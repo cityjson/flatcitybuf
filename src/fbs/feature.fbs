@@ -1,0 +1,120 @@
+include "header.fbs";
+
+namespace FlatCityBuf;
+
+enum CityObjectType:ubyte {
+  Bridge,
+  BridgePart,
+  BridgeInstallation,
+  BridgeConstructiveElement,
+  BridgeRoom,
+  BridgeFurniture,
+
+  Building,
+  BuildingPart,
+  BuildingInstallation,
+  BuildingConstructiveElement,
+  BuildingFurniture,
+  BuildingStorey,
+  BuildingRoom,
+  BuildingUnit,
+
+  CityFurniture,
+  CityObjectGroup,
+  GenericCityObject,
+  LandUse,
+  OtherConstruction,
+  PlantCover,
+  SolitaryVegetationObject,
+  TINRelief,
+
+  // Transportation objects
+  Road,
+  Railway,
+  Waterway,
+  TransportSquare,
+
+  Tunnel,
+  TunnelPart,
+  TunnelInstallation,
+  TunnelConstructiveElement,
+  TunnelHollowSpace,
+  TunnelFurniture,
+
+  WaterBody
+}
+
+enum SemanticSurfaceType:ubyte {
+  // Building
+  RoofSurface,
+  GroundSurface,
+  WallSurface,
+  ClosureSurface,
+  OuterCeilingSurface,
+  OuterFloorSurface,
+  Window,
+  Door,
+  InteriorWallSurface,
+  CeilingSurface,
+  FloorSurface,
+  // WaterBody
+  WaterSurface,
+  WaterGroundSurface,
+  WaterClosureSurface,
+  // Transportation ("Road", "Railway", "TransportSquare")
+  TrafficArea,
+  AuxiliaryTrafficArea,
+  TransportationMarking,
+  TransportationHole
+}
+
+struct Vertex {
+  x:int;
+  y:int;
+  z:int;
+}
+
+
+table CityFeature {
+  id:string (key, required);
+  objects:[CityObject];
+  vertices:[Vertex];
+}
+
+table CityObject {
+  type:CityObjectType;
+  id:string (key, required);
+  geographical_extent:GeographicalExtent;
+  geometry:[Geometry];
+  attributes:[ubyte];
+  columns:[Column];         // Attribute columns schema (optional, if set it should be used instead of the header columns)
+  children:[string];
+  children_roles:[string];  // for CityObjectGroup only
+  parents:[string];
+}
+
+table Geometry {
+  type:GeometryType;
+  lod:string;
+
+  // these are lengths in the
+  // depending on the geometry_type, different fields are used
+  solids:[uint];
+  shells:[uint];
+  surfaces:[uint];
+  strings:[uint];           // Rings or LineStrings
+
+  boundaries:[uint];        // flat list of vertex indices
+  semantics:[uint];         // flat list of semantic object indices
+
+  semantics_objects:[SemanticObject];
+}
+
+table SemanticObject {
+  type:SemanticSurfaceType;
+  attributes:[ubyte];
+  children:[uint];
+  parent:uint = null;       // default is null, important to be able to check if this field is set
+}
+
+root_type CityFeature;

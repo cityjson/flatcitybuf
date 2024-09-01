@@ -1,0 +1,97 @@
+namespace FlatCityBuf;
+
+// Reference: https://github.com/Ylannl/CityBuf/blob/main/CityBufHeader.fbs
+// Reference: https://github.com/flatgeobuf/flatgeobuf/blob/master/src/fbs/header.fbs
+enum GeometryType:ubyte {
+  MultiPoint,
+  MultiLineString,
+  MultiSurface,
+  CompositeSurface,
+  Solid,
+  MultiSolid,
+  CompositeSolid
+}
+
+
+enum ColumnType: ubyte {
+  Byte,                         // Signed 8-bit integer
+  UByte,                        // Unsigned 8-bit integer
+  Bool,                         // Boolean
+  Short,                        // Signed 16-bit integer
+  UShort,                       // Unsigned 16-bit integer
+  Int,                          // Signed 32-bit integer
+  UInt,                         // Unsigned 32-bit integer
+  Long,                         // Signed 64-bit integer
+  ULong,                        // Unsigned 64-bit integer
+  Float,                        // Single precision floating point number
+  Double,                       // Double precision floating point number
+  String,                       // UTF8 string
+  Json,                         // General JSON type intended to be application specific
+  DateTime,                     // ISO 8601 date time
+  Binary                        // General binary type intended to be application specific
+}
+
+table Column {
+  name: string (required);      // Column name
+  type: ColumnType;             // Column type
+  title: string;                // Column title
+  description: string;          // Column description (intended for free form long text)
+  precision: int = -1;          // Column values expected precision (-1 = unknown) as defined by SQL
+  scale: int = -1;              // Column values expected scale (-1 = unknown) as defined by SQL
+  nullable: bool = true;        // Column values expected nullability
+  unique: bool = false;         // Column values expected uniqueness
+  primary_key: bool = false;    // Indicates this column has been (part of) a primary key
+  metadata: string;             // Column metadata (intended to be application specific and suggested to be structured fx. JSON)
+}
+
+table ReferenceSystem {
+  authority: string;            // Case-insensitive name of the defining organization e.g. EPSG or epsg (NULL = EPSG)
+  version: int;                 // Version of the Spatial Reference System assigned by the organization (0 = not defined)
+  code: int;                    // Numeric ID of the Spatial Reference System assigned by the organization (0 = unknown)
+  code_string: string;          // Text ID of the Spatial Reference System assigned by the organization in the (rare) case when it is not an integer and thus cannot be set into code
+}
+
+struct Vector {
+  x:double;
+  y:double;
+  z:double;
+}
+
+struct Transform {
+  scale: Vector;
+  translate: Vector;
+}
+
+struct GeographicalExtent {
+  min: Vector;
+  max: Vector;
+}
+
+table Header {
+  transform: Transform;                     // Transformation vectors
+  columns: [Column];                        // Attribute columns schema (can be omitted if per feature schema)
+  features_count: ulong;                    // Number of features in the dataset (0 = unknown)
+  // index_node_size: ushort = 16;          // Index node size (0 = no index)
+
+  // metadata
+  geographical_extent: GeographicalExtent;  // Bounds
+  reference_system: ReferenceSystem;        // Spatial Reference System
+  identifier: string;                       // Dataset identifier
+  reference_date: string;                   // Reference date
+  title: string;                            // Dataset title
+  poc_contact_name: string;                 // Point of contact name
+  poc_contact_type: string;                 // Point of contact type
+  poc_role: string;                         // Point of contact role
+  poc_phone: string;                        // Point of contact phone
+  poc_email: string;                        // Point of contact email
+  poc_website: string;                      // Point of contact website
+  poc_address_thoroughfare_number: string;  // Point of contact address thoroughfare number
+  poc_address_thoroughfare_name: string;    // Point of contact address thoroughfare name
+  poc_address_locality: string;             // Point of contact address locality
+  poc_address_postcode: string;             // Point of contact address postcode
+  poc_address_country: string;              // Point of contact address country
+
+  attributes: [ubyte];                      // Other attributes that are stored in root CityJSON object
+}
+
+root_type Header;
