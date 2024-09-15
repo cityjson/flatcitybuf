@@ -1,2 +1,2 @@
 #!/bin/bash
-flatc --typescript -o ./src/ts/src src/fbs/*.fbs
+flatc --ts -o ./src/ts/src src/fbs/*.fbs

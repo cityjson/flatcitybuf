@@ -1,0 +1,64 @@
+[tool.poetry]
+name = "py"
+version = "0.1.0"
+description = ""
+authors = ["HideBa <baba.papa1120.ba@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+flatbuffers = "^24.3.25"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.8.0"
+mypy = "^1.11.2"
+flake8 = "^7.1.1"
+isort = "^5.13.2"
+pytest = "^8.3.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.black]
+line-length = 78
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+
+[tool.mypy]
+files = ["py/**/*.py"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+ignore_missing_imports = true
+check_untyped_defs = true
+disallow_untyped_calls = true
+disallow_subclassing_any = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_untyped_decorators = true
+warn_unused_ignores = true
+strict_optional = true
+strict_param_types = true
+warn_untyped_fields = true
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["py", "py.*"]

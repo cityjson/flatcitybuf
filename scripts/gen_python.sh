@@ -1,2 +1,2 @@
 #!/bin/bash
-flatc --python -o ./src/python/src src/fbs/*.fbs
+flatc --python --gen-all --size-prefixed -o src/python/src src/fbs/*.fbs
