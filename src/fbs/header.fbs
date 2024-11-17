@@ -2,15 +2,6 @@ namespace FlatCityBuf;
 
 // Reference: https://github.com/Ylannl/CityBuf/blob/main/CityBufHeader.fbs
 // Reference: https://github.com/flatgeobuf/flatgeobuf/blob/master/src/fbs/header.fbs
-enum GeometryType:ubyte {
-  MultiPoint,
-  MultiLineString,
-  MultiSurface,
-  CompositeSurface,
-  Solid,
-  MultiSolid,
-  CompositeSolid
-}
 
 
 enum ColumnType: ubyte {
@@ -90,7 +81,6 @@ table Header {
   poc_address_locality: string;             // Point of contact address locality
   poc_address_postcode: string;             // Point of contact address postcode
   poc_address_country: string;              // Point of contact address country
-
   attributes: [ubyte];                      // Other attributes that are stored in root CityJSON object
 }
 

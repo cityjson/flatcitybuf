@@ -1,3 +1,7 @@
+// Description: FlatBuffers schema for CityBuf feature format. Original schema is authored by TU Delft 3D geoinformation group, Ravi Peters (3DGI), Balazs Dukai (3DGI)
+// Reference: https://github.com/3DBAG/CityBuf/blob/main/CityBufFeature.fbs
+
+
 include "header.fbs";
 
 namespace FlatCityBuf;
@@ -68,12 +72,21 @@ enum SemanticSurfaceType:ubyte {
   TransportationHole
 }
 
+enum GeometryType:ubyte {
+  MultiPoint,
+  MultiLineString,
+  MultiSurface,
+  CompositeSurface,
+  Solid,
+  MultiSolid,
+  CompositeSolid
+}
+
 struct Vertex {
   x:int;
   y:int;
   z:int;
 }
-
 
 table CityFeature {
   id:string (key, required);
