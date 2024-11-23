@@ -27,6 +27,8 @@ target/
 **/*.rs.bk
 Cargo.lock
 *.pdb
+src/rust/tests/data/*
+!src/rust/tests/data/.gitkeep
 
 # C++
 *.o
