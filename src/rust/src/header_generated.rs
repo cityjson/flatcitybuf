@@ -9,15 +9,6 @@ use core::cmp::Ordering;
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
-#[allow(unused_imports, dead_code)]
-pub mod flat_city_buf {
-
-  use core::mem;
-  use core::cmp::Ordering;
-
-  extern crate flatbuffers;
-  use self::flatbuffers::{EndianScalar, Follow};
-
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_COLUMN_TYPE: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
@@ -1381,5 +1372,3 @@ pub fn finish_header_buffer<'a, 'b, A: flatbuffers::Allocator + 'a>(
 pub fn finish_size_prefixed_header_buffer<'a, 'b, A: flatbuffers::Allocator + 'a>(fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>, root: flatbuffers::WIPOffset<Header<'a>>) {
   fbb.finish_size_prefixed(root, None);
 }
-}  // pub mod FlatCityBuf
-

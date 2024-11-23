@@ -4,7 +4,7 @@
 
 include "header.fbs";
 
-namespace FlatCityBuf;
+// namespace FlatCityBuf;
 
 enum CityObjectType:ubyte {
   Bridge,

@@ -1,4 +1,4 @@
-namespace FlatCityBuf;
+// namespace FlatCityBuf;
 
 // Reference: https://github.com/Ylannl/CityBuf/blob/main/CityBufHeader.fbs
 // Reference: https://github.com/flatgeobuf/flatgeobuf/blob/master/src/fbs/header.fbs
