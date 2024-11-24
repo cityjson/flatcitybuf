@@ -1,5 +1,6 @@
 #![allow(clippy::manual_range_contains)]
 
+mod cj_utils;
 mod error;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 mod feature_generated;
@@ -8,6 +9,7 @@ mod file_writer;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 mod header_generated;
 
+pub use cj_utils::*;
 pub use cjseq::*;
 pub use file_writer::*;
 

@@ -1,9 +1,11 @@
 use crate::error::Result;
 // use crate::feature_writer::FeatureWriter;
-use crate::header_generated::flat_city_buf::{
-    Column, ColumnArgs, ColumnType, GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector
+use crate::header_generated::{
+    Column, ColumnArgs, ColumnType, GeographicalExtent, Header, HeaderArgs, ReferenceSystem,
+    ReferenceSystemArgs, Transform, Vector,
 };
-use crate::{MAGIC_BYTES}
+use crate::MAGIC_BYTES;
+use cjseq::CityJSON;
 // use crate::packed_r_tree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use flatbuffers::FlatBufferBuilder;
 // use geozero::CoordDimensions;
@@ -17,6 +19,8 @@ pub struct FcbWriter<'a> {
     fbb: FlatBufferBuilder<'a>,
     header_args: HeaderArgs<'a>,
     columns: Vec<flatbuffers::WIPOffset<Column<'a>>>,
+    cj: CityJSON,
+    // transform: &'a Transform,
     // feat_writer: FeatureWriter<'a>,
     // feat_offsets: Vec<FeatureOffset>,
     // feat_nodes: Vec<NodeItem>,
@@ -87,20 +91,21 @@ struct FeatureOffset {
 }
 
 impl<'a> FcbWriter<'a> {
-    /// Configure FlatGeobuf headers for creating a new file with default options
-    ///
-
-    pub fn create(name: &str) -> Result<Self> {
+    pub fn create(cj: CityJSON) -> Result<Self> {
         let options = FcbWriterOptions {
             // write_index: true,
             // detect_type: true,
             // promote_to_multi: true,
             ..Default::default()
         };
-        FcbWriter::create_with_options(name, options)
+        Self::create_with_options("output.fcb", options, cj)
     }
 
-    pub fn create_with_options(name: &str, options: FcbWriterOptions) -> Result<Self> {
+    pub fn create_with_options(
+        name: &str,
+        options: FcbWriterOptions,
+        cj: CityJSON,
+    ) -> Result<Self> {
         let mut fbb = FlatBufferBuilder::new();
 
         // let index_node_size = if options.write_index {
@@ -115,6 +120,19 @@ impl<'a> FcbWriter<'a> {
             code: 0,
             code_string: options.ref_system.code_string.map(|v| fbb.create_string(v)),
         };
+
+        let scale = Vector::new(
+            cj.transform.scale[0],
+            cj.transform.scale[1],
+            cj.transform.scale[2],
+        );
+        let translate = Vector::new(
+            cj.transform.translate[0],
+            cj.transform.translate[1],
+            cj.transform.translate[2],
+        );
+        let transform = Transform::new(&scale, &translate);
+
         let header_args = HeaderArgs {
             transform: None,
             columns: None,
@@ -152,6 +170,8 @@ impl<'a> FcbWriter<'a> {
             fbb,
             header_args,
             columns: Vec::new(),
+            cj,
+            // transform: &transform,
             // feat_writer,
             // feat_offsets: Vec::new(),
             // feat_nodes: Vec::new(),
@@ -172,31 +192,30 @@ impl<'a> FcbWriter<'a> {
         self.columns.push(Column::create(&mut self.fbb, &col));
     }
 
-    fn write_feature(&mut self) -> Result<()> {
-        let mut node = self.feat_writer.bbox.clone();
-        // Offset is index of feat_offsets before sorting
-        // Will be replaced with output offset after sorting
-        node.offset = self.feat_offsets.len() as u64;
-        self.feat_nodes.push(node);
-        let feat_buf = self.feat_writer.finish_to_feature();
-        let tmpoffset = self
-            .feat_offsets
-            .last()
-            .map(|it| it.offset + it.size)
-            .unwrap_or(0);
-        self.feat_offsets.push(FeatureOffset {
-            offset: tmpoffset,
-            size: feat_buf.len(),
-        });
-        self.tmpout.write_all(&feat_buf)?;
-        self.header_args.features_count += 1;
-        Ok(())
-    }
+    // fn write_feature(&mut self) -> Result<()> {
+    //     let mut node = self.feat_writer.bbox.clone();
+    //     // Offset is index of feat_offsets before sorting
+    //     // Will be replaced with output offset after sorting
+    //     node.offset = self.feat_offsets.len() as u64;
+    //     self.feat_nodes.push(node);
+    //     let feat_buf = self.feat_writer.finish_to_feature();
+    //     let tmpoffset = self
+    //         .feat_offsets
+    //         .last()
+    //         .map(|it| it.offset + it.size)
+    //         .unwrap_or(0);
+    //     self.feat_offsets.push(FeatureOffset {
+    //         offset: tmpoffset,
+    //         size: feat_buf.len(),
+    //     });
+    //     self.tmpout.write_all(&feat_buf)?;
+    //     self.header_args.features_count += 1;
+    //     Ok(())
+    // }
 
     /// Write the FlatGeobuf dataset (Hilbert sorted)
     pub fn write(mut self, mut out: impl Write) -> Result<()> {
         out.write_all(&MAGIC_BYTES)?;
-
 
         // Write header
         // self.header_args.columns = Some(self.fbb.create_vector(&self.columns));
@@ -206,6 +225,9 @@ impl<'a> FcbWriter<'a> {
         //             .create_vector(&[extent.min_x, extent.min_y, extent.max_x, extent.max_y]),
         //     );
         // self.header_args.geometry_type = self.feat_writer.dataset_type;
+
+        // self.header_args.transform = Some(&self.transform);
+
         let header = Header::create(&mut self.fbb, &self.header_args);
         self.fbb.finish_size_prefixed(header, None);
         let buf = self.fbb.finished_data();
@@ -238,17 +260,17 @@ impl<'a> FcbWriter<'a> {
 
         // Clippy generates a false-positive here, needs a block to disable, see
         // https://github.com/rust-lang/rust-clippy/issues/9274
-        #[allow(clippy::read_zero_byte_vec)]
-        {
-            let mut buf = Vec::with_capacity(2048);
-            // for node in &self.feat_nodes {
-            //     let feat = &self.feat_offsets[node.offset as usize];
-            //     unsorted_feature_reader.seek(SeekFrom::Start(feat.offset as u64))?;
-            //     buf.resize(feat.size, 0);
-            //     unsorted_feature_reader.read_exact(&mut buf)?;
-            //     out.write_all(&buf)?;
-            // }
-        }
+        // #[allow(clippy::read_zero_byte_vec)]
+        // {
+        //     let mut buf = Vec::with_capacity(2048);
+        //     for node in &self.feat_nodes {
+        //         let feat = &self.feat_offsets[node.offset as usize];
+        //         unsorted_feature_reader.seek(SeekFrom::Start(feat.offset as u64))?;
+        //         buf.resize(feat.size, 0);
+        //         unsorted_feature_reader.read_exact(&mut buf)?;
+        //         out.write_all(&buf)?;
+        //     }
+        // }
 
         Ok(())
     }
