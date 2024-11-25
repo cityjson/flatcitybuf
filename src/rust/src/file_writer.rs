@@ -115,8 +115,8 @@ impl<'a> FcbWriter<'a> {
         // };
         // let index_node_size = 0; // TODO: implement index later
         let ref_system_args = ReferenceSystemArgs {
-            authority: None,
-            version: 0,
+            authority: Some(fbb.create_string("Hogehoge")),
+            version: 1,
             code: 0,
             code_string: options.ref_system.code_string.map(|v| fbb.create_string(v)),
         };
