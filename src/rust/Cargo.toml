@@ -8,6 +8,10 @@ edition = "2021"
 [dependencies]
 flatbuffers = "24.3.25"
 byteorder = "1.5.0"
-cjseq = { git = "https://github.com/cityjson/cjseq", branch = "develop" }
+cjseq = { git = "https://github.com/HideBa/cjseq", branch = "develop" }
 tempfile = "3.14.0"
 serde_json = "1.0.133"
+
+[[bin]]
+name = "read"
+path = "src/bin/read.rs"

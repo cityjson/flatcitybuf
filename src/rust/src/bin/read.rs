@@ -1,4 +1,6 @@
-use flatcitybuf::{size_prefixed_root_as_header, FcbReader, FcbWriter, VERSION};
+use flatcitybuf::{
+    header_to_cityjson, size_prefixed_root_as_header, FcbReader, FcbWriter, VERSION,
+};
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Read};
@@ -27,6 +29,16 @@ fn read_file() -> Result<(), Box<dyn Error>> {
     let header = size_prefixed_root_as_header(&header_buf).unwrap();
     let ref_system = header.reference_system();
     println!("ref_system: {:?}", ref_system);
+
+    let output_file = manifest_dir
+        .join("temp")
+        .join("test_output_header.city.jsonl");
+    let output_file = File::create(output_file)?;
+    let outputwriter = BufWriter::new(output_file);
+
+    let cj = header_to_cityjson(header)?;
+
+    serde_json::to_writer(outputwriter, &cj)?;
 
     Ok(())
 }

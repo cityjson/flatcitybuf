@@ -1,13 +1,9 @@
 use crate::CityJSON;
 use crate::FcbWriter;
 use flatcitybuf::*;
-use geo_types::{line_string, LineString};
-use geozero::geojson::{GeoJson, GeoJsonReader};
-use geozero::{ColumnValue, GeozeroDatasource, PropertyProcessor};
-use serde_json::{json, Value};
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
-use tempfile::{tempfile, NamedTempFile};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use tempfile::{tempfile, NamedTempFile}
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -25,14 +21,16 @@ fn write_file() -> std::io::Result<()> {
                 if i == 0 {
                     cjj = serde_json::from_str(line)?;
                 } else {
-                    let cjf: CityJSONFeature = serde_json::from_str(line)?;
-                    cjj.add_feature(cjf);
+                    let mut cjf: CityJSONFeature = serde_json::from_str(line)?;
+                    cjj.add_cjfeature(&mut cjf);
                 }
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err((*e).into()),
         }
         cjj.remove_duplicate_vertices();
     }
+
+
 
     let mut output_file = BufWriter::new(File::create(TEST_OUTPUT)?);
     const MAGIC_BYTES: [u8; 8] = [b'f', b'c', b'b', 1, b'f', b'c', b'b', 0];
