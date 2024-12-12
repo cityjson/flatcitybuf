@@ -82,6 +82,7 @@ table Header {
   poc_address_postcode: string;             // Point of contact address postcode
   poc_address_country: string;              // Point of contact address country
   attributes: [ubyte];                      // Other attributes that are stored in root CityJSON object
+  version: string (required);               // CityJSON version
 }
 
 root_type Header;

@@ -917,6 +917,7 @@ impl<'a> Header<'a> {
   pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 38;
   pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 40;
   pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 42;
+  pub const VT_VERSION: flatbuffers::VOffsetT = 44;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -929,6 +930,7 @@ impl<'a> Header<'a> {
   ) -> flatbuffers::WIPOffset<Header<'bldr>> {
     let mut builder = HeaderBuilder::new(_fbb);
     builder.add_features_count(args.features_count);
+    if let Some(x) = args.version { builder.add_version(x); }
     if let Some(x) = args.attributes { builder.add_attributes(x); }
     if let Some(x) = args.poc_address_country { builder.add_poc_address_country(x); }
     if let Some(x) = args.poc_address_postcode { builder.add_poc_address_postcode(x); }
@@ -1092,6 +1094,13 @@ impl<'a> Header<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u8>>>(Header::VT_ATTRIBUTES, None)}
   }
+  #[inline]
+  pub fn version(&self) -> &'a str {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(Header::VT_VERSION, None).unwrap()}
+  }
 }
 
 impl flatbuffers::Verifiable for Header<'_> {
@@ -1121,6 +1130,7 @@ impl flatbuffers::Verifiable for Header<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("poc_address_postcode", Self::VT_POC_ADDRESS_POSTCODE, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("poc_address_country", Self::VT_POC_ADDRESS_COUNTRY, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>("attributes", Self::VT_ATTRIBUTES, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("version", Self::VT_VERSION, true)?
      .finish();
     Ok(())
   }
@@ -1146,6 +1156,7 @@ pub struct HeaderArgs<'a> {
     pub poc_address_postcode: Option<flatbuffers::WIPOffset<&'a str>>,
     pub poc_address_country: Option<flatbuffers::WIPOffset<&'a str>>,
     pub attributes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
+    pub version: Option<flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for HeaderArgs<'a> {
   #[inline]
@@ -1171,6 +1182,7 @@ impl<'a> Default for HeaderArgs<'a> {
       poc_address_postcode: None,
       poc_address_country: None,
       attributes: None,
+      version: None, // required field
     }
   }
 }
@@ -1261,6 +1273,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Header::VT_ATTRIBUTES, attributes);
   }
   #[inline]
+  pub fn add_version(&mut self, version: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Header::VT_VERSION, version);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> HeaderBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     HeaderBuilder {
@@ -1271,6 +1287,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
   #[inline]
   pub fn finish(self) -> flatbuffers::WIPOffset<Header<'a>> {
     let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, Header::VT_VERSION,"version");
     flatbuffers::WIPOffset::new(o.value())
   }
 }
@@ -1298,6 +1315,7 @@ impl core::fmt::Debug for Header<'_> {
       ds.field("poc_address_postcode", &self.poc_address_postcode());
       ds.field("poc_address_country", &self.poc_address_country());
       ds.field("attributes", &self.attributes());
+      ds.field("version", &self.version());
       ds.finish()
   }
 }
