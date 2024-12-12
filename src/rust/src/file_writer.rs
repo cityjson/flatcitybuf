@@ -1,11 +1,11 @@
-use crate::error::Result;
+use crate::error::{CityJSONError, Result};
 // use crate::feature_writer::FeatureWriter;
 use crate::header_generated::{
     Column, ColumnArgs, ColumnType, GeographicalExtent, Header, HeaderArgs, ReferenceSystem,
     ReferenceSystemArgs, Transform, Vector,
 };
 use crate::MAGIC_BYTES;
-use cjseq::CityJSON;
+use cjseq::{CityJSON, ReferenceSystem as CjReferenceSystem};
 // use crate::packed_r_tree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use flatbuffers::FlatBufferBuilder;
 // use geozero::CoordDimensions;
@@ -114,12 +114,33 @@ impl<'a> FcbWriter<'a> {
         //     0
         // };
         // let index_node_size = 0; // TODO: implement index later
-        let ref_system_args = ReferenceSystemArgs {
-            authority: Some(fbb.create_string("Hogehoge")),
-            version: 1,
-            code: 0,
-            code_string: options.ref_system.code_string.map(|v| fbb.create_string(v)),
-        };
+
+        let reference_system = cj.metadata.as_ref().and_then(|mt| {
+            mt.reference_system.as_ref().map(|ref_sys| {
+                let authority = fbb.create_string(&ref_sys.authority);
+                let authority = Some(authority);
+
+                let version = ref_sys.version.parse::<i32>().unwrap_or_else(|e| {
+                    println!("Failed to parse version: {}", e);
+                    0
+                });
+                let code = ref_sys.code.parse::<i32>().unwrap_or_else(|e| {
+                    println!("Failed to parse code: {}", e);
+                    0
+                });
+                let code_string = options.ref_system.code_string.map(|v| fbb.create_string(v));
+
+                ReferenceSystem::create(
+                    &mut fbb,
+                    &ReferenceSystemArgs {
+                        authority,
+                        version,
+                        code,
+                        code_string,
+                    },
+                )
+            })
+        });
 
         let scale = Vector::new(
             cj.transform.scale[0],
@@ -132,23 +153,56 @@ impl<'a> FcbWriter<'a> {
             cj.transform.translate[2],
         );
         let transform = Transform::new(&scale, &translate);
-
+        let metadata = cj
+            .metadata
+            .as_ref()
+            .ok_or(CityJSONError::MissingField("metadata"))
+            .unwrap();
         let header_args = HeaderArgs {
+            version: Some(fbb.create_string(&cj.version)),
             transform: None,
             columns: None,
             features_count: 0,
+            // geographical_extent: metadata.geographical_extent.as_ref().map(|ge| {
+            //     let min = Vector::new(ge[0], ge[1], ge[2]);
+            //     let max = Vector::new(ge[3], ge[4], ge[5]);
+            //     GeographicalExtent::new(&min, &max)
+            // }),
             geographical_extent: None,
-            reference_system: Some(ReferenceSystem::create(&mut fbb, &ref_system_args)),
+            reference_system,
             identifier: None,
             reference_date: None,
             title: None,
-            poc_contact_name: None,
-            poc_contact_type: None,
-            poc_role: None,
-            poc_phone: None,
-            poc_email: None,
-            poc_website: None,
-            poc_address_thoroughfare_number: None,
+            poc_contact_name: metadata
+                .point_of_contact
+                .as_ref()
+                .map(|poc| fbb.create_string(&poc.contact_name)),
+            poc_contact_type: metadata
+                .point_of_contact
+                .as_ref()
+                .and_then(|poc| poc.contact_type.as_ref().map(|ct| fbb.create_string(ct))),
+
+            poc_role: metadata
+                .point_of_contact
+                .as_ref()
+                .and_then(|poc| poc.role.as_ref().map(|r| fbb.create_string(r))),
+            poc_phone: metadata
+                .point_of_contact
+                .as_ref()
+                .and_then(|poc| poc.phone.as_ref().map(|p| fbb.create_string(p))),
+            poc_email: metadata
+                .point_of_contact
+                .as_ref()
+                .map(|poc| fbb.create_string(&poc.email_address)),
+            poc_website: metadata
+                .point_of_contact
+                .as_ref()
+                .and_then(|poc| poc.website.as_ref().map(|w| fbb.create_string(&w))),
+            poc_address_thoroughfare_number: metadata.point_of_contact.as_ref().and_then(|poc| {
+                poc.address
+                    .as_ref()
+                    .map(|a| fbb.create_string(&a.thoroughfare_number.to_string()))
+            }),
             poc_address_thoroughfare_name: None,
             poc_address_locality: None,
             poc_address_postcode: None,

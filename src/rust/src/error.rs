@@ -47,3 +47,21 @@ impl From<http_range_client::HttpError> for Error {
         Error::HttpClient(value)
     }
 }
+
+#[derive(Debug)]
+pub enum CityJSONError {
+    MissingField(&'static str),
+    ParseError(String),
+    InvalidData(&'static str),
+}
+impl std::error::Error for CityJSONError {}
+
+impl std::fmt::Display for CityJSONError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CityJSONError::MissingField(field) => write!(f, "Missing field: {}", field),
+            CityJSONError::ParseError(err) => write!(f, "Parse error: {}", err),
+            CityJSONError::InvalidData(msg) => write!(f, "Invalid data: {}", msg),
+        }
+    }
+}

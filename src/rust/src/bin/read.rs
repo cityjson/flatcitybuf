@@ -26,9 +26,13 @@ fn read_file() -> Result<(), Box<dyn Error>> {
     header_buf.resize(header_buf.capacity(), 0);
     inputreader.read_exact(&mut header_buf[4..])?;
 
-    let header = size_prefixed_root_as_header(&header_buf).unwrap();
-    let ref_system = header.reference_system();
-    println!("ref_system: {:?}", ref_system);
+    let header = size_prefixed_root_as_header(&header_buf);
+    if let Ok(header) = header {
+        let ref_system = header.reference_system();
+        println!("ref_system: {:?}", ref_system);
+    } else {
+        println!("header is invalid");
+    }
 
     let output_file = manifest_dir
         .join("temp")
@@ -36,9 +40,12 @@ fn read_file() -> Result<(), Box<dyn Error>> {
     let output_file = File::create(output_file)?;
     let outputwriter = BufWriter::new(output_file);
 
-    let cj = header_to_cityjson(header)?;
-
-    serde_json::to_writer(outputwriter, &cj)?;
+    if let Ok(header) = header {
+        let cj = header_to_cityjson(header)?;
+        serde_json::to_writer(outputwriter, &cj)?;
+    } else {
+        println!("header is invalid");
+    }
 
     Ok(())
 }
