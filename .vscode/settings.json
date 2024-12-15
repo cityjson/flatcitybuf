@@ -2,5 +2,11 @@
   "rust-analyzer.linkedProjects": [
     "src/rust/Cargo.toml"
   ],
+  "rust-analyzer.diagnostics.disable": [
+    "unresolved-extern-crate"
+  ],
+  "rust-analyzer.checkOnSave.extraArgs": [
+    "--lib"
+  ],
   "python.pythonPath": "${workspaceFolder}/src/py/.venv/bin/python"
 }

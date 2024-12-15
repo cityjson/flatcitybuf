@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::header_generated::*;
 use crate::{check_magic_bytes, HEADER_MAX_BUFFER_SIZE};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{Read, Seek};
 use std::marker::PhantomData;
 
 pub struct FcbReader<R> {
@@ -28,7 +28,6 @@ pub mod reader_trait {
     pub struct Seekable;
     pub struct NotSeekable;
 }
-use reader_trait::*;
 
 impl<R: Read> FcbReader<R> {
     pub fn open(reader: R) -> Result<FcbReader<R>> {
@@ -53,7 +52,7 @@ impl<R: Read> FcbReader<R> {
             return Err(Error::IllegalHeaderSize(header_size));
         }
 
-        let mut header_buf = Vec::with_capacity(header_size as usize + 4);
+        let mut header_buf = Vec::with_capacity(header_size + 4);
         header_buf.extend_from_slice(&size_buf);
         header_buf.resize(header_buf.capacity(), 0);
         reader.read_exact(&mut header_buf[4..])?;

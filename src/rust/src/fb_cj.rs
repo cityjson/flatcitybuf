@@ -1,7 +1,7 @@
 use crate::{error::CityJSONError, header_generated::*};
 use cjseq::{
-    Address, CityJSON, GeographicalExtent as CjGeographicalExtent, Metadata as CjMetadata,
-    PointOfContact, ReferenceSystem as CjReferenceSystem, Transform as CjTransform,
+    Address, CityJSON, Metadata as CjMetadata, PointOfContact,
+    ReferenceSystem as CjReferenceSystem, Transform as CjTransform,
 };
 
 pub fn header_to_cityjson(header: Header) -> Result<CityJSON, Box<dyn std::error::Error>> {
@@ -79,8 +79,8 @@ pub fn header_to_cityjson(header: Header) -> Result<CityJSON, Box<dyn std::error
         reference_system: Some(CjReferenceSystem::new(
             None,
             reference_system.authority().unwrap_or_default().to_string(),
-            reference_system.code().to_string(),
             reference_system.version().to_string(),
+            reference_system.code().to_string(),
         )),
         title: Some(header.title().unwrap_or_default().to_string()),
     };

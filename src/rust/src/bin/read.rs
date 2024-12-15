@@ -1,9 +1,7 @@
-use flatcitybuf::{
-    header_to_cityjson, size_prefixed_root_as_header, FcbReader, FcbWriter, VERSION,
-};
+use flatcitybuf::{header_to_cityjson, size_prefixed_root_as_header, VERSION};
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read};
+use std::io::{BufReader, BufWriter, Read};
 use std::path::PathBuf;
 
 fn read_file() -> Result<(), Box<dyn Error>> {
