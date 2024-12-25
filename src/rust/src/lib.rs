@@ -5,18 +5,16 @@ mod error;
 mod fb_cj;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 mod feature_generated;
-mod feature_writer;
 mod file_reader;
-mod file_writer;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 mod header_generated;
+mod writer;
 
 pub use cj_utils::*;
-pub use cjseq::*;
 pub use fb_cj::*;
 pub use file_reader::*;
-pub use file_writer::*;
 pub use header_generated::*;
+pub use writer::*;
 
 pub const VERSION: u8 = 1;
 pub(crate) const MAGIC_BYTES: [u8; 8] = [b'f', b'c', b'b', VERSION, b'f', b'c', b'b', 0];

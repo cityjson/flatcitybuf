@@ -1,19 +1,44 @@
+use crate::feature_generated::{
+    CityFeature, CityFeatureArgs, CityObject, CityObjectArgs, CityObjectType, Geometry,
+    GeometryArgs, GeometryType, SemanticObject, SemanticObjectArgs, SemanticSurfaceType, Vertex,
+};
+use crate::header_generated::{GeographicalExtent, Vector};
 
-use super::FeatureWriter;
-use crate::feature_writer::geometry_encoderdecoder::FcbGeometryEncoderDecoder;
-use crate::{
-    feature_generated::{
-        CityFeature, CityFeatureArgs, CityObject, CityObjectArgs, CityObjectType, Geometry,
-        GeometryArgs, GeometryType, SemanticObject, SemanticObjectArgs, SemanticSurfaceType,
-        Vertex,
-    },
-    header_generated::{GeographicalExtent, Vector},
-};
 use cjseq::{
-    CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
+    CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
+    GeometryType as CjGeometryType,
 };
+
+use super::geometry_encoderdecoder::FcbGeometryEncoderDecoder;
+
+pub struct FeatureWriter<'a> {
+    city_features: &'a [&'a CityJSONFeature],
+    fbb: flatbuffers::FlatBufferBuilder<'a>,
+}
 
 impl<'a> FeatureWriter<'a> {
+    pub fn new(city_features: &'a [&'a CityJSONFeature]) -> FeatureWriter<'a> {
+        FeatureWriter {
+            city_features,
+            fbb: flatbuffers::FlatBufferBuilder::new(),
+        }
+    }
+
+    pub fn finish_to_feature(&mut self) -> Vec<u8> {
+        let mut fb_features = Vec::new();
+        for cf in self.city_features {
+            let city_objects_buf: Vec<_> = cf
+                .city_objects
+                .iter()
+                .map(|(id, co)| self.create_city_object(id, co))
+                .collect();
+            let cf_buf = self.create_city_feature(cf.id.as_str(), &city_objects_buf, &cf.vertices);
+            fb_features.push(cf_buf);
+        }
+        let f = self.fbb.create_vector(&fb_features);
+        self.fbb.finish(f, None);
+        self.fbb.finished_data().to_vec()
+    }
     fn create_city_object_type(&self, co_type: &str) -> CityObjectType {
         match co_type {
             "Bridge" => CityObjectType::Bridge,
@@ -222,7 +247,7 @@ impl<'a> FeatureWriter<'a> {
                 .map(|s| {
                     let children = s.children.clone().map(|c| {
                         self.fbb
-                            .create_vector(&c.iter().copied().collect::<Vec<_>>())
+                            .create_vector(&c.to_vec())
                     });
                     let semantics_type = Self::semantic_surface_type(&s.thetype);
                     let semantic_object = SemanticObject::create(
@@ -245,7 +270,7 @@ impl<'a> FeatureWriter<'a> {
                 &semantics_values
                     .iter()
                     .map(|v| match v {
-                        Some(v) => { *v },
+                        Some(v) => *v,
                         None => u32::MAX,
                     })
                     .collect::<Vec<_>>(),

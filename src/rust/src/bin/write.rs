@@ -24,7 +24,7 @@ fn write_file() -> Result<(), Box<dyn Error>> {
         let features_slice = features.iter().collect::<Vec<_>>();
         let features_slice: &[&CityJSONFeature] = features_slice.as_slice();
 
-        let fcb = FcbWriter::create(cj, features_slice)?;
+        let fcb = FcbWriter::new(cj, features_slice)?;
         fcb.write(outputwriter)?;
     }
 

@@ -138,8 +138,7 @@ impl FcbGeometryEncoderDecoder {
                             let ring_size = self.strings[ring_cursor] as usize;
                             ring_cursor += 1;
 
-                            let ring_indices = self.indices
-                                [index_cursor..index_cursor + ring_size]
+                            let ring_indices = self.indices[index_cursor..index_cursor + ring_size]
                                 .iter()
                                 .map(|x| *x as usize)
                                 .collect::<Vec<_>>();
@@ -178,8 +177,7 @@ impl FcbGeometryEncoderDecoder {
                     for _ in 0..rings_in_surface {
                         let ring_size = self.strings[ring_cursor] as usize;
                         ring_cursor += 1;
-                        let ring_indices = self.indices
-                            [index_cursor..index_cursor + ring_size]
+                        let ring_indices = self.indices[index_cursor..index_cursor + ring_size]
                             .iter()
                             .map(|x| *x as usize)
                             .collect::<Vec<_>>();
@@ -205,8 +203,7 @@ impl FcbGeometryEncoderDecoder {
                 for _ in 0..rings_count {
                     let ring_size = self.strings[ring_cursor] as usize;
                     ring_cursor += 1;
-                    let ring_indices = self.indices
-                        [index_cursor..index_cursor + ring_size]
+                    let ring_indices = self.indices[index_cursor..index_cursor + ring_size]
                         .iter()
                         .map(|x| *x as usize)
                         .collect::<Vec<_>>();
