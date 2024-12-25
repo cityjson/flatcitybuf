@@ -1,16 +1,14 @@
 use crate::error::{CityJSONError, Result};
-// use crate::feature_writer::FeatureWriter;
+use crate::feature_writer::FeatureWriter;
 use crate::header_generated::{
     Column, ColumnArgs, ColumnType, GeographicalExtent, Header, HeaderArgs, ReferenceSystem,
     ReferenceSystemArgs, Transform, Vector,
 };
 use crate::MAGIC_BYTES;
-use cjseq::{CityJSON, Metadata as CJMetadata, Transform as CjTransform};
-// use crate::packed_r_tree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
+use cjseq::{CityJSON, CityJSONFeature, Metadata as CJMetadata, Transform as CjTransform};
 use flatbuffers::FlatBufferBuilder;
-// use geozero::CoordDimensions;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, Write};
 
 // Note: Many parts of this code are derived from https://github.com/flatgeobuf/flatgeobuf/tree/master/src/rust
 
@@ -20,7 +18,7 @@ pub struct FcbWriter<'a> {
     columns: Vec<flatbuffers::WIPOffset<Column<'a>>>,
     cj: CityJSON,
     options: FcbWriterOptions,
-    // feat_writer: FeatureWriter<'a>,
+    feat_writer: FeatureWriter<'a>,
     // feat_offsets: Vec<FeatureOffset>,
     // feat_nodes: Vec<NodeItem>,
 }
@@ -45,12 +43,16 @@ impl Default for FcbWriterOptions {
 // }
 
 impl<'a> FcbWriter<'a> {
-    pub fn create(cj: CityJSON) -> Result<Self> {
+    pub fn create(cj: CityJSON, city_features: &'a [&CityJSONFeature]) -> Result<Self> {
         let options = FcbWriterOptions { write_index: false };
-        Self::create_with_options(options, cj)
+        Self::create_with_options(options, cj, city_features)
     }
 
-    pub fn create_with_options(options: FcbWriterOptions, cj: CityJSON) -> Result<Self> {
+    pub fn create_with_options(
+        options: FcbWriterOptions,
+        cj: CityJSON,
+        city_features: &'a [&CityJSONFeature],
+    ) -> Result<Self> {
         let fbb = FlatBufferBuilder::new();
 
         // let index_node_size = if options.write_index {
@@ -68,6 +70,7 @@ impl<'a> FcbWriter<'a> {
         // );
 
         let tmpout = BufWriter::new(tempfile::tempfile()?);
+        let feat_writer: FeatureWriter<'a> = FeatureWriter::new(city_features);
 
         Ok(FcbWriter {
             tmpout,
@@ -75,6 +78,7 @@ impl<'a> FcbWriter<'a> {
             columns: Vec::new(),
             cj,
             options,
+            feat_writer,
             // feat_writer,
             // feat_offsets: Vec::new(),
             // feat_nodes: Vec::new(),
@@ -82,18 +86,18 @@ impl<'a> FcbWriter<'a> {
     }
 
     /// Add a new column.
-    pub fn add_column<F>(&mut self, name: &str, col_type: ColumnType, cfgfn: F)
-    where
-        F: FnOnce(&mut FlatBufferBuilder<'a>, &mut ColumnArgs),
-    {
-        let mut col = ColumnArgs {
-            name: Some(self.fbb.create_string(name)),
-            type_: col_type,
-            ..Default::default()
-        };
-        cfgfn(&mut self.fbb, &mut col);
-        self.columns.push(Column::create(&mut self.fbb, &col));
-    }
+    // pub fn add_column<F>(&mut self, name: &str, col_type: ColumnType, cfgfn: F)
+    // where
+    //     F: FnOnce(&mut FlatBufferBuilder<'a>, &mut ColumnArgs),
+    // {
+    //     let mut col = ColumnArgs {
+    //         name: Some(self.fbb.create_string(name)),
+    //         type_: col_type,
+    //         ..Default::default()
+    //     };
+    //     cfgfn(&mut self.fbb, &mut col);
+    //     self.columns.push(Column::create(&mut self.fbb, &col));
+    // }
 
     fn geographical_extent(geographical_extent: &[f64; 6]) -> GeographicalExtent {
         let min = Vector::new(
@@ -149,8 +153,14 @@ impl<'a> FcbWriter<'a> {
         })
     }
 
+    pub fn write_features(&mut self) -> Result<()> {
+        let feat_buf = self.feat_writer.finish_to_feature();
+        self.tmpout.write_all(&feat_buf)?;
+        Ok(())
+    }
+
     /// Write the FlatGeobuf dataset (Hilbert sorted)
-    pub fn write(&mut self, mut out: impl Write) -> Result<()> {
+    pub fn write(mut self, mut out: impl Write) -> Result<()> {
         out.write_all(&MAGIC_BYTES)?;
 
         let metadata = self
@@ -165,11 +175,12 @@ impl<'a> FcbWriter<'a> {
             .geographical_extent
             .as_ref()
             .map(Self::geographical_extent);
+        let features_count = self.feat_writer.city_features.len();
         let header_args = HeaderArgs {
             version: Some(self.fbb.create_string(&self.cj.version)),
             transform: Some(&transform),
             columns: None,
-            features_count: 0,
+            features_count: features_count as u64,
             geographical_extent: geographical_extent.as_ref(),
             reference_system,
             identifier: metadata
@@ -251,44 +262,11 @@ impl<'a> FcbWriter<'a> {
         let buf = self.fbb.finished_data();
         out.write_all(buf)?;
 
-        // if self.header_args.index_node_size > 0 && !self.feat_nodes.is_empty() {
-        //     // Create sorted index
-        //     hilbert_sort(&mut self.feat_nodes, &extent);
-        //     // Update offsets for index
-        //     let mut offset = 0;
-        //     let index_nodes = self
-        //         .feat_nodes
-        //         .iter()
-        //         .map(|tmpnode| {
-        //             let feat = &self.feat_offsets[tmpnode.offset as usize];
-        //             let mut node = tmpnode.clone();
-        //             node.offset = offset;
-        //             offset += feat.size as u64;
-        //             node
-        //         })
-        //         .collect();
-        //     let tree = PackedRTree::build(&index_nodes, &extent, self.header_args.index_node_size)?;
-        //     tree.stream_write(&mut out)?;
-        // }
-
-        // Copy features from temp file in sort order
-        // self.tmpout.rewind()?;
-        // let unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
-        // let mut unsorted_feature_reader = BufReader::new(unsorted_feature_output);
-
-        // Clippy generates a false-positive here, needs a block to disable, see
-        // https://github.com/rust-lang/rust-clippy/issues/9274
-        // #[allow(clippy::read_zero_byte_vec)]
-        // {
-        //     let mut buf = Vec::with_capacity(2048);
-        //     for node in &self.feat_nodes {
-        //         let feat = &self.feat_offsets[node.offset as usize];
-        //         unsorted_feature_reader.seek(SeekFrom::Start(feat.offset as u64))?;
-        //         buf.resize(feat.size, 0);
-        //         unsorted_feature_reader.read_exact(&mut buf)?;
-        //         out.write_all(&buf)?;
-        //     }
-        // }
+        self.tmpout.rewind()?;
+        let mut unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
+        let mut buf = Vec::new();
+        unsorted_feature_output.read_to_end(&mut buf)?;
+        out.write_all(&buf)?;
 
         Ok(())
     }

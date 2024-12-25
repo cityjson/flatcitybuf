@@ -1,4 +1,6 @@
-use flatcitybuf::{read_cityjson_from_bufreader, FcbWriter};
+use cjseq::CityJSONFeature;
+
+use flatcitybuf::{read_cityjson_from_bufreader, CJType, CJTypeKind, CityJSONSeq, FcbWriter};
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -11,17 +13,20 @@ fn write_file() -> Result<(), Box<dyn Error>> {
         .join("data")
         .join("small.city.jsonl");
     let output_file = manifest_dir.join("temp").join("test_output.fgb");
-    println!("input file: {}", input_file.display());
-    println!("output file: {}", output_file.display());
     let input_file = File::open(input_file)?;
     let inputreader = BufReader::new(input_file);
-    println!("inputreader: {:?}", inputreader);
-    let cjj = read_cityjson_from_bufreader(inputreader)?;
-    println!("cjj: {:?}", cjj);
-    let output_file = File::create(output_file)?;
-    let outputwriter = BufWriter::new(output_file);
-    let mut fcb = FcbWriter::create(cjj)?;
-    fcb.write(outputwriter)?;
+    let cj_seq = read_cityjson_from_bufreader(inputreader, CJTypeKind::Seq)?;
+    if let CJType::Seq(cj_seq) = cj_seq {
+        let CityJSONSeq { cj, features } = cj_seq;
+
+        let output_file = File::create(output_file)?;
+        let outputwriter = BufWriter::new(output_file);
+        let features_slice = features.iter().collect::<Vec<_>>();
+        let features_slice: &[&CityJSONFeature] = features_slice.as_slice();
+
+        let fcb = FcbWriter::create(cj, features_slice)?;
+        fcb.write(outputwriter)?;
+    }
 
     Ok(())
 }
