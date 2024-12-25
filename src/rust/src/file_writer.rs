@@ -1,14 +1,14 @@
 use crate::error::{CityJSONError, Result};
 use crate::feature_writer::FeatureWriter;
 use crate::header_generated::{
-    Column, ColumnArgs, ColumnType, GeographicalExtent, Header, HeaderArgs, ReferenceSystem,
+    Column, GeographicalExtent, Header, HeaderArgs, ReferenceSystem,
     ReferenceSystemArgs, Transform, Vector,
 };
 use crate::MAGIC_BYTES;
 use cjseq::{CityJSON, CityJSONFeature, Metadata as CJMetadata, Transform as CjTransform};
 use flatbuffers::FlatBufferBuilder;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Seek, Write};
+use std::io::{BufWriter, Read, Seek, Write};
 
 // Note: Many parts of this code are derived from https://github.com/flatgeobuf/flatgeobuf/tree/master/src/rust
 

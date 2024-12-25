@@ -1,16 +1,4 @@
-use crate::feature_generated::{
-    CityFeature, CityFeatureArgs, CityFeatureBuilder, CityFeatureOffset, CityObject,
-    CityObjectArgs, CityObjectType, Geometry, GeometryArgs, GeometryType, SemanticObject,
-    SemanticSurfaceType,
-};
-use crate::header_generated::{Column, ColumnArgs, ColumnOffset};
-use byteorder::{ByteOrder, LittleEndian};
-use cjseq::{
-    Appearance as CjAppearance, CityJSON, CityJSONFeature, CityObject as CjCityObject,
-    Geometry as CjGeometry, Transform as CjTransform,
-};
-
-use std::{mem::size_of, str};
+use cjseq::CityJSONFeature;
 
 mod city_feature_writer;
 mod geometry_encoderdecoder;

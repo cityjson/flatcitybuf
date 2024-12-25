@@ -29,7 +29,7 @@ impl FcbGeometryEncoderDecoder {
     fn encode_boundaries(&mut self, boundaries: &Boundaries) -> usize {
         match boundaries {
             Boundaries::Indices(indices) => {
-                self.indices.extend_from_slice(&indices);
+                self.indices.extend_from_slice(indices);
                 self.strings.push(self.indices.len() as u32);
                 1
             }
@@ -54,7 +54,7 @@ impl FcbGeometryEncoderDecoder {
         }
     }
     pub fn encode(mut self, boundaries: &Boundaries, semantics: Option<&Semantics>) -> Self {
-        self.encode_boundaries(&boundaries);
+        self.encode_boundaries(boundaries);
         if let Some(semantics) = semantics {
             self.encode_semantics(semantics);
         }
@@ -139,11 +139,11 @@ impl FcbGeometryEncoderDecoder {
                             ring_cursor += 1;
 
                             let ring_indices = self.indices
-                                [index_cursor..index_cursor + ring_size as usize]
+                                [index_cursor..index_cursor + ring_size]
                                 .iter()
                                 .map(|x| *x as usize)
                                 .collect::<Vec<_>>();
-                            index_cursor += ring_size as usize;
+                            index_cursor += ring_size;
 
                             let ring_indices = ring_indices
                                 .into_iter()
@@ -179,11 +179,11 @@ impl FcbGeometryEncoderDecoder {
                         let ring_size = self.strings[ring_cursor] as usize;
                         ring_cursor += 1;
                         let ring_indices = self.indices
-                            [index_cursor..index_cursor + ring_size as usize]
+                            [index_cursor..index_cursor + ring_size]
                             .iter()
                             .map(|x| *x as usize)
                             .collect::<Vec<_>>();
-                        index_cursor += ring_size as usize;
+                        index_cursor += ring_size;
 
                         ring_vec.push(Boundaries::Indices(
                             ring_indices.into_iter().map(|x| x as u32).collect(),
@@ -206,11 +206,11 @@ impl FcbGeometryEncoderDecoder {
                     let ring_size = self.strings[ring_cursor] as usize;
                     ring_cursor += 1;
                     let ring_indices = self.indices
-                        [index_cursor..index_cursor + ring_size as usize]
+                        [index_cursor..index_cursor + ring_size]
                         .iter()
                         .map(|x| *x as usize)
                         .collect::<Vec<_>>();
-                    index_cursor += ring_size as usize;
+                    index_cursor += ring_size;
 
                     ring_vec.push(Boundaries::Indices(
                         ring_indices.into_iter().map(|x| x as u32).collect(),
@@ -241,7 +241,7 @@ impl FcbGeometryEncoderDecoder {
                 Boundaries::Nested(ring_vec)
             }
         } else {
-            Boundaries::Indices(self.indices.into_iter().map(|x| x as u32).collect())
+            Boundaries::Indices(self.indices.into_iter().collect())
         }
     }
 

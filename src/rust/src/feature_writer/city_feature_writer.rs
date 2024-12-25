@@ -1,4 +1,3 @@
-use std::any::Any;
 
 use super::FeatureWriter;
 use crate::feature_writer::geometry_encoderdecoder::FcbGeometryEncoderDecoder;
@@ -9,11 +8,9 @@ use crate::{
         Vertex,
     },
     header_generated::{GeographicalExtent, Vector},
-    Column,
 };
 use cjseq::{
-    Boundaries, CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
-    Semantics,
+    CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
 };
 
 impl<'a> FeatureWriter<'a> {
@@ -225,7 +222,7 @@ impl<'a> FeatureWriter<'a> {
                 .map(|s| {
                     let children = s.children.clone().map(|c| {
                         self.fbb
-                            .create_vector(&c.iter().map(|x| *x as u32).collect::<Vec<_>>())
+                            .create_vector(&c.iter().copied().collect::<Vec<_>>())
                     });
                     let semantics_type = Self::semantic_surface_type(&s.thetype);
                     let semantic_object = SemanticObject::create(
@@ -248,7 +245,7 @@ impl<'a> FeatureWriter<'a> {
                 &semantics_values
                     .iter()
                     .map(|v| match v {
-                        Some(v) => *v as u32,
+                        Some(v) => { *v },
                         None => u32::MAX,
                     })
                     .collect::<Vec<_>>(),
