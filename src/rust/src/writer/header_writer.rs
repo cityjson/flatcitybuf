@@ -1,8 +1,6 @@
-
 use crate::error::CityJSONError;
 use crate::header_generated::{
-    GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs,
-    Transform, Vector,
+    GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
 use cjseq::{CityJSON, Metadata as CJMetadata, Transform as CjTransform};
 use flatbuffers::FlatBufferBuilder;

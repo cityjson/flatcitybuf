@@ -1,7 +1,3 @@
-mod feature_writer;
-mod geometry_encoderdecoder;
-mod header_writer;
-
 use crate::error::Result;
 use crate::MAGIC_BYTES;
 use cjseq::{CityJSON, CityJSONFeature};
@@ -9,6 +5,10 @@ use feature_writer::FeatureWriter;
 use header_writer::HeaderWriter;
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
+
+pub mod feature_writer;
+pub mod geometry_encoderdecoder;
+pub mod header_writer;
 
 pub struct FcbWriter<'a> {
     tmpout: BufWriter<File>,

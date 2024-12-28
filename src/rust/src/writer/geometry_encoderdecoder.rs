@@ -1,4 +1,7 @@
-use cjseq::{Boundaries, Semantics, SemanticsSurface, SemanticsValues};
+use cjseq::{
+    Boundaries as CjBoundaries, GeometryType as CjGeometryType, Semantics,
+    SemanticsSurface, SemanticsValues,
+};
 
 use crate::feature_generated::{GeometryType, SemanticObject, SemanticSurfaceType};
 
@@ -11,6 +14,12 @@ pub struct FcbGeometryEncoderDecoder {
 
     semantics_surfaces: Vec<SemanticsSurface>,
     semantics_values: Vec<Option<u32>>,
+}
+
+impl Default for FcbGeometryEncoderDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FcbGeometryEncoderDecoder {
@@ -26,14 +35,44 @@ impl FcbGeometryEncoderDecoder {
         }
     }
 
-    fn encode_boundaries(&mut self, boundaries: &Boundaries) -> usize {
+    pub fn new_as_decoder(
+        solids: Option<Vec<u32>>,
+        shells: Option<Vec<u32>>,
+        surfaces: Option<Vec<u32>>,
+        strings: Option<Vec<u32>>,
+        indices: Option<Vec<u32>>,
+        semantics_values: Option<Vec<u32>>,
+        semantics_surfaces: Option<Vec<SemanticObject>>,
+    ) -> Self {
+        let semantics_values = semantics_values.map(|values| {
+            values
+                .into_iter()
+                .map(|v| (v != u32::MAX).then_some(v))
+                .collect()
+        });
+
+        let semantics_surfaces =
+            semantics_surfaces.map(|surfaces| Self::decode_semantics_surfaces(&surfaces));
+
+        Self {
+            solids: solids.unwrap_or_default(),
+            shells: shells.unwrap_or_default(),
+            surfaces: surfaces.unwrap_or_default(),
+            strings: strings.unwrap_or_default(),
+            indices: indices.unwrap_or_default(),
+            semantics_values: semantics_values.unwrap_or_default(),
+            semantics_surfaces: semantics_surfaces.unwrap_or_default(),
+        }
+    }
+
+    fn encode_boundaries(&mut self, boundaries: &CjBoundaries) -> usize {
         match boundaries {
-            Boundaries::Indices(indices) => {
+            CjBoundaries::Indices(indices) => {
                 self.indices.extend_from_slice(indices);
                 self.strings.push(self.indices.len() as u32);
                 1
             }
-            Boundaries::Nested(boundaries) => {
+            CjBoundaries::Nested(boundaries) => {
                 let mut max_depth = 0;
                 for sub in boundaries {
                     let d = self.encode_boundaries(sub);
@@ -53,7 +92,7 @@ impl FcbGeometryEncoderDecoder {
             }
         }
     }
-    pub fn encode(mut self, boundaries: &Boundaries, semantics: Option<&Semantics>) -> Self {
+    pub fn encode(mut self, boundaries: &CjBoundaries, semantics: Option<&Semantics>) -> Self {
         self.encode_boundaries(boundaries);
         if let Some(semantics) = semantics {
             self.encode_semantics(semantics);
@@ -114,7 +153,7 @@ impl FcbGeometryEncoderDecoder {
         (&self.semantics_surfaces, &self.semantics_values)
     }
 
-    pub fn decode(self) -> Boundaries {
+    pub fn decode(&self) -> CjBoundaries {
         let mut shell_cursor = 0;
         let mut surface_cursor = 0;
         let mut ring_cursor = 0;
@@ -148,22 +187,22 @@ impl FcbGeometryEncoderDecoder {
                                 .into_iter()
                                 .map(|x| x as u32)
                                 .collect::<Vec<_>>();
-                            ring_vec.push(Boundaries::Indices(ring_indices));
+                            ring_vec.push(CjBoundaries::Indices(ring_indices));
                         }
 
-                        surface_vec.push(Boundaries::Nested(ring_vec));
+                        surface_vec.push(CjBoundaries::Nested(ring_vec));
                     }
 
-                    shell_vec.push(Boundaries::Nested(surface_vec));
+                    shell_vec.push(CjBoundaries::Nested(surface_vec));
                 }
 
-                solids_vec.push(Boundaries::Nested(shell_vec));
+                solids_vec.push(CjBoundaries::Nested(shell_vec));
             }
 
             if solids_vec.len() == 1 {
                 solids_vec.into_iter().next().unwrap()
             } else {
-                Boundaries::Nested(solids_vec)
+                CjBoundaries::Nested(solids_vec)
             }
         } else if !self.shells.is_empty() {
             let mut shell_vec = Vec::new();
@@ -183,18 +222,18 @@ impl FcbGeometryEncoderDecoder {
                             .collect::<Vec<_>>();
                         index_cursor += ring_size;
 
-                        ring_vec.push(Boundaries::Indices(
+                        ring_vec.push(CjBoundaries::Indices(
                             ring_indices.into_iter().map(|x| x as u32).collect(),
                         ));
                     }
-                    surface_vec.push(Boundaries::Nested(ring_vec));
+                    surface_vec.push(CjBoundaries::Nested(ring_vec));
                 }
-                shell_vec.push(Boundaries::Nested(surface_vec));
+                shell_vec.push(CjBoundaries::Nested(surface_vec));
             }
             if shell_vec.len() == 1 {
                 shell_vec.into_iter().next().unwrap()
             } else {
-                Boundaries::Nested(shell_vec)
+                CjBoundaries::Nested(shell_vec)
             }
         } else if !self.surfaces.is_empty() {
             let mut surface_vec = Vec::new();
@@ -209,16 +248,16 @@ impl FcbGeometryEncoderDecoder {
                         .collect::<Vec<_>>();
                     index_cursor += ring_size;
 
-                    ring_vec.push(Boundaries::Indices(
+                    ring_vec.push(CjBoundaries::Indices(
                         ring_indices.into_iter().map(|x| x as u32).collect(),
                     ));
                 }
-                surface_vec.push(Boundaries::Nested(ring_vec));
+                surface_vec.push(CjBoundaries::Nested(ring_vec));
             }
             if surface_vec.len() == 1 {
                 surface_vec.into_iter().next().unwrap()
             } else {
-                Boundaries::Nested(surface_vec)
+                CjBoundaries::Nested(surface_vec)
             }
         } else if !self.strings.is_empty() {
             let mut ring_vec = Vec::new();
@@ -228,17 +267,17 @@ impl FcbGeometryEncoderDecoder {
                     .map(|x| *x as usize)
                     .collect::<Vec<_>>();
                 index_cursor += ring_size as usize;
-                ring_vec.push(Boundaries::Indices(
+                ring_vec.push(CjBoundaries::Indices(
                     ring_indices.into_iter().map(|x| x as u32).collect(),
                 ));
             }
             if ring_vec.len() == 1 {
                 ring_vec.into_iter().next().unwrap()
             } else {
-                Boundaries::Nested(ring_vec)
+                CjBoundaries::Nested(ring_vec)
             }
         } else {
-            Boundaries::Indices(self.indices.into_iter().collect())
+            CjBoundaries::Indices(self.indices.clone())
         }
     }
 
@@ -437,5 +476,33 @@ impl FcbGeometryEncoderDecoder {
         );
 
         Semantics { values, surfaces }
+    }
+}
+
+impl GeometryType {
+    pub fn to_string(&self) -> &'static str {
+        match *self {
+            Self::MultiPoint => "MultiPoint",
+            Self::MultiLineString => "MultiLineString",
+            Self::MultiSurface => "MultiSurface",
+            Self::CompositeSurface => "CompositeSurface",
+            Self::Solid => "Solid",
+            Self::MultiSolid => "MultiSolid",
+            Self::CompositeSolid => "CompositeSolid",
+            _ => "Solid",
+        }
+    }
+
+    pub fn to_cj(&self) -> CjGeometryType {
+        match *self {
+            Self::MultiPoint => CjGeometryType::MultiPoint,
+            Self::MultiLineString => CjGeometryType::MultiLineString,
+            Self::MultiSurface => CjGeometryType::MultiSurface,
+            Self::CompositeSurface => CjGeometryType::CompositeSurface,
+            Self::Solid => CjGeometryType::Solid,
+            Self::MultiSolid => CjGeometryType::MultiSolid,
+            Self::CompositeSolid => CjGeometryType::CompositeSolid,
+            _ => CjGeometryType::Solid,
+        }
     }
 }
