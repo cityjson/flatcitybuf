@@ -12,7 +12,7 @@ use cjseq::{
     ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, Transform as CjTransform,
 };
 
-pub fn to_cj_metadata(header: Header) -> Result<CityJSON> {
+pub fn to_cj_metadata(header: &Header) -> Result<CityJSON> {
     let mut cj = CityJSON::new();
 
     if let Some(transform) = header.transform() {
@@ -28,7 +28,6 @@ pub fn to_cj_metadata(header: Header) -> Result<CityJSON> {
         .context("missing reference_system")?;
     cj.version = reference_system.version().to_string();
     cj.thetype = String::from("CityJSON");
-    println!("version: {}", cj.version);
 
     let geographical_extent = header
         .geographical_extent()
@@ -47,7 +46,7 @@ pub fn to_cj_metadata(header: Header) -> Result<CityJSON> {
     cj.metadata = Some(CjMetadata {
         geographical_extent: Some(geographical_extent),
         identifier: Some(header.identifier().unwrap_or_default().to_string()),
-        point_of_contact: Some(to_cj_point_of_contact(&header)?),
+        point_of_contact: Some(to_cj_point_of_contact(header)?),
         reference_date: Some(header.reference_date().unwrap_or_default().to_string()),
         reference_system: Some(CjReferenceSystem::new(
             None,
@@ -57,7 +56,6 @@ pub fn to_cj_metadata(header: Header) -> Result<CityJSON> {
         )),
         title: Some(header.title().unwrap_or_default().to_string()),
     });
-    println!("metadata: {:?}", cj.metadata);
 
     Ok(cj)
 }
@@ -146,38 +144,39 @@ pub fn to_cj_feature(feature: CityFeature) -> Result<CityJSONFeature> {
     cj.id = feature.id().to_string();
 
     if let Some(objects) = feature.objects() {
-        let mut city_objects: HashMap<String, CjCityObject> = HashMap::new();
+        let city_objects: HashMap<String, CjCityObject> = objects
+            .iter()
+            .map(|co| {
+                let geographical_extent = co.geographical_extent().map(|extent| {
+                    vec![
+                        extent.min().x(),
+                        extent.min().y(),
+                        extent.min().z(),
+                        extent.max().x(),
+                        extent.max().y(),
+                        extent.max().z(),
+                    ]
+                });
+                let geometries = co.geometry().map(|gs| {
+                    gs.iter()
+                        .map(|g| decode_geometry(g).unwrap())
+                        .collect::<Vec<_>>()
+                }); //TODO: handle error
 
-        objects.iter().map(|co| {
-            let geographical_extent = co.geographical_extent().map(|extent| {
-                vec![
-                    extent.min().x(),
-                    extent.min().y(),
-                    extent.min().z(),
-                    extent.max().x(),
-                    extent.max().y(),
-                    extent.max().z(),
-                ]
-            });
-            let geometries = co.geometry().map(|gs| {
-                gs.iter()
-                    .map(|g| decode_geometry(g).unwrap())
-                    .collect::<Vec<_>>()
-            }); //TODO: handle error
-
-            let cjco = CjCityObject::new(
-                to_cj_co_type(co.type_()).to_string(),
-                geographical_extent,
-                None,
-                geometries,
-                co.children()
-                    .map(|c| c.iter().map(|s| s.to_string()).collect()),
-                co.parents()
-                    .map(|p| p.iter().map(|s| s.to_string()).collect()),
-                None,
-            );
-            city_objects.insert(co.id().to_string(), cjco);
-        });
+                let cjco = CjCityObject::new(
+                    to_cj_co_type(co.type_()).to_string(),
+                    geographical_extent,
+                    None,
+                    geometries,
+                    co.children()
+                        .map(|c| c.iter().map(|s| s.to_string()).collect()),
+                    co.parents()
+                        .map(|p| p.iter().map(|s| s.to_string()).collect()),
+                    None,
+                );
+                (co.id().to_string(), cjco)
+            })
+            .collect::<HashMap<String, CjCityObject>>();
         cj.city_objects = city_objects;
     }
 

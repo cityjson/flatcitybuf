@@ -1,6 +1,6 @@
 use cjseq::{
-    Boundaries as CjBoundaries, GeometryType as CjGeometryType, Semantics,
-    SemanticsSurface, SemanticsValues,
+    Boundaries as CjBoundaries, GeometryType as CjGeometryType, Semantics, SemanticsSurface,
+    SemanticsValues,
 };
 
 use crate::feature_generated::{GeometryType, SemanticObject, SemanticSurfaceType};

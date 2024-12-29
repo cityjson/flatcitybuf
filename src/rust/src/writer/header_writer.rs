@@ -55,7 +55,7 @@ impl<'a> HeaderWriter<'a> {
             .geographical_extent
             .as_ref()
             .map(Self::geographical_extent);
-        let features_count = 0;
+        let features_count = 3; // TODO: get from buffer
         let header_args = HeaderArgs {
             version: Some(self.fbb.create_string(&self.cj.version)),
             transform: Some(&transform),

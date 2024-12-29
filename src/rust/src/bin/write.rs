@@ -12,7 +12,7 @@ fn write_file() -> Result<(), Box<dyn Error>> {
         .join("tests")
         .join("data")
         .join("small.city.jsonl");
-    let output_file = manifest_dir.join("temp").join("test_output.fgb");
+    let output_file = manifest_dir.join("temp").join("test_output.fcb");
     let input_file = File::open(input_file)?;
     let inputreader = BufReader::new(input_file);
     let cj_seq = read_cityjson_from_bufreader(inputreader, CJTypeKind::Seq)?;

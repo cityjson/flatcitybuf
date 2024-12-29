@@ -1,4 +1,3 @@
-
 use cjseq::CityJSONFeature;
 
 use crate::fcb_serde::fcb_serializer::*;
@@ -33,7 +32,7 @@ impl<'a> FeatureWriter<'a> {
             fb_features.push(cf_buf);
         }
         let f = self.fbb.create_vector(&fb_features);
-        self.fbb.finish(f, None);
+        self.fbb.finish_size_prefixed(f, None);
         self.fbb.finished_data().to_vec()
     }
 }

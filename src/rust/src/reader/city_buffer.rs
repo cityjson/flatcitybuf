@@ -11,7 +11,7 @@ impl FcbBuffer {
         unsafe { size_prefixed_root_as_header_unchecked(&self.header_buf) }
     }
 
-    pub(crate) fn features(&self) -> CityFeature {
+    pub(crate) fn feature(&self) -> CityFeature {
         unsafe { size_prefixed_root_as_city_feature_unchecked(&self.features_buf) }
     }
 }
