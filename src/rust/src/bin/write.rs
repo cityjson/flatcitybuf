@@ -1,5 +1,3 @@
-use cjseq::CityJSONFeature;
-
 use flatcitybuf::{read_cityjson_from_bufreader, CJType, CJTypeKind, CityJSONSeq, FcbWriter};
 use std::error::Error;
 use std::fs::File;
@@ -21,10 +19,12 @@ fn write_file() -> Result<(), Box<dyn Error>> {
 
         let output_file = File::create(output_file)?;
         let outputwriter = BufWriter::new(output_file);
-        let features_slice = features.iter().collect::<Vec<_>>();
-        let features_slice: &[&CityJSONFeature] = features_slice.as_slice();
 
-        let fcb = FcbWriter::new(cj, features_slice)?;
+        let mut fcb = FcbWriter::new(cj, features.first().unwrap())?;
+        fcb.write_feature()?;
+        for feature in features.iter().skip(1) {
+            fcb.add_feature(feature)?;
+        }
         fcb.write(outputwriter)?;
     }
 

@@ -12,6 +12,7 @@ cjseq = { git = "https://github.com/HideBa/cjseq", branch = "develop" }
 tempfile = "3.14.0"
 serde_json = "1.0.133"
 anyhow = "1.0.95"
+fallible-streaming-iterator = "0.1.9"
 
 [[bin]]
 name = "read"

@@ -25,28 +25,33 @@ pub struct FcbWriter<'a> {
 // }
 
 impl<'a> FcbWriter<'a> {
-    pub fn new(cj: CityJSON, features: &'a [&'a CityJSONFeature]) -> Result<Self> {
+    pub fn new(cj: CityJSON, feature: &'a CityJSONFeature) -> Result<Self> {
         let header_writer = HeaderWriter::new(cj, None);
-        let feat_writer = FeatureWriter::new(features);
+        let feat_writer = FeatureWriter::new(feature);
         Ok(Self {
             header_writer,
             feat_writer,
             tmpout: BufWriter::new(tempfile::tempfile()?),
         })
     }
-    pub fn write_features(&mut self) -> Result<()> {
+
+    //TODO: make this private and think how to handle the first feature
+    pub fn write_feature(&mut self) -> Result<()> {
         let feat_buf = self.feat_writer.finish_to_feature();
-        println!("feat_buf size: {} bytes", feat_buf.len());
         self.tmpout.write_all(&feat_buf)?;
+        Ok(())
+    }
+
+    pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<()> {
+        self.feat_writer.add_feature(feature);
+        self.write_feature()?;
+        // TODO: add feature number to header
         Ok(())
     }
 
     /// Write the FlatGeobuf dataset (Hilbert sorted)
     pub fn write(mut self, mut out: impl Write) -> Result<()> {
         out.write_all(&MAGIC_BYTES)?;
-
-        // Write features. This should be done first, so that the header can be written with the correct number of features.
-        self.write_features()?;
 
         let header_buf = self.header_writer.finish_to_header();
         println!("header buf size: {} bytes", header_buf.len());

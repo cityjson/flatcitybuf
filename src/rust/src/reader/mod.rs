@@ -339,6 +339,7 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
         let mut features: Vec<CityFeature> = Vec::new();
         let mut count = 0;
         loop {
+            // Scope the mutable borrow of `self` explicitly
             let next_feature = {
                 match self.next() {
                     Ok(Some(f)) => f,
@@ -346,21 +347,16 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
                     Err(e) => return Err(e),
                 }
             };
+
             count += 1;
-            println!("count: {}", count);
-            // Clone the feature to own the data independently of the buffer
-            let feature = next_feature.feature();
-            // features.push(feature);
-            print!("feature: {:?}", feature);
+
+            // At this point, `self` is no longer mutably borrowed,
+            // and we can safely call `feature()`
+            let feature = next_feature.feature().clone();
+            features.push(feature);
         }
 
-        // let mut count = 0;
-        // while let Ok(Some(feature)) = self.next().map_err(|e| e.to_string()) {
-        //     count += 1;
-        //     print!("feature: {:?}", feature.feature());
-        // }
-
-        // println!("count: {}", count);
+        println!("count: {}", count);
         Ok(features)
     }
 }
