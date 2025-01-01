@@ -5,6 +5,7 @@ use cjseq::{
 
 use crate::feature_generated::{GeometryType, SemanticObject, SemanticSurfaceType};
 
+#[derive(Debug, Clone, Default)]
 pub struct FcbGeometryEncoderDecoder {
     solids: Vec<u32>,
     shells: Vec<u32>,
@@ -14,12 +15,6 @@ pub struct FcbGeometryEncoderDecoder {
 
     semantics_surfaces: Vec<SemanticsSurface>,
     semantics_values: Vec<Option<u32>>,
-}
-
-impl Default for FcbGeometryEncoderDecoder {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl FcbGeometryEncoderDecoder {
@@ -64,40 +59,54 @@ impl FcbGeometryEncoderDecoder {
             semantics_surfaces: semantics_surfaces.unwrap_or_default(),
         }
     }
-
-    fn encode_boundaries(&mut self, boundaries: &CjBoundaries) -> usize {
-        match boundaries {
-            CjBoundaries::Indices(indices) => {
-                self.indices.extend_from_slice(indices);
-                self.strings.push(self.indices.len() as u32);
-                1
-            }
-            CjBoundaries::Nested(boundaries) => {
-                let mut max_depth = 0;
-                for sub in boundaries {
-                    let d = self.encode_boundaries(sub);
-                    if d > max_depth {
-                        max_depth = d;
-                    }
-                }
-
-                let count = boundaries.len() as u32;
-                match max_depth {
-                    1 => self.surfaces.push(count),
-                    2 => self.shells.push(count),
-                    3 => self.solids.push(count),
-                    _ => unreachable!(),
-                }
-                max_depth + 1
-            }
-        }
-    }
     pub fn encode(mut self, boundaries: &CjBoundaries, semantics: Option<&Semantics>) -> Self {
         self.encode_boundaries(boundaries);
         if let Some(semantics) = semantics {
             self.encode_semantics(semantics);
         }
         self
+    }
+
+    fn encode_boundaries(&mut self, boundaries: &CjBoundaries) -> usize {
+        match boundaries {
+            CjBoundaries::Indices(indices) => {
+                let start_len = self.indices.len();
+                self.indices.extend_from_slice(indices);
+                let ring_size = self.indices.len() - start_len;
+                self.strings.push(ring_size as u32);
+                0 // Return 0 for direct indices (MultiPoint)
+            }
+            CjBoundaries::Nested(boundaries) => {
+                let mut max_depth = 0;
+
+                // First pass to determine the depth
+                for sub in boundaries.iter() {
+                    let d = self.encode_boundaries(sub);
+                    max_depth = max_depth.max(d);
+                }
+
+                // For MultiSurface (depth 1), we need to push 1 for each surface
+                if max_depth == 1 {
+                    for _ in 0..boundaries.len() {
+                        self.surfaces.push(1);
+                    }
+                } else {
+                    match max_depth {
+                        0 => (), // MultiPoint or LineString
+                        2 => {
+                            // For shells, count the number of surfaces
+                            self.shells.push(boundaries.len() as u32);
+                        }
+                        3 => {
+                            // For solids, count the number of shells
+                            self.solids.push(boundaries.len() as u32);
+                        }
+                        _ => unreachable!("Invalid geometry nesting depth"),
+                    }
+                }
+                max_depth + 1
+            }
+        }
     }
 
     fn encode_semantics_surface(&mut self, semantics_surfaces: &[SemanticsSurface]) -> usize {
@@ -139,13 +148,13 @@ impl FcbGeometryEncoderDecoder {
         self.encode_semantics_values(&semantics.values, &mut values);
     }
 
-    pub fn boundaries(&self) -> (&[u32], &[u32], &[u32], &[u32], &[u32]) {
+    pub fn boundaries(&self) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
         (
-            &self.solids,
-            &self.shells,
-            &self.surfaces,
-            &self.strings,
-            &self.indices,
+            self.solids.clone(),
+            self.shells.clone(),
+            self.surfaces.clone(),
+            self.strings.clone(),
+            self.indices.clone(),
         )
     }
 
@@ -504,5 +513,289 @@ impl GeometryType {
             Self::CompositeSolid => CjGeometryType::CompositeSolid,
             _ => CjGeometryType::Solid,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::feature_generated::SemanticObject;
+    use anyhow::Result;
+    use cjseq::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_encode() -> Result<()> {
+        // MultiPoint
+        let boundaries = json!([2, 44, 0, 7]);
+        let boundaries: NestedArray = serde_json::from_value(boundaries)?;
+        let encoder = FcbGeometryEncoderDecoder::new().encode(&boundaries, None);
+        println!("{:?}", encoder);
+        assert_eq!(encoder.indices, vec![2, 44, 0, 7]);
+        assert_eq!(encoder.strings, vec![4]);
+        assert!(encoder.surfaces.is_empty());
+        assert!(encoder.shells.is_empty());
+        assert!(encoder.solids.is_empty());
+
+        // MultiLineString
+        let boundaries = json!([[2, 3, 5], [77, 55, 212]]);
+        let boundaries: NestedArray = serde_json::from_value(boundaries)?;
+        let encoder = FcbGeometryEncoderDecoder::new().encode(&boundaries, None);
+        assert_eq!(encoder.indices, vec![2, 3, 5, 77, 55, 212]);
+        assert_eq!(encoder.strings, vec![3, 3]);
+        assert!(encoder.surfaces.is_empty());
+        assert!(encoder.shells.is_empty());
+        assert!(encoder.solids.is_empty());
+
+        // MultiSurface
+        let boundaries = json!([[[0, 3, 2, 1]], [[4, 5, 6, 7]], [[0, 1, 5, 4]]]);
+        let boundaries: NestedArray = serde_json::from_value(boundaries)?;
+        let encoder = FcbGeometryEncoderDecoder::new().encode(&boundaries, None);
+        assert_eq!(encoder.indices, vec![0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4]);
+        assert_eq!(encoder.strings, vec![4, 4, 4]);
+        assert_eq!(encoder.surfaces, vec![1, 1, 1]);
+        assert!(encoder.shells.is_empty());
+        assert!(encoder.solids.is_empty());
+
+        // Solid
+        let boundaries = json!([
+            [
+                [[0, 3, 2, 1, 22], [1, 2, 3, 4]],
+                [[4, 5, 6, 7]],
+                [[0, 1, 5, 4]],
+                [[1, 2, 6, 5]]
+            ],
+            [
+                [[240, 243, 124]],
+                [[244, 246, 724]],
+                [[34, 414, 45]],
+                [[111, 246, 5]]
+            ]
+        ]);
+        let boundaries: NestedArray = serde_json::from_value(boundaries)?;
+        let encoder = FcbGeometryEncoderDecoder::new().encode(&boundaries, None);
+        assert_eq!(
+            encoder.indices,
+            vec![
+                0, 3, 2, 1, 22, 1, 2, 3, 4, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 240, 243, 124, 244,
+                246, 724, 34, 414, 45, 111, 246, 5
+            ]
+        );
+        assert_eq!(encoder.strings, vec![5, 4, 4, 4, 4, 3, 3, 3, 3]);
+        assert_eq!(encoder.surfaces, vec![2, 1, 1, 1, 1, 1, 1, 1]);
+        assert_eq!(encoder.shells, vec![4, 4]);
+        assert_eq!(encoder.solids, vec![2]);
+
+        // CompositeSolid
+        let boundaries = json!([
+            [
+                [
+                    [[0, 3, 2, 1, 22]],
+                    [[4, 5, 6, 7]],
+                    [[0, 1, 5, 4]],
+                    [[1, 2, 6, 5]]
+                ],
+                [
+                    [[240, 243, 124]],
+                    [[244, 246, 724]],
+                    [[34, 414, 45]],
+                    [[111, 246, 5]]
+                ]
+            ],
+            [[
+                [[666, 667, 668]],
+                [[74, 75, 76]],
+                [[880, 881, 885]],
+                [[111, 122, 226]]
+            ]]
+        ]);
+        let boundaries: NestedArray = serde_json::from_value(boundaries)?;
+        let encoder = FcbGeometryEncoderDecoder::new().encode(&boundaries, None);
+        assert_eq!(
+            encoder.indices,
+            vec![
+                0, 3, 2, 1, 22, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 240, 243, 124, 244, 246, 724,
+                34, 414, 45, 111, 246, 5, 666, 667, 668, 74, 75, 76, 880, 881, 885, 111, 122, 226
+            ]
+        );
+        assert_eq!(encoder.strings, vec![5, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3]);
+        assert_eq!(encoder.surfaces, vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+        assert_eq!(encoder.shells, vec![4, 4, 4]);
+        assert_eq!(encoder.solids, vec![2, 1]);
+
+        Ok(())
+    }
+
+    // #[test]
+    // fn test_encode_boundaries_nested() -> Result<()> {
+    //     let mut encoder = FcbGeometryEncoderDecoder::new();
+    //     let nested = CjBoundaries::Nested(vec![
+    //         CjBoundaries::Indices(vec![1, 2]),
+    //         CjBoundaries::Indices(vec![3, 4]),
+    //     ]);
+
+    //     encoder.encode_boundaries(&nested);
+
+    //     assert_eq!(encoder.indices, vec![1, 2, 3, 4]);
+    //     assert_eq!(encoder.strings, vec![2, 2]);
+    //     assert_eq!(encoder.surfaces, vec![2]);
+    //     Ok(())
+    // }
+
+    // #[test]
+    // fn test_encode_semantics() -> Result<()> {
+    //     let mut encoder = FcbGeometryEncoderDecoder::new();
+    //     let surfaces = vec![SemanticsSurface {
+    //         thetype: "RoofSurface".to_string(),
+    //         parent: None,
+    //         children: None,
+    //         other: serde_json::Value::Null,
+    //     }];
+    //     let values = SemanticsValues::Indices(vec![0, 1]);
+    //     let semantics = Semantics { surfaces, values };
+
+    //     encoder.encode_semantics(&semantics);
+
+    //     assert_eq!(encoder.semantics_surfaces.len(), 1);
+    //     assert_eq!(encoder.semantics_surfaces[0].thetype, "RoofSurface");
+    //     assert_eq!(encoder.semantics_values, vec![Some(0), Some(1)]);
+    //     Ok(())
+    // }
+
+    #[test]
+    fn test_decode() -> Result<()> {
+        // MultiPoint
+        let boundaries_value = json!([2, 44, 0, 7]);
+        let expected: NestedArray = serde_json::from_value(boundaries_value)?;
+        let indices = vec![2, 44, 0, 7];
+        let strings = vec![4];
+        let decoder = FcbGeometryEncoderDecoder::new_as_decoder(
+            None,
+            None,
+            None,
+            Some(strings),
+            Some(indices),
+            None,
+            None,
+        );
+        let boundaries = decoder.decode();
+        assert_eq!(expected, boundaries);
+
+        // MultiLineString
+        let boundaries_value = json!([[2, 3, 5], [77, 55, 212]]);
+        let expected: NestedArray = serde_json::from_value(boundaries_value)?;
+        let indices = vec![2, 3, 5, 77, 55, 212];
+        let strings = vec![3, 3];
+        let decoder = FcbGeometryEncoderDecoder::new_as_decoder(
+            None,
+            None,
+            None,
+            Some(strings),
+            Some(indices),
+            None,
+            None,
+        );
+        let boundaries = decoder.decode();
+        assert_eq!(expected, boundaries);
+
+        // MultiSurface
+        let boundaries_value = json!([[[0, 3, 2, 1]], [[4, 5, 6, 7]], [[0, 1, 5, 4]]]);
+        let expected: NestedArray = serde_json::from_value(boundaries_value)?;
+        let indices = vec![0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5];
+        let strings = vec![4, 4, 4];
+        let surfaces = vec![1, 1, 1];
+        let decoder = FcbGeometryEncoderDecoder::new_as_decoder(
+            None,
+            None,
+            Some(surfaces),
+            Some(strings),
+            Some(indices),
+            None,
+            None,
+        );
+        let boundaries = decoder.decode();
+        assert_eq!(expected, boundaries);
+
+        // Solid
+        let boundaries_value = json!([
+            [
+                [[0, 3, 2, 1, 22], [1, 2, 3, 4]],
+                [[4, 5, 6, 7]],
+                [[0, 1, 5, 4]],
+                [[1, 2, 6, 5]]
+            ],
+            [
+                [[240, 243, 124]],
+                [[244, 246, 724]],
+                [[34, 414, 45]],
+                [[111, 246, 5]]
+            ]
+        ]);
+        let expected: NestedArray = serde_json::from_value(boundaries_value)?;
+        let indices = vec![
+            0, 3, 2, 1, 22, 1, 2, 3, 4, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 240, 243, 124, 244,
+            246, 724, 34, 414, 45, 111, 246, 5,
+        ];
+        let strings = vec![5, 4, 4, 4, 4, 3, 3, 3, 3];
+        let surfaces = vec![2, 1, 1, 1, 1, 1, 1, 1];
+        let shells = vec![4, 4];
+        let solids = vec![2];
+        let decoder = FcbGeometryEncoderDecoder::new_as_decoder(
+            Some(solids),
+            Some(shells),
+            Some(surfaces),
+            Some(strings),
+            Some(indices),
+            None,
+            None,
+        );
+        let boundaries = decoder.decode();
+        assert_eq!(expected, boundaries);
+
+        // CompositeSolid
+        let boundaries_value = json!([
+            [
+                [
+                    [[0, 3, 2, 1, 22]],
+                    [[4, 5, 6, 7]],
+                    [[0, 1, 5, 4]],
+                    [[1, 2, 6, 5]]
+                ],
+                [
+                    [[240, 243, 124]],
+                    [[244, 246, 724]],
+                    [[34, 414, 45]],
+                    [[111, 246, 5]]
+                ]
+            ],
+            [[
+                [[666, 667, 668]],
+                [[74, 75, 76]],
+                [[880, 881, 885]],
+                [[111, 122, 226]]
+            ]]
+        ]);
+        let expected: NestedArray = serde_json::from_value(boundaries_value)?;
+        let indices = vec![
+            0, 3, 2, 1, 22, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 240, 243, 124, 244, 246, 724, 34,
+            414, 45, 111, 246, 5, 666, 667, 668, 74, 75, 76, 880, 881, 885, 111, 122, 226,
+        ];
+        let strings = vec![5, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3];
+        let surfaces = vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+        let shells = vec![4, 4, 4, 4];
+        let solids = vec![2, 1];
+        let decoder = FcbGeometryEncoderDecoder::new_as_decoder(
+            Some(solids),
+            Some(shells),
+            Some(surfaces),
+            Some(strings),
+            Some(indices),
+            None,
+            None,
+        );
+        let boundaries = decoder.decode();
+        assert_eq!(expected, boundaries);
+
+        Ok(())
     }
 }

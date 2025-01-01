@@ -206,11 +206,11 @@ fn to_fcb_geometry<'a>(
     let (solids, shells, surfaces, strings, boundary_indices) = encoder_decoder.boundaries();
     let (semantics_surfaces, semantics_values) = encoder_decoder.semantics();
 
-    let solids = Some(fbb.create_vector(solids));
-    let shells = Some(fbb.create_vector(shells));
-    let surfaces = Some(fbb.create_vector(surfaces));
-    let strings = Some(fbb.create_vector(strings));
-    let boundary_indices = Some(fbb.create_vector(boundary_indices));
+    let solids = Some(fbb.create_vector(&solids));
+    let shells = Some(fbb.create_vector(&shells));
+    let surfaces = Some(fbb.create_vector(&surfaces));
+    let strings = Some(fbb.create_vector(&strings));
+    let boundary_indices = Some(fbb.create_vector(&boundary_indices));
 
     let semantics_objects = {
         let semantics_objects = semantics_surfaces
