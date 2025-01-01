@@ -9,7 +9,7 @@ use crate::feature_generated::{size_prefixed_root_as_city_feature, CityFeature};
 use crate::header_generated::*;
 use crate::{check_magic_bytes, HEADER_MAX_BUFFER_SIZE};
 use fallible_streaming_iterator::FallibleStreamingIterator;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 use std::marker::PhantomData;
 pub struct FcbReader<R> {
@@ -291,31 +291,25 @@ impl<R: Read> FeatureIter<R, NotSeekable> {
     }
 
     pub fn get_features(&mut self) -> Result<Vec<CityFeature>> {
-        let mut features: Vec<CityFeature> = Vec::new();
-        let mut count = 0;
-        loop {
-            let next_feature = {
-                match self.next() {
-                    Ok(Some(f)) => f,
-                    Ok(None) => break,
-                    Err(e) => return Err(e),
-                }
-            };
-            count += 1;
-            // Clone the feature to own the data independently of the buffer
-            let feature = next_feature.feature();
-            // features.push(feature);
-            print!("feature: {:?}", feature);
-        }
-        println!("count: {}", count);
-        // if let Some(next_feature) = self.iter_get() {
+        // let mut features: Vec<CityFeature> = Vec::new();
+        // let mut count = 0;
+        // loop {
+        //     let next_feature = {
+        //         match self.next() {
+        //             Ok(Some(f)) => f,
+        //             Ok(None) => break,
+        //             Err(e) => return Err(e),
+        //         }
+        //     };
         //     count += 1;
+        //     // Clone the feature to own the data independently of the buffer
         //     let feature = next_feature.feature();
-        //     features.push(feature);
+        //     // features.push(feature);
         //     print!("feature: {:?}", feature);
         // }
-        // println!("count: {}", count);
-        Ok(features)
+
+        // Ok(features)
+        todo!("implement")
     }
     // FIXME
     // pub fn process_features(&mut self, out: &mut impl Write) -> Result<(&[CjCityFeature])> {
@@ -326,38 +320,41 @@ impl<R: Read> FeatureIter<R, NotSeekable> {
     //     }
     //     Ok(())
     // }
+    pub fn next(&mut self) -> Result<Option<&Self>> {
+        self.advance()?;
+        Ok(Some(self))
+    }
 }
 
 impl<R: Read + Seek> FeatureIter<R, Seekable> {
     /// Return current feature
-    pub fn cur_feature(&self) -> &FcbBuffer {
-        &self.buffer
+    pub fn cur_feature(&self) -> CityFeature {
+        self.buffer.feature()
     }
 
-    pub fn get_features(&mut self) -> Result<Vec<CityFeature>> {
-        println!("get features");
-        let mut features: Vec<CityFeature> = Vec::new();
-        let mut count = 0;
-        loop {
-            // Scope the mutable borrow of `self` explicitly
-            let next_feature = {
-                match self.next() {
-                    Ok(Some(f)) => f,
-                    Ok(None) => break,
-                    Err(e) => return Err(e),
-                }
-            };
+    pub fn get_features(&mut self, out: impl Write) -> Result<()> {
+        // println!("get features");
+        // let mut count = 0;
 
-            count += 1;
+        // while let Ok(Some(next_feature)) = self.next() {
+        //     count += 1;
 
-            // At this point, `self` is no longer mutably borrowed,
-            // and we can safely call `feature()`
-            let feature = next_feature.feature().clone();
-            features.push(feature);
-        }
+        //     let feature = next_feature.feature();
+        //     out.write_all(feature)?;
+        // }
 
-        println!("count: {}", count);
-        Ok(features)
+        // println!("count: {}", count);
+        // Ok(())
+        todo!("implement")
+    }
+
+    pub fn get_current_feature(&self) -> CityFeature {
+        self.buffer.feature()
+    }
+
+    pub fn next(&mut self) -> Result<Option<&Self>> {
+        self.advance()?;
+        Ok(Some(self))
     }
 }
 

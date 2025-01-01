@@ -11,27 +11,6 @@ fn read_file() -> Result<(), Box<dyn Error>> {
     let input_file = File::open(input_file_path)?;
     let inputreader = BufReader::new(input_file);
 
-    // let mut magic_buf: [u8; 8] = [0; 8];
-    // inputreader.read_exact(&mut magic_buf)?;
-    // assert_eq!(magic_buf, [b'f', b'c', b'b', VERSION, b'f', b'c', b'b', 0]);
-
-    // let mut size_buf: [u8; 4] = [0; 4];
-    // inputreader.read_exact(&mut size_buf)?;
-    // let header_size = u32::from_le_bytes(size_buf) as usize;
-    // println!("header_size: {}", header_size);
-    // let mut header_buf = Vec::with_capacity(header_size + 4);
-    // header_buf.extend_from_slice(&size_buf);
-    // header_buf.resize(header_buf.capacity(), 0);
-    // inputreader.read_exact(&mut header_buf[4..])?;
-
-    // let header = size_prefixed_root_as_header(&header_buf);
-    // if let Ok(header) = header {
-    //     let ref_system = header.reference_system();
-    //     println!("ref_system: {:?}", ref_system);
-    // } else {
-    //     println!("header is invalid");
-    // }
-
     let output_file = manifest_dir
         .join("temp")
         .join("test_output_header.city.jsonl");
@@ -43,18 +22,18 @@ fn read_file() -> Result<(), Box<dyn Error>> {
     let cj = to_cj_metadata(&header)?;
     println!("cj: {:?}", cj);
 
-    let features = reader.get_features()?;
-    println!("features num: {}", features.len());
-    let cj_feature = features
-        .iter()
-        .map(|f| to_cj_feature(*f))
-        .collect::<Vec<_>>();
+    let mut features = Vec::new();
+    while let Ok(Some(feat_buf)) = reader.next() {
+        let feature = feat_buf.cur_feature();
+        features.push(to_cj_feature(feature)?);
+    }
+
+    println!("features: {:?}", features);
+
     serde_json::to_writer(&mut outputwriter, &cj)?;
-    for feature in cj_feature {
-        if let Ok(feature) = feature {
-            serde_json::to_writer(&mut outputwriter, &feature)?;
-        } else {
-            println!("feature is invalid");
+    for feature in features {
+        if let Err(e) = serde_json::to_writer(&mut outputwriter, &feature) {
+            println!("error: {}", e);
         }
     }
 
