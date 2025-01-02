@@ -190,12 +190,18 @@ fn decode_geometry(g: Geometry) -> Result<CjGeometry> {
         g.surfaces().map(|v| v.iter().collect()),
         g.strings().map(|v| v.iter().collect()),
         g.boundaries().map(|v| v.iter().collect()),
-        g.semantics().map(|v| v.iter().collect()),
-        g.semantics_objects().map(|v| v.iter().collect()),
     );
 
     let boundaries = decoder.decode();
-    let semantics = decode_semantics(&g, &decoder)?;
+    let semantics: Option<CjSemantics> = if let (Some(semantics_objects), Some(semantics)) =
+        (g.semantics_objects(), g.semantics())
+    {
+        let semantics_objects = semantics_objects.iter().collect::<Vec<_>>();
+        let semantics = semantics.iter().collect::<Vec<_>>();
+        Some(decoder.decode_semantics(g.type_(), semantics_objects, semantics))
+    } else {
+        None
+    };
 
     Ok(CjGeometry {
         thetype: g.type_().to_cj(),
@@ -207,22 +213,4 @@ fn decode_geometry(g: Geometry) -> Result<CjGeometry> {
         template: None,
         transformation_matrix: None,
     })
-}
-
-fn decode_semantics(
-    g: &Geometry,
-    decoder: &FcbGeometryEncoderDecoder,
-) -> Result<Option<CjSemantics>> {
-    if let (Some(semantics_objects), Some(semantics)) = (g.semantics_objects(), g.semantics()) {
-        let semantics_objects = semantics_objects.iter().collect::<Vec<_>>();
-        let semantics_values = semantics.iter().collect::<Vec<_>>();
-
-        Ok(Some(decoder.decode_semantics(
-            g.type_(),
-            &semantics_objects,
-            &semantics_values,
-        )))
-    } else {
-        Ok(None)
-    }
 }

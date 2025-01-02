@@ -201,8 +201,8 @@ fn to_fcb_geometry<'a>(
     let type_ = to_fcb_geometry_type(&geometry.thetype);
     let lod = geometry.lod.as_ref().map(|lod| fbb.create_string(lod));
 
-    let encoder_decoder =
-        FcbGeometryEncoderDecoder::new().encode(&geometry.boundaries, geometry.semantics.as_ref());
+    let mut encoder_decoder = FcbGeometryEncoderDecoder::new();
+    encoder_decoder.encode(&geometry.boundaries, geometry.semantics.as_ref());
     let (solids, shells, surfaces, strings, boundary_indices) = encoder_decoder.boundaries();
     let (semantics_surfaces, semantics_values) = encoder_decoder.semantics();
 
@@ -233,17 +233,7 @@ fn to_fcb_geometry<'a>(
         Some(fbb.create_vector(&semantics_objects))
     };
 
-    let semantics_values = Some(
-        fbb.create_vector(
-            &semantics_values
-                .iter()
-                .map(|v| match v {
-                    Some(v) => *v,
-                    None => u32::MAX,
-                })
-                .collect::<Vec<_>>(),
-        ),
-    );
+    let semantics_values = Some(fbb.create_vector(semantics_values));
 
     Geometry::create(
         fbb,
