@@ -13,7 +13,17 @@ tempfile = "3.14.0"
 serde_json = "1.0.133"
 anyhow = "1.0.95"
 fallible-streaming-iterator = "0.1.9"
+clap = "4.5.23"
+
+[lib]
+name = "flatcitybuf"
+path = "src/lib.rs"
+
 
 [[bin]]
 name = "read"
 path = "src/bin/read.rs"
+
+[[bin]]
+name = "flatcitybuf_cli"
+path = "src/main.rs"

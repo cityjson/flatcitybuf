@@ -1,4 +1,4 @@
-use flatcitybuf::{read_cityjson_from_bufreader, CJType, CJTypeKind, CityJSONSeq, FcbWriter};
+use flatcitybuf::{read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbWriter};
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -13,7 +13,7 @@ fn write_file() -> Result<(), Box<dyn Error>> {
     let output_file = manifest_dir.join("temp").join("test_output.fcb");
     let input_file = File::open(input_file)?;
     let inputreader = BufReader::new(input_file);
-    let cj_seq = read_cityjson_from_bufreader(inputreader, CJTypeKind::Seq)?;
+    let cj_seq = read_cityjson_from_reader(inputreader, CJTypeKind::Seq)?;
     if let CJType::Seq(cj_seq) = cj_seq {
         let CityJSONSeq { cj, features } = cj_seq;
 

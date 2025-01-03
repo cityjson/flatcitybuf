@@ -1,29 +1,10 @@
-use anyhow::anyhow;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use cjseq::{CityJSON, CityJSONFeature};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-
-pub trait CityJSONSource {
-    fn read_lines(&mut self) -> std::io::Lines<impl BufRead>;
-}
-
-impl CityJSONSource for BufReader<File> {
-    fn read_lines(&mut self) -> std::io::Lines<impl BufRead> {
-        self.lines()
-    }
-}
-
-impl CityJSONSource for &str {
-    fn read_lines(&mut self) -> std::io::Lines<impl BufRead> {
-        let file = File::open(self).expect("Failed to open file");
-        BufReader::new(file).lines()
-    }
-}
+use std::io::{BufRead, BufReader, Read};
 
 pub struct CityJSONSeq {
     pub cj: CityJSON,
-    pub features: Vec<CityJSONFeature>, // TODO: use iterator for performance reason
+    pub features: Vec<CityJSONFeature>,
 }
 
 pub enum CJType {
@@ -37,15 +18,39 @@ pub enum CJTypeKind {
     Seq,
 }
 
-fn parse_cityjson<T: CityJSONSource>(mut source: T, cj_type: CJTypeKind) -> Result<CJType> {
-    let mut lines = source.read_lines().enumerate();
+pub trait CityJSONReader {
+    fn read_lines(&mut self) -> Box<dyn Iterator<Item = Result<String>> + '_>;
+}
 
-    let (_, first_line) = lines.next().ok_or_else(|| anyhow!("Empty file"))?;
-    let mut cjj: CityJSON = serde_json::from_str(&first_line.unwrap())?;
+impl<R: Read> CityJSONReader for BufReader<R> {
+    fn read_lines(&mut self) -> Box<dyn Iterator<Item = Result<String>> + '_> {
+        Box::new(self.lines().map(|line| line.map_err(anyhow::Error::from)))
+    }
+}
+
+impl CityJSONReader for &str {
+    fn read_lines(&mut self) -> Box<dyn Iterator<Item = Result<String>> + '_> {
+        match std::fs::File::open(self) {
+            Ok(file) => Box::new(
+                BufReader::new(file)
+                    .lines()
+                    .map(|line| line.map_err(anyhow::Error::from)),
+            ),
+            Err(e) => Box::new(std::iter::once(Err(anyhow::Error::from(e)))),
+        }
+    }
+}
+
+fn parse_cityjson<T: CityJSONReader>(mut source: T, cj_type: CJTypeKind) -> Result<CJType> {
+    let mut lines = source.read_lines();
+
+    let first_line = lines.next().ok_or_else(|| anyhow!("Empty input"))??;
+
+    let mut cjj: CityJSON = serde_json::from_str(&first_line)?;
 
     match cj_type {
         CJTypeKind::Normal => {
-            for (_, line) in lines {
+            for line in lines {
                 let mut feature: CityJSONFeature = serde_json::from_str(&line?)?;
                 cjj.add_cjfeature(&mut feature);
             }
@@ -55,7 +60,7 @@ fn parse_cityjson<T: CityJSONSource>(mut source: T, cj_type: CJTypeKind) -> Resu
 
         CJTypeKind::Seq => {
             let features: Result<Vec<_>> = lines
-                .map(|(_, line)| -> Result<_> {
+                .map(|line| -> Result<_> {
                     let line = line?;
                     Ok(serde_json::from_str(&line)?)
                 })
@@ -69,13 +74,41 @@ fn parse_cityjson<T: CityJSONSource>(mut source: T, cj_type: CJTypeKind) -> Resu
     }
 }
 
+/// Read CityJSON from a file path
 pub fn read_cityjson(file: &str, cj_type: CJTypeKind) -> Result<CJType> {
     parse_cityjson(file, cj_type)
 }
 
-pub fn read_cityjson_from_bufreader(
-    reader: BufReader<File>,
+/// Read CityJSON from any reader (file or stdin)
+pub fn read_cityjson_from_reader<R: Read>(
+    reader: BufReader<R>,
     cj_type: CJTypeKind,
 ) -> Result<CJType> {
     parse_cityjson(reader, cj_type)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_read_from_memory() -> Result<()> {
+        let data = r#"{"type":"CityJSON","version":"1.1"}
+{"type":"CityJSONFeature","id":"feature1"}
+{"type":"CityJSONFeature","id":"feature2"}"#;
+
+        let reader = BufReader::new(Cursor::new(data));
+        let result = read_cityjson_from_reader(reader, CJTypeKind::Seq)?;
+
+        if let CJType::Seq(seq) = result {
+            assert_eq!(seq.features.len(), 2);
+            assert_eq!(seq.features[0].id, "feature1");
+            assert_eq!(seq.features[1].id, "feature2");
+        } else {
+            panic!("Expected Seq type");
+        }
+
+        Ok(())
+    }
 }

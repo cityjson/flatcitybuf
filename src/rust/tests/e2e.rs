@@ -1,6 +1,6 @@
 use anyhow::Result;
 use flatcitybuf::{
-    fcb_deserializer, read_cityjson_from_bufreader, CJType, CJTypeKind, FcbReader, FcbWriter,
+    fcb_deserializer, read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
 use std::{
     fs::File,
@@ -21,7 +21,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
     // Read original CityJSONSeq
     let input_file = File::open(input_file)?;
     let input_reader = BufReader::new(input_file);
-    let original_cj_seq = match read_cityjson_from_bufreader(input_reader, CJTypeKind::Seq)? {
+    let original_cj_seq = match read_cityjson_from_reader(input_reader, CJTypeKind::Seq)? {
         CJType::Seq(seq) => seq,
         _ => panic!("Expected CityJSONSeq"),
     };

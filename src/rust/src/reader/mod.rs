@@ -1,6 +1,4 @@
 mod city_buffer;
-mod feature_reader;
-mod header_reader;
 
 use city_buffer::FcbBuffer;
 
@@ -285,8 +283,8 @@ impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
 }
 
 impl<R: Read> FeatureIter<R, NotSeekable> {
-    pub fn cur_feature(&self) -> &FcbBuffer {
-        &self.buffer
+    pub fn cur_feature(&self) -> CityFeature {
+        self.buffer.feature()
     }
 
     pub fn get_features(&mut self) -> Result<Vec<CityFeature>> {
