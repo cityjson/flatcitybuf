@@ -5,6 +5,14 @@ use cjseq::{
 
 use crate::feature_generated::{GeometryType, SemanticObject, SemanticSurfaceType};
 
+/// For semantics decoding, we only care about solids and shells.
+/// We stop recursing at d <= 2 which are surfaces, rings and points (meaning we just return semantic_indices).
+struct PartLists<'a> {
+    solids: &'a [u32],
+    shells: &'a [u32],
+    starts: [usize; 5], // parallel "start" indices
+}
+
 /// `FcbGeometryEncoderDecoder` is responsible for encoding and decoding
 /// CityJSON geometries into flattened one-dimensional arrays suitable
 /// for serialization with FlatBuffers.
@@ -239,12 +247,27 @@ impl FcbGeometryEncoderDecoder {
         }
     }
 
+    /// Encodes semantic surfaces and values from a CityJSON Semantics object.
+    ///
+    /// # Arguments
+    ///
+    /// * `semantics` - Reference to the CityJSON Semantics object containing surfaces and values
     pub fn encode_semantics(&mut self, semantics: &Semantics) {
         self.encode_semantics_surface(semantics.surfaces.to_vec());
         let mut values = Vec::new();
         self.encode_semantics_values(&semantics.values, &mut values);
     }
 
+    /// Returns the encoded boundary arrays as a tuple.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// * solids - Number of shells per solid
+    /// * shells - Number of surfaces per shell  
+    /// * surfaces - Number of rings per surface
+    /// * strings - Number of indices per ring
+    /// * indices - Flattened list of vertex indices
     pub fn boundaries(&self) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
         (
             self.solids.clone(),
@@ -254,6 +277,14 @@ impl FcbGeometryEncoderDecoder {
             self.indices.clone(),
         )
     }
+
+    /// Returns the encoded semantic surfaces and values.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// * surfaces - Slice of semantic surface definitions
+    /// * values - Slice of semantic value indices
     pub fn semantics(&self) -> (&[SemanticsSurface], &[u32]) {
         match (&self.semantics_surfaces, &self.semantics_values) {
             (Some(surfaces), Some(values)) => (surfaces, values.as_slice()),
@@ -261,6 +292,14 @@ impl FcbGeometryEncoderDecoder {
         }
     }
 
+    /// Decodes the flattened arrays back into a nested CityJSON boundaries structure.
+    ///
+    /// Uses cursor indices to track position in each array while rebuilding the
+    /// hierarchical structure of solids, shells, surfaces and rings.
+    ///
+    /// # Returns
+    ///
+    /// The reconstructed CityJSON boundaries structure
     pub fn decode(&self) -> CjBoundaries {
         let mut shell_cursor = 0;
         let mut surface_cursor = 0;
@@ -389,6 +428,15 @@ impl FcbGeometryEncoderDecoder {
         }
     }
 
+    /// Converts FlatBuffers semantic surface objects into CityJSON semantic surfaces.
+    ///
+    /// # Arguments
+    ///
+    /// * `semantics_objects` - Slice of FlatBuffers semantic surface objects
+    ///
+    /// # Returns
+    ///
+    /// Vector of CityJSON semantic surface definitions
     pub fn decode_semantics_surfaces(
         semantics_objects: &[SemanticObject],
     ) -> Vec<SemanticsSurface> {
@@ -429,118 +477,115 @@ impl FcbGeometryEncoderDecoder {
         });
         surfaces.collect()
     }
-    /// Decode semantics in a way that each "shell" corresponds to exactly 1 Indices array.
-    /// This matches your test, which lumps multiple geometry surfaces into a single array per shell.
+
+    /// Helper function for recursively decoding semantic values.
     ///
-    /// - depth=2 => parse all solids (`self.solids`)
-    ///    * each solid has `shell_count` shells => parse shell semantics at depth=1
-    /// - depth=1 => parse shells (`self.shells`)
-    ///    * each shell is 1 Indices(...) array (depth=0)
-    /// - depth<=0 => parse a single Indices(...) from leftover
+    /// # Arguments
     ///
-    fn decode_semantics_values(
-        &self,
-        depth: i8,
-        solids_cursor: &mut usize,
-        shells_cursor: &mut usize,
-        semantics_values: &[u32],
-        semantics_pos: &mut usize,
+    /// * `d` - Current depth in geometry hierarchy (4=solids, 3=shells, <=2=surfaces)
+    /// * `start` - Starting index in current array level
+    /// * `n` - Number of elements to process at current level
+    /// * `part_lists` - References to solids/shells arrays and cursor positions
+    /// * `semantic_indices` - Flattened array of semantic value indices
+    ///
+    /// # Returns
+    ///
+    /// Nested structure of semantic values matching geometry hierarchy
+    fn decode_semantics_(
+        d: i32,
+        start: Option<usize>,
+        n: Option<usize>,
+        part_lists: &mut PartLists,
+        semantic_indices: &[u32],
     ) -> SemanticsValues {
-        // -----------------------------
-        // Base case: depth <= 0 => parse 1 Indices array from leftover
-        // -----------------------------
-        if depth <= 0 {
-            // In your test JSON, the entire "shell" is one array,
-            // so read *all* leftover for that shell:
-            let leftover = &semantics_values[*semantics_pos..];
-            *semantics_pos += leftover.len();
+        // 1) If top-level call (start==None, n==None)
+        if start.is_none() || n.is_none() {
+            if d > 2 {
+                // example: d=4 => part_lists[4] = self.solids, d=3 => shells
+                let arr = match d {
+                    4 => &part_lists.solids,
+                    3 => &part_lists.shells,
+                    _ => unreachable!(),
+                };
 
-            let leaf: Vec<Option<u32>> = leftover
-                .iter()
-                .map(|&val| if val == u32::MAX { None } else { Some(val) })
-                .collect();
-
-            return SemanticsValues::Indices(leaf);
-        }
-
-        match depth {
-            // -----------------------------
-            // depth=2 => CompositeSolid/MultiSolid
-            // parse each solid in `self.solids`
-            // -----------------------------
-            2 => {
-                let mut result_solids = Vec::new();
-                let total_solids = self.solids.len();
-
-                for _ in 0..total_solids {
-                    let shell_count = self.solids[*solids_cursor];
-                    *solids_cursor += 1;
-
-                    // parse shell_count shells at depth=1
-                    let mut shell_vec = Vec::new();
-                    for _ in 0..shell_count {
-                        let shell_semantics = self.decode_semantics_values(
-                            depth - 1, // => 1
-                            solids_cursor,
-                            shells_cursor,
-                            semantics_values,
-                            semantics_pos,
-                        );
-                        shell_vec.push(shell_semantics);
-                    }
-
-                    result_solids.push(SemanticsValues::Nested(shell_vec));
-                }
-
-                SemanticsValues::Nested(result_solids)
-            }
-
-            // -----------------------------
-            // depth=1 => Solid / CompositeSurface
-            // parse each shell in `self.shells`,
-            // but unify all surfaces in that shell into one Indices array
-            // -----------------------------
-            1 => {
-                let mut result_shells = Vec::new();
-
-                // The geometry says `shells = [4,3]`,
-                // but semantics lumps those 4 surfaces into 1 array,
-                // so we read exactly 1 Indices for each shell:
-                let shells_left = self.shells.len() - *shells_cursor;
-                for _ in 0..shells_left {
-                    let _surface_count = self.shells[*shells_cursor];
-                    *shells_cursor += 1;
-
-                    // parse 1 Indices array (depth=0)
-                    let one_shell = self.decode_semantics_values(
-                        0,
-                        solids_cursor,
-                        shells_cursor,
-                        semantics_values,
-                        semantics_pos,
+                let mut results = Vec::new();
+                // loop over each 'gn' in part_lists[d]
+                for &gn in *arr {
+                    // decode_semantics_(d-1, self.starts[d], gn)
+                    let st = part_lists.starts[d as usize];
+                    // decode subarray
+                    let subvals = Self::decode_semantics_(
+                        d - 1,
+                        Some(st),
+                        Some(gn as usize),
+                        part_lists,
+                        semantic_indices,
                     );
-                    result_shells.push(one_shell);
+                    part_lists.starts[d as usize] += gn as usize;
+                    results.push(subvals);
                 }
 
-                SemanticsValues::Nested(result_shells)
+                SemanticsValues::Nested(results)
+            } else {
+                // d <= 2 => "return self.semantic_indices"
+                // as a single Indices array
+                let mut leaf = Vec::new();
+                for &val in semantic_indices {
+                    leaf.push(if val == u32::MAX { None } else { Some(val) });
+                }
+                SemanticsValues::Indices(leaf)
             }
+        } else {
+            // 2) If subsequent recursive call (start,n are Some)
+            let s = start.unwrap();
+            let length = n.unwrap();
 
-            // Should not occur for MultiSurface (depth=0),
-            // Solid (depth=1), CompositeSolid (depth=2).
-            _ => unreachable!("Unexpected depth in decode_semantics_values"),
+            if d <= 2 {
+                let slice = &semantic_indices[s..s + length];
+                let mut leaf = Vec::with_capacity(slice.len());
+                for &val in slice {
+                    leaf.push(if val == u32::MAX { None } else { Some(val) });
+                }
+                SemanticsValues::Indices(leaf)
+            } else {
+                // d>2 => we iterate subarray part_lists[d][start..start+n]
+                let arr = match d {
+                    4 => &part_lists.solids,
+                    3 => &part_lists.shells,
+                    _ => unreachable!(),
+                };
+
+                let mut results = Vec::new();
+                // for gn in part_lists[d][start..start+n]
+                for &gn in &arr[s..(s + length)] {
+                    let st = part_lists.starts[d as usize];
+                    let subvals = Self::decode_semantics_(
+                        d - 1,
+                        Some(st),
+                        Some(gn as usize),
+                        part_lists,
+                        semantic_indices,
+                    );
+                    part_lists.starts[d as usize] += gn as usize;
+                    results.push(subvals);
+                }
+
+                SemanticsValues::Nested(results)
+            }
         }
     }
 
-    fn geometry_depth(geometry_type: GeometryType) -> i8 {
-        match geometry_type {
-            GeometryType::MultiPoint => 0,
-            GeometryType::MultiLineString => 1,
-            GeometryType::MultiSurface | GeometryType::CompositeSurface => 2,
-            GeometryType::Solid => 3,
-            GeometryType::MultiSolid | GeometryType::CompositeSolid => 4,
-            _ => 3,
-        }
-    }
+    /// Decodes FlatBuffers semantic data into CityJSON semantics structure.
+    ///
+    /// # Arguments
+    ///
+    /// * `geometry_type` - Type of geometry (determines nesting depth)
+    /// * `semantics_objects` - Vector of semantic surface definitions
+    /// * `semantics_values` - Vector of semantic value indices
+    ///
+    /// # Returns
+    ///
+    /// Complete CityJSON semantics structure with surfaces and values
     pub fn decode_semantics(
         &self,
         geometry_type: GeometryType,
@@ -549,19 +594,42 @@ impl FcbGeometryEncoderDecoder {
     ) -> Semantics {
         let surfaces = Self::decode_semantics_surfaces(&semantics_objects);
 
-        let depth = Self::geometry_depth(geometry_type) - 2;
-        let mut solids_cursor = 0;
-        let mut shells_cursor = 0;
-        let mut semantics_pos = 0;
-        let values = self.decode_semantics_values(
-            depth,
-            &mut solids_cursor,
-            &mut shells_cursor,
-            semantics_values.as_slice(),
-            &mut semantics_pos,
-        );
+        let mut part_lists = PartLists {
+            solids: &self.solids,
+            shells: &self.shells,
+            starts: [0; 5],
+        };
 
-        Semantics { values, surfaces }
+        let d = match geometry_type {
+            GeometryType::MultiSolid | GeometryType::CompositeSolid => 4,
+            GeometryType::Solid => 3,
+            GeometryType::MultiSurface
+            | GeometryType::CompositeSurface
+            | GeometryType::MultiLineString
+            | GeometryType::MultiPoint => 2,
+            // fallback
+            _ => 2,
+        };
+
+        if d <= 2 {
+            // Flatten entire semantics_values into Indices
+            let mut leaf = Vec::new();
+            for &val in &semantics_values {
+                leaf.push(if val == u32::MAX { None } else { Some(val) });
+            }
+            return Semantics {
+                surfaces,
+                values: SemanticsValues::Indices(leaf),
+            };
+        }
+
+        // otherwise, top-level call to decode_semantics_(d, None, None)
+        let result = Self::decode_semantics_(d, None, None, &mut part_lists, &semantics_values);
+
+        Semantics {
+            surfaces,
+            values: result,
+        }
     }
 }
 
@@ -613,7 +681,6 @@ mod tests {
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
         let mut encoder = FcbGeometryEncoderDecoder::new();
         encoder.encode(&boundaries, None);
-        println!("{:?}", encoder);
         assert_eq!(vec![2, 44, 0, 7], encoder.indices);
         assert_eq!(vec![4], encoder.strings);
         assert!(encoder.surfaces.is_empty());
@@ -625,7 +692,6 @@ mod tests {
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
         let mut encoder = FcbGeometryEncoderDecoder::new();
         encoder.encode(&boundaries, None);
-        println!("{:?}", encoder);
 
         assert_eq!(vec![2, 3, 5, 77, 55, 212], encoder.indices);
         assert_eq!(vec![3, 3], encoder.strings);
@@ -638,7 +704,6 @@ mod tests {
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
         let mut encoder = FcbGeometryEncoderDecoder::new();
         encoder.encode(&boundaries, None);
-        println!("{:?}", encoder);
 
         assert_eq!(vec![0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4], encoder.indices);
         assert_eq!(vec![4, 4, 4], encoder.strings);
@@ -664,7 +729,6 @@ mod tests {
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
         let mut encoder = FcbGeometryEncoderDecoder::new();
         encoder.encode(&boundaries, None);
-        println!("{:?}", encoder);
 
         assert_eq!(
             vec![
@@ -704,7 +768,6 @@ mod tests {
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
         let mut encoder = FcbGeometryEncoderDecoder::new();
         encoder.encode(&boundaries, None);
-        println!("{:?}", encoder);
         assert_eq!(
             vec![
                 0, 3, 2, 1, 22, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 240, 243, 124, 244, 246, 724,
@@ -843,12 +906,19 @@ mod tests {
             "lod": "2.2",
             "boundaries": [
               [
-                [ [[0, 3, 2, 1, 22]], [[4, 5, 6, 7]], [[0, 1, 5, 4]], [[1, 2, 6, 5]] ]
-              ],
-              [
-                [ [[666, 667, 668]], [[74, 75, 76]], [[880, 881, 885]] ]
-              ]
-            ],
+                [
+                    [[0, 3, 2, 1, 22]],
+                    [[4, 5, 6, 7]],
+                    [[0, 1, 5, 4]],
+                    [[1, 2, 6, 5]]
+                ],
+                [
+                    [[240, 243, 124]],
+                    [[244, 246, 724]],
+                    [[34, 414, 45]],
+                    [[111, 246, 5]]
+                ]
+            ]],
             "semantics": {
               "surfaces" : [
                 {
@@ -1309,10 +1379,6 @@ mod tests {
             assert_eq!(decoded.surfaces[1].thetype, "WallSurface");
             assert_eq!(decoded.surfaces[1].children, None);
 
-            println!("decoder: {:?}", decoder);
-            println!("decoded.values: {:?}", decoded.values);
-
-            println!("original semantics values: {:?}", semantics.unwrap().values);
             match &decoded.values {
                 SemanticsValues::Nested(solids) => {
                     assert_eq!(solids.len(), 2);
