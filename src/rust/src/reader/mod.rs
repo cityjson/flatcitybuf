@@ -272,7 +272,6 @@ impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
         //         self.cur_pos += seek_bytes;
         //     }
         // }
-        println!("advance");
         self.read_feature()
     }
 
@@ -418,7 +417,6 @@ impl<R: Read, S> FeatureIter<R, S> {
 
     /// Read feature size and return true if end of dataset reached
     fn read_feature_size(&mut self) -> bool {
-        println!("read feature size");
         self.buffer.features_buf.resize(4, 0);
         self.cur_pos += 4;
         self.reader
@@ -427,14 +425,11 @@ impl<R: Read, S> FeatureIter<R, S> {
     }
 
     fn read_feature(&mut self) -> Result<()> {
-        println!("read_feature");
         match self.state {
             State::ReadFirstFeatureSize => {
-                println!("read first feature size");
                 self.state = State::Reading;
             }
             State::Reading => {
-                println!("read feature");
                 if self.read_feature_size() {
                     self.state = State::Finished;
                     return Ok(());
@@ -460,6 +455,7 @@ impl<R: Read, S> FeatureIter<R, S> {
         }
         self.feat_no += 1;
         self.cur_pos += feature_size as u64;
+
         Ok(())
     }
 

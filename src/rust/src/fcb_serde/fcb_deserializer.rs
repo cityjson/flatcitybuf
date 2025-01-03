@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    feature_generated::{CityFeature, CityObjectType, Geometry},
+    feature_generated::{CityFeature, CityObjectType, Geometry, Vertex},
     geometry_encoderdecoder::FcbGeometryEncoderDecoder,
     header_generated::*,
 };
@@ -26,7 +26,7 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON> {
     let reference_system = header
         .reference_system()
         .context("missing reference_system")?;
-    cj.version = reference_system.version().to_string();
+    cj.version = header.version().to_string();
     cj.thetype = String::from("CityJSON");
 
     let geographical_extent = header
@@ -45,22 +45,22 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON> {
 
     cj.metadata = Some(CjMetadata {
         geographical_extent: Some(geographical_extent),
-        identifier: Some(header.identifier().unwrap_or_default().to_string()),
+        identifier: header.identifier().map(|i| i.to_string()),
         point_of_contact: Some(to_cj_point_of_contact(header)?),
-        reference_date: Some(header.reference_date().unwrap_or_default().to_string()),
+        reference_date: header.reference_date().map(|r| r.to_string()),
         reference_system: Some(CjReferenceSystem::new(
             None,
             reference_system.authority().unwrap_or_default().to_string(),
             reference_system.version().to_string(),
             reference_system.code().to_string(),
         )),
-        title: Some(header.title().unwrap_or_default().to_string()),
+        title: header.title().map(|t| t.to_string()),
     });
 
     Ok(cj)
 }
 
-fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact> {
+pub(crate) fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact> {
     Ok(CjPointOfContact {
         contact_name: header
             .poc_contact_name()
@@ -74,33 +74,29 @@ fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact> {
             .context("missing email_address")?
             .to_string(),
         website: header.poc_website().map(|w| w.to_string()),
-        address: Some(to_cj_address(header)),
+        address: to_cj_address(header),
     })
 }
 
-fn to_cj_address(header: &Header) -> CjAddress {
-    CjAddress {
-        thoroughfare_number: header
-            .poc_address_thoroughfare_number()
-            .and_then(|n| n.parse::<i64>().ok())
-            .unwrap_or_default(),
-        thoroughfare_name: header
-            .poc_address_thoroughfare_name()
-            .unwrap_or_default()
-            .to_string(),
-        locality: header
-            .poc_address_locality()
-            .unwrap_or_default()
-            .to_string(),
-        postal_code: header
-            .poc_address_postcode()
-            .unwrap_or_default()
-            .to_string(),
-        country: header.poc_address_country().unwrap_or_default().to_string(),
-    }
+pub(crate) fn to_cj_address(header: &Header) -> Option<CjAddress> {
+    let thoroughfare_number = header
+        .poc_address_thoroughfare_number()
+        .and_then(|n| n.parse::<i64>().ok())?;
+    let thoroughfare_name = header.poc_address_thoroughfare_name()?;
+    let locality = header.poc_address_locality()?;
+    let postal_code = header.poc_address_postcode()?;
+    let country = header.poc_address_country()?;
+
+    Some(CjAddress {
+        thoroughfare_number,
+        thoroughfare_name: thoroughfare_name.to_string(),
+        locality: locality.to_string(),
+        postal_code: postal_code.to_string(),
+        country: country.to_string(),
+    })
 }
 
-fn to_cj_co_type(co_type: CityObjectType) -> String {
+pub(crate) fn to_cj_co_type(co_type: CityObjectType) -> String {
     match co_type {
         CityObjectType::Bridge => "Bridge".to_string(),
         CityObjectType::BridgePart => "BridgePart".to_string(),
@@ -180,10 +176,14 @@ pub fn to_cj_feature(feature: CityFeature) -> Result<CityJSONFeature> {
         cj.city_objects = city_objects;
     }
 
+    cj.vertices = feature
+        .vertices()
+        .map_or(Vec::new(), |v| to_cj_vertices(v.iter().collect()));
+
     Ok(cj)
 }
 
-fn decode_geometry(g: Geometry) -> Result<CjGeometry> {
+pub(crate) fn decode_geometry(g: Geometry) -> Result<CjGeometry> {
     let decoder = FcbGeometryEncoderDecoder::new_as_decoder(
         g.solids().map(|v| v.iter().collect()),
         g.shells().map(|v| v.iter().collect()),
@@ -213,4 +213,11 @@ fn decode_geometry(g: Geometry) -> Result<CjGeometry> {
         template: None,
         transformation_matrix: None,
     })
+}
+
+pub(crate) fn to_cj_vertices(vertices: Vec<&Vertex>) -> Vec<Vec<i64>> {
+    vertices
+        .iter()
+        .map(|v| vec![v.x() as i64, v.y() as i64, v.z() as i64])
+        .collect()
 }
