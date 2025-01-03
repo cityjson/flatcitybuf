@@ -264,7 +264,7 @@ impl FcbGeometryEncoderDecoder {
     ///
     /// A tuple containing:
     /// * solids - Number of shells per solid
-    /// * shells - Number of surfaces per shell  
+    /// * shells - Number of surfaces per shell
     /// * surfaces - Number of rings per surface
     /// * strings - Number of indices per ring
     /// * indices - Flattened list of vertex indices
@@ -471,8 +471,8 @@ impl FcbGeometryEncoderDecoder {
                 thetype: surface_type_str.to_string(),
                 parent: s.parent(),
                 children,
-                other: serde_json::Value::Null,
                 // TODO: Think how to handle `other`
+                other: serde_json::Value::default(),
             }
         });
         surfaces.collect()
