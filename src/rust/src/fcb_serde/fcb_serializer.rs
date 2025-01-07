@@ -7,6 +7,7 @@ use crate::geometry_encoderdecoder::FcbGeometryEncoderDecoder;
 use crate::header_generated::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
+use crate::header_writer::HeaderMetadata;
 
 use cjseq::{
     CityJSON, CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
@@ -21,6 +22,7 @@ use flatbuffers::FlatBufferBuilder;
 pub fn to_fcb_header<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     cj: &CityJSON,
+    header_metadata: HeaderMetadata,
 ) -> flatbuffers::WIPOffset<Header<'a>> {
     let metadata = cj
         .metadata
@@ -33,12 +35,11 @@ pub fn to_fcb_header<'a>(
         .geographical_extent
         .as_ref()
         .map(to_fcb_geographical_extent);
-    let features_count = 3; // TODO: get from buffer
     let header_args = HeaderArgs {
         version: Some(fbb.create_string(&cj.version)),
         transform: Some(&transform),
         columns: None,
-        features_count: features_count as u64,
+        features_count: header_metadata.features_count,
         geographical_extent: geographical_extent.as_ref(),
         reference_system,
         identifier: metadata.identifier.as_ref().map(|i| fbb.create_string(i)),

@@ -1,3 +1,4 @@
+use flatcitybuf::header_writer::{HeaderMetadata, HeaderWriterOptions};
 use flatcitybuf::{read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbWriter};
 use std::error::Error;
 use std::fs::File;
@@ -20,7 +21,14 @@ fn write_file() -> Result<(), Box<dyn Error>> {
         let output_file = File::create(output_file)?;
         let outputwriter = BufWriter::new(output_file);
 
-        let mut fcb = FcbWriter::new(cj, features.first().unwrap())?;
+        let header_metadata = HeaderMetadata {
+            features_count: features.len() as u64,
+        };
+        let header_options = Some(HeaderWriterOptions {
+            write_index: false,
+            header_metadata,
+        });
+        let mut fcb = FcbWriter::new(cj, header_options, features.first())?;
         fcb.write_feature()?;
         for feature in features.iter().skip(1) {
             fcb.add_feature(feature)?;

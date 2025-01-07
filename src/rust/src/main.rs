@@ -1,8 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use flatcitybuf::{
-    fcb_deserializer, read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbReader,
-    FcbWriter,
+    fcb_deserializer,
+    header_writer::{HeaderMetadata, HeaderWriterOptions},
+    read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbReader, FcbWriter,
 };
 use std::{
     fs::File,
@@ -73,7 +74,14 @@ fn serialize(input: &str, output: &str) -> Result<()> {
     };
 
     let CityJSONSeq { cj, features } = cj_seq;
-    let mut fcb = FcbWriter::new(cj, features.first().unwrap())?;
+    let header_metadata = HeaderMetadata {
+        features_count: features.len() as u64,
+    };
+    let header_options = Some(HeaderWriterOptions {
+        write_index: false,
+        header_metadata,
+    });
+    let mut fcb = FcbWriter::new(cj, header_options, features.first())?;
     fcb.write_feature()?;
 
     for feature in features.iter().skip(1) {
@@ -120,10 +128,12 @@ fn deserialize(input: &str, output: &str) -> Result<()> {
 
 fn show_info(input: PathBuf) -> Result<()> {
     let reader = BufReader::new(File::open(input)?);
+    let metadata = reader.get_ref().metadata()?.len() / 1024 / 1024; // show in megabytes
     let fcb_reader = FcbReader::open(reader)?.select_all()?;
 
     let header = fcb_reader.header();
     println!("FCB File Info:");
+    println!("    File size: {} MB", metadata);
     println!("  Version: {}", header.version());
     println!("  Features count: {}", header.features_count());
 

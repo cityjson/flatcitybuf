@@ -14,11 +14,19 @@ pub struct HeaderWriter<'a> {
 
 pub struct HeaderWriterOptions {
     pub write_index: bool,
+    pub header_metadata: HeaderMetadata,
+}
+
+pub struct HeaderMetadata {
+    pub features_count: u64,
 }
 
 impl Default for HeaderWriterOptions {
     fn default() -> Self {
-        HeaderWriterOptions { write_index: true }
+        HeaderWriterOptions {
+            write_index: true,
+            header_metadata: HeaderMetadata { features_count: 0 },
+        }
     }
 }
 
@@ -55,12 +63,12 @@ impl<'a> HeaderWriter<'a> {
             .geographical_extent
             .as_ref()
             .map(Self::geographical_extent);
-        let features_count = 3; // TODO: get from buffer
+        let features_count = self.header_options.header_metadata.features_count;
         let header_args = HeaderArgs {
             version: Some(self.fbb.create_string(&self.cj.version)),
             transform: Some(&transform),
             columns: None,
-            features_count: features_count as u64,
+            features_count,
             geographical_extent: geographical_extent.as_ref(),
             reference_system,
             identifier: metadata

@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::MAGIC_BYTES;
 use cjseq::{CityJSON, CityJSONFeature};
 use feature_writer::FeatureWriter;
-use header_writer::HeaderWriter;
+use header_writer::{HeaderWriter, HeaderWriterOptions};
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
 
@@ -13,7 +13,7 @@ pub mod header_writer;
 pub struct FcbWriter<'a> {
     tmpout: BufWriter<File>,
     header_writer: HeaderWriter<'a>,
-    feat_writer: FeatureWriter<'a>,
+    feat_writer: Option<FeatureWriter<'a>>,
     // feat_offsets: Vec<FeatureOffset>,
     // feat_nodes: Vec<NodeItem>,
 }
@@ -25,9 +25,13 @@ pub struct FcbWriter<'a> {
 // }
 
 impl<'a> FcbWriter<'a> {
-    pub fn new(cj: CityJSON, feature: &'a CityJSONFeature) -> Result<Self> {
-        let header_writer = HeaderWriter::new(cj, None);
-        let feat_writer = FeatureWriter::new(feature);
+    pub fn new(
+        cj: CityJSON,
+        header_option: Option<HeaderWriterOptions>,
+        first_feature: Option<&'a CityJSONFeature>,
+    ) -> Result<Self> {
+        let header_writer = HeaderWriter::new(cj, header_option);
+        let feat_writer = first_feature.map(FeatureWriter::new);
         Ok(Self {
             header_writer,
             feat_writer,
@@ -37,14 +41,18 @@ impl<'a> FcbWriter<'a> {
 
     //TODO: make this private and think how to handle the first feature
     pub fn write_feature(&mut self) -> Result<()> {
-        let feat_buf = self.feat_writer.finish_to_feature();
-        self.tmpout.write_all(&feat_buf)?;
+        if let Some(feat_writer) = &mut self.feat_writer {
+            let feat_buf = feat_writer.finish_to_feature();
+            self.tmpout.write_all(&feat_buf)?;
+        }
         Ok(())
     }
 
     pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<()> {
-        self.feat_writer.add_feature(feature);
-        self.write_feature()?;
+        if let Some(feat_writer) = &mut self.feat_writer {
+            feat_writer.add_feature(feature);
+            self.write_feature()?;
+        }
         // TODO: add feature number to header
         Ok(())
     }

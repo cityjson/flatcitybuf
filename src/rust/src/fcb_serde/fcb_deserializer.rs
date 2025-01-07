@@ -157,7 +157,7 @@ pub fn to_cj_feature(feature: CityFeature) -> Result<CityJSONFeature> {
                     gs.iter()
                         .map(|g| decode_geometry(g).unwrap())
                         .collect::<Vec<_>>()
-                }); //TODO: handle error
+                });
 
                 let cjco = CjCityObject::new(
                     to_cj_co_type(co.type_()).to_string(),

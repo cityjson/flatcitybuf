@@ -1,6 +1,8 @@
 use anyhow::Result;
 use flatcitybuf::{
-    fcb_deserializer, read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
+    fcb_deserializer,
+    header_writer::{HeaderMetadata, HeaderWriterOptions},
+    read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
 use std::{
     fs::File,
@@ -31,9 +33,16 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         let output_file = File::create(&temp_fcb)?;
         let output_writer = BufWriter::new(output_file);
 
+        let header_metadata = HeaderMetadata {
+            features_count: original_cj_seq.features.len() as u64,
+        };
         let mut fcb = FcbWriter::new(
             original_cj_seq.cj.clone(),
-            original_cj_seq.features.first().unwrap(),
+            Some(HeaderWriterOptions {
+                write_index: false,
+                header_metadata,
+            }),
+            original_cj_seq.features.first(),
         )?;
         fcb.write_feature()?;
         for feature in original_cj_seq.features.iter().skip(1) {

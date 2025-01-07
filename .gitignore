@@ -57,3 +57,5 @@ __pycache__/
 *.pytest_cache/
 
 temp/
+
+src/rust/benchmark_data/
