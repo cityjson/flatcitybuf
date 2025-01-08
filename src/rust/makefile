@@ -18,3 +18,7 @@ encode:
 .PHONY: decode
 decode:
 	cargo run --bin flatcitybuf_cli deserialize -i temp/small.fcb -o temp/small.city.jsonl
+
+.PHONY: bench
+bench:
+	cargo bench --bench read -- --html-reports

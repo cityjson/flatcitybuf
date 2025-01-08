@@ -12,6 +12,7 @@ mod writer;
 
 pub use cj_utils::*;
 pub use fcb_serde::*;
+pub use feature_generated::*;
 pub use header_generated::*;
 pub use reader::*;
 pub use writer::*;

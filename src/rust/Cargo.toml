@@ -27,3 +27,11 @@ path = "src/bin/read.rs"
 [[bin]]
 name = "flatcitybuf_cli"
 path = "src/main.rs"
+
+[dev-dependencies]
+criterion = { version = "0.5.1", features = ["html_reports"] }
+pretty_assertions = "1.4.1"
+
+[[bench]]
+name = "read"
+harness = false
