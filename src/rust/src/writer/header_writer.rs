@@ -5,19 +5,27 @@ use crate::header_generated::{
 use cjseq::{CityJSON, Metadata as CJMetadata, Transform as CjTransform};
 use flatbuffers::FlatBufferBuilder;
 
-// impl<'a> HeaderWriter<'a> {}
+/// Writer for converting CityJSON header information to FlatBuffers format
 pub struct HeaderWriter<'a> {
+    /// FlatBuffers builder instance
     fbb: FlatBufferBuilder<'a>,
+    /// Source CityJSON data
     cj: CityJSON,
+    /// Configuration options for header writing
     header_options: HeaderWriterOptions,
 }
 
+/// Configuration options for header writing process
 pub struct HeaderWriterOptions {
+    /// Whether to write index information
     pub write_index: bool,
+    /// Additional metadata for the header
     pub header_metadata: HeaderMetadata,
 }
 
+/// Additional metadata to be included in the header
 pub struct HeaderMetadata {
+    /// Total count of features in the CityJSON data
     pub features_count: u64,
 }
 
@@ -31,9 +39,22 @@ impl Default for HeaderWriterOptions {
 }
 
 impl<'a> HeaderWriter<'a> {
+    /// Creates a new HeaderWriter with optional configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `cj` - The CityJSON data to write
+    /// * `header_options` - Optional configuration for the header writing process
     pub fn new(cj: CityJSON, header_options: Option<HeaderWriterOptions>) -> HeaderWriter<'a> {
         Self::new_with_options(header_options.unwrap_or_default(), cj)
     }
+
+    /// Creates a new HeaderWriter with specific configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Configuration for the header writing process
+    /// * `cj` - The CityJSON data to write
     pub fn new_with_options(options: HeaderWriterOptions, cj: CityJSON) -> HeaderWriter<'a> {
         let fbb = FlatBufferBuilder::new();
 
@@ -44,12 +65,22 @@ impl<'a> HeaderWriter<'a> {
         }
     }
 
+    /// Finalizes the header and returns it as a byte vector
+    ///
+    /// # Returns
+    ///
+    /// A size-prefixed FlatBuffer containing the serialized header
     pub fn finish_to_header(mut self) -> Vec<u8> {
         let header = self.create_header();
         self.fbb.finish_size_prefixed(header, None);
         self.fbb.finished_data().to_vec()
     }
 
+    /// Creates the header structure in FlatBuffers format
+    ///
+    /// # Panics
+    ///
+    /// Panics if required metadata fields are missing
     fn create_header(&mut self) -> flatbuffers::WIPOffset<Header<'a>> {
         let metadata = self
             .cj
@@ -148,6 +179,11 @@ impl<'a> HeaderWriter<'a> {
         Header::create(&mut self.fbb, &header_args)
     }
 
+    /// Converts CityJSON geographical extent to FlatBuffers format
+    ///
+    /// # Arguments
+    ///
+    /// * `geographical_extent` - Array of 6 values representing min/max coordinates
     fn geographical_extent(geographical_extent: &[f64; 6]) -> GeographicalExtent {
         let min = Vector::new(
             geographical_extent[0],
@@ -162,6 +198,11 @@ impl<'a> HeaderWriter<'a> {
         GeographicalExtent::new(&min, &max)
     }
 
+    /// Converts CityJSON transform to FlatBuffers format
+    ///
+    /// # Arguments
+    ///
+    /// * `transform` - CityJSON transform data containing scale and translate values
     fn transform(transform: &CjTransform) -> Transform {
         let scale = Vector::new(transform.scale[0], transform.scale[1], transform.scale[2]);
         let translate = Vector::new(
@@ -172,6 +213,16 @@ impl<'a> HeaderWriter<'a> {
         Transform::new(&scale, &translate)
     }
 
+    /// Creates a reference system entry in FlatBuffers format
+    ///
+    /// # Arguments
+    ///
+    /// * `fbb` - FlatBuffers builder
+    /// * `metadata` - CityJSON metadata containing reference system information
+    ///
+    /// # Returns
+    ///
+    /// Optional reference system offset in the FlatBuffer
     fn reference_system(
         fbb: &mut FlatBufferBuilder<'a>,
         metadata: &CJMetadata,

@@ -10,21 +10,32 @@ pub mod feature_writer;
 pub mod geometry_encoderdecoder;
 pub mod header_writer;
 
+/// Main writer for FlatCityBuf (FCB) format
+///
+/// FcbWriter handles the serialization of CityJSON data into the FCB binary format.
+/// It manages both header and feature writing, using a temporary file for feature storage
+/// before final assembly.
 pub struct FcbWriter<'a> {
+    /// Temporary buffer for storing features before final assembly
     tmpout: BufWriter<File>,
+    /// Writer for the FCB header section
     header_writer: HeaderWriter<'a>,
+    /// Optional writer for features
     feat_writer: Option<FeatureWriter<'a>>,
-    // feat_offsets: Vec<FeatureOffset>,
-    // feat_nodes: Vec<NodeItem>,
 }
 
-// Offsets in temporary file
-// struct FeatureOffset {
-//     offset: usize,
-//     size: usize,
-// }
-
 impl<'a> FcbWriter<'a> {
+    /// Creates a new FCB writer instance
+    ///
+    /// # Arguments
+    ///
+    /// * `cj` - The CityJSON data to be written
+    /// * `header_option` - Optional configuration for header writing
+    /// * `first_feature` - Optional first feature to begin writing
+    ///
+    /// # Returns
+    ///
+    /// A Result containing the new FcbWriter instance
     pub fn new(
         cj: CityJSON,
         header_option: Option<HeaderWriterOptions>,
@@ -39,7 +50,11 @@ impl<'a> FcbWriter<'a> {
         })
     }
 
-    //TODO: make this private and think how to handle the first feature
+    /// Writes the current feature to the temporary buffer
+    ///
+    /// # Returns
+    ///
+    /// A Result indicating success or failure of the write operation
     pub fn write_feature(&mut self) -> Result<()> {
         if let Some(feat_writer) = &mut self.feat_writer {
             let feat_buf = feat_writer.finish_to_feature();
@@ -48,16 +63,37 @@ impl<'a> FcbWriter<'a> {
         Ok(())
     }
 
+    /// Adds a new feature to be written
+    ///
+    /// # Arguments
+    ///
+    /// * `feature` - The CityJSON feature to add
+    ///
+    /// # Returns
+    ///
+    /// A Result indicating success or failure of the operation
     pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<()> {
         if let Some(feat_writer) = &mut self.feat_writer {
             feat_writer.add_feature(feature);
             self.write_feature()?;
         }
-        // TODO: add feature number to header
         Ok(())
     }
 
-    /// Write the FlatGeobuf dataset (Hilbert sorted)
+    /// Writes the complete FCB dataset to the output
+    ///
+    /// This method assembles the final FCB file by writing:
+    /// 1. Magic bytes
+    /// 2. Header
+    /// 3. Feature data
+    ///
+    /// # Arguments
+    ///
+    /// * `out` - The output destination implementing Write
+    ///
+    /// # Returns
+    ///
+    /// A Result indicating success or failure of the write operation
     pub fn write(mut self, mut out: impl Write) -> Result<()> {
         out.write_all(&MAGIC_BYTES)?;
 
