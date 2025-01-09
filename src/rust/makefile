@@ -19,4 +19,4 @@ decode:
 
 .PHONY: bench
 bench:
-	cargo bench --bench read -- --html-reports
+	cargo bench --bench read
