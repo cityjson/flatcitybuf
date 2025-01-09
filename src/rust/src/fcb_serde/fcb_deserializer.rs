@@ -169,6 +169,7 @@ pub fn to_cj_feature(feature: CityFeature) -> Result<CityJSONFeature> {
                     co.parents()
                         .map(|p| p.iter().map(|s| s.to_string()).collect()),
                     None,
+                    None,
                 );
                 (co.id().to_string(), cjco)
             })
