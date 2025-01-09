@@ -1,6 +1,4 @@
-.PHONY: write
-write:
-	cargo run --bin write
+
 
 .PHONY: pre-commit
 pre-commit:
