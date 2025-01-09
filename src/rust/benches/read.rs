@@ -79,7 +79,6 @@ fn read_cjseq(path: &str) -> Result<(u64, u64, u64)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_read_counts_match() -> Result<()> {
