@@ -2,6 +2,8 @@ use cjseq::CityJSONFeature;
 
 use crate::fcb_serde::fcb_serializer::*;
 
+use super::attribute::AttributeSchema;
+
 /// A writer that converts CityJSON features to FlatBuffers format
 ///
 /// This struct handles the serialization of CityJSON features into a binary
@@ -11,6 +13,8 @@ pub struct FeatureWriter<'a> {
     city_feature: &'a CityJSONFeature,
     /// The FlatBuffers builder instance used for serialization
     fbb: flatbuffers::FlatBufferBuilder<'a>,
+
+    attr_schema: AttributeSchema,
 }
 
 impl<'a> FeatureWriter<'a> {
@@ -19,10 +23,14 @@ impl<'a> FeatureWriter<'a> {
     /// # Arguments
     ///
     /// * `city_feature` - A reference to the CityJSON feature to be serialized
-    pub fn new(city_feature: &'a CityJSONFeature) -> FeatureWriter<'a> {
+    pub fn new(
+        city_feature: &'a CityJSONFeature,
+        attr_schema: AttributeSchema,
+    ) -> FeatureWriter<'a> {
         FeatureWriter {
             city_feature,
             fbb: flatbuffers::FlatBufferBuilder::new(),
+            attr_schema,
         }
     }
 
@@ -39,7 +47,7 @@ impl<'a> FeatureWriter<'a> {
             .city_feature
             .city_objects
             .iter()
-            .map(|(id, co)| to_fcb_city_object(&mut self.fbb, id, co))
+            .map(|(id, co)| to_fcb_city_object(&mut self.fbb, id, co, &self.attr_schema))
             .collect();
         let cf_buf = to_fcb_city_feature(
             &mut self.fbb,

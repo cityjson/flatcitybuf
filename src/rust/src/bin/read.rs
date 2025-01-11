@@ -1,4 +1,4 @@
-use flatcitybuf::fcb_deserializer::{to_cj_feature, to_cj_metadata};
+use flatcitybuf::fcb_deserializer::to_cj_metadata;
 use flatcitybuf::FcbReader;
 use std::error::Error;
 use std::fs::File;
@@ -20,16 +20,15 @@ fn read_file() -> Result<(), Box<dyn Error>> {
     let mut reader = FcbReader::open(inputreader)?.select_all()?;
     let header = reader.header();
     let cj = to_cj_metadata(&header)?;
-
     let mut features = Vec::new();
     let feat_count = header.features_count();
     let mut feat_num = 0;
-    while let Ok(Some(feat_buf)) = reader.next() {
-        let feature = feat_buf.cur_feature();
+    while let Some(feat_buf) = reader.next()? {
+        let feature = feat_buf.cur_cj_feature()?;
         if feat_num == 0 {
             println!("feature: {:?}", feature);
         }
-        features.push(to_cj_feature(feature)?);
+        features.push(feature);
         feat_num += 1;
         if feat_num >= feat_count {
             break;

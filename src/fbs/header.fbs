@@ -20,9 +20,11 @@ enum ColumnType: ubyte {
   Json,                         // General JSON type intended to be application specific
   DateTime,                     // ISO 8601 date time
   Binary                        // General binary type intended to be application specific
+  // Array                         // Array of values
 }
 
 table Column {
+  index: ushort;                // Column index (0 = first column)
   name: string (required);      // Column name
   type: ColumnType;             // Column type
   title: string;                // Column title

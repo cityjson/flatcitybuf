@@ -1,3 +1,4 @@
+use flatcitybuf::attribute::{AttributeSchema, AttributeSchemaMethods};
 use flatcitybuf::header_writer::{HeaderMetadata, HeaderWriterOptions};
 use flatcitybuf::{read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbWriter};
 use std::error::Error;
@@ -28,7 +29,15 @@ fn write_file() -> Result<(), Box<dyn Error>> {
             write_index: false,
             header_metadata,
         });
-        let mut fcb = FcbWriter::new(cj, header_options, features.first())?;
+        let mut attr_schema = AttributeSchema::new();
+        for feature in features.iter() {
+            for (_, co) in feature.city_objects.iter() {
+                if let Some(attributes) = &co.attributes {
+                    attr_schema.add_attributes(attributes);
+                }
+            }
+        }
+        let mut fcb = FcbWriter::new(cj, header_options, features.first(), Some(&attr_schema))?;
         fcb.write_feature()?;
         for feature in features.iter().skip(1) {
             fcb.add_feature(feature)?;

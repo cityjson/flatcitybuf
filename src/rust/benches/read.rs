@@ -19,7 +19,7 @@ fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
     let mut multi_surface_count = 0;
     let mut other_count = 0;
     let mut feat_num = 0;
-    while let Ok(Some(feat_buf)) = reader.next() {
+    while let Some(feat_buf) = reader.next()? {
         let feature = feat_buf.cur_feature();
         feature
             .objects()
@@ -97,13 +97,13 @@ mod tests {
 }
 
 const DATASETS: &[(&str, (&str, &str))] = &[
-    (
-        "3DBAG",
-        (
-            "benchmark_data/3DBAG.fcb",
-            "benchmark_data/3DBAG.city.jsonl",
-        ),
-    ),
+    // (
+    //     "3DBAG",
+    //     (
+    //         "benchmark_data/3DBAG.fcb",
+    //         "benchmark_data/3DBAG.city.jsonl",
+    //     ),
+    // ),
     // (
     //     "3DBV",
     //     ("benchmark_data/3DBV.fcb", "benchmark_data/3DBV.city.jsonl"),
@@ -122,13 +122,13 @@ const DATASETS: &[(&str, (&str, &str))] = &[
     //         "benchmark_data/Ingolstadt.city.jsonl",
     //     ),
     // ),
-    // (
-    //     "Montreal",
-    //     (
-    //         "benchmark_data/Montreal.fcb",
-    //         "benchmark_data/Montreal.city.jsonl",
-    //     ),
-    // ),
+    (
+        "Montreal",
+        (
+            "benchmark_data/Montreal.fcb",
+            "benchmark_data/Montreal.city.jsonl",
+        ),
+    ),
     // (
     //     "NYC",
     //     ("benchmark_data/NYC.fcb", "benchmark_data/NYC.city.jsonl"),

@@ -503,16 +503,17 @@ impl<'a> flatbuffers::Follow<'a> for Column<'a> {
 }
 
 impl<'a> Column<'a> {
-    pub const VT_NAME: flatbuffers::VOffsetT = 4;
-    pub const VT_TYPE_: flatbuffers::VOffsetT = 6;
-    pub const VT_TITLE: flatbuffers::VOffsetT = 8;
-    pub const VT_DESCRIPTION: flatbuffers::VOffsetT = 10;
-    pub const VT_PRECISION: flatbuffers::VOffsetT = 12;
-    pub const VT_SCALE: flatbuffers::VOffsetT = 14;
-    pub const VT_NULLABLE: flatbuffers::VOffsetT = 16;
-    pub const VT_UNIQUE: flatbuffers::VOffsetT = 18;
-    pub const VT_PRIMARY_KEY: flatbuffers::VOffsetT = 20;
-    pub const VT_METADATA: flatbuffers::VOffsetT = 22;
+    pub const VT_INDEX: flatbuffers::VOffsetT = 4;
+    pub const VT_NAME: flatbuffers::VOffsetT = 6;
+    pub const VT_TYPE_: flatbuffers::VOffsetT = 8;
+    pub const VT_TITLE: flatbuffers::VOffsetT = 10;
+    pub const VT_DESCRIPTION: flatbuffers::VOffsetT = 12;
+    pub const VT_PRECISION: flatbuffers::VOffsetT = 14;
+    pub const VT_SCALE: flatbuffers::VOffsetT = 16;
+    pub const VT_NULLABLE: flatbuffers::VOffsetT = 18;
+    pub const VT_UNIQUE: flatbuffers::VOffsetT = 20;
+    pub const VT_PRIMARY_KEY: flatbuffers::VOffsetT = 22;
+    pub const VT_METADATA: flatbuffers::VOffsetT = 24;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -538,6 +539,7 @@ impl<'a> Column<'a> {
         if let Some(x) = args.name {
             builder.add_name(x);
         }
+        builder.add_index(args.index);
         builder.add_primary_key(args.primary_key);
         builder.add_unique(args.unique);
         builder.add_nullable(args.nullable);
@@ -545,6 +547,13 @@ impl<'a> Column<'a> {
         builder.finish()
     }
 
+    #[inline]
+    pub fn index(&self) -> u16 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<u16>(Column::VT_INDEX, Some(0)).unwrap() }
+    }
     #[inline]
     pub fn name(&self) -> &'a str {
         // Safety:
@@ -658,6 +667,7 @@ impl flatbuffers::Verifiable for Column<'_> {
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
         use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
+            .visit_field::<u16>("index", Self::VT_INDEX, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
             .visit_field::<ColumnType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("title", Self::VT_TITLE, false)?
@@ -681,6 +691,7 @@ impl flatbuffers::Verifiable for Column<'_> {
     }
 }
 pub struct ColumnArgs<'a> {
+    pub index: u16,
     pub name: Option<flatbuffers::WIPOffset<&'a str>>,
     pub type_: ColumnType,
     pub title: Option<flatbuffers::WIPOffset<&'a str>>,
@@ -696,6 +707,7 @@ impl<'a> Default for ColumnArgs<'a> {
     #[inline]
     fn default() -> Self {
         ColumnArgs {
+            index: 0,
             name: None, // required field
             type_: ColumnType::Byte,
             title: None,
@@ -715,6 +727,10 @@ pub struct ColumnBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
     start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ColumnBuilder<'a, 'b, A> {
+    #[inline]
+    pub fn add_index(&mut self, index: u16) {
+        self.fbb_.push_slot::<u16>(Column::VT_INDEX, index, 0);
+    }
     #[inline]
     pub fn add_name(&mut self, name: flatbuffers::WIPOffset<&'b str>) {
         self.fbb_
@@ -783,6 +799,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ColumnBuilder<'a, 'b, A> {
 impl core::fmt::Debug for Column<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut ds = f.debug_struct("Column");
+        ds.field("index", &self.index());
         ds.field("name", &self.name());
         ds.field("type_", &self.type_());
         ds.field("title", &self.title());

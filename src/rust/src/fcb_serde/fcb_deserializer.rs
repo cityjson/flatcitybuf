@@ -6,6 +6,7 @@ use crate::{
     header_generated::*,
 };
 use anyhow::{Context, Result};
+use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
     Address as CjAddress, CityJSON, CityJSONFeature, CityObject as CjCityObject,
     Geometry as CjGeometry, Metadata as CjMetadata, PointOfContact as CjPointOfContact,
@@ -135,7 +136,135 @@ pub(crate) fn to_cj_co_type(co_type: CityObjectType) -> String {
     }
 }
 
-pub fn to_cj_feature(feature: CityFeature) -> Result<CityJSONFeature> {
+pub fn decode_attributes(
+    columns: flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>,
+    attributes: flatbuffers::Vector<'_, u8>,
+) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    let bytes = attributes.bytes();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let col_index = LittleEndian::read_u16(&bytes[offset..offset + size_of::<u16>()]) as u16;
+        offset += size_of::<u16>();
+        if col_index >= columns.len() as u16 {
+            panic!("column index out of range"); //TODO: handle this as an error
+        }
+        let column = columns.iter().find(|c| c.index() == col_index);
+        if column.is_none() {
+            panic!("column not found"); //TODO: handle this as an error
+        }
+        let column = column.unwrap();
+        match column.type_() {
+            ColumnType::Int => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(LittleEndian::read_i32(
+                        &bytes[offset..offset + size_of::<i32>()],
+                    ))),
+                );
+                offset += size_of::<i32>();
+            }
+            ColumnType::UInt => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(LittleEndian::read_u32(
+                        &bytes[offset..offset + size_of::<u32>()],
+                    ))),
+                );
+                offset += size_of::<u32>();
+            }
+            ColumnType::Bool => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Bool(bytes[offset] != 0),
+                );
+                offset += size_of::<u8>();
+            }
+            ColumnType::Short => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(LittleEndian::read_i16(
+                        &bytes[offset..offset + size_of::<i16>()],
+                    ))),
+                );
+                offset += size_of::<i16>();
+            }
+            ColumnType::UShort => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(LittleEndian::read_u16(
+                        &bytes[offset..offset + size_of::<u16>()],
+                    ))),
+                );
+                offset += size_of::<u16>();
+            }
+            ColumnType::Long => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(LittleEndian::read_i64(
+                        &bytes[offset..offset + size_of::<i64>()],
+                    ))),
+                );
+                offset += size_of::<i64>();
+            }
+            ColumnType::ULong => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(LittleEndian::read_u64(
+                        &bytes[offset..offset + size_of::<u64>()],
+                    ))),
+                );
+                offset += size_of::<u64>();
+            }
+            ColumnType::Float => {
+                let f = LittleEndian::read_f32(&bytes[offset..offset + size_of::<f32>()]);
+                if let Some(num) = serde_json::Number::from_f64(f as f64) {
+                    map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                }
+                offset += size_of::<f32>();
+            }
+            ColumnType::Double => {
+                let f = LittleEndian::read_f64(&bytes[offset..offset + size_of::<f64>()]);
+                if let Some(num) = serde_json::Number::from_f64(f) {
+                    map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                }
+                offset += size_of::<f64>();
+            }
+            ColumnType::String => {
+                let len = LittleEndian::read_u32(&bytes[offset..offset + size_of::<u32>()]);
+                offset += size_of::<u32>();
+                let s = String::from_utf8(bytes[offset..offset + len as usize].to_vec())
+                    .unwrap_or_default();
+                map.insert(column.name().to_string(), serde_json::Value::String(s));
+                offset += len as usize;
+            }
+            ColumnType::Json => {
+                let len = LittleEndian::read_u32(&bytes[offset..offset + size_of::<u32>()]);
+                offset += size_of::<u32>();
+                let s = String::from_utf8(bytes[offset..offset + len as usize].to_vec())
+                    .unwrap_or_default();
+                map.insert(column.name().to_string(), serde_json::from_str(&s).unwrap());
+                offset += len as usize;
+            }
+
+            // TODO: handle other column types
+            _ => unreachable!(),
+        }
+    }
+
+    // check if there is any column that is not in the map, and set it to null
+    for col in columns.iter() {
+        if !map.contains_key(col.name()) {
+            map.insert(col.name().to_string(), serde_json::Value::Null);
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+pub fn to_cj_feature(
+    feature: CityFeature,
+    root_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
+) -> Result<CityJSONFeature> {
     let mut cj = CityJSONFeature::new();
     cj.id = feature.id().to_string();
 
@@ -159,16 +288,29 @@ pub fn to_cj_feature(feature: CityFeature) -> Result<CityJSONFeature> {
                         .collect::<Vec<_>>()
                 });
 
+                let mut attributes = None;
+                if root_attr_schema.is_none() && co.columns().is_none() {
+                    attributes = None;
+                } else {
+                    attributes = co.attributes().map(|a| {
+                        decode_attributes(co.columns().unwrap_or(root_attr_schema.unwrap()), a)
+                    });
+                }
+
+                let children_roles = co
+                    .children_roles()
+                    .map(|c| c.iter().map(|s| s.to_string()).collect());
+
                 let cjco = CjCityObject::new(
                     to_cj_co_type(co.type_()).to_string(),
                     geographical_extent,
-                    None,
+                    attributes,
                     geometries,
                     co.children()
                         .map(|c| c.iter().map(|s| s.to_string()).collect()),
+                    children_roles,
                     co.parents()
                         .map(|p| p.iter().map(|s| s.to_string()).collect()),
-                    None,
                     None,
                 );
                 (co.id().to_string(), cjco)

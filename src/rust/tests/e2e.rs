@@ -1,5 +1,6 @@
 use anyhow::Result;
 use flatcitybuf::{
+    attribute::{AttributeSchema, AttributeSchemaMethods},
     fcb_deserializer,
     header_writer::{HeaderMetadata, HeaderWriterOptions},
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
@@ -36,6 +37,14 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         let header_metadata = HeaderMetadata {
             features_count: original_cj_seq.features.len() as u64,
         };
+        let mut attr_schema = AttributeSchema::new();
+        for feature in original_cj_seq.features.iter() {
+            for (_, co) in feature.city_objects.iter() {
+                if let Some(attributes) = &co.attributes {
+                    attr_schema.add_attributes(attributes);
+                }
+            }
+        }
         let mut fcb = FcbWriter::new(
             original_cj_seq.cj.clone(),
             Some(HeaderWriterOptions {
@@ -43,6 +52,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                 header_metadata,
             }),
             original_cj_seq.features.first(),
+            Some(&attr_schema),
         )?;
         fcb.write_feature()?;
         for feature in original_cj_seq.features.iter().skip(1) {
@@ -65,8 +75,8 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
     let feat_count = header.features_count();
     let mut feat_num = 0;
     while let Ok(Some(feat_buf)) = reader.next() {
-        let feature = feat_buf.cur_feature();
-        deserialized_features.push(fcb_deserializer::to_cj_feature(feature)?);
+        let feature = feat_buf.cur_cj_feature()?;
+        deserialized_features.push(feature);
         feat_num += 1;
         if feat_num >= feat_count {
             break;
@@ -207,3 +217,78 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
 
     Ok(())
 }
+
+// #[test]
+// fn test_attribute_serialization() -> Result<()> {
+//     let json_data = json!({
+//         "attributes": {
+//             "int": -1,
+//             "uint": 1,
+//             "bool": true,
+//             "float": 1.0,
+//             "string": "hoge",
+//             "array": [1, 2, 3],
+//             "json": {
+//                 "hoge": "fuga"
+//             },
+//             "null": null
+//         }
+//     });
+//     let attrs = &json_data["attributes"];
+
+//         // Test case 1: Using common schema
+//         {
+//             let mut fbb = FlatBufferBuilder::new();
+//             let mut common_schema = AttributeSchema::new();
+//             common_schema.add_attributes(attrs);
+
+//             let columns = to_fcb_columns(&mut fbb, &common_schema);
+//             let header = Header::create(
+//                 &mut fbb,
+//                 &HeaderArgs {
+//                     columns: Some(columns),
+//                     ..Default::default()
+//                 },
+//             );
+
+//             fbb.finish(header, None);
+//             let finished_data = fbb.finished_data();
+//             let header_buf = root_as_header(finished_data).unwrap();
+
+//             // let feature =
+
+//             let encoded = encode_attributes_with_schema(attrs, &common_schema);
+
+//             // Verify encoded data
+//             assert!(!encoded.is_empty());
+
+//             let decoded = decode_attributes(header_buf.columns().unwrap(), encoded.);
+//             assert_eq!(attrs, &decoded);
+//         }
+
+//         // Test case 2: Using own schema
+//         {
+//             let mut fbb = FlatBufferBuilder::new();
+//             let (offset, schema) = to_fcb_attribute(&mut fbb, attrs, &AttributeSchema::new());
+
+//             // Verify schema is returned for own schema case
+//             assert!(schema.is_some());
+//             let schema = schema.unwrap();
+
+//             // Verify schema contains expected types
+//             assert_eq!(schema.get("int"), Some(&ColumnType::Int));
+//             assert_eq!(schema.get("uint"), Some(&ColumnType::UInt));
+//             assert_eq!(schema.get("bool"), Some(&ColumnType::Bool));
+//             assert_eq!(schema.get("float"), Some(&ColumnType::Float));
+//             assert_eq!(schema.get("string"), Some(&ColumnType::String));
+//             assert_eq!(schema.get("json"), Some(&ColumnType::Json));
+
+//             // Get the encoded data
+//             let data = fbb.finished_data();
+//             assert!(!data.is_empty());
+//             // First 2 bytes should be 1 (true) for own schema
+//             assert_eq!(&data[0..2], &[1, 0]);
+//         }
+
+//     Ok(())
+// }

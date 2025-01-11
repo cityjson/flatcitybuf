@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use flatcitybuf::{
+    attribute::{AttributeSchema, AttributeSchemaMethods},
     fcb_deserializer,
     header_writer::{HeaderMetadata, HeaderWriterOptions},
     read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbReader, FcbWriter,
@@ -74,6 +75,15 @@ fn serialize(input: &str, output: &str) -> Result<()> {
     };
 
     let CityJSONSeq { cj, features } = cj_seq;
+    let mut attr_schema = AttributeSchema::new();
+    for feature in features.iter() {
+        for (_, co) in feature.city_objects.iter() {
+            if let Some(attributes) = &co.attributes {
+                attr_schema.add_attributes(attributes);
+            }
+        }
+    }
+
     let header_metadata = HeaderMetadata {
         features_count: features.len() as u64,
     };
@@ -81,10 +91,19 @@ fn serialize(input: &str, output: &str) -> Result<()> {
         write_index: false,
         header_metadata,
     });
-    let mut fcb = FcbWriter::new(cj, header_options, features.first())?;
+    let mut fcb = FcbWriter::new(
+        cj,
+        header_options,
+        None,
+        if attr_schema.is_empty() {
+            None
+        } else {
+            Some(&attr_schema)
+        },
+    )?;
     fcb.write_feature()?;
 
-    for feature in features.iter().skip(1) {
+    for feature in features.iter() {
         fcb.add_feature(feature)?;
     }
     fcb.write(writer)?;
@@ -106,12 +125,13 @@ fn deserialize(input: &str, output: &str) -> Result<()> {
     // Write header
     writeln!(writer, "{}", serde_json::to_string(&cj)?)?;
 
+    let root_attr_schema = header.columns();
     // Write features
     let feat_count = header.features_count();
     let mut feat_num = 0;
     while let Ok(Some(feat_buf)) = fcb_reader.next() {
         let feature = feat_buf.cur_feature();
-        let cj_feature = fcb_deserializer::to_cj_feature(feature)?;
+        let cj_feature = fcb_deserializer::to_cj_feature(feature, None)?;
         writeln!(writer, "{}", serde_json::to_string(&cj_feature)?)?;
 
         feat_num += 1;

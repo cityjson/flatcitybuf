@@ -1,4 +1,4 @@
-use crate::error::CityJSONError;
+use crate::attribute::{encode_attributes_with_schema, AttributeSchema, AttributeSchemaMethods};
 use crate::feature_generated::{
     CityFeature, CityFeatureArgs, CityObject, CityObjectArgs, CityObjectType, Geometry,
     GeometryArgs, GeometryType, SemanticObject, SemanticObjectArgs, SemanticSurfaceType, Vertex,
@@ -8,12 +8,14 @@ use crate::header_generated::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
 use crate::header_writer::HeaderMetadata;
+use crate::{Column, ColumnArgs};
 
 use cjseq::{
     CityJSON, CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
     Metadata as CjMetadata, Transform as CjTransform,
 };
 use flatbuffers::FlatBufferBuilder;
+use serde_json::Value;
 
 /// -----------------------------------
 /// Serializer for Header
@@ -30,12 +32,18 @@ pub fn to_fcb_header<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     cj: &CityJSON,
     header_metadata: HeaderMetadata,
+    attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<Header<'a>> {
     let metadata = cj
         .metadata
         .as_ref()
-        .ok_or(CityJSONError::MissingField("metadata"))
+        .ok_or(anyhow::anyhow!("metadata is missing"))
         .unwrap();
+    // let metadata = cj
+    //     .metadata
+    //     .as_ref()
+    //     .ok_or(anyhow::anyhow!(Error::MissingField("metadata".to_string())))
+    //     .unwrap();
     let reference_system = to_fcb_reference_system(fbb, metadata);
     let transform = to_fcb_transform(&cj.transform);
     let geographical_extent = metadata
@@ -45,7 +53,7 @@ pub fn to_fcb_header<'a>(
     let header_args = HeaderArgs {
         version: Some(fbb.create_string(&cj.version)),
         transform: Some(&transform),
-        columns: None,
+        columns: Some(to_fcb_columns(fbb, attr_schema)),
         features_count: header_metadata.features_count,
         geographical_extent: geographical_extent.as_ref(),
         reference_system,
@@ -314,6 +322,7 @@ pub fn to_fcb_city_object<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     id: &str,
     co: &CjCityObject,
+    attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<CityObject<'a>> {
     let id = Some(fbb.create_string(id));
 
@@ -332,8 +341,23 @@ pub fn to_fcb_city_object<'a>(
         });
         geometries.map(|geometries| fbb.create_vector(&geometries))
     };
-    // let attributes = Some(self.fbb.create_vector(co.attributes));
-    // let columns = Some(self.fbb.create_vector(co.columns));
+
+    let attributes_and_columns = co
+        .attributes
+        .as_ref()
+        .map(|attr| {
+            if !attr.is_object() {
+                return (None, None);
+            }
+            let (attr_vec, own_schema) = to_fcb_attribute(fbb, attr, attr_schema);
+            let columns = own_schema.map(|schema| to_fcb_columns(fbb, &schema));
+            (Some(attr_vec), columns)
+        })
+        .unwrap_or((None, None));
+
+    let (attributes, columns) = attributes_and_columns;
+
+    // todo: check if truncate is needed
     let children = {
         let children_strings = co
             .children
@@ -342,15 +366,14 @@ pub fn to_fcb_city_object<'a>(
         children_strings.map(|children_strings| fbb.create_vector(&children_strings))
     };
 
-    // let children_roles = {
-    //     let children_roles_strings: Vec<_> = co
-    //         .childre
-    //         .iter()
-    //         .map(|s| self.fbb.create_string(s))
-    //         .collect();
-    //     Some(self.fbb.create_vector(&children_roles_strings))
-    // };
-    let children_roles = None; // TODO: implement this later
+    let children_roles = {
+        let children_roles_strings = co
+            .children_roles
+            .as_ref()
+            .map(|c| c.iter().map(|r| fbb.create_string(r)).collect::<Vec<_>>());
+        children_roles_strings
+            .map(|children_roles_strings| fbb.create_vector(&children_roles_strings))
+    };
 
     let parents = {
         let parents_strings = co
@@ -367,8 +390,8 @@ pub fn to_fcb_city_object<'a>(
             type_,
             geographical_extent: geographical_extent.as_ref(),
             geometry: geometries,
-            attributes: None,
-            columns: None,
+            attributes,
+            columns,
             children,
             children_roles,
             parents,
@@ -474,11 +497,62 @@ pub(crate) fn to_fcb_geometry<'a>(
     )
 }
 
+pub fn to_fcb_columns<'a>(
+    fbb: &mut FlatBufferBuilder<'a>,
+    attr_schema: &AttributeSchema,
+) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>> {
+    let mut sorted_schema: Vec<_> = attr_schema.iter().collect();
+    sorted_schema.sort_by_key(|(_, (index, _))| *index);
+    let columns_vec = sorted_schema
+        .iter()
+        .map(|(name, (index, column_type))| {
+            let name = fbb.create_string(name);
+            Column::create(
+                fbb,
+                &ColumnArgs {
+                    name: Some(name),
+                    index: *index,
+                    type_: *column_type,
+                    ..Default::default()
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    fbb.create_vector(&columns_vec)
+}
+
+pub fn to_fcb_attribute<'a>(
+    fbb: &mut FlatBufferBuilder<'a>,
+    attr: &Value,
+    schema: &AttributeSchema,
+) -> (
+    flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>,
+    Option<AttributeSchema>,
+) {
+    let mut is_own_schema = false;
+    for (key, _) in attr.as_object().unwrap().iter() {
+        if !schema.contains_key(key) {
+            is_own_schema = true;
+        }
+    }
+    if is_own_schema {
+        let mut own_schema = AttributeSchema::new();
+        own_schema.add_attributes(attr);
+        let encoded = encode_attributes_with_schema(attr, &own_schema);
+        (fbb.create_vector(&encoded), Some(own_schema))
+    } else {
+        let encoded = encode_attributes_with_schema(attr, schema);
+        (fbb.create_vector(&encoded), None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::fcb_serde::fcb_deserializer::to_cj_co_type;
     use crate::feature_generated::root_as_city_feature;
+
     use anyhow::Result;
     use cjseq::CityJSONFeature;
     use flatbuffers::FlatBufferBuilder;
@@ -489,12 +563,19 @@ mod tests {
             r#"{"type":"CityJSONFeature","id":"NL.IMBAG.Pand.0503100000005156","CityObjects":{"NL.IMBAG.Pand.0503100000005156-0":{"type":"BuildingPart","attributes":{},"geometry":[{"type":"Solid","lod":"1.2","boundaries":[[[[6,1,0,5,4,3,7,8]],[[9,5,0,10]],[[10,0,1,11]],[[12,3,4,13]],[[13,4,5,9]],[[14,7,3,12]],[[15,8,7,14]],[[16,6,8,15]],[[11,1,6,16]],[[11,16,15,14,12,13,9,10]]]],"semantics":{"surfaces":[{"type":"GroundSurface"},{"type":"RoofSurface"},{"on_footprint_edge":true,"type":"WallSurface"},{"on_footprint_edge":false,"type":"WallSurface"}],"values":[[0,2,2,2,2,2,2,2,2,1]]}},{"type":"Solid","lod":"1.3","boundaries":[[[[3,7,8,6,1,17,0,5,4,18]],[[19,5,0,20]],[[21,22,17,1,23]],[[24,7,3,25]],[[26,8,7,24]],[[20,0,17,43]],[[44,45,43,46]],[[47,4,5,36]],[[48,18,4,47]],[[39,1,6,49]],[[41,3,18,48,50]],[[46,43,17,35,38]],[[49,6,8,42]],[[51,52,45,44]],[[53,54,55]],[[54,53,56]],[[50,48,52,51]],[[53,55,38,39,49,42]],[[54,56,44,46,38,55]],[[50,51,44,56,53,42,40,41]],[[52,48,47,36,37,43,45]]]],"semantics":{"surfaces":[{"type":"GroundSurface"},{"type":"RoofSurface"},{"on_footprint_edge":true,"type":"WallSurface"},{"on_footprint_edge":false,"type":"WallSurface"}],"values":[[0,2,2,2,2,2,3,2,2,2,2,2,3,3,1,1]]}},{"type":"Solid","lod":"2.2","boundaries":[[[[1,35,17,0,5,4,18,3,7,8,6]],[[36,5,0,37]],[[38,35,1,39]],[[40,7,3,41]],[[42,8,7,40]],[[37,0,17,43]],[[44,45,43,46]],[[47,4,5,36]],[[48,18,4,47]],[[39,1,6,49]],[[41,3,18,48,50]],[[46,43,17,35,38]],[[49,6,8,42]],[[51,52,45,44]],[[53,54,55]],[[54,53,56]],[[50,48,52,51]],[[53,55,38,39,49,42]],[[54,56,44,46,38,55]],[[50,51,44,56,53,42,40,41]],[[52,48,47,36,37,43,45]]]],"semantics":{"surfaces":[{"type":"GroundSurface"},{"type":"RoofSurface"},{"on_footprint_edge":true,"type":"WallSurface"},{"on_footprint_edge":false,"type":"WallSurface"}],"values":[[0,2,2,2,2,2,3,2,2,2,2,2,2,3,3,3,3,1,1,1,1]]}}],"parents":["NL.IMBAG.Pand.0503100000005156"]},"NL.IMBAG.Pand.0503100000005156":{"type":"Building","geographicalExtent":[84734.8046875,446636.5625,0.6919999718666077,84746.9453125,446651.0625,11.119057655334473],"attributes":{"b3_bag_bag_overlap":0.0,"b3_bouwlagen":3,"b3_dak_type":"slanted","b3_h_dak_50p":8.609999656677246,"b3_h_dak_70p":9.239999771118164,"b3_h_dak_max":10.970000267028809,"b3_h_dak_min":3.890000104904175,"b3_h_maaiveld":0.6919999718666077,"b3_kas_warenhuis":false,"b3_mutatie_ahn3_ahn4":false,"b3_nodata_fractie_ahn3":0.002518891589716077,"b3_nodata_fractie_ahn4":0.0,"b3_nodata_radius_ahn3":0.359510600566864,"b3_nodata_radius_ahn4":0.34349295496940613,"b3_opp_buitenmuur":165.03,"b3_opp_dak_plat":51.38,"b3_opp_dak_schuin":63.5,"b3_opp_grond":99.21,"b3_opp_scheidingsmuur":129.53,"b3_puntdichtheid_ahn3":16.353534698486328,"b3_puntdichtheid_ahn4":46.19647216796875,"b3_pw_bron":"AHN4","b3_pw_datum":2020,"b3_pw_selectie_reden":"PREFERRED_AND_LATEST","b3_reconstructie_onvolledig":false,"b3_rmse_lod12":3.2317864894866943,"b3_rmse_lod13":0.642620861530304,"b3_rmse_lod22":0.09925124794244766,"b3_val3dity_lod12":"[]","b3_val3dity_lod13":"[]","b3_val3dity_lod22":"[]","b3_volume_lod12":845.0095825195312,"b3_volume_lod13":657.8263549804688,"b3_volume_lod22":636.9927368164062,"begingeldigheid":"1999-04-28","documentdatum":"1999-04-28","documentnummer":"408040.tif","eindgeldigheid":null,"eindregistratie":null,"geconstateerd":false,"identificatie":"NL.IMBAG.Pand.0503100000005156","oorspronkelijkbouwjaar":2000,"status":"Pand in gebruik","tijdstipeindregistratielv":null,"tijdstipinactief":null,"tijdstipinactieflv":null,"tijdstipnietbaglv":null,"tijdstipregistratie":"2010-10-13T12:29:24Z","tijdstipregistratielv":"2010-10-13T12:30:50Z","voorkomenidentificatie":1},"geometry":[{"type":"MultiSurface","lod":"0","boundaries":[[[0,1,2,3,4,5]]]}],"children":["NL.IMBAG.Pand.0503100000005156-0"]}},"vertices":[[-353581,253246,-44957],[-348730,242291,-44957],[-343550,244604,-44957],[-344288,246257,-44957],[-341437,247537,-44957],[-345635,256798,-44957],[-343558,244600,-44957],[-343662,244854,-44957],[-343926,244734,-44957],[-345635,256798,-36439],[-353581,253246,-36439],[-348730,242291,-36439],[-344288,246257,-36439],[-341437,247537,-36439],[-343662,244854,-36439],[-343926,244734,-36439],[-343558,244600,-36439],[-352596,251020,-44957],[-344083,246349,-44957],[-345635,256798,-41490],[-353581,253246,-41490],[-352596,251020,-35952],[-352596,251020,-41490],[-348730,242291,-35952],[-343662,244854,-35952],[-344288,246257,-35952],[-343926,244734,-35952],[-347233,253386,-35952],[-347233,253386,-41490],[-341437,247537,-41490],[-344083,246349,-41490],[-343558,244600,-35952],[-344083,246349,-35952],[-347089,253741,-35952],[-347089,253741,-41490],[-350613,246543,-44957],[-345635,256798,-41507],[-353581,253246,-41516],[-350613,246543,-34688],[-348730,242291,-36953],[-343662,244854,-37089],[-344288,246257,-37099],[-343926,244734,-36944],[-352596,251020,-41514],[-347233,253386,-37262],[-347233,253386,-41508],[-352596,251020,-37264],[-341437,247537,-41498],[-344083,246349,-41501],[-343558,244600,-37083],[-344083,246349,-37212],[-347089,253741,-37402],[-347089,253741,-41508],[-349425,246738,-34864],[-349425,246738,-34529],[-349862,246897,-34699],[-349238,248437,-35307]]}"#,
         )?;
 
+        let mut attr_schema = AttributeSchema::new();
+        for (_, co) in cj_city_feature.city_objects.iter() {
+            if let Some(attr) = &co.attributes {
+                attr_schema.add_attributes(attr);
+            }
+        }
+
         // Create FlatBuffer and encode
         let mut fbb = FlatBufferBuilder::new();
         let city_objects_buf: Vec<_> = cj_city_feature
             .city_objects
             .iter()
-            .map(|(id, co)| to_fcb_city_object(&mut fbb, id, co))
+            .map(|(id, co)| to_fcb_city_object(&mut fbb, id, co, &attr_schema))
             .collect();
         let city_feature = to_fcb_city_feature(
             &mut fbb,
@@ -611,6 +692,81 @@ mod tests {
                 );
             }
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_attributes() -> Result<()> {
+        // let json_data = json!({
+        //     "attributes": {
+        //         "int": -1,
+        //         "uint": 1,
+        //         "bool": true,
+        //         "float": 1.0,
+        //         "string": "hoge",
+        //         "array": [1, 2, 3],
+        //         "json": {
+        //             "hoge": "fuga"
+        //         },
+        //         "null": null
+        //     }
+        // });
+        // let attrs = &json_data["attributes"];
+
+        // // Test case 1: Using common schema
+        // {
+        //     let mut fbb = FlatBufferBuilder::new();
+        //     let mut common_schema = AttributeSchema::new();
+        //     common_schema.add_attributes(attrs);
+
+        //     let columns = to_fcb_columns(&mut fbb, &common_schema);
+        //     let header = Header::create(
+        //         &mut fbb,
+        //         &HeaderArgs {
+        //             columns: Some(columns),
+        //             ..Default::default()
+        //         },
+        //     );
+
+        //     fbb.finish(header, None);
+        //     let finished_data = fbb.finished_data();
+        //     let header_buf = root_as_header(finished_data).unwrap();
+
+        //     // let feature =
+
+        //     let encoded = encode_attributes_with_schema(attrs, &common_schema);
+
+        //     // Verify encoded data
+        //     assert!(!encoded.is_empty());
+
+        //     let decoded = decode_attributes(header_buf.columns().unwrap(), encoded.);
+        //     assert_eq!(attrs, &decoded);
+        // }
+
+        // // Test case 2: Using own schema
+        // {
+        //     let mut fbb = FlatBufferBuilder::new();
+        //     let (offset, schema) = to_fcb_attribute(&mut fbb, attrs, &AttributeSchema::new());
+
+        //     // Verify schema is returned for own schema case
+        //     assert!(schema.is_some());
+        //     let schema = schema.unwrap();
+
+        //     // Verify schema contains expected types
+        //     assert_eq!(schema.get("int"), Some(&ColumnType::Int));
+        //     assert_eq!(schema.get("uint"), Some(&ColumnType::UInt));
+        //     assert_eq!(schema.get("bool"), Some(&ColumnType::Bool));
+        //     assert_eq!(schema.get("float"), Some(&ColumnType::Float));
+        //     assert_eq!(schema.get("string"), Some(&ColumnType::String));
+        //     assert_eq!(schema.get("json"), Some(&ColumnType::Json));
+
+        //     // Get the encoded data
+        //     let data = fbb.finished_data();
+        //     assert!(!data.is_empty());
+        //     // First 2 bytes should be 1 (true) for own schema
+        //     assert_eq!(&data[0..2], &[1, 0]);
+        // }
 
         Ok(())
     }

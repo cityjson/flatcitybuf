@@ -1,11 +1,13 @@
-use crate::error::Result;
 use crate::MAGIC_BYTES;
+use anyhow::Result;
+use attribute::AttributeSchema;
 use cjseq::{CityJSON, CityJSONFeature};
 use feature_writer::FeatureWriter;
 use header_writer::{HeaderWriter, HeaderWriterOptions};
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
 
+pub mod attribute;
 pub mod feature_writer;
 pub mod geometry_encoderdecoder;
 pub mod header_writer;
@@ -22,6 +24,8 @@ pub struct FcbWriter<'a> {
     header_writer: HeaderWriter<'a>,
     /// Optional writer for features
     feat_writer: Option<FeatureWriter<'a>>,
+
+    attr_schema: AttributeSchema,
 }
 
 impl<'a> FcbWriter<'a> {
@@ -40,13 +44,18 @@ impl<'a> FcbWriter<'a> {
         cj: CityJSON,
         header_option: Option<HeaderWriterOptions>,
         first_feature: Option<&'a CityJSONFeature>,
+        attr_schema: Option<&AttributeSchema>,
     ) -> Result<Self> {
-        let header_writer = HeaderWriter::new(cj, header_option);
-        let feat_writer = first_feature.map(FeatureWriter::new);
+        let owned_schema = AttributeSchema::new();
+        let attr_schema = attr_schema.unwrap_or(&owned_schema);
+
+        let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone()); // if attr_schema is None, instantiate an empty one
+        let feat_writer = first_feature.map(|feat| FeatureWriter::new(feat, attr_schema.clone()));
         Ok(Self {
             header_writer,
             feat_writer,
             tmpout: BufWriter::new(tempfile::tempfile()?),
+            attr_schema: attr_schema.clone(),
         })
     }
 

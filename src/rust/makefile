@@ -11,7 +11,8 @@ pre-commit:
 
 .PHONY: encode
 encode:
-	cargo run --bin flatcitybuf_cli serialize -i tests/data/delft.city.jsonl -o temp/delft.fcb
+	cargo run --bin flatcitybuf_cli serialize -i tests/data/delft.city.jsonl -o temp/delft_attr.fcb
+# cargo run --bin flatcitybuf_cli serialize -i tests/data/delft.city.jsonl -o temp/delft.fcb
 
 .PHONY: decode
 decode:

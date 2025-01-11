@@ -1,11 +1,13 @@
 mod city_buffer;
 
 use city_buffer::FcbBuffer;
+use cjseq::CityJSONFeature;
 
-use crate::error::{Error, Result};
+use crate::fcb_deserializer::to_cj_feature;
 use crate::feature_generated::{size_prefixed_root_as_city_feature, CityFeature};
 use crate::header_generated::*;
 use crate::{check_magic_bytes, HEADER_MAX_BUFFER_SIZE};
+use anyhow::{anyhow, Result};
 use fallible_streaming_iterator::FallibleStreamingIterator;
 use std::io::{Read, Seek, SeekFrom, Write};
 
@@ -66,14 +68,14 @@ impl<R: Read> FcbReader<R> {
         let mut magic_buf: [u8; 8] = [0; 8];
         reader.read_exact(&mut magic_buf)?;
         if !check_magic_bytes(&magic_buf) {
-            return Err(Error::MissingMagicBytes);
+            return Err(anyhow!("Missing magic bytes. Is this an fgb file?"));
         }
 
         let mut size_buf: [u8; 4] = [0; 4]; // MEMO: 4 bytes for size prefix. This is comvention for FlatBuffers's size_prefixed_root
         reader.read_exact(&mut size_buf)?;
         let header_size = u32::from_le_bytes(size_buf) as usize;
         if header_size > HEADER_MAX_BUFFER_SIZE || header_size < 8 {
-            return Err(Error::IllegalHeaderSize(header_size));
+            return Err(anyhow!("Illegal header size: {header_size}"));
         }
 
         let mut header_buf = Vec::with_capacity(header_size + 4);
@@ -206,6 +208,12 @@ impl<R: Read> FcbReader<R> {
         self.buffer.header()
     }
 
+    pub fn root_attr_schema(
+        &self,
+    ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<Column>>> {
+        self.buffer.header().columns()
+    }
+
     fn index_size(&self) -> u64 {
         0
         //     let header = self.buffer.header();
@@ -220,7 +228,7 @@ impl<R: Read> FcbReader<R> {
 
 impl<R: Read> FallibleStreamingIterator for FeatureIter<R, NotSeekable> {
     type Item = FcbBuffer;
-    type Error = Error;
+    type Error = anyhow::Error;
 
     fn advance(&mut self) -> Result<()> {
         if self.advance_finished() {
@@ -252,7 +260,7 @@ impl<R: Read> FallibleStreamingIterator for FeatureIter<R, NotSeekable> {
 
 impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
     type Item = FcbBuffer;
-    type Error = Error;
+    type Error = anyhow::Error;
 
     fn advance(&mut self) -> Result<()> {
         if self.advance_finished() {
@@ -285,6 +293,13 @@ impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
 impl<R: Read> FeatureIter<R, NotSeekable> {
     pub fn cur_feature(&self) -> CityFeature {
         self.buffer.feature()
+    }
+
+    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature> {
+        let fcb_feature = self.buffer.feature();
+        let root_attr_schema = self.buffer.header().columns();
+
+        to_cj_feature(fcb_feature, root_attr_schema)
     }
 
     pub fn get_features(&mut self) -> Result<Vec<CityFeature>> {
@@ -324,9 +339,15 @@ impl<R: Read> FeatureIter<R, NotSeekable> {
 }
 
 impl<R: Read + Seek> FeatureIter<R, Seekable> {
-    /// Return current feature
     pub fn cur_feature(&self) -> CityFeature {
         self.buffer.feature()
+    }
+    /// Return current feature
+    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature> {
+        let fcb_feature = self.buffer.feature();
+        let root_attr_schema = self.buffer.header().columns();
+
+        to_cj_feature(fcb_feature, root_attr_schema)
     }
 
     pub fn get_features(&mut self, out: impl Write) -> Result<()> {
@@ -390,6 +411,12 @@ impl<R: Read, S> FeatureIter<R, S> {
 
     pub fn header(&self) -> Header {
         self.buffer.header()
+    }
+
+    pub fn root_attr_schema(
+        &self,
+    ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<Column>>> {
+        self.buffer.header().columns()
     }
 
     // pub fn features(&self) -> CityFeature {
