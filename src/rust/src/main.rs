@@ -22,7 +22,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Convert CityJSON to FCB
-    Serialize {
+    Ser {
         /// Input file (use '-' for stdin)
         #[arg(short, long)]
         input: String,
@@ -33,7 +33,7 @@ enum Commands {
     },
 
     /// Convert FCB to CityJSON
-    Deserialize {
+    Deser {
         /// Input file (use '-' for stdin)
         #[arg(short, long)]
         input: String,
@@ -180,8 +180,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Serialize { input, output } => serialize(&input, &output),
-        Commands::Deserialize { input, output } => deserialize(&input, &output),
+        Commands::Ser { input, output } => serialize(&input, &output),
+        Commands::Deser { input, output } => deserialize(&input, &output),
         Commands::Info { input } => show_info(input),
     }
 }
