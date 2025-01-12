@@ -1,9 +1,9 @@
-mod city_buffer;
-
+pub mod city_buffer;
+pub mod deserializer;
 use city_buffer::FcbBuffer;
 use cjseq::CityJSONFeature;
+use deserializer::to_cj_feature;
 
-use crate::fcb_deserializer::to_cj_feature;
 use crate::feature_generated::{size_prefixed_root_as_city_feature, CityFeature};
 use crate::header_generated::*;
 use crate::{check_magic_bytes, HEADER_MAX_BUFFER_SIZE};

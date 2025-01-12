@@ -1,7 +1,7 @@
 use anyhow::Result;
 use flatcitybuf::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
-    fcb_deserializer,
+    deserializer,
     header_writer::{HeaderMetadata, HeaderWriterOptions},
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
@@ -51,11 +51,10 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                 write_index: false,
                 header_metadata,
             }),
-            original_cj_seq.features.first(),
             Some(attr_schema),
         )?;
         fcb.write_feature()?;
-        for feature in original_cj_seq.features.iter().skip(1) {
+        for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
         }
         fcb.write(output_writer)?;
@@ -68,8 +67,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
 
     // Get header and convert to CityJSON
     let header = reader.header();
-    let deserialized_cj = fcb_deserializer::to_cj_metadata(&header)?;
-
+    let deserialized_cj = deserializer::to_cj_metadata(&header)?;
     // Read all features
     let mut deserialized_features = Vec::new();
     let feat_count = header.features_count();

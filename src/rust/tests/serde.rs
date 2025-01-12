@@ -2,10 +2,10 @@ use anyhow::Result;
 use flatbuffers::FlatBufferBuilder;
 use flatcitybuf::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
-    fcb_deserializer::decode_attributes,
-    fcb_serializer::{to_fcb_attribute, to_fcb_columns},
-    root_as_city_feature, root_as_header, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
-    Header, HeaderArgs,
+    deserializer::decode_attributes,
+    root_as_city_feature, root_as_header,
+    serializer::{to_columns, to_fcb_attribute},
+    CityFeature, CityFeatureArgs, CityObject, CityObjectArgs, Header, HeaderArgs,
 };
 use serde_json::json;
 
@@ -108,7 +108,7 @@ fn test_attribute_serialization() -> Result<()> {
         let mut common_schema = AttributeSchema::new();
         common_schema.add_attributes(attr_schema);
 
-        let columns = to_fcb_columns(&mut fbb, &common_schema);
+        let columns = to_columns(&mut fbb, &common_schema);
         let header = {
             let version = fbb.create_string("1.0.0");
             Header::create(

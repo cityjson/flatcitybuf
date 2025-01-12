@@ -1,4 +1,4 @@
-use flatcitybuf::fcb_deserializer::to_cj_metadata;
+use flatcitybuf::deserializer::to_cj_metadata;
 use flatcitybuf::FcbReader;
 use std::error::Error;
 use std::fs::File;

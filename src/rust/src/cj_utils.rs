@@ -86,6 +86,20 @@ pub fn read_cityjson_from_reader<R: Read>(
     parse_cityjson(reader, cj_type)
 }
 
+/// Tests reading CityJSON data from a memory string
+///
+/// # Arguments
+/// None
+///
+/// # Returns
+/// * `Result<()>` - Ok if test passes, Error otherwise
+///
+/// # Example
+/// ```
+/// let test_data = include_str!("../tests/data/small.city.jsonl");
+/// let result = read_cityjson(test_data, CJTypeKind::Seq)?;
+/// ```
+
 #[cfg(test)]
 mod tests {
     use std::{fs::File, path::PathBuf};
@@ -94,10 +108,11 @@ mod tests {
 
     #[test]
     fn test_read_from_memory() -> Result<()> {
-        let input_file =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/small.city.jsonl");
-        let reader = BufReader::new(File::open(input_file)?);
-        let result = read_cityjson_from_reader(reader, CJTypeKind::Seq)?;
+        let input_file = BufReader::new(File::open(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/small.city.jsonl"),
+        )?);
+        let result = read_cityjson_from_reader(input_file, CJTypeKind::Seq)?;
+
         if let CJType::Seq(seq) = result {
             assert_eq!(seq.features.len(), 3);
         } else {

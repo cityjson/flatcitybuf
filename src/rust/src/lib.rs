@@ -2,7 +2,6 @@
 
 mod cj_utils;
 mod error;
-mod fcb_serde;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 mod feature_generated;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
@@ -11,7 +10,6 @@ mod reader;
 mod writer;
 
 pub use cj_utils::*;
-pub use fcb_serde::*;
 pub use feature_generated::*;
 pub use header_generated::*;
 pub use reader::*;

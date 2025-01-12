@@ -1,4 +1,4 @@
-use crate::fcb_serializer::to_fcb_header;
+use crate::serializer::to_fcb_header;
 use cjseq::CityJSON;
 use flatbuffers::FlatBufferBuilder;
 

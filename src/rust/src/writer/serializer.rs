@@ -11,8 +11,9 @@ use crate::header_writer::HeaderMetadata;
 use crate::{Column, ColumnArgs};
 
 use cjseq::{
-    CityJSON, CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
-    Metadata as CjMetadata, Transform as CjTransform,
+    CityJSON, CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
+    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
+    ReferenceSystem as CjReferenceSystem, Transform as CjTransform,
 };
 use flatbuffers::FlatBufferBuilder;
 use serde_json::Value;
@@ -34,100 +35,98 @@ pub fn to_fcb_header<'a>(
     header_metadata: HeaderMetadata,
     attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<Header<'a>> {
-    let metadata = cj
-        .metadata
-        .as_ref()
-        .ok_or(anyhow::anyhow!("metadata is missing"))
-        .unwrap();
-    // let metadata = cj
-    //     .metadata
-    //     .as_ref()
-    //     .ok_or(anyhow::anyhow!(Error::MissingField("metadata".to_string())))
-    //     .unwrap();
-    let reference_system = to_fcb_reference_system(fbb, metadata);
-    let transform = to_fcb_transform(&cj.transform);
-    let geographical_extent = metadata
-        .geographical_extent
-        .as_ref()
-        .map(to_fcb_geographical_extent);
-    let header_args = HeaderArgs {
-        version: Some(fbb.create_string(&cj.version)),
-        transform: Some(&transform),
-        columns: Some(to_fcb_columns(fbb, attr_schema)),
-        features_count: header_metadata.features_count,
-        geographical_extent: geographical_extent.as_ref(),
-        reference_system,
-        identifier: metadata.identifier.as_ref().map(|i| fbb.create_string(i)),
-        reference_date: metadata
-            .reference_date
-            .as_ref()
-            .map(|r| fbb.create_string(r)),
-        title: metadata.title.as_ref().map(|t| fbb.create_string(t)),
-        poc_contact_name: metadata
-            .point_of_contact
-            .as_ref()
-            .map(|poc| fbb.create_string(&poc.contact_name)),
-        poc_contact_type: metadata
-            .point_of_contact
-            .as_ref()
-            .and_then(|poc| poc.contact_type.as_ref().map(|ct| fbb.create_string(ct))),
-        poc_role: metadata
-            .point_of_contact
-            .as_ref()
-            .and_then(|poc| poc.role.as_ref().map(|r| fbb.create_string(r))),
-        poc_phone: metadata
-            .point_of_contact
-            .as_ref()
-            .and_then(|poc| poc.phone.as_ref().map(|p| fbb.create_string(p))),
-        poc_email: metadata
-            .point_of_contact
-            .as_ref()
-            .map(|poc| fbb.create_string(&poc.email_address)),
-        poc_website: metadata
-            .point_of_contact
-            .as_ref()
-            .and_then(|poc| poc.website.as_ref().map(|w| fbb.create_string(w))),
-        poc_address_thoroughfare_number: metadata.point_of_contact.as_ref().and_then(|poc| {
-            poc.address
-                .as_ref()
-                .map(|a| fbb.create_string(&a.thoroughfare_number.to_string()))
-        }),
-        poc_address_thoroughfare_name: metadata.point_of_contact.as_ref().map(|poc| {
-            fbb.create_string(
-                &poc.address
-                    .as_ref()
-                    .map(|a| a.thoroughfare_name.clone())
-                    .unwrap_or_default(),
-            )
-        }),
-        poc_address_locality: metadata.point_of_contact.as_ref().map(|poc| {
-            fbb.create_string(
-                &poc.address
-                    .as_ref()
-                    .map(|a| a.locality.clone())
-                    .unwrap_or_default(),
-            )
-        }),
-        poc_address_postcode: metadata.point_of_contact.as_ref().map(|poc| {
-            fbb.create_string(
-                &poc.address
-                    .as_ref()
-                    .map(|a| a.postal_code.clone())
-                    .unwrap_or_default(),
-            )
-        }),
-        poc_address_country: metadata.point_of_contact.as_ref().map(|poc| {
-            fbb.create_string(
-                &poc.address
-                    .as_ref()
-                    .map(|a| a.country.clone())
-                    .unwrap_or_default(),
-            )
-        }),
-        attributes: None,
-    };
+    let version = Some(fbb.create_string(&cj.version));
+    let transform = to_transform(&cj.transform);
+    let features_count: u64 = header_metadata.features_count;
+    let columns = Some(to_columns(fbb, attr_schema));
 
-    Header::create(fbb, &header_args)
+    if let Some(meta) = cj.metadata.as_ref() {
+        let reference_system = meta
+            .reference_system
+            .as_ref()
+            .map(|ref_sys| to_reference_system(fbb, ref_sys));
+        let geographical_extent = meta
+            .geographical_extent
+            .as_ref()
+            .map(to_geographical_extent);
+        let identifier = meta.identifier.as_ref().map(|i| fbb.create_string(i));
+        let reference_date = meta.reference_date.as_ref().map(|r| fbb.create_string(r));
+        let title = meta.title.as_ref().map(|t| fbb.create_string(t));
+        let poc_fields = meta
+            .point_of_contact
+            .as_ref()
+            .map(|poc| to_point_of_contact(fbb, poc));
+
+        let (
+            poc_contact_name,
+            poc_contact_type,
+            poc_role,
+            poc_phone,
+            poc_email,
+            poc_website,
+            poc_address_thoroughfare_number,
+            poc_address_thoroughfare_name,
+            poc_address_locality,
+            poc_address_postcode,
+            poc_address_country,
+        ) = poc_fields.map_or(
+            (
+                None, None, None, None, None, None, None, None, None, None, None,
+            ),
+            |poc| {
+                (
+                    poc.poc_contact_name,
+                    poc.poc_contact_type,
+                    poc.poc_role,
+                    poc.poc_phone,
+                    poc.poc_email,
+                    poc.poc_website,
+                    poc.poc_address_thoroughfare_number,
+                    poc.poc_address_thoroughfare_name,
+                    poc.poc_address_locality,
+                    poc.poc_address_postcode,
+                    poc.poc_address_country,
+                )
+            },
+        );
+        Header::create(
+            fbb,
+            &HeaderArgs {
+                transform: Some(transform).as_ref(),
+                columns,
+                features_count,
+                geographical_extent: geographical_extent.as_ref(),
+                reference_system,
+                identifier,
+                reference_date,
+                title,
+                poc_contact_name,
+                poc_contact_type,
+                poc_role,
+                poc_phone,
+                poc_email,
+                poc_website,
+                poc_address_thoroughfare_number,
+                poc_address_thoroughfare_name,
+                poc_address_locality,
+                poc_address_postcode,
+                poc_address_country,
+                attributes: None,
+                version,
+            },
+        )
+    } else {
+        Header::create(
+            fbb,
+            &HeaderArgs {
+                transform: Some(transform).as_ref(),
+                columns,
+                features_count,
+                version,
+                ..Default::default()
+            },
+        )
+    }
 }
 
 /// Converts CityJSON geographical extent to FlatBuffers format
@@ -135,7 +134,7 @@ pub fn to_fcb_header<'a>(
 /// # Arguments
 ///
 /// * `geographical_extent` - Array of 6 values [minx, miny, minz, maxx, maxy, maxz]
-pub(crate) fn to_fcb_geographical_extent(geographical_extent: &[f64; 6]) -> GeographicalExtent {
+pub(crate) fn to_geographical_extent(geographical_extent: &[f64; 6]) -> GeographicalExtent {
     let min = Vector::new(
         geographical_extent[0],
         geographical_extent[1],
@@ -154,7 +153,7 @@ pub(crate) fn to_fcb_geographical_extent(geographical_extent: &[f64; 6]) -> Geog
 /// # Arguments
 ///
 /// * `transform` - CityJSON transform containing scale and translate values
-pub(crate) fn to_fcb_transform(transform: &CjTransform) -> Transform {
+pub(crate) fn to_transform(transform: &CjTransform) -> Transform {
     let scale = Vector::new(transform.scale[0], transform.scale[1], transform.scale[2]);
     let translate = Vector::new(
         transform.translate[0],
@@ -170,106 +169,93 @@ pub(crate) fn to_fcb_transform(transform: &CjTransform) -> Transform {
 ///
 /// * `fbb` - FlatBuffers builder instance
 /// * `metadata` - CityJSON metadata containing reference system information
-pub(crate) fn to_fcb_reference_system<'a>(
+pub(crate) fn to_reference_system<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
-    metadata: &CjMetadata,
-) -> Option<flatbuffers::WIPOffset<ReferenceSystem<'a>>> {
-    metadata.reference_system.as_ref().map(|ref_sys| {
-        let authority = Some(fbb.create_string(&ref_sys.authority));
+    ref_system: &CjReferenceSystem,
+) -> flatbuffers::WIPOffset<ReferenceSystem<'a>> {
+    let authority = Some(fbb.create_string(&ref_system.authority));
 
-        let version = ref_sys.version.parse::<i32>().unwrap_or_else(|e| {
-            println!("failed to parse version: {}", e);
-            0
-        });
-        let code = ref_sys.code.parse::<i32>().unwrap_or_else(|e| {
-            println!("failed to parse code: {}", e);
-            0
-        });
+    let version = ref_system.version.parse::<i32>().unwrap_or_else(|e| {
+        println!("failed to parse version: {}", e);
+        0
+    });
+    let code = ref_system.code.parse::<i32>().unwrap_or_else(|e| {
+        println!("failed to parse code: {}", e);
+        0
+    });
 
-        let code_string = None; // TODO: implement code_string
+    let code_string = None; // TODO: implement code_string
 
-        ReferenceSystem::create(
-            fbb,
-            &ReferenceSystemArgs {
-                authority,
-                version,
-                code,
-                code_string,
-            },
-        )
-    })
+    ReferenceSystem::create(
+        fbb,
+        &ReferenceSystemArgs {
+            authority,
+            version,
+            code,
+            code_string,
+        },
+    )
+}
+
+/// Internal struct used only as a return type for `to_point_of_contact`
+#[doc(hidden)]
+struct FcbPointOfContact<'a> {
+    poc_contact_name: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_contact_type: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_role: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_phone: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_email: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_website: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_address_thoroughfare_number: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_address_thoroughfare_name: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_address_locality: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_address_postcode: Option<flatbuffers::WIPOffset<&'a str>>,
+    poc_address_country: Option<flatbuffers::WIPOffset<&'a str>>,
+}
+
+fn to_point_of_contact<'a>(
+    fbb: &mut FlatBufferBuilder<'a>,
+    poc: &CjPointOfContact,
+) -> FcbPointOfContact<'a> {
+    let poc_contact_name = Some(fbb.create_string(&poc.contact_name));
+
+    let poc_contact_type = poc.contact_type.as_ref().map(|ct| fbb.create_string(ct));
+    let poc_role = poc.role.as_ref().map(|r| fbb.create_string(r));
+    let poc_phone = poc.phone.as_ref().map(|p| fbb.create_string(p));
+    let poc_email = Some(fbb.create_string(&poc.email_address));
+    let poc_website = poc.website.as_ref().map(|w| fbb.create_string(w));
+    let poc_address_thoroughfare_number = poc
+        .address
+        .as_ref()
+        .map(|a| fbb.create_string(&a.thoroughfare_number.to_string()));
+    let poc_address_thoroughfare_name = poc
+        .address
+        .as_ref()
+        .map(|a| fbb.create_string(&a.thoroughfare_name));
+    let poc_address_locality = poc.address.as_ref().map(|a| fbb.create_string(&a.locality));
+    let poc_address_postcode = poc
+        .address
+        .as_ref()
+        .map(|a| fbb.create_string(&a.postal_code));
+    let poc_address_country = poc.address.as_ref().map(|a| fbb.create_string(&a.country));
+    FcbPointOfContact {
+        poc_contact_name,
+        poc_contact_type,
+        poc_role,
+        poc_phone,
+        poc_email,
+        poc_website,
+        poc_address_thoroughfare_number,
+        poc_address_thoroughfare_name,
+        poc_address_locality,
+        poc_address_postcode,
+        poc_address_country,
+    }
 }
 
 /// -----------------------------------
 /// Serializer for CityJSONFeature
 /// -----------------------------------
-
-/// Converts CityJSON object type to FlatBuffers enum
-///
-/// # Arguments
-///
-/// * `co_type` - String representation of CityJSON object type
-pub fn to_fcb_city_object_type(co_type: &str) -> CityObjectType {
-    match co_type {
-        "Bridge" => CityObjectType::Bridge,
-        "BridgePart" => CityObjectType::BridgePart,
-        "BridgeInstallation" => CityObjectType::BridgeInstallation,
-        "BridgeConstructiveElement" => CityObjectType::BridgeConstructiveElement,
-        "BridgeRoom" => CityObjectType::BridgeRoom,
-        "BridgeFurniture" => CityObjectType::BridgeFurniture,
-
-        "Building" => CityObjectType::Building,
-        "BuildingPart" => CityObjectType::BuildingPart,
-        "BuildingInstallation" => CityObjectType::BuildingInstallation,
-        "BuildingConstructiveElement" => CityObjectType::BuildingConstructiveElement,
-        "BuildingFurniture" => CityObjectType::BuildingFurniture,
-        "BuildingStorey" => CityObjectType::BuildingStorey,
-        "BuildingRoom" => CityObjectType::BuildingRoom,
-        "BuildingUnit" => CityObjectType::BuildingUnit,
-
-        "CityFurniture" => CityObjectType::CityFurniture,
-        "CityObjectGroup" => CityObjectType::CityObjectGroup,
-        "GenericCityObject" => CityObjectType::GenericCityObject,
-        "LandUse" => CityObjectType::LandUse,
-        "OtherConstruction" => CityObjectType::OtherConstruction,
-        "PlantCover" => CityObjectType::PlantCover,
-        "SolitaryVegetationObject" => CityObjectType::SolitaryVegetationObject,
-        "TINRelief" => CityObjectType::TINRelief,
-
-        "Road" => CityObjectType::Road,
-        "Railway" => CityObjectType::Railway,
-        "Waterway" => CityObjectType::Waterway,
-        "TransportSquare" => CityObjectType::TransportSquare,
-
-        "Tunnel" => CityObjectType::Tunnel,
-        "TunnelPart" => CityObjectType::TunnelPart,
-        "TunnelInstallation" => CityObjectType::TunnelInstallation,
-        "TunnelConstructiveElement" => CityObjectType::TunnelConstructiveElement,
-        "TunnelHollowSpace" => CityObjectType::TunnelHollowSpace,
-        "TunnelFurniture" => CityObjectType::TunnelFurniture,
-
-        "WaterBody" => CityObjectType::WaterBody,
-        _ => CityObjectType::GenericCityObject,
-    }
-}
-
-/// Converts CityJSON geometry type to FlatBuffers enum
-///
-/// # Arguments
-///
-/// * `geometry_type` - CityJSON geometry type
-pub(crate) fn to_fcb_geometry_type(geometry_type: &CjGeometryType) -> GeometryType {
-    match geometry_type {
-        CjGeometryType::MultiPoint => GeometryType::MultiPoint,
-        CjGeometryType::MultiLineString => GeometryType::MultiLineString,
-        CjGeometryType::MultiSurface => GeometryType::MultiSurface,
-        CjGeometryType::CompositeSurface => GeometryType::CompositeSurface,
-        CjGeometryType::Solid => GeometryType::Solid,
-        CjGeometryType::MultiSolid => GeometryType::MultiSolid,
-        CjGeometryType::CompositeSolid => GeometryType::CompositeSolid,
-        _ => GeometryType::Solid,
-    }
-}
 
 /// Creates a CityFeature in FlatBuffers format
 ///
@@ -282,14 +268,20 @@ pub(crate) fn to_fcb_geometry_type(geometry_type: &CjGeometryType) -> GeometryTy
 pub fn to_fcb_city_feature<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     id: &str,
-    objects: &[flatbuffers::WIPOffset<CityObject<'a>>],
-    vertices: &[Vec<i64>],
+    city_feature: &CityJSONFeature,
+    attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<CityFeature<'a>> {
     let id = Some(fbb.create_string(id));
-    let objects = Some(fbb.create_vector(objects));
+    let city_objects: Vec<_> = city_feature
+        .city_objects
+        .iter()
+        .map(|(id, co)| to_city_object(fbb, id, co, attr_schema))
+        .collect();
+    let objects = Some(fbb.create_vector(&city_objects));
     let vertices = Some(
         fbb.create_vector(
-            &vertices
+            &city_feature
+                .vertices
                 .iter()
                 .map(|v| {
                     Vertex::new(
@@ -318,7 +310,7 @@ pub fn to_fcb_city_feature<'a>(
 /// * `fbb` - FlatBuffers builder instance
 /// * `id` - Object identifier
 /// * `co` - CityJSON city object
-pub fn to_fcb_city_object<'a>(
+pub fn to_city_object<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     id: &str,
     co: &CjCityObject,
@@ -326,7 +318,7 @@ pub fn to_fcb_city_object<'a>(
 ) -> flatbuffers::WIPOffset<CityObject<'a>> {
     let id = Some(fbb.create_string(id));
 
-    let type_ = to_fcb_city_object_type(&co.thetype);
+    let type_ = to_co_type(&co.thetype);
     let geographical_extent = co.geographical_extent.as_ref().map(|ge| {
         let min = Vector::new(ge[0], ge[1], ge[2]);
         let max = Vector::new(ge[3], ge[4], ge[5]);
@@ -336,7 +328,7 @@ pub fn to_fcb_city_object<'a>(
         let geometries = co.geometry.as_ref().map(|geometries| {
             geometries
                 .iter()
-                .map(|g| to_fcb_geometry(fbb, g))
+                .map(|g| to_geometry(fbb, g))
                 .collect::<Vec<_>>()
         });
         geometries.map(|geometries| fbb.create_vector(&geometries))
@@ -350,7 +342,7 @@ pub fn to_fcb_city_object<'a>(
                 return (None, None);
             }
             let (attr_vec, own_schema) = to_fcb_attribute(fbb, attr, attr_schema);
-            let columns = own_schema.map(|schema| to_fcb_columns(fbb, &schema));
+            let columns = own_schema.map(|schema| to_columns(fbb, &schema));
             (Some(attr_vec), columns)
         })
         .unwrap_or((None, None));
@@ -399,12 +391,79 @@ pub fn to_fcb_city_object<'a>(
     )
 }
 
+/// Converts CityJSON object type to FlatBuffers enum
+///
+/// # Arguments
+///
+/// * `co_type` - String representation of CityJSON object type
+pub fn to_co_type(co_type: &str) -> CityObjectType {
+    match co_type {
+        "Bridge" => CityObjectType::Bridge,
+        "BridgePart" => CityObjectType::BridgePart,
+        "BridgeInstallation" => CityObjectType::BridgeInstallation,
+        "BridgeConstructiveElement" => CityObjectType::BridgeConstructiveElement,
+        "BridgeRoom" => CityObjectType::BridgeRoom,
+        "BridgeFurniture" => CityObjectType::BridgeFurniture,
+
+        "Building" => CityObjectType::Building,
+        "BuildingPart" => CityObjectType::BuildingPart,
+        "BuildingInstallation" => CityObjectType::BuildingInstallation,
+        "BuildingConstructiveElement" => CityObjectType::BuildingConstructiveElement,
+        "BuildingFurniture" => CityObjectType::BuildingFurniture,
+        "BuildingStorey" => CityObjectType::BuildingStorey,
+        "BuildingRoom" => CityObjectType::BuildingRoom,
+        "BuildingUnit" => CityObjectType::BuildingUnit,
+
+        "CityFurniture" => CityObjectType::CityFurniture,
+        "CityObjectGroup" => CityObjectType::CityObjectGroup,
+        "GenericCityObject" => CityObjectType::GenericCityObject,
+        "LandUse" => CityObjectType::LandUse,
+        "OtherConstruction" => CityObjectType::OtherConstruction,
+        "PlantCover" => CityObjectType::PlantCover,
+        "SolitaryVegetationObject" => CityObjectType::SolitaryVegetationObject,
+        "TINRelief" => CityObjectType::TINRelief,
+
+        "Road" => CityObjectType::Road,
+        "Railway" => CityObjectType::Railway,
+        "Waterway" => CityObjectType::Waterway,
+        "TransportSquare" => CityObjectType::TransportSquare,
+
+        "Tunnel" => CityObjectType::Tunnel,
+        "TunnelPart" => CityObjectType::TunnelPart,
+        "TunnelInstallation" => CityObjectType::TunnelInstallation,
+        "TunnelConstructiveElement" => CityObjectType::TunnelConstructiveElement,
+        "TunnelHollowSpace" => CityObjectType::TunnelHollowSpace,
+        "TunnelFurniture" => CityObjectType::TunnelFurniture,
+
+        "WaterBody" => CityObjectType::WaterBody,
+        _ => CityObjectType::GenericCityObject,
+    }
+}
+
+/// Converts CityJSON geometry type to FlatBuffers enum
+///
+/// # Arguments
+///
+/// * `geometry_type` - CityJSON geometry type
+pub(crate) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
+    match geometry_type {
+        CjGeometryType::MultiPoint => GeometryType::MultiPoint,
+        CjGeometryType::MultiLineString => GeometryType::MultiLineString,
+        CjGeometryType::MultiSurface => GeometryType::MultiSurface,
+        CjGeometryType::CompositeSurface => GeometryType::CompositeSurface,
+        CjGeometryType::Solid => GeometryType::Solid,
+        CjGeometryType::MultiSolid => GeometryType::MultiSolid,
+        CjGeometryType::CompositeSolid => GeometryType::CompositeSolid,
+        _ => GeometryType::Solid,
+    }
+}
+
 /// Converts CityJSON semantic surface type to FlatBuffers enum
 ///
 /// # Arguments
 ///
 /// * `ss_type` - String representation of semantic surface type
-pub(crate) fn to_fcb_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
+pub(super) fn to_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
     match ss_type {
         "RoofSurface" => SemanticSurfaceType::RoofSurface,
         "GroundSurface" => SemanticSurfaceType::GroundSurface,
@@ -436,11 +495,11 @@ pub(crate) fn to_fcb_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType
 ///
 /// * `fbb` - FlatBuffers builder instance
 /// * `geometry` - CityJSON geometry object
-pub(crate) fn to_fcb_geometry<'a>(
+pub fn to_geometry<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     geometry: &CjGeometry,
 ) -> flatbuffers::WIPOffset<Geometry<'a>> {
-    let type_ = to_fcb_geometry_type(&geometry.thetype);
+    let type_ = to_geom_type(&geometry.thetype);
     let lod = geometry.lod.as_ref().map(|lod| fbb.create_string(lod));
 
     let mut encoder_decoder = FcbGeometryEncoderDecoder::new();
@@ -459,7 +518,7 @@ pub(crate) fn to_fcb_geometry<'a>(
             .iter()
             .map(|s| {
                 let children = s.children.clone().map(|c| fbb.create_vector(&c.to_vec()));
-                let semantics_type = to_fcb_semantic_surface_type(&s.thetype);
+                let semantics_type = to_semantic_surface_type(&s.thetype);
                 let semantic_object = SemanticObject::create(
                     fbb,
                     &SemanticObjectArgs {
@@ -497,7 +556,7 @@ pub(crate) fn to_fcb_geometry<'a>(
     )
 }
 
-pub fn to_fcb_columns<'a>(
+pub fn to_columns<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>> {
@@ -550,8 +609,7 @@ pub fn to_fcb_attribute<'a>(
 mod tests {
     use super::*;
 
-    use crate::fcb_serde::fcb_deserializer::to_cj_co_type;
-    use crate::feature_generated::root_as_city_feature;
+    use crate::{deserializer::to_cj_co_type, feature_generated::root_as_city_feature};
 
     use anyhow::Result;
     use cjseq::CityJSONFeature;
@@ -572,17 +630,8 @@ mod tests {
 
         // Create FlatBuffer and encode
         let mut fbb = FlatBufferBuilder::new();
-        let city_objects_buf: Vec<_> = cj_city_feature
-            .city_objects
-            .iter()
-            .map(|(id, co)| to_fcb_city_object(&mut fbb, id, co, &attr_schema))
-            .collect();
-        let city_feature = to_fcb_city_feature(
-            &mut fbb,
-            "test_id",
-            &city_objects_buf,
-            &cj_city_feature.vertices,
-        );
+
+        let city_feature = to_fcb_city_feature(&mut fbb, "test_id", &cj_city_feature, &attr_schema);
 
         fbb.finish(city_feature, None);
         let buf = fbb.finished_data();
@@ -692,81 +741,6 @@ mod tests {
                 );
             }
         }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_encode_attributes() -> Result<()> {
-        // let json_data = json!({
-        //     "attributes": {
-        //         "int": -1,
-        //         "uint": 1,
-        //         "bool": true,
-        //         "float": 1.0,
-        //         "string": "hoge",
-        //         "array": [1, 2, 3],
-        //         "json": {
-        //             "hoge": "fuga"
-        //         },
-        //         "null": null
-        //     }
-        // });
-        // let attrs = &json_data["attributes"];
-
-        // // Test case 1: Using common schema
-        // {
-        //     let mut fbb = FlatBufferBuilder::new();
-        //     let mut common_schema = AttributeSchema::new();
-        //     common_schema.add_attributes(attrs);
-
-        //     let columns = to_fcb_columns(&mut fbb, &common_schema);
-        //     let header = Header::create(
-        //         &mut fbb,
-        //         &HeaderArgs {
-        //             columns: Some(columns),
-        //             ..Default::default()
-        //         },
-        //     );
-
-        //     fbb.finish(header, None);
-        //     let finished_data = fbb.finished_data();
-        //     let header_buf = root_as_header(finished_data).unwrap();
-
-        //     // let feature =
-
-        //     let encoded = encode_attributes_with_schema(attrs, &common_schema);
-
-        //     // Verify encoded data
-        //     assert!(!encoded.is_empty());
-
-        //     let decoded = decode_attributes(header_buf.columns().unwrap(), encoded.);
-        //     assert_eq!(attrs, &decoded);
-        // }
-
-        // // Test case 2: Using own schema
-        // {
-        //     let mut fbb = FlatBufferBuilder::new();
-        //     let (offset, schema) = to_fcb_attribute(&mut fbb, attrs, &AttributeSchema::new());
-
-        //     // Verify schema is returned for own schema case
-        //     assert!(schema.is_some());
-        //     let schema = schema.unwrap();
-
-        //     // Verify schema contains expected types
-        //     assert_eq!(schema.get("int"), Some(&ColumnType::Int));
-        //     assert_eq!(schema.get("uint"), Some(&ColumnType::UInt));
-        //     assert_eq!(schema.get("bool"), Some(&ColumnType::Bool));
-        //     assert_eq!(schema.get("float"), Some(&ColumnType::Float));
-        //     assert_eq!(schema.get("string"), Some(&ColumnType::String));
-        //     assert_eq!(schema.get("json"), Some(&ColumnType::Json));
-
-        //     // Get the encoded data
-        //     let data = fbb.finished_data();
-        //     assert!(!data.is_empty());
-        //     // First 2 bytes should be 1 (true) for own schema
-        //     assert_eq!(&data[0..2], &[1, 0]);
-        // }
 
         Ok(())
     }

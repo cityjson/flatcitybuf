@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use flatcitybuf::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
-    fcb_deserializer,
+    deserializer,
     header_writer::{HeaderMetadata, HeaderWriterOptions},
     read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbReader, FcbWriter,
 };
@@ -98,7 +98,7 @@ fn serialize(input: &str, output: &str) -> Result<()> {
         write_index: false,
         header_metadata,
     });
-    let mut fcb = FcbWriter::new(cj, header_options, None, attr_schema)?;
+    let mut fcb = FcbWriter::new(cj, header_options, attr_schema)?;
     fcb.write_feature()?;
 
     for feature in features.iter() {
@@ -118,7 +118,7 @@ fn deserialize(input: &str, output: &str) -> Result<()> {
     let mut fcb_reader = FcbReader::open(reader)?.select_all_seq()?;
 
     let header = fcb_reader.header();
-    let cj = fcb_deserializer::to_cj_metadata(&header)?;
+    let cj = deserializer::to_cj_metadata(&header)?;
 
     // Write header
     writeln!(writer, "{}", serde_json::to_string(&cj)?)?;

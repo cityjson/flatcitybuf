@@ -1,7 +1,7 @@
 use crate::header_generated::ColumnType;
 use byteorder::{ByteOrder, LittleEndian};
 use serde_json::Value;
-use std::{collections::HashMap, u16};
+use std::collections::HashMap;
 
 pub type AttributeSchema = HashMap<String, (u16, ColumnType)>;
 

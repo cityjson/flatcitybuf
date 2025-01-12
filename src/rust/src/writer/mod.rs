@@ -11,6 +11,7 @@ pub mod attribute;
 pub mod feature_writer;
 pub mod geometry_encoderdecoder;
 pub mod header_writer;
+pub mod serializer;
 
 /// Main writer for FlatCityBuf (FCB) format
 ///
@@ -42,16 +43,14 @@ impl<'a> FcbWriter<'a> {
     pub fn new(
         cj: CityJSON,
         header_option: Option<HeaderWriterOptions>,
-        first_feature: Option<&'a CityJSONFeature>,
         attr_schema: Option<AttributeSchema>,
     ) -> Result<Self> {
         let attr_schema = attr_schema.unwrap_or_default();
 
         let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone());
-        let feat_writer = first_feature.map(|feat| FeatureWriter::new(feat, attr_schema.clone()));
         Ok(Self {
             header_writer,
-            feat_writer,
+            feat_writer: None,
             tmpout: BufWriter::new(tempfile::tempfile()?),
             attr_schema,
         })
@@ -110,17 +109,12 @@ impl<'a> FcbWriter<'a> {
         out.write_all(&MAGIC_BYTES)?;
 
         let header_buf = self.header_writer.finish_to_header();
-        println!("header buf size: {} bytes", header_buf.len());
         out.write_all(&header_buf)?;
 
         self.tmpout.rewind()?;
         let mut unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
         let mut feature_buf: Vec<u8> = Vec::new();
         unsorted_feature_output.read_to_end(&mut feature_buf)?;
-        println!(
-            "unsorted_feature_output buf size: {} bytes",
-            feature_buf.len()
-        );
         out.write_all(&feature_buf)?;
 
         Ok(())
