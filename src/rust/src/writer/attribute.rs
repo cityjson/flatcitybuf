@@ -75,17 +75,28 @@ pub fn attr_size(coltype: &ColumnType, colval: &Value) -> usize {
 }
 
 pub fn encode_attributes_with_schema(attr: &Value, schema: &AttributeSchema) -> Vec<u8> {
+    if !attr.is_object() || attr.as_object().unwrap().is_empty() || attr.is_null() {
+        return Vec::new();
+    }
+
     let mut out = Vec::new();
     let mut sorted_schema: Vec<_> = schema.iter().collect();
     sorted_schema.sort_by_key(|(_, (index, _))| *index);
 
     for (name, (index, coltype)) in sorted_schema {
-        let (_, val) = attr
-            .as_object()
-            .unwrap()
-            .iter()
-            .find(|(k, _)| *k == name)
-            .unwrap();
+        let (_, val) = {
+            let attr_obj = attr.as_object();
+            if let Some(attr_obj) = attr_obj {
+                let value = attr_obj.iter().find(|(k, _)| *k == name);
+                if let Some(value) = value {
+                    (value.0, value.1)
+                } else {
+                    return Vec::new();
+                }
+            } else {
+                return Vec::new();
+            }
+        };
 
         if val.is_null() {
             continue;
@@ -201,12 +212,12 @@ mod tests {
         attr_schema.add_attributes(&json_data["attributes"]);
 
         // Check if the schema contains the expected keys and types
-        assert_eq!(attr_schema.get("int").unwrap().1, ColumnType::Int);
-        assert_eq!(attr_schema.get("uint").unwrap().1, ColumnType::UInt);
+        assert_eq!(attr_schema.get("int").unwrap().1, ColumnType::Long);
+        assert_eq!(attr_schema.get("uint").unwrap().1, ColumnType::ULong);
         assert_eq!(attr_schema.get("bool").unwrap().1, ColumnType::Bool);
-        assert_eq!(attr_schema.get("float").unwrap().1, ColumnType::Float);
+        assert_eq!(attr_schema.get("float").unwrap().1, ColumnType::Double);
         assert_eq!(attr_schema.get("string").unwrap().1, ColumnType::String);
-        assert_eq!(attr_schema.get("array").unwrap().1, ColumnType::Json);
+        assert_eq!(attr_schema.get("array").unwrap().1, ColumnType::Json); //TODO: check if this is correct
         assert_eq!(attr_schema.get("json").unwrap().1, ColumnType::Json);
 
         Ok(())

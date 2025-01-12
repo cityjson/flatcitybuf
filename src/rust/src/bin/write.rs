@@ -37,7 +37,7 @@ fn write_file() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-        let mut fcb = FcbWriter::new(cj, header_options, features.first(), Some(&attr_schema))?;
+        let mut fcb = FcbWriter::new(cj, header_options, features.first(), Some(attr_schema))?;
         fcb.write_feature()?;
         for feature in features.iter().skip(1) {
             fcb.add_feature(feature)?;

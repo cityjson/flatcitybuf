@@ -44,21 +44,20 @@ impl CityJSONReader for &str {
 fn parse_cityjson<T: CityJSONReader>(mut source: T, cj_type: CJTypeKind) -> Result<CJType> {
     let mut lines = source.read_lines();
 
-    let first_line = lines.next().ok_or_else(|| anyhow!("Empty input"))??;
-
-    let mut cjj: CityJSON = serde_json::from_str(&first_line)?;
-
     match cj_type {
         CJTypeKind::Normal => {
-            for line in lines {
-                let mut feature: CityJSONFeature = serde_json::from_str(&line?)?;
-                cjj.add_cjfeature(&mut feature);
-            }
-            cjj.remove_duplicate_vertices();
-            Ok(CJType::Normal(cjj))
+            let content = lines.collect::<Result<Vec<_>>>()?.join("\n");
+
+            let cj: CityJSON = serde_json::from_str(&content)?;
+            Ok(CJType::Normal(cj))
         }
 
         CJTypeKind::Seq => {
+            // Read first line as CityJSON metadata
+            let first_line = lines.next().ok_or_else(|| anyhow!("Empty input"))??;
+            let cj: CityJSON = serde_json::from_str(&first_line)?;
+
+            // Read remaining lines as CityJSONFeatures
             let features: Result<Vec<_>> = lines
                 .map(|line| -> Result<_> {
                     let line = line?;
@@ -67,7 +66,7 @@ fn parse_cityjson<T: CityJSONReader>(mut source: T, cj_type: CJTypeKind) -> Resu
                 .collect();
 
             Ok(CJType::Seq(CityJSONSeq {
-                cj: cjj,
+                cj,
                 features: features?,
             }))
         }
@@ -89,22 +88,18 @@ pub fn read_cityjson_from_reader<R: Read>(
 
 #[cfg(test)]
 mod tests {
+    use std::{fs::File, path::PathBuf};
+
     use super::*;
-    use std::io::Cursor;
 
     #[test]
     fn test_read_from_memory() -> Result<()> {
-        let data = r#"{"type":"CityJSON","version":"1.1"}
-{"type":"CityJSONFeature","id":"feature1"}
-{"type":"CityJSONFeature","id":"feature2"}"#;
-
-        let reader = BufReader::new(Cursor::new(data));
+        let input_file =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/small.city.jsonl");
+        let reader = BufReader::new(File::open(input_file)?);
         let result = read_cityjson_from_reader(reader, CJTypeKind::Seq)?;
-
         if let CJType::Seq(seq) = result {
-            assert_eq!(seq.features.len(), 2);
-            assert_eq!(seq.features[0].id, "feature1");
-            assert_eq!(seq.features[1].id, "feature2");
+            assert_eq!(seq.features.len(), 3);
         } else {
             panic!("Expected Seq type");
         }

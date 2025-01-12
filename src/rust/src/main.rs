@@ -75,14 +75,21 @@ fn serialize(input: &str, output: &str) -> Result<()> {
     };
 
     let CityJSONSeq { cj, features } = cj_seq;
-    let mut attr_schema = AttributeSchema::new();
-    for feature in features.iter() {
-        for (_, co) in feature.city_objects.iter() {
-            if let Some(attributes) = &co.attributes {
-                attr_schema.add_attributes(attributes);
+    let attr_schema = {
+        let mut schema = AttributeSchema::new();
+        for feature in features.iter() {
+            for (_, co) in feature.city_objects.iter() {
+                if let Some(attributes) = &co.attributes {
+                    schema.add_attributes(attributes);
+                }
             }
         }
-    }
+        if schema.is_empty() {
+            None
+        } else {
+            Some(schema)
+        }
+    };
 
     let header_metadata = HeaderMetadata {
         features_count: features.len() as u64,
@@ -91,16 +98,7 @@ fn serialize(input: &str, output: &str) -> Result<()> {
         write_index: false,
         header_metadata,
     });
-    let mut fcb = FcbWriter::new(
-        cj,
-        header_options,
-        None,
-        if attr_schema.is_empty() {
-            None
-        } else {
-            Some(&attr_schema)
-        },
-    )?;
+    let mut fcb = FcbWriter::new(cj, header_options, None, attr_schema)?;
     fcb.write_feature()?;
 
     for feature in features.iter() {
@@ -125,14 +123,12 @@ fn deserialize(input: &str, output: &str) -> Result<()> {
     // Write header
     writeln!(writer, "{}", serde_json::to_string(&cj)?)?;
 
-    let root_attr_schema = header.columns();
     // Write features
     let feat_count = header.features_count();
     let mut feat_num = 0;
     while let Ok(Some(feat_buf)) = fcb_reader.next() {
-        let feature = feat_buf.cur_feature();
-        let cj_feature = fcb_deserializer::to_cj_feature(feature, None)?;
-        writeln!(writer, "{}", serde_json::to_string(&cj_feature)?)?;
+        let feature = feat_buf.cur_cj_feature()?;
+        writeln!(writer, "{}", serde_json::to_string(&feature)?)?;
 
         feat_num += 1;
         if feat_num >= feat_count {

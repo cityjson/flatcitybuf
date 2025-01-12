@@ -140,6 +140,10 @@ pub fn decode_attributes(
     columns: flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>,
     attributes: flatbuffers::Vector<'_, u8>,
 ) -> serde_json::Value {
+    if attributes.is_empty() {
+        return serde_json::Value::Object(serde_json::Map::new());
+    }
+
     let mut map = serde_json::Map::new();
     let bytes = attributes.bytes();
     let mut offset = 0;
@@ -288,14 +292,13 @@ pub fn to_cj_feature(
                         .collect::<Vec<_>>()
                 });
 
-                let mut attributes = None;
-                if root_attr_schema.is_none() && co.columns().is_none() {
-                    attributes = None;
+                let attributes = if root_attr_schema.is_none() && co.columns().is_none() {
+                    None
                 } else {
-                    attributes = co.attributes().map(|a| {
+                    co.attributes().map(|a| {
                         decode_attributes(co.columns().unwrap_or(root_attr_schema.unwrap()), a)
-                    });
-                }
+                    })
+                };
 
                 let children_roles = co
                     .children_roles()

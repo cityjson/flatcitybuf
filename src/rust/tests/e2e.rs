@@ -52,7 +52,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                 header_metadata,
             }),
             original_cj_seq.features.first(),
-            Some(&attr_schema),
+            Some(attr_schema),
         )?;
         fcb.write_feature()?;
         for feature in original_cj_seq.features.iter().skip(1) {

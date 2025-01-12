@@ -24,7 +24,6 @@ pub struct FcbWriter<'a> {
     header_writer: HeaderWriter<'a>,
     /// Optional writer for features
     feat_writer: Option<FeatureWriter<'a>>,
-
     attr_schema: AttributeSchema,
 }
 
@@ -44,18 +43,17 @@ impl<'a> FcbWriter<'a> {
         cj: CityJSON,
         header_option: Option<HeaderWriterOptions>,
         first_feature: Option<&'a CityJSONFeature>,
-        attr_schema: Option<&AttributeSchema>,
+        attr_schema: Option<AttributeSchema>,
     ) -> Result<Self> {
-        let owned_schema = AttributeSchema::new();
-        let attr_schema = attr_schema.unwrap_or(&owned_schema);
+        let attr_schema = attr_schema.unwrap_or_default();
 
-        let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone()); // if attr_schema is None, instantiate an empty one
+        let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone());
         let feat_writer = first_feature.map(|feat| FeatureWriter::new(feat, attr_schema.clone()));
         Ok(Self {
             header_writer,
             feat_writer,
             tmpout: BufWriter::new(tempfile::tempfile()?),
-            attr_schema: attr_schema.clone(),
+            attr_schema,
         })
     }
 
@@ -82,10 +80,15 @@ impl<'a> FcbWriter<'a> {
     ///
     /// A Result indicating success or failure of the operation
     pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<()> {
+        if self.feat_writer.is_none() {
+            self.feat_writer = Some(FeatureWriter::new(feature, self.attr_schema.clone()));
+        }
+
         if let Some(feat_writer) = &mut self.feat_writer {
             feat_writer.add_feature(feature);
             self.write_feature()?;
         }
+
         Ok(())
     }
 

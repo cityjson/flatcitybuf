@@ -350,7 +350,7 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
         to_cj_feature(fcb_feature, root_attr_schema)
     }
 
-    pub fn get_features(&mut self, out: impl Write) -> Result<()> {
+    pub fn get_features(&mut self, _: impl Write) -> Result<()> {
         // println!("get features");
         // let mut count = 0;
 
