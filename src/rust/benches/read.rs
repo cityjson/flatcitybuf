@@ -40,6 +40,40 @@ fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
     Ok((solid_count, multi_surface_count, other_count))
 }
 
+/// Read FCB file and count geometry types
+fn read_fcb_as_cj(path: &str) -> Result<(u64, u64, u64)> {
+    let input_file = File::open(path)?;
+    let inputreader = BufReader::new(input_file);
+
+    let mut reader = FcbReader::open(inputreader)?.select_all()?;
+    let header = reader.header();
+    let feat_count = header.features_count();
+    let mut solid_count = 0;
+    let mut multi_surface_count = 0;
+    let mut other_count = 0;
+    let mut feat_num = 0;
+    while let Some(feat_buf) = reader.next()? {
+        let feature = feat_buf.cur_cj_feature()?;
+        feature.city_objects.iter().for_each(|(_, co)| {
+            if let Some(geometries) = &co.geometry {
+                for geometry in geometries {
+                    match geometry.thetype {
+                        cjseq::GeometryType::Solid => solid_count += 1,
+                        cjseq::GeometryType::MultiSurface => multi_surface_count += 1,
+                        _ => other_count += 1,
+                    }
+                }
+            }
+        });
+        feat_num += 1;
+        if feat_num == feat_count {
+            break;
+        }
+    }
+
+    Ok((solid_count, multi_surface_count, other_count))
+}
+
 /// Read CityJSONSeq file and count geometry types
 fn read_cjseq(path: &str) -> Result<(u64, u64, u64)> {
     let file = File::open(path)?;
@@ -104,10 +138,10 @@ const DATASETS: &[(&str, (&str, &str))] = &[
     //         "benchmark_data/3DBAG.city.jsonl",
     //     ),
     // ),
-    // (
-    //     "3DBV",
-    //     ("benchmark_data/3DBV.fcb", "benchmark_data/3DBV.city.jsonl"),
-    // ),
+    (
+        "3DBV",
+        ("benchmark_data/3DBV.fcb", "benchmark_data/3DBV.city.jsonl"),
+    ),
     // (
     //     "Helsinki",
     //     (
@@ -122,13 +156,13 @@ const DATASETS: &[(&str, (&str, &str))] = &[
     //         "benchmark_data/Ingolstadt.city.jsonl",
     //     ),
     // ),
-    (
-        "Montreal",
-        (
-            "benchmark_data/Montreal.fcb",
-            "benchmark_data/Montreal.city.jsonl",
-        ),
-    ),
+    // (
+    //     "Montreal",
+    //     (
+    //         "benchmark_data/Montreal.fcb",
+    //         "benchmark_data/Montreal.city.jsonl",
+    //     ),
+    // ),
     // (
     //     "NYC",
     //     ("benchmark_data/NYC.fcb", "benchmark_data/NYC.city.jsonl"),
@@ -165,7 +199,10 @@ pub fn read_benchmark(c: &mut Criterion) {
             b.iter(|| read_fcb(black_box(path)))
         });
 
-        // Benchmark CityJSONSeq reading
+        group.bench_with_input(BenchmarkId::new("fcb as cj", size), fcb_path, |b, path| {
+            b.iter(|| read_fcb_as_cj(black_box(path)))
+        });
+
         group.bench_with_input(BenchmarkId::new("cjseq", size), cjseq_path, |b, path| {
             b.iter(|| read_cjseq(black_box(path)))
         });
