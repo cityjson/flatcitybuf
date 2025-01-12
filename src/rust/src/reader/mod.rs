@@ -11,6 +11,7 @@ use anyhow::{anyhow, Result};
 use fallible_streaming_iterator::FallibleStreamingIterator;
 use std::io::{Read, Seek, SeekFrom, Write};
 
+pub mod geom_decoder;
 use std::marker::PhantomData;
 pub struct FcbReader<R> {
     reader: R,

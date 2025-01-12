@@ -3,7 +3,7 @@ use crate::feature_generated::{
     CityFeature, CityFeatureArgs, CityObject, CityObjectArgs, CityObjectType, Geometry,
     GeometryArgs, GeometryType, SemanticObject, SemanticObjectArgs, SemanticSurfaceType, Vertex,
 };
-use crate::geometry_encoderdecoder::FcbGeometryEncoderDecoder;
+use crate::geom_encoder::encode;
 use crate::header_generated::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
@@ -17,6 +17,8 @@ use cjseq::{
 };
 use flatbuffers::FlatBufferBuilder;
 use serde_json::Value;
+
+use super::geom_encoder::{GMBoundaries, GMSemantics};
 
 /// -----------------------------------
 /// Serializer for Header
@@ -310,7 +312,7 @@ pub fn to_fcb_city_feature<'a>(
 /// * `fbb` - FlatBuffers builder instance
 /// * `id` - Object identifier
 /// * `co` - CityJSON city object
-pub fn to_city_object<'a>(
+pub(crate) fn to_city_object<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     id: &str,
     co: &CjCityObject,
@@ -319,18 +321,12 @@ pub fn to_city_object<'a>(
     let id = Some(fbb.create_string(id));
 
     let type_ = to_co_type(&co.thetype);
-    let geographical_extent = co.geographical_extent.as_ref().map(|ge| {
-        let min = Vector::new(ge[0], ge[1], ge[2]);
-        let max = Vector::new(ge[3], ge[4], ge[5]);
-        GeographicalExtent::new(&min, &max)
-    });
+    let geographical_extent = co.geographical_extent.as_ref().map(to_geographical_extent);
     let geometries = {
-        let geometries = co.geometry.as_ref().map(|geometries| {
-            geometries
-                .iter()
-                .map(|g| to_geometry(fbb, g))
-                .collect::<Vec<_>>()
-        });
+        let geometries = co
+            .geometry
+            .as_ref()
+            .map(|gs| gs.iter().map(|g| to_geometry(fbb, g)).collect::<Vec<_>>());
         geometries.map(|geometries| fbb.create_vector(&geometries))
     };
 
@@ -349,13 +345,12 @@ pub fn to_city_object<'a>(
 
     let (attributes, columns) = attributes_and_columns;
 
-    // todo: check if truncate is needed
     let children = {
-        let children_strings = co
+        let children = co
             .children
             .as_ref()
             .map(|c| c.iter().map(|s| fbb.create_string(s)).collect::<Vec<_>>());
-        children_strings.map(|children_strings| fbb.create_vector(&children_strings))
+        children.map(|c| fbb.create_vector(&c))
     };
 
     let children_roles = {
@@ -363,16 +358,15 @@ pub fn to_city_object<'a>(
             .children_roles
             .as_ref()
             .map(|c| c.iter().map(|r| fbb.create_string(r)).collect::<Vec<_>>());
-        children_roles_strings
-            .map(|children_roles_strings| fbb.create_vector(&children_roles_strings))
+        children_roles_strings.map(|c| fbb.create_vector(&c))
     };
 
     let parents = {
-        let parents_strings = co
+        let parents = co
             .parents
             .as_ref()
             .map(|p| p.iter().map(|s| fbb.create_string(s)).collect::<Vec<_>>());
-        parents_strings.map(|parents_strings| fbb.create_vector(&parents_strings))
+        parents.map(|p| fbb.create_vector(&p))
     };
 
     CityObject::create(
@@ -396,7 +390,7 @@ pub fn to_city_object<'a>(
 /// # Arguments
 ///
 /// * `co_type` - String representation of CityJSON object type
-pub fn to_co_type(co_type: &str) -> CityObjectType {
+pub(crate) fn to_co_type(co_type: &str) -> CityObjectType {
     match co_type {
         "Bridge" => CityObjectType::Bridge,
         "BridgePart" => CityObjectType::BridgePart,
@@ -502,43 +496,47 @@ pub fn to_geometry<'a>(
     let type_ = to_geom_type(&geometry.thetype);
     let lod = geometry.lod.as_ref().map(|lod| fbb.create_string(lod));
 
-    let mut encoder_decoder = FcbGeometryEncoderDecoder::new();
-    encoder_decoder.encode(&geometry.boundaries, geometry.semantics.as_ref());
-    let (solids, shells, surfaces, strings, boundary_indices) = encoder_decoder.boundaries();
-    let (semantics_surfaces, semantics_values) = encoder_decoder.semantics();
+    let encoded = encode(&geometry.boundaries, geometry.semantics.as_ref());
+    let GMBoundaries {
+        solids,
+        shells,
+        surfaces,
+        strings,
+        indices,
+    } = encoded.boundaries;
+    let semantics = encoded
+        .semantics
+        .map(|GMSemantics { surfaces, values }| (surfaces, values));
 
     let solids = Some(fbb.create_vector(&solids));
     let shells = Some(fbb.create_vector(&shells));
     let surfaces = Some(fbb.create_vector(&surfaces));
     let strings = Some(fbb.create_vector(&strings));
-    let boundary_indices = Some(fbb.create_vector(&boundary_indices));
+    let boundary_indices = Some(fbb.create_vector(&indices));
 
-    let semantics_objects = {
-        let semantics_objects = semantics_surfaces
-            .iter()
-            .map(|s| {
-                let children = s.children.clone().map(|c| fbb.create_vector(&c.to_vec()));
-                let semantics_type = to_semantic_surface_type(&s.thetype);
-                let semantic_object = SemanticObject::create(
-                    fbb,
-                    &SemanticObjectArgs {
-                        type_: semantics_type,
-                        attributes: None,
-                        children,
-                        parent: s.parent,
-                    },
-                );
-                semantic_object
-            })
-            .collect::<Vec<_>>();
-        if !semantics_objects.is_empty() {
-            Some(fbb.create_vector(&semantics_objects))
-        } else {
-            None
-        }
-    };
+    let (semantics_objects, semantics_values) =
+        semantics.map_or((None, None), |(surface, values)| {
+            let semantics_objects = surface
+                .iter()
+                .map(|s| {
+                    let children = s.children.as_ref().map(|c| fbb.create_vector(c));
+                    SemanticObject::create(
+                        fbb,
+                        &SemanticObjectArgs {
+                            type_: to_semantic_surface_type(&s.thetype),
+                            attributes: None,
+                            children,
+                            parent: s.parent,
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
 
-    let semantics_values = Some(fbb.create_vector(semantics_values));
+            (
+                Some(fbb.create_vector(&semantics_objects)),
+                Some(fbb.create_vector(&values)),
+            )
+        });
 
     Geometry::create(
         fbb,

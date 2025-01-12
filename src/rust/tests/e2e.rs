@@ -111,6 +111,41 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         // Compare city objects
         assert_eq!(orig_feat.city_objects.len(), des_feat.city_objects.len());
         for (id, orig_co) in orig_feat.city_objects.iter() {
+            // ===============remove these lines later=================
+            println!(
+                "is CityObject same? {:?}",
+                orig_co == des_feat.city_objects.get(id).unwrap()
+            );
+
+            println!(
+                "is attribute same======? {:?}",
+                orig_co.attributes == des_feat.city_objects.get(id).unwrap().attributes
+            );
+            if orig_co.attributes != des_feat.city_objects.get(id).unwrap().attributes {
+                println!("  attributes======:");
+
+                let orig_attrs = orig_co.attributes.as_ref().unwrap();
+                let des_attrs = des_feat
+                    .city_objects
+                    .get(id)
+                    .unwrap()
+                    .attributes
+                    .as_ref()
+                    .unwrap();
+                if orig_attrs.is_object() && des_attrs.is_object() {
+                    for (key, value) in orig_attrs.as_object().unwrap() {
+                        let des_value = des_attrs.get(key);
+                        if des_value.is_none() {
+                            println!("  key not found: {:?}", key);
+                        } else if value != des_value.unwrap() {
+                            println!("  key: {:?}", key);
+                            println!("    original: {:?}", value);
+                            println!("    deserialized: {:?}", des_value.unwrap());
+                        }
+                    }
+                }
+            }
+            // ===============remove these lines later=================
             // FIXME: Later, just compare CityObject using "=="
 
             let des_co = des_feat.city_objects.get(id).unwrap();

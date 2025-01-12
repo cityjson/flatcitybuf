@@ -9,7 +9,7 @@ use std::io::{BufWriter, Read, Seek, Write};
 
 pub mod attribute;
 pub mod feature_writer;
-pub mod geometry_encoderdecoder;
+pub mod geom_encoder;
 pub mod header_writer;
 pub mod serializer;
 
