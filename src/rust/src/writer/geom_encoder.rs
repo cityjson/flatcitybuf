@@ -1,8 +1,7 @@
 use cjseq::{
-    Boundaries as CjBoundaries, Semantics as CjSemantics,
-    SemanticsSurface as CjSemanticsSurface, SemanticsValues as CjSemanticsValues,
+    Boundaries as CjBoundaries, Semantics as CjSemantics, SemanticsSurface as CjSemanticsSurface,
+    SemanticsValues as CjSemanticsValues,
 };
-
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct GMBoundaries {
@@ -188,12 +187,11 @@ pub fn encode_semantics(semantics: &CjSemantics) -> GMSemantics {
 
 #[cfg(test)]
 mod tests {
-    
 
     use super::*;
     use anyhow::Result;
     use cjseq::Geometry as CjGeometry;
-    
+
     use serde_json::json;
 
     #[test]
@@ -438,19 +436,67 @@ mod tests {
           "type": "CompositeSolid",
           "lod": "2.2",
           "boundaries": [
+            [ //-- 1st Solid
             [
               [
-                  [[0, 3, 2, 1, 22]],
-                  [[4, 5, 6, 7]],
-                  [[0, 1, 5, 4]],
-                  [[1, 2, 6, 5]]
+                [
+                  0,
+                  3,
+                  2,
+                  1,
+                  22
+                ]
               ],
               [
-                  [[240, 243, 124]],
-                  [[244, 246, 724]],
-                  [[34, 414, 45]],
-                  [[111, 246, 5]]
+                [
+                  4,
+                  5,
+                  6,
+                  7
+                ]
+              ],
+              [
+                [
+                  0,
+                  1,
+                  5,
+                  4
+                ]
+              ],
+              [
+                [
+                  1,
+                  2,
+                  6,
+                  5
+                ]
               ]
+            ]
+          ],
+          [ //-- 2nd Solid
+            [
+              [
+                [
+                  666,
+                  667,
+                  668
+                ]
+              ],
+              [
+                [
+                  74,
+                  75,
+                  76
+                ]
+              ],
+              [
+                [
+                  880,
+                  881,
+                  885
+                ]
+              ]
+            ]
           ]],
           "semantics": {
             "surfaces" : [

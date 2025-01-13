@@ -457,7 +457,7 @@ pub(crate) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
 /// # Arguments
 ///
 /// * `ss_type` - String representation of semantic surface type
-pub(super) fn to_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
+pub(crate) fn to_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
     match ss_type {
         "RoofSurface" => SemanticSurfaceType::RoofSurface,
         "GroundSurface" => SemanticSurfaceType::GroundSurface,

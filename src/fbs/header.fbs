@@ -24,7 +24,7 @@ enum ColumnType: ubyte {
 }
 
 table Column {
-  index: ushort;                // Column index (0 = first column)
+  index: ushort;                // Column index (0 = first column) This index is used to identify the column in the FlatBuffer. The reason why index is used instead of column name is to save more space on attribute field.
   name: string (required);      // Column name
   type: ColumnType;             // Column type
   title: string;                // Column title

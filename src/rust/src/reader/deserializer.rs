@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     feature_generated::{CityFeature, CityObjectType, Geometry, Vertex},
-    geometry_encoderdecoder::FcbGeometryEncoderDecoder,
+    geom_decoder::{decode, decode_semantics},
     header_generated::*,
 };
 use anyhow::{Context, Result};
@@ -277,7 +277,7 @@ pub fn to_cj_feature(
             .iter()
             .map(|co| {
                 let geographical_extent = co.geographical_extent().map(|extent| {
-                    vec![
+                    [
                         extent.min().x(),
                         extent.min().y(),
                         extent.min().z(),
@@ -330,21 +330,39 @@ pub fn to_cj_feature(
 }
 
 pub(crate) fn decode_geometry(g: Geometry) -> Result<CjGeometry> {
-    let decoder = FcbGeometryEncoderDecoder::new_as_decoder(
-        g.solids().map(|v| v.iter().collect()),
-        g.shells().map(|v| v.iter().collect()),
-        g.surfaces().map(|v| v.iter().collect()),
-        g.strings().map(|v| v.iter().collect()),
-        g.boundaries().map(|v| v.iter().collect()),
-    );
-
-    let boundaries = decoder.decode();
+    let solids = g
+        .solids()
+        .map(|v| v.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let shells = g
+        .shells()
+        .map(|v| v.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let surfaces = g
+        .surfaces()
+        .map(|v| v.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let strings = g
+        .strings()
+        .map(|v| v.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let indices = g
+        .boundaries()
+        .map(|v| v.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let boundaries = decode(&solids, &shells, &surfaces, &strings, &indices);
     let semantics: Option<CjSemantics> = if let (Some(semantics_objects), Some(semantics)) =
         (g.semantics_objects(), g.semantics())
     {
         let semantics_objects = semantics_objects.iter().collect::<Vec<_>>();
         let semantics = semantics.iter().collect::<Vec<_>>();
-        Some(decoder.decode_semantics(g.type_(), semantics_objects, semantics))
+        Some(decode_semantics(
+            &solids,
+            &shells,
+            g.type_(),
+            semantics_objects,
+            semantics,
+        ))
     } else {
         None
     };
