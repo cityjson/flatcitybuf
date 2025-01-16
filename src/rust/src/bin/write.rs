@@ -1,5 +1,5 @@
 use flatcitybuf::attribute::{AttributeSchema, AttributeSchemaMethods};
-use flatcitybuf::header_writer::{HeaderMetadata, HeaderWriterOptions};
+use flatcitybuf::header_writer::HeaderWriterOptions;
 use flatcitybuf::{read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbWriter};
 use std::error::Error;
 use std::fs::File;
@@ -22,12 +22,10 @@ fn write_file() -> Result<(), Box<dyn Error>> {
         let output_file = File::create(output_file)?;
         let outputwriter = BufWriter::new(output_file);
 
-        let header_metadata = HeaderMetadata {
-            features_count: features.len() as u64,
-        };
         let header_options = Some(HeaderWriterOptions {
             write_index: false,
-            header_metadata,
+            feature_count: features.len() as u64,
+            index_node_size: 16,
         });
         let mut attr_schema = AttributeSchema::new();
         for feature in features.iter() {

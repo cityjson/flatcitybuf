@@ -4,6 +4,8 @@ use crate::serializer::*;
 
 use super::attribute::AttributeSchema;
 
+use crate::packedrtree::NodeItem;
+
 /// A writer that converts CityJSON features to FlatBuffers format
 ///
 /// This struct handles the serialization of CityJSON features into a binary
@@ -13,8 +15,9 @@ pub struct FeatureWriter<'a> {
     city_feature: &'a CityJSONFeature,
     /// The FlatBuffers builder instance used for serialization
     fbb: flatbuffers::FlatBufferBuilder<'a>,
-
+    /// The attribute schema to be used for serialization
     attr_schema: AttributeSchema,
+    pub(crate) bbox: NodeItem,
 }
 
 impl<'a> FeatureWriter<'a> {
@@ -31,6 +34,7 @@ impl<'a> FeatureWriter<'a> {
             city_feature,
             fbb: flatbuffers::FlatBufferBuilder::new(),
             attr_schema,
+            bbox: NodeItem::create(0),
         }
     }
 
@@ -43,7 +47,7 @@ impl<'a> FeatureWriter<'a> {
     ///
     /// A vector of bytes containing the serialized feature
     pub fn finish_to_feature(&mut self) -> Vec<u8> {
-        let cf_buf = to_fcb_city_feature(
+        let (cf_buf, bbox) = to_fcb_city_feature(
             &mut self.fbb,
             self.city_feature.id.as_str(),
             self.city_feature,
@@ -62,5 +66,9 @@ impl<'a> FeatureWriter<'a> {
     /// * `feature` - A reference to the new CityJSON feature
     pub fn add_feature(&mut self, feature: &'a CityJSONFeature) {
         self.city_feature = feature;
+    }
+
+    fn reset_bbox(&mut self) {
+        self.bbox = NodeItem::create(0);
     }
 }

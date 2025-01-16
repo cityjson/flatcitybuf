@@ -6,12 +6,14 @@ mod error;
 mod feature_generated;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 mod header_generated;
+mod packedrtree;
 mod reader;
 mod writer;
 
 pub use cj_utils::*;
 pub use feature_generated::*;
 pub use header_generated::*;
+pub use packedrtree::*;
 pub use reader::*;
 pub use writer::*;
 

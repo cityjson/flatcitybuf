@@ -1,4 +1,4 @@
-use crate::serializer::to_fcb_header;
+use crate::{serializer::to_fcb_header, PackedRTree};
 use cjseq::CityJSON;
 use flatbuffers::FlatBufferBuilder;
 
@@ -7,34 +7,31 @@ use super::attribute::AttributeSchema;
 /// Writer for converting CityJSON header information to FlatBuffers format
 pub struct HeaderWriter<'a> {
     /// FlatBuffers builder instance
-    fbb: FlatBufferBuilder<'a>,
+    pub fbb: FlatBufferBuilder<'a>,
     /// Source CityJSON data
-    cj: CityJSON,
+    pub cj: CityJSON,
+
     /// Configuration options for header writing
-    header_options: HeaderWriterOptions,
+    pub header_options: HeaderWriterOptions,
     /// Attribute schema
-    attr_schema: AttributeSchema,
+    pub attr_schema: AttributeSchema,
 }
 
 /// Configuration options for header writing process
 pub struct HeaderWriterOptions {
     /// Whether to write index information
     pub write_index: bool,
-    /// Additional metadata for the header
-    pub header_metadata: HeaderMetadata,
-}
-
-/// Additional metadata to be included in the header
-pub struct HeaderMetadata {
-    /// Total count of features in the CityJSON data
-    pub features_count: u64,
+    pub feature_count: u64,
+    /// Size of the index node
+    pub index_node_size: u16,
 }
 
 impl Default for HeaderWriterOptions {
     fn default() -> Self {
         HeaderWriterOptions {
             write_index: true,
-            header_metadata: HeaderMetadata { features_count: 0 },
+            index_node_size: PackedRTree::DEFAULT_NODE_SIZE,
+            feature_count: 0,
         }
     }
 }
@@ -61,12 +58,17 @@ impl<'a> HeaderWriter<'a> {
     /// * `options` - Configuration for the header writing process
     /// * `cj` - The CityJSON data to write
     pub fn new_with_options(
-        options: HeaderWriterOptions,
+        mut options: HeaderWriterOptions,
         cj: CityJSON,
         attr_schema: AttributeSchema,
     ) -> HeaderWriter<'a> {
         let fbb = FlatBufferBuilder::new();
-
+        let index_node_size = if options.write_index {
+            PackedRTree::DEFAULT_NODE_SIZE
+        } else {
+            0
+        };
+        options.index_node_size = index_node_size;
         HeaderWriter {
             fbb,
             cj,
@@ -84,7 +86,7 @@ impl<'a> HeaderWriter<'a> {
         let header = to_fcb_header(
             &mut self.fbb,
             &self.cj,
-            self.header_options.header_metadata,
+            self.header_options,
             &self.attr_schema,
         );
         self.fbb.finish_size_prefixed(header, None);

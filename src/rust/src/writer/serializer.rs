@@ -7,8 +7,7 @@ use crate::geom_encoder::encode;
 use crate::header_generated::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
-use crate::header_writer::HeaderMetadata;
-use crate::{Column, ColumnArgs};
+use crate::{Column, ColumnArgs, NodeItem};
 
 use cjseq::{
     CityJSON, CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
@@ -19,6 +18,7 @@ use flatbuffers::FlatBufferBuilder;
 use serde_json::Value;
 
 use super::geom_encoder::{GMBoundaries, GMSemantics};
+use super::header_writer::HeaderWriterOptions;
 
 /// -----------------------------------
 /// Serializer for Header
@@ -34,13 +34,14 @@ use super::geom_encoder::{GMBoundaries, GMSemantics};
 pub fn to_fcb_header<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     cj: &CityJSON,
-    header_metadata: HeaderMetadata,
+    header_options: HeaderWriterOptions,
     attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<Header<'a>> {
     let version = Some(fbb.create_string(&cj.version));
     let transform = to_transform(&cj.transform);
-    let features_count: u64 = header_metadata.features_count;
+    let features_count: u64 = header_options.feature_count;
     let columns = Some(to_columns(fbb, attr_schema));
+    let index_node_size = header_options.index_node_size;
 
     if let Some(meta) = cj.metadata.as_ref() {
         let reference_system = meta
@@ -58,7 +59,6 @@ pub fn to_fcb_header<'a>(
             .point_of_contact
             .as_ref()
             .map(|poc| to_point_of_contact(fbb, poc));
-
         let (
             poc_contact_name,
             poc_contact_type,
@@ -97,6 +97,7 @@ pub fn to_fcb_header<'a>(
                 transform: Some(transform).as_ref(),
                 columns,
                 features_count,
+                index_node_size,
                 geographical_extent: geographical_extent.as_ref(),
                 reference_system,
                 identifier,
@@ -124,6 +125,7 @@ pub fn to_fcb_header<'a>(
                 transform: Some(transform).as_ref(),
                 columns,
                 features_count,
+                index_node_size,
                 version,
                 ..Default::default()
             },
@@ -272,7 +274,7 @@ pub fn to_fcb_city_feature<'a>(
     id: &str,
     city_feature: &CityJSONFeature,
     attr_schema: &AttributeSchema,
-) -> flatbuffers::WIPOffset<CityFeature<'a>> {
+) -> (flatbuffers::WIPOffset<CityFeature<'a>>, NodeItem) {
     let id = Some(fbb.create_string(id));
     let city_objects: Vec<_> = city_feature
         .city_objects
@@ -295,13 +297,21 @@ pub fn to_fcb_city_feature<'a>(
                 .collect::<Vec<_>>(),
         ),
     );
-    CityFeature::create(
-        fbb,
-        &CityFeatureArgs {
-            id,
-            objects,
-            vertices,
-        },
+    let min_x = city_feature.vertices.iter().map(|v| v[0]).min().unwrap();
+    let min_y = city_feature.vertices.iter().map(|v| v[1]).min().unwrap();
+    let max_x = city_feature.vertices.iter().map(|v| v[0]).max().unwrap();
+    let max_y = city_feature.vertices.iter().map(|v| v[1]).max().unwrap();
+    let bbox = NodeItem::new(min_x, min_y, max_x, max_y);
+    (
+        CityFeature::create(
+            fbb,
+            &CityFeatureArgs {
+                id,
+                objects,
+                vertices,
+            },
+        ),
+        bbox,
     )
 }
 
@@ -629,7 +639,8 @@ mod tests {
         // Create FlatBuffer and encode
         let mut fbb = FlatBufferBuilder::new();
 
-        let city_feature = to_fcb_city_feature(&mut fbb, "test_id", &cj_city_feature, &attr_schema);
+        let (city_feature, feat_node) =
+            to_fcb_city_feature(&mut fbb, "test_id", &cj_city_feature, &attr_schema);
 
         fbb.finish(city_feature, None);
         let buf = fbb.finished_data();

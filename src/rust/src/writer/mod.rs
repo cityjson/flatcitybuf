@@ -1,11 +1,11 @@
-use crate::MAGIC_BYTES;
+use crate::{calc_extent, hilbert_sort, NodeItem, PackedRTree, MAGIC_BYTES};
 use anyhow::Result;
 use attribute::AttributeSchema;
 use cjseq::{CityJSON, CityJSONFeature};
 use feature_writer::FeatureWriter;
 use header_writer::{HeaderWriter, HeaderWriterOptions};
 use std::fs::File;
-use std::io::{BufWriter, Read, Seek, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 pub mod attribute;
 pub mod feature_writer;
@@ -25,7 +25,16 @@ pub struct FcbWriter<'a> {
     header_writer: HeaderWriter<'a>,
     /// Optional writer for features
     feat_writer: Option<FeatureWriter<'a>>,
+    /// Offset of the feature in the feature data section
+    feat_offsets: Vec<FeatureOffset>,
+    feat_nodes: Vec<NodeItem>,
     attr_schema: AttributeSchema,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+struct FeatureOffset {
+    offset: usize,
+    size: usize,
 }
 
 impl<'a> FcbWriter<'a> {
@@ -53,6 +62,8 @@ impl<'a> FcbWriter<'a> {
             feat_writer: None,
             tmpout: BufWriter::new(tempfile::tempfile()?),
             attr_schema,
+            feat_offsets: Vec::new(),
+            feat_nodes: Vec::new(),
         })
     }
 
@@ -63,7 +74,21 @@ impl<'a> FcbWriter<'a> {
     /// A Result indicating success or failure of the write operation
     pub fn write_feature(&mut self) -> Result<()> {
         if let Some(feat_writer) = &mut self.feat_writer {
+            let mut node = feat_writer.bbox.clone();
+            node.offset = self.feat_offsets.len() as u64;
+            self.feat_nodes.push(node);
+
             let feat_buf = feat_writer.finish_to_feature();
+            let tempoffset = self
+                .feat_offsets
+                .last()
+                .map(|it| it.offset + it.size)
+                .unwrap_or(0);
+            self.feat_offsets.push(FeatureOffset {
+                offset: tempoffset,
+                size: feat_buf.len(),
+            });
+
             self.tmpout.write_all(&feat_buf)?;
         }
         Ok(())
@@ -108,14 +133,43 @@ impl<'a> FcbWriter<'a> {
     pub fn write(mut self, mut out: impl Write) -> Result<()> {
         out.write_all(&MAGIC_BYTES)?;
 
+        let index_node_size = self.header_writer.header_options.index_node_size;
         let header_buf = self.header_writer.finish_to_header();
         out.write_all(&header_buf)?;
 
+        if index_node_size > 0 && !self.feat_nodes.is_empty() {
+            let extent = calc_extent(&self.feat_nodes);
+            hilbert_sort(&mut self.feat_nodes, &extent);
+            let mut offset = 0;
+            let index_nodes = self
+                .feat_nodes
+                .iter()
+                .map(|temp_node| {
+                    let feat = &self.feat_offsets[temp_node.offset as usize];
+                    let mut node = temp_node.clone();
+                    node.offset = offset;
+                    offset += feat.size as u64;
+                    node
+                })
+                .collect();
+            let tree = PackedRTree::build(&index_nodes, &extent, index_node_size)?;
+            tree.stream_write(&mut out)?;
+        }
+
         self.tmpout.rewind()?;
-        let mut unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
-        let mut feature_buf: Vec<u8> = Vec::new();
-        unsorted_feature_output.read_to_end(&mut feature_buf)?;
-        out.write_all(&feature_buf)?;
+        let unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
+        let mut unsorted_feature_reader = BufReader::new(unsorted_feature_output);
+
+        {
+            let mut buf = Vec::with_capacity(2038);
+            for node in &self.feat_nodes {
+                let feat = &self.feat_offsets[node.offset as usize];
+                unsorted_feature_reader.seek(SeekFrom::Start(feat.offset as u64))?;
+                buf.resize(feat.size, 0);
+                unsorted_feature_reader.read_exact(&mut buf)?;
+                out.write_all(&buf)?;
+            }
+        }
 
         Ok(())
     }

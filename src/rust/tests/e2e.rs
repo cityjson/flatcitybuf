@@ -2,7 +2,7 @@ use anyhow::Result;
 use flatcitybuf::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     deserializer,
-    header_writer::{HeaderMetadata, HeaderWriterOptions},
+    header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
 use std::{
@@ -34,9 +34,6 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         let output_file = File::create(&temp_fcb)?;
         let output_writer = BufWriter::new(output_file);
 
-        let header_metadata = HeaderMetadata {
-            features_count: original_cj_seq.features.len() as u64,
-        };
         let mut attr_schema = AttributeSchema::new();
         for feature in original_cj_seq.features.iter() {
             for (_, co) in feature.city_objects.iter() {
@@ -49,7 +46,8 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
             original_cj_seq.cj.clone(),
             Some(HeaderWriterOptions {
                 write_index: false,
-                header_metadata,
+                feature_count: original_cj_seq.features.len() as u64,
+                index_node_size: 16,
             }),
             Some(attr_schema),
         )?;

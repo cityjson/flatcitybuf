@@ -1,6 +1,5 @@
 use anyhow::Result;
 use cjseq::{CityJSON, CityJSONFeature};
-use criterion::measurement::WallTime;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use flatcitybuf::{FcbReader, GeometryType};
 use std::{

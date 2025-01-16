@@ -393,7 +393,8 @@ impl GeometryType {
 mod tests {
     use crate::{
         feature_generated::{
-            root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs, GeometryType,
+            root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
+            GeometryType,
         },
         serializer::to_geometry,
     };

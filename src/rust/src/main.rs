@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use flatcitybuf::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     deserializer,
-    header_writer::{HeaderMetadata, HeaderWriterOptions},
+    header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbReader, FcbWriter,
 };
 use std::{
@@ -91,12 +91,10 @@ fn serialize(input: &str, output: &str) -> Result<()> {
         }
     };
 
-    let header_metadata = HeaderMetadata {
-        features_count: features.len() as u64,
-    };
     let header_options = Some(HeaderWriterOptions {
         write_index: false,
-        header_metadata,
+        feature_count: features.len() as u64,
+        index_node_size: 16,
     });
     let mut fcb = FcbWriter::new(cj, header_options, attr_schema)?;
     fcb.write_feature()?;
