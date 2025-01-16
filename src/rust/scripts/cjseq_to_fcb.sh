@@ -23,7 +23,7 @@ find "$dir_path" -type f -name "*.jsonl" | while read -r file; do
   echo "=== ${file} is being converted ==="
 
   # Run the conversion command
-  cargo run --bin flatcitybuf_cli serialize -i "$file" -o "${base_name}.fcb"
+  cargo run --bin flatcitybuf_cli ser -i "$file" -o "${base_name}.fcb"
 
   echo "conversion completed for ${file}"
   echo

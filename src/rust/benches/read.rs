@@ -1,10 +1,13 @@
 use anyhow::Result;
 use cjseq::{CityJSON, CityJSONFeature};
+use criterion::measurement::WallTime;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use flatcitybuf::{FcbReader, GeometryType};
 use std::{
+    collections::HashMap,
     fs::File,
     io::{BufRead, BufReader},
+    time::{Duration, Instant},
 };
 
 /// Read FCB file and count geometry types
@@ -131,84 +134,139 @@ mod tests {
 }
 
 const DATASETS: &[(&str, (&str, &str))] = &[
-    // (
-    //     "3DBAG",
-    //     (
-    //         "benchmark_data/3DBAG.fcb",
-    //         "benchmark_data/3DBAG.city.jsonl",
-    //     ),
-    // ),
+    (
+        "3DBAG",
+        (
+            "benchmark_data/3DBAG.fcb",
+            "benchmark_data/3DBAG.city.jsonl",
+        ),
+    ),
     (
         "3DBV",
         ("benchmark_data/3DBV.fcb", "benchmark_data/3DBV.city.jsonl"),
     ),
-    // (
-    //     "Helsinki",
-    //     (
-    //         "benchmark_data/Helsinki.fcb",
-    //         "benchmark_data/Helsinki.city.jsonl",
-    //     ),
-    // ),
-    // (
-    //     "Ingolstadt",
-    //     (
-    //         "benchmark_data/Ingolstadt.fcb",
-    //         "benchmark_data/Ingolstadt.city.jsonl",
-    //     ),
-    // ),
-    // (
-    //     "Montreal",
-    //     (
-    //         "benchmark_data/Montreal.fcb",
-    //         "benchmark_data/Montreal.city.jsonl",
-    //     ),
-    // ),
-    // (
-    //     "NYC",
-    //     ("benchmark_data/NYC.fcb", "benchmark_data/NYC.city.jsonl"),
-    // ),
-    // (
-    //     "Rotterdam",
-    //     (
-    //         "benchmark_data/Rotterdam.fcb",
-    //         "benchmark_data/Rotterdam.city.jsonl",
-    //     ),
-    // ),
-    // (
-    //     "Vienna",
-    //     (
-    //         "benchmark_data/Vienna.fcb",
-    //         "benchmark_data/Vienna.city.jsonl",
-    //     ),
-    // ),
-    // (
-    //     "Zurich",
-    //     (
-    //         "benchmark_data/Zurich.fcb",
-    //         "benchmark_data/Zurich.city.jsonl",
-    //     ),
-    // ),
+    (
+        "Helsinki",
+        (
+            "benchmark_data/Helsinki.fcb",
+            "benchmark_data/Helsinki.city.jsonl",
+        ),
+    ),
+    (
+        "Ingolstadt",
+        (
+            "benchmark_data/Ingolstadt.fcb",
+            "benchmark_data/Ingolstadt.city.jsonl",
+        ),
+    ),
+    (
+        "Montreal",
+        (
+            "benchmark_data/Montreal.fcb",
+            "benchmark_data/Montreal.city.jsonl",
+        ),
+    ),
+    (
+        "NYC",
+        ("benchmark_data/NYC.fcb", "benchmark_data/NYC.city.jsonl"),
+    ),
+    (
+        "Rotterdam",
+        (
+            "benchmark_data/Rotterdam.fcb",
+            "benchmark_data/Rotterdam.city.jsonl",
+        ),
+    ),
+    (
+        "Vienna",
+        (
+            "benchmark_data/Vienna.fcb",
+            "benchmark_data/Vienna.city.jsonl",
+        ),
+    ),
+    (
+        "Zurich",
+        (
+            "benchmark_data/Zurich.fcb",
+            "benchmark_data/Zurich.city.jsonl",
+        ),
+    ),
 ];
+
+fn format_duration(d: Duration) -> String {
+    if d.as_secs() > 0 {
+        format!("{:.2}s", d.as_secs_f64())
+    } else {
+        format!("{:.2}ms", d.as_millis() as f64)
+    }
+}
+
+#[derive(Debug)]
+struct BenchResult {
+    format: String,
+    duration: Duration,
+}
 
 pub fn read_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("read");
+    let mut results = HashMap::new();
 
+    // Run all benchmarks first and collect results
     for (size, (fcb_path, cjseq_path)) in DATASETS {
-        // Benchmark FCB reading
+        // FCB benchmark
+        let start = Instant::now();
         group.bench_with_input(BenchmarkId::new("fcb", size), fcb_path, |b, path| {
             b.iter(|| read_fcb(black_box(path)))
         });
+        results.insert(
+            format!("{}_fcb", size),
+            BenchResult {
+                format: "FCB".to_string(),
+                duration: start.elapsed(),
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("fcb as cj", size), fcb_path, |b, path| {
-            b.iter(|| read_fcb_as_cj(black_box(path)))
-        });
-
+        // CJSeq benchmark
+        let start = Instant::now();
         group.bench_with_input(BenchmarkId::new("cjseq", size), cjseq_path, |b, path| {
             b.iter(|| read_cjseq(black_box(path)))
         });
+        results.insert(
+            format!("{}_cjseq", size),
+            BenchResult {
+                format: "CJSeq".to_string(),
+                duration: start.elapsed(),
+            },
+        );
     }
 
     group.finish();
+
+    // Print all results at the end
+    println!("\nBenchmark Results:");
+    println!("{:<12} {:<15} {:<15}", "Dataset", "Format", "Mean Time");
+    println!("{:-<42}", "");
+
+    for (size, _) in DATASETS {
+        // Print FCB result
+        if let Some(result) = results.get(&format!("{}_fcb", size)) {
+            println!(
+                "{:<12} {:<15} {}",
+                size,
+                result.format,
+                format_duration(result.duration)
+            );
+        }
+        // Print CJSeq result
+        if let Some(result) = results.get(&format!("{}_cjseq", size)) {
+            println!(
+                "{:<12} {:<15} {}",
+                size,
+                result.format,
+                format_duration(result.duration)
+            );
+        }
+    }
 }
 
 criterion_group!(benches, read_benchmark);

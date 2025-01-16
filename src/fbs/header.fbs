@@ -64,7 +64,7 @@ table Header {
   transform: Transform;                     // Transformation vectors
   columns: [Column];                        // Attribute columns schema (can be omitted if per feature schema)
   features_count: ulong;                    // Number of features in the dataset (0 = unknown)
-  // index_node_size: ushort = 16;          // Index node size (0 = no index)
+  index_node_size: ushort = 16;          // Index node size (0 = no index)
 
   // metadata
   geographical_extent: GeographicalExtent;  // Bounds
