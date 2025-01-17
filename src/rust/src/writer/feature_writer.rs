@@ -47,12 +47,14 @@ impl<'a> FeatureWriter<'a> {
     ///
     /// A vector of bytes containing the serialized feature
     pub fn finish_to_feature(&mut self) -> Vec<u8> {
+        self.reset_bbox();
         let (cf_buf, bbox) = to_fcb_city_feature(
             &mut self.fbb,
             self.city_feature.id.as_str(),
             self.city_feature,
             &self.attr_schema,
         );
+        self.bbox = bbox;
         self.fbb.finish_size_prefixed(cf_buf, None);
         let buf = self.fbb.finished_data().to_vec();
         self.fbb.reset();

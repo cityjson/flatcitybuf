@@ -522,7 +522,7 @@ impl PackedRTree {
         while let Some(next) = queue.pop_front() {
             let node_index = next.0;
             let level = next.1;
-            println!("popped next node_index: {node_index}, level: {level}");
+            // println!("popped next node_index: {node_index}, level: {level}");
             let is_leaf_node = node_index >= num_nodes - num_items;
             // find the end index of the node
             let end = min(node_index + node_size as usize, level_bounds[level].end);
@@ -538,12 +538,12 @@ impl PackedRTree {
                 if is_leaf_node {
                     let index = pos - leaf_nodes_offset;
                     let offset = node_item.offset as usize;
-                    println!("pushing leaf node. index: {index}, offset: {offset}");
+                    // println!("pushing leaf node. index: {index}, offset: {offset}");
                     results.push(SearchResultItem { offset, index });
                 } else {
                     let offset = node_item.offset as usize;
                     let prev_level = level - 1;
-                    println!("pushing branch node. prev_level: {prev_level}, offset: {offset}");
+                    // println!("pushing branch node. prev_level: {prev_level}, offset: {offset}");
                     queue.push_back((offset, prev_level));
                 }
             }

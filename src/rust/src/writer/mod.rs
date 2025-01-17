@@ -132,7 +132,6 @@ impl<'a> FcbWriter<'a> {
     /// A Result indicating success or failure of the write operation
     pub fn write(mut self, mut out: impl Write) -> Result<()> {
         out.write_all(&MAGIC_BYTES)?;
-
         let index_node_size = self.header_writer.header_options.index_node_size;
         let header_buf = self.header_writer.finish_to_header();
         out.write_all(&header_buf)?;
@@ -159,7 +158,6 @@ impl<'a> FcbWriter<'a> {
         self.tmpout.rewind()?;
         let unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
         let mut unsorted_feature_reader = BufReader::new(unsorted_feature_output);
-
         {
             let mut buf = Vec::with_capacity(2038);
             for node in &self.feat_nodes {

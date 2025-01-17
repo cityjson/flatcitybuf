@@ -92,7 +92,7 @@ fn serialize(input: &str, output: &str) -> Result<()> {
     };
 
     let header_options = Some(HeaderWriterOptions {
-        write_index: false,
+        write_index: true,
         feature_count: features.len() as u64,
         index_node_size: 16,
     });
