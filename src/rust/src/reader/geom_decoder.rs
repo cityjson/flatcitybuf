@@ -264,13 +264,8 @@ fn decode_semantics_(
         // 2) If subsequent recursive call (start,n are Some)
         let s = start.unwrap();
         let length = n.unwrap();
-        println!("d: {:?}", d);
-        println!("s: {:?}", s);
-        println!("length: {:?}", length);
-        println!("semantic_indices: {:?}", semantic_indices);
         if d <= 2 {
             let slice = &semantic_indices[s..s + length];
-            print!("slice: {:?}", slice);
             let mut leaf = Vec::with_capacity(slice.len());
             for &val in slice {
                 leaf.push(if val == u32::MAX { None } else { Some(val) });
@@ -782,14 +777,6 @@ mod tests {
                 .unwrap_or_default()
                 .iter()
                 .collect::<Vec<_>>();
-
-            println!("solids: {:?}", solids);
-            println!("shells: {:?}", shells);
-            println!(
-                "semantics_objects: {:?}",
-                geometry.semantics_objects().unwrap()
-            );
-            println!("semantics: {:?}", geometry.semantics().unwrap());
             let decoded = decode_semantics(
                 &solids,
                 &shells,
@@ -805,8 +792,6 @@ mod tests {
             assert_eq!(decoded.surfaces[1].thetype, "WallSurface");
             assert_eq!(decoded.surfaces[1].children, None);
 
-            println!("values: {:?}", decoded.values);
-            println!("surfaces: {:?}", decoded.surfaces);
             match &decoded.values {
                 SemanticsValues::Nested(solids) => {
                     assert_eq!(solids.len(), 2);

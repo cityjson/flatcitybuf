@@ -301,6 +301,7 @@ pub fn to_fcb_city_feature<'a>(
     let min_y = city_feature.vertices.iter().map(|v| v[1]).min().unwrap();
     let max_x = city_feature.vertices.iter().map(|v| v[0]).max().unwrap();
     let max_y = city_feature.vertices.iter().map(|v| v[1]).max().unwrap();
+
     let bbox = NodeItem::new(min_x, min_y, max_x, max_y);
     (
         CityFeature::create(
