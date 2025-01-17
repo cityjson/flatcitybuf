@@ -1,3 +1,13 @@
+// This file is part of the FlatGeobuf project.
+// Much of this code is derived from the `packed_r_tree.rs` file of the FlatGeobuf project:
+// https://github.com/flatgeobuf/flatgeobuf/blob/master/src/rust/src/packed_r_tree.rs
+// Copyright (c) 2018, Björn Harrtell, Postnummer Stockholm AB (BSD 2-Clause License)
+//
+// See LICENSE file for full license text.
+//! Create and read a [packed Hilbert R-Tree](https://en.wikipedia.org/wiki/Hilbert_R-tree#Packed_Hilbert_R-trees)
+//! to enable fast bounding box spatial filtering.
+
+// ... rest of the code ...
 //! Create and read a [packed Hilbert R-Tree](https://en.wikipedia.org/wiki/Hilbert_R-tree#Packed_Hilbert_R-trees)
 //! to enable fast bounding box spatial filtering.
 
