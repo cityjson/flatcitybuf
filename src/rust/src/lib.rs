@@ -1,5 +1,6 @@
 #![allow(clippy::manual_range_contains)]
 
+mod btree;
 mod cj_utils;
 mod error;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
@@ -10,13 +11,13 @@ mod packedrtree;
 mod reader;
 mod writer;
 
+pub use btree::*;
 pub use cj_utils::*;
 pub use feature_generated::*;
 pub use header_generated::*;
 pub use packedrtree::*;
 pub use reader::*;
 pub use writer::*;
-
 pub const VERSION: u8 = 1;
 pub(crate) const MAGIC_BYTES: [u8; 8] = [b'f', b'c', b'b', VERSION, b'f', b'c', b'b', 0];
 pub(crate) const HEADER_MAX_BUFFER_SIZE: usize = 1024 * 1024 * 512; // 512MB
