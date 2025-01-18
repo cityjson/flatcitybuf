@@ -5,7 +5,7 @@ pre-commit:
 	cargo fmt
 	cargo clippy --fix --allow-dirty
 	cargo machete
-	cargo test
+	cargo nextest run
 	cargo check --all-features
 	cargo build --release
 

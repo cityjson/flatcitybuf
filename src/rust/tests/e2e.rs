@@ -5,6 +5,7 @@ use flatcitybuf::{
     header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
+use pretty_assertions::assert_eq;
 use std::{
     fs::File,
     io::{BufReader, BufWriter},

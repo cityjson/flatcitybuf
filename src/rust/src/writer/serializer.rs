@@ -623,6 +623,7 @@ mod tests {
     use anyhow::Result;
     use cjseq::CityJSONFeature;
     use flatbuffers::FlatBufferBuilder;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_to_fcb_city_feature() -> Result<()> {
