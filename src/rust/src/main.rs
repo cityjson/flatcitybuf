@@ -183,3 +183,14 @@ fn main() -> Result<()> {
         Commands::Info { input } => show_info(input),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_cli() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+}

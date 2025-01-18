@@ -191,6 +191,7 @@ mod tests {
     use super::*;
     use anyhow::Result;
     use cjseq::Geometry as CjGeometry;
+    use pretty_assertions::assert_eq;
 
     use serde_json::json;
 
