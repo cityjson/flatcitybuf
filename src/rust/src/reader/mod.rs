@@ -1,6 +1,6 @@
 pub mod city_buffer;
 pub mod deserializer;
-use city_buffer::FcbBuffer;
+use city_buffer::*;
 use cjseq::CityJSONFeature;
 use deserializer::to_cj_feature;
 
