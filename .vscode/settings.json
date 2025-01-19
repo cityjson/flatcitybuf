@@ -8,5 +8,8 @@
   "rust-analyzer.checkOnSave.extraArgs": [
     "--lib"
   ],
-  "python.pythonPath": "${workspaceFolder}/src/py/.venv/bin/python"
+  "python.pythonPath": "${workspaceFolder}/src/py/.venv/bin/python",
+  "rust-analyzer.server.extraEnv": {
+    "RUST_LOG": "debug"
+  }
 }
