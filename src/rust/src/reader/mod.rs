@@ -1,6 +1,6 @@
 pub mod city_buffer;
 pub mod deserializer;
-use city_buffer::FcbBuffer;
+use city_buffer::*;
 use cjseq::CityJSONFeature;
 use deserializer::to_cj_feature;
 
@@ -128,7 +128,7 @@ impl<R: Read> FcbReader<R> {
             header.index_node_size(),
         )?;
         let (min_x, min_y, max_x, max_y) = (min_x as i64, min_y as i64, max_x as i64, max_y as i64);
-        let list = index.search(min_x, min_y, max_x, max_y)?;
+        let list = index.search(min_x as f64, min_y as f64, max_x as f64, max_y as f64)?;
         debug_assert!(
             list.windows(2).all(|w| w[0].offset < w[1].offset),
             "Since the tree is traversed breadth first, list should be sorted by construction."
@@ -174,10 +174,10 @@ impl<R: Read + Seek> FcbReader<R> {
             &mut self.reader,
             header.features_count() as usize,
             PackedRTree::DEFAULT_NODE_SIZE,
-            min_x,
-            min_y,
-            max_x,
-            max_y,
+            min_x as f64,
+            min_y as f64,
+            max_x as f64,
+            max_y as f64,
         )?;
         debug_assert!(
             list.windows(2).all(|w| w[0].offset < w[1].offset),

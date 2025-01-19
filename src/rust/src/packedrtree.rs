@@ -14,10 +14,11 @@
 use anyhow::Result;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-// #[cfg(feature = "http")]
-// use http_range_client::{
-//     AsyncBufferedHttpRangeClient, AsyncHttpRangeClient, BufferedHttpRangeClient,
-// };
+use core::f64;
+#[cfg(feature = "http")]
+use http_range_client::{
+    AsyncBufferedHttpRangeClient, AsyncHttpRangeClient, BufferedHttpRangeClient,
+};
 use std::cmp::{max, min};
 use std::collections::VecDeque;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
@@ -30,10 +31,10 @@ use std::ops::Range;
 #[repr(C)]
 /// R-Tree node
 pub struct NodeItem {
-    pub min_x: i64,
-    pub min_y: i64,
-    pub max_x: i64,
-    pub max_y: i64,
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
     /// Byte offset in feature data section
     pub offset: u64,
 }
@@ -42,10 +43,10 @@ impl NodeItem {
     #[deprecated(
         note = "Use NodeItem::bounds instead if you're only using the node item for bounds checking"
     )]
-    pub fn new(min_x: i64, min_y: i64, max_x: i64, max_y: i64) -> NodeItem {
+    pub fn new(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> NodeItem {
         Self::bounds(min_x, min_y, max_x, max_y)
     }
-    pub fn bounds(min_x: i64, min_y: i64, max_x: i64, max_y: i64) -> NodeItem {
+    pub fn bounds(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> NodeItem {
         NodeItem {
             min_x,
             min_y,
@@ -57,20 +58,20 @@ impl NodeItem {
 
     pub fn create(offset: u64) -> NodeItem {
         NodeItem {
-            min_x: i64::MAX,
-            min_y: i64::MAX,
-            max_x: i64::MIN,
-            max_y: i64::MIN,
+            min_x: f64::INFINITY,
+            min_y: f64::INFINITY,
+            max_x: f64::NEG_INFINITY,
+            max_y: f64::NEG_INFINITY,
             offset,
         }
     }
 
     pub fn from_reader(mut rdr: impl Read) -> Result<Self> {
         Ok(NodeItem {
-            min_x: rdr.read_i64::<LittleEndian>()?,
-            min_y: rdr.read_i64::<LittleEndian>()?,
-            max_x: rdr.read_i64::<LittleEndian>()?,
-            max_y: rdr.read_i64::<LittleEndian>()?,
+            min_x: rdr.read_f64::<LittleEndian>()?,
+            min_y: rdr.read_f64::<LittleEndian>()?,
+            max_x: rdr.read_f64::<LittleEndian>()?,
+            max_y: rdr.read_f64::<LittleEndian>()?,
             offset: rdr.read_u64::<LittleEndian>()?,
         })
     }
@@ -80,19 +81,19 @@ impl NodeItem {
     }
 
     pub fn write<W: Write>(&self, wtr: &mut W) -> std::io::Result<()> {
-        wtr.write_i64::<LittleEndian>(self.min_x)?;
-        wtr.write_i64::<LittleEndian>(self.min_y)?;
-        wtr.write_i64::<LittleEndian>(self.max_x)?;
-        wtr.write_i64::<LittleEndian>(self.max_y)?;
+        wtr.write_f64::<LittleEndian>(self.min_x)?;
+        wtr.write_f64::<LittleEndian>(self.min_y)?;
+        wtr.write_f64::<LittleEndian>(self.max_x)?;
+        wtr.write_f64::<LittleEndian>(self.max_y)?;
         wtr.write_u64::<LittleEndian>(self.offset)?;
         Ok(())
     }
 
-    pub fn width(&self) -> i64 {
+    pub fn width(&self) -> f64 {
         self.max_x - self.min_x
     }
 
-    pub fn height(&self) -> i64 {
+    pub fn height(&self) -> f64 {
         self.max_y - self.min_y
     }
 
@@ -116,7 +117,7 @@ impl NodeItem {
         }
     }
 
-    pub fn expand_xy(&mut self, x: i64, y: i64) {
+    pub fn expand_xy(&mut self, x: f64, y: f64) {
         if x < self.min_x {
             self.min_x = x;
         }
@@ -264,11 +265,9 @@ fn hilbert(x: u32, y: u32) -> u32 {
 
 fn hilbert_bbox(r: &NodeItem, hilbert_max: u32, extent: &NodeItem) -> u32 {
     // calculate bbox center and scale to hilbert_max
-    let x = (hilbert_max as f64 * ((r.min_x + r.max_x) / 2 - extent.min_x) as f64
-        / extent.width() as f64)
+    let x = (hilbert_max as f64 * ((r.min_x + r.max_x) / 2.0 - extent.min_x) / extent.width())
         .floor() as u32;
-    let y = (hilbert_max as f64 * ((r.min_y + r.max_y) / 2 - extent.min_y) as f64
-        / extent.height() as f64)
+    let y = (hilbert_max as f64 * ((r.min_y + r.max_y) / 2.0 - extent.min_y) / extent.height())
         .floor() as u32;
     hilbert(x, y)
 }
@@ -461,10 +460,10 @@ impl PackedRTree {
 
     pub fn search(
         &self,
-        min_x: i64,
-        min_y: i64,
-        max_x: i64,
-        max_y: i64,
+        min_x: f64,
+        min_y: f64,
+        max_x: f64,
+        max_y: f64,
     ) -> Result<Vec<SearchResultItem>> {
         let leaf_nodes_offset = self
             .level_bounds
@@ -507,10 +506,10 @@ impl PackedRTree {
         data: &mut R,
         num_items: usize,
         node_size: u16,
-        min_x: i64,
-        min_y: i64,
-        max_x: i64,
-        max_y: i64,
+        min_x: f64,
+        min_y: f64,
+        max_x: f64,
+        max_y: f64,
     ) -> Result<Vec<SearchResultItem>> {
         let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
         let level_bounds = PackedRTree::generate_level_bounds(num_items, node_size);
@@ -578,6 +577,8 @@ impl PackedRTree {
         max_y: f64,
         combine_request_threshold: usize,
     ) -> Result<Vec<HttpSearchResultItem>> {
+        use tracing::debug;
+
         let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
         if num_items == 0 {
             return Ok(vec![]);
@@ -828,24 +829,24 @@ mod tests {
     #[test]
     fn tree_2items() -> Result<()> {
         let mut nodes = Vec::new();
-        nodes.push(NodeItem::bounds(0, 0, 1, 1));
-        nodes.push(NodeItem::bounds(2, 2, 3, 3));
+        nodes.push(NodeItem::bounds(0.0, 0.0, 1.0, 1.0));
+        nodes.push(NodeItem::bounds(2.0, 2.0, 3.0, 3.0));
         let extent = calc_extent(&nodes);
-        assert_eq!(extent, NodeItem::bounds(0, 0, 3, 3));
-        assert!(nodes[0].intersects(&NodeItem::bounds(0, 0, 1, 1)));
-        assert!(nodes[1].intersects(&NodeItem::bounds(2, 2, 3, 3)));
+        assert_eq!(extent, NodeItem::bounds(0.0, 0.0, 3.0, 3.0));
+        assert!(nodes[0].intersects(&NodeItem::bounds(0.0, 0.0, 1.0, 1.0)));
+        assert!(nodes[1].intersects(&NodeItem::bounds(2.0, 2.0, 3.0, 3.0)));
         hilbert_sort(&mut nodes, &extent);
         let mut offset = 0;
         for node in &mut nodes {
             node.offset = offset;
             offset += size_of::<NodeItem>() as u64;
         }
-        assert!(nodes[1].intersects(&NodeItem::bounds(0, 0, 1, 1)));
-        assert!(nodes[0].intersects(&NodeItem::bounds(2, 2, 3, 3)));
+        assert!(nodes[1].intersects(&NodeItem::bounds(0.0, 0.0, 1.0, 1.0)));
+        assert!(nodes[0].intersects(&NodeItem::bounds(2.0, 2.0, 3.0, 3.0)));
         let tree = PackedRTree::build(&nodes, &extent, PackedRTree::DEFAULT_NODE_SIZE)?;
-        let list = tree.search(0, 0, 1, 1)?;
+        let list = tree.search(0.0, 0.0, 1.0, 1.0)?;
         assert_eq!(list.len(), 1);
-        assert!(nodes[list[0].index].intersects(&NodeItem::bounds(0, 0, 1, 1)));
+        assert!(nodes[list[0].index].intersects(&NodeItem::bounds(0.0, 0.0, 1.0, 1.0)));
         Ok(())
     }
 

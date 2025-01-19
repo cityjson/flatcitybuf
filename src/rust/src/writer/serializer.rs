@@ -297,10 +297,30 @@ pub fn to_fcb_city_feature<'a>(
                 .collect::<Vec<_>>(),
         ),
     );
-    let min_x = city_feature.vertices.iter().map(|v| v[0]).min().unwrap();
-    let min_y = city_feature.vertices.iter().map(|v| v[1]).min().unwrap();
-    let max_x = city_feature.vertices.iter().map(|v| v[0]).max().unwrap();
-    let max_y = city_feature.vertices.iter().map(|v| v[1]).max().unwrap();
+    let min_x = city_feature
+        .vertices
+        .iter()
+        .map(|v| v[0])
+        .min()
+        .unwrap_or(0) as f64;
+    let min_y = city_feature
+        .vertices
+        .iter()
+        .map(|v| v[1])
+        .min()
+        .unwrap_or(0) as f64;
+    let max_x = city_feature
+        .vertices
+        .iter()
+        .map(|v| v[0])
+        .max()
+        .unwrap_or(0) as f64;
+    let max_y = city_feature
+        .vertices
+        .iter()
+        .map(|v| v[1])
+        .max()
+        .unwrap_or(0) as f64;
 
     let bbox = NodeItem::new(min_x, min_y, max_x, max_y);
     (
