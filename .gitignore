@@ -58,6 +58,7 @@ __pycache__/
 
 temp/
 
-src/rust/benchmark_data/
-
+benchmark_data/
+src/rust/fcb_core/tests/data/
+!src/rust/fcb_core/tests/data/.gitkeep
 .cursorrules

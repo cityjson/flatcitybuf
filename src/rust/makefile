@@ -11,7 +11,7 @@ pre-commit:
 
 .PHONY: ser
 ser:
-	cargo run --all-features --bin flatcitybuf_cli ser -i tests/data/delft.city.jsonl -o temp/delft_attr.fcb
+	cargo run --all-features --bin flatcitybuf_cli ser -i fcb_core/tests/data/delft.city.jsonl -o temp/delft_attr.fcb
 # cargo run --bin flatcitybuf_cli serialize -i tests/data/delft.city.jsonl -o temp/delft.fcb
 
 .PHONY: deser
@@ -22,3 +22,8 @@ deser:
 .PHONY: bench
 bench:
 	cargo bench --bench read
+
+.PHONY: wasm-build
+wasm-build:
+	wasm-pack build --target web --debug
+# cargo build --target web --release
