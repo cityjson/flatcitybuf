@@ -6,19 +6,19 @@ pre-commit:
 .PHONY: check-common
 check-common:
 	cargo fmt
-	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude wasm
+	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm
 	cargo clippy --fix --allow-dirty -p wasm --target wasm32-unknown-unknown
 # cargo machete --all-features --workspace --exclude wasm
-	cargo nextest run --all-features --workspace --exclude wasm
-	cargo check --all-features --workspace --exclude wasm
-	cargo build --workspace --all-features --exclude wasm
+	cargo nextest run --all-features --workspace --exclude fcb_wasm
+	cargo check --all-features --workspace --exclude fcb_wasm
+	cargo build --workspace --all-features --exclude fcb_wasm
 
 .PHONY: check-wasm
 check-wasm:
-	cargo clippy --fix --allow-dirty -p wasm --target wasm32-unknown-unknown
+	cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
 # cargo nextest run -p wasm --target wasm32-unknown-unknown
-	cargo check -p wasm --target wasm32-unknown-unknown
-	cargo build -p wasm --target wasm32-unknown-unknown
+	cargo check -p fcb_wasm --target wasm32-unknown-unknown
+	cargo build -p fcb_wasm --target wasm32-unknown-unknown
 
 .PHONY: ser
 ser:
@@ -40,5 +40,5 @@ build-fcb_core:
 
 .PHONY: wasm-build
 wasm-build:
-	wasm-pack build --target web --debug
+	cd wasm && wasm-pack build --target web --debug --out-dir ../ts
 # cargo build --target web --release
