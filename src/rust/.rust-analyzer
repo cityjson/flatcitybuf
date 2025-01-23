@@ -1,0 +1,3 @@
+exclude = [
+    "src/rust/fcb_core/src/fb/*",
+]

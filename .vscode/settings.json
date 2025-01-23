@@ -11,5 +11,6 @@
   "python.pythonPath": "${workspaceFolder}/src/py/.venv/bin/python",
   "rust-analyzer.server.extraEnv": {
     "RUST_LOG": "debug"
-  }
+  },
+  "liveServer.settings.port": 5501
 }

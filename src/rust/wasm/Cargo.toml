@@ -1,0 +1,34 @@
+[package]
+name = "wasm"
+version = "0.1.0"
+edition = "2021"
+
+
+[lib]
+crate-type = ["cdylib"]
+
+[build]
+target = "wasm32-unknown-unknown"
+
+
+[dependencies]
+packed_rtree = { path = "../packed_rtree" }
+bytes = { workspace = true }
+fcb_core = { path = "../fcb_core", features = ["wasm"] }
+getrandom = { workspace = true, features = ["js"] }
+gloo-net = { workspace = true }
+http-range-client = { workspace = true, default-features = false }
+js-sys = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+byteorder = { workspace = true }
+tempfile = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+clap = { workspace = true }
+tracing = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+async-trait = { workspace = true, default-features = false }
+console_error_panic_hook = { workspace = true }
+console_log = { workspace = true }
+log = { workspace = true }
