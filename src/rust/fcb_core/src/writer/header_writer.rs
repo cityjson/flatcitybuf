@@ -44,7 +44,7 @@ impl<'a> HeaderWriter<'a> {
     ///
     /// * `cj` - The CityJSON data to write
     /// * `header_options` - Optional configuration for the header writing process
-    pub fn new(
+    pub(super) fn new(
         cj: CityJSON,
         header_options: Option<HeaderWriterOptions>,
         attr_schema: AttributeSchema,
@@ -58,7 +58,7 @@ impl<'a> HeaderWriter<'a> {
     ///
     /// * `options` - Configuration for the header writing process
     /// * `cj` - The CityJSON data to write
-    pub fn new_with_options(
+    fn new_with_options(
         mut options: HeaderWriterOptions,
         cj: CityJSON,
         attr_schema: AttributeSchema,
@@ -83,7 +83,7 @@ impl<'a> HeaderWriter<'a> {
     /// # Returns
     ///
     /// A size-prefixed FlatBuffer containing the serialized header
-    pub fn finish_to_header(mut self) -> Vec<u8> {
+    pub(super) fn finish_to_header(mut self) -> Vec<u8> {
         let header = to_fcb_header(
             &mut self.fbb,
             &self.cj,

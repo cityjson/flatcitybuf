@@ -135,7 +135,7 @@ pub(crate) fn to_cj_co_type(co_type: CityObjectType) -> String {
     }
 }
 
-pub fn decode_attributes(
+pub(crate) fn decode_attributes(
     columns: flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>,
     attributes: flatbuffers::Vector<'_, u8>,
 ) -> serde_json::Value {

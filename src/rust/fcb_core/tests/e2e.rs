@@ -11,6 +11,7 @@ use std::{
     io::{BufReader, BufWriter},
     path::PathBuf,
 };
+use tempfile::NamedTempFile;
 
 #[test]
 fn test_cityjson_serialization_cycle() -> Result<()> {
@@ -20,7 +21,8 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         .join("tests")
         .join("data")
         .join("small.city.jsonl");
-    let temp_fcb = manifest_dir.join("temp").join("test_e2e.fcb");
+
+    let temp_fcb = NamedTempFile::new()?;
 
     // Read original CityJSONSeq
     let input_file = File::open(input_file)?;
@@ -52,7 +54,6 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
             }),
             Some(attr_schema),
         )?;
-        fcb.write_feature()?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
         }

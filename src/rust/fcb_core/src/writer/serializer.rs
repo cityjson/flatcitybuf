@@ -23,7 +23,6 @@ use super::header_writer::HeaderWriterOptions;
 /// -----------------------------------
 /// Serializer for Header
 /// -----------------------------------
-
 /// Converts a CityJSON header into FlatBuffers format
 ///
 /// # Arguments
@@ -31,7 +30,7 @@ use super::header_writer::HeaderWriterOptions;
 /// * `fbb` - FlatBuffers builder instance
 /// * `cj` - CityJSON data containing header information
 /// * `header_metadata` - Additional metadata for the header
-pub fn to_fcb_header<'a>(
+pub(super) fn to_fcb_header<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     cj: &CityJSON,
     header_options: HeaderWriterOptions,
@@ -138,7 +137,7 @@ pub fn to_fcb_header<'a>(
 /// # Arguments
 ///
 /// * `geographical_extent` - Array of 6 values [minx, miny, minz, maxx, maxy, maxz]
-pub(crate) fn to_geographical_extent(geographical_extent: &[f64; 6]) -> GeographicalExtent {
+pub(super) fn to_geographical_extent(geographical_extent: &[f64; 6]) -> GeographicalExtent {
     let min = Vector::new(
         geographical_extent[0],
         geographical_extent[1],
@@ -157,7 +156,7 @@ pub(crate) fn to_geographical_extent(geographical_extent: &[f64; 6]) -> Geograph
 /// # Arguments
 ///
 /// * `transform` - CityJSON transform containing scale and translate values
-pub(crate) fn to_transform(transform: &CjTransform) -> Transform {
+pub(super) fn to_transform(transform: &CjTransform) -> Transform {
     let scale = Vector::new(transform.scale[0], transform.scale[1], transform.scale[2]);
     let translate = Vector::new(
         transform.translate[0],
@@ -173,7 +172,7 @@ pub(crate) fn to_transform(transform: &CjTransform) -> Transform {
 ///
 /// * `fbb` - FlatBuffers builder instance
 /// * `metadata` - CityJSON metadata containing reference system information
-pub(crate) fn to_reference_system<'a>(
+pub(super) fn to_reference_system<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     ref_system: &CjReferenceSystem,
 ) -> flatbuffers::WIPOffset<ReferenceSystem<'a>> {
@@ -260,7 +259,6 @@ fn to_point_of_contact<'a>(
 /// -----------------------------------
 /// Serializer for CityJSONFeature
 /// -----------------------------------
-
 /// Creates a CityFeature in FlatBuffers format
 ///
 /// # Arguments
@@ -269,7 +267,7 @@ fn to_point_of_contact<'a>(
 /// * `id` - Feature identifier
 /// * `objects` - Vector of city objects
 /// * `vertices` - Vector of vertex coordinates
-pub fn to_fcb_city_feature<'a>(
+pub(super) fn to_fcb_city_feature<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     id: &str,
     city_feature: &CityJSONFeature,
@@ -343,7 +341,7 @@ pub fn to_fcb_city_feature<'a>(
 /// * `fbb` - FlatBuffers builder instance
 /// * `id` - Object identifier
 /// * `co` - CityJSON city object
-pub(crate) fn to_city_object<'a>(
+pub(super) fn to_city_object<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     id: &str,
     co: &CjCityObject,
@@ -421,7 +419,7 @@ pub(crate) fn to_city_object<'a>(
 /// # Arguments
 ///
 /// * `co_type` - String representation of CityJSON object type
-pub(crate) fn to_co_type(co_type: &str) -> CityObjectType {
+pub(super) fn to_co_type(co_type: &str) -> CityObjectType {
     match co_type {
         "Bridge" => CityObjectType::Bridge,
         "BridgePart" => CityObjectType::BridgePart,
@@ -470,7 +468,7 @@ pub(crate) fn to_co_type(co_type: &str) -> CityObjectType {
 /// # Arguments
 ///
 /// * `geometry_type` - CityJSON geometry type
-pub(crate) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
+pub(super) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
     match geometry_type {
         CjGeometryType::MultiPoint => GeometryType::MultiPoint,
         CjGeometryType::MultiLineString => GeometryType::MultiLineString,
@@ -488,7 +486,7 @@ pub(crate) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
 /// # Arguments
 ///
 /// * `ss_type` - String representation of semantic surface type
-pub(crate) fn to_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
+pub(super) fn to_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
     match ss_type {
         "RoofSurface" => SemanticSurfaceType::RoofSurface,
         "GroundSurface" => SemanticSurfaceType::GroundSurface,
@@ -520,7 +518,7 @@ pub(crate) fn to_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
 ///
 /// * `fbb` - FlatBuffers builder instance
 /// * `geometry` - CityJSON geometry object
-pub fn to_geometry<'a>(
+pub(crate) fn to_geometry<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     geometry: &CjGeometry,
 ) -> flatbuffers::WIPOffset<Geometry<'a>> {
@@ -585,7 +583,7 @@ pub fn to_geometry<'a>(
     )
 }
 
-pub fn to_columns<'a>(
+pub(super) fn to_columns<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>> {
@@ -609,7 +607,7 @@ pub fn to_columns<'a>(
     fbb.create_vector(&columns_vec)
 }
 
-pub fn to_fcb_attribute<'a>(
+pub(super) fn to_fcb_attribute<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     attr: &Value,
     schema: &AttributeSchema,
@@ -661,7 +659,7 @@ mod tests {
         // Create FlatBuffer and encode
         let mut fbb = FlatBufferBuilder::new();
 
-        let (city_feature, feat_node) =
+        let (city_feature, _) =
             to_fcb_city_feature(&mut fbb, "test_id", &cj_city_feature, &attr_schema);
 
         fbb.finish(city_feature, None);

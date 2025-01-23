@@ -12,6 +12,3 @@ pub const MAGIC_BYTES_SIZE: usize = 8;
 
 // Size of header size
 pub const HEADER_SIZE_SIZE: usize = 4;
-
-// // Offset of header size
-// pub(crate) const HEADER_SIZE_OFFSET: usize = MAGIC_BYTES_SIZE + HEADER_SIZE_SIZE;

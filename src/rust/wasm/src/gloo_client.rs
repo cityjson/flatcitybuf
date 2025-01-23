@@ -39,10 +39,6 @@ impl AsyncHttpRangeClient for WasmHttpClient {
             .await
             .map_err(|e| HttpError::HttpError(format!("failed to send request: {}", e)))?;
         if let Some(val) = response.headers().get(header) {
-            // let v = val
-            //     .to_str()
-            //     .map_err(|e| HttpError::HttpError(e.to_string()))?;
-            // Ok(Some(v.to_string()))
             Ok(Some(val.to_string()))
         } else {
             Ok(None)

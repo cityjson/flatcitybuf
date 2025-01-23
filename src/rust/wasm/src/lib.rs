@@ -1,17 +1,16 @@
-use console_error_panic_hook::set_once;
+#![cfg(target_arch = "wasm32")]
 use console_log::init_with_level;
 use fcb_core::deserializer::{to_cj_feature, to_cj_metadata};
-use fcb_core::{feature_generated, header_generated, size_prefixed_root_as_header, Header};
+use fcb_core::{size_prefixed_root_as_header, Header};
+// #[cfg(target_arch = "wasm32")]
 use gloo_client::WasmHttpClient;
-use gloo_net::http::{Request as GlooRequest, Response};
-use js_sys::Uint8Array;
-use log::{error, info};
+#[cfg(target_arch = "wasm32")]
+use log::{debug, info, trace};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
-use cjseq::CityJSONFeature;
 use fcb_core::city_buffer::FcbBuffer;
 use fcb_core::{
     check_magic_bytes, size_prefixed_root_as_city_feature, HEADER_MAX_BUFFER_SIZE,
@@ -21,15 +20,12 @@ use fcb_core::{
 use std::fmt::Error;
 use std::result::Result;
 
-use http_range_client::{
-    AsyncBufferedHttpRangeClient, AsyncHttpRangeClient, BufferedHttpRangeClient,
-};
+use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
 
 use packed_rtree::{http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree};
 use std::collections::VecDeque;
 use std::ops::Range;
-use tracing::debug;
-use tracing::trace;
+
 mod gloo_client;
 
 // The largest request we'll speculatively make.
@@ -57,16 +53,9 @@ pub struct AsyncFeatureIter {
     count: usize,
 }
 
-// impl WasmFcbReader {
-//     pub async fn new(url: String) -> Result<WasmFcbReader, JsValue> {
-//         let client = WasmHttpClient::new(url).await?;
-//         Self::_open(client).await
-//     }
-// }
-
 #[wasm_bindgen]
 impl HttpFcbReader {
-    #[wasm_bindgen(constructor, start)]
+    #[wasm_bindgen(constructor)]
     pub async fn new(url: String) -> Result<HttpFcbReader, JsValue> {
         println!("open===: {:?}", url);
         console_error_panic_hook::set_once();
@@ -125,7 +114,7 @@ impl HttpFcbReader {
         read_bytes += HEADER_SIZE_SIZE;
 
         let header_size = LittleEndian::read_u32(&bytes) as usize;
-        if header_size > HEADER_MAX_BUFFER_SIZE || header_size < 8 {
+        if !(8..=HEADER_MAX_BUFFER_SIZE).contains(&header_size) {
             // minimum size check avoids panic in FlatBuffers header decoding
             return Err(JsValue::from_str(&format!(
                 "IllegalHeaderSize: {header_size}"
@@ -288,13 +277,11 @@ impl AsyncFeatureIter {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let cj_feature = to_cj_feature(feature, self._header().columns())
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
         Ok(Some(to_value(&cj_feature)?))
     }
-    /// Return current feature
-    pub fn cur_feature(&self) -> Result<JsValue, JsValue> {
-        self.cur_feature()
-    }
 
+    #[wasm_bindgen]
     pub fn cur_cj_feature(&self) -> Result<JsValue, JsValue> {
         let cj_feature = to_cj_feature(self.fbs.feature(), self._header().columns())
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -489,83 +476,3 @@ impl FeatureBatch {
         Ok(Some(feature_buffer.freeze()))
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use crate::HttpFcbReader;
-
-//     #[tokio::test]
-//     async fn fgb_max_request_size() {
-//         let (fgb, stats) = HttpFcbReader::mock_from_file("../../test/data/UScounties.fgb")
-//             .await
-//             .unwrap();
-
-//         {
-//             // The read guard needs to be in a scoped block, else we won't release the lock and the test will hang when
-//             // the actual FGB client code tries to update the stats.
-//             let stats = stats.read().unwrap();
-//             assert_eq!(stats.request_count, 1);
-//             // This number might change a little if the test data or logic changes, but they should be in the same ballpark.
-//             assert_eq!(stats.bytes_requested, 12944);
-//         }
-
-//         // This bbox covers a large swathe of the dataset. The idea is that at least one request should be limited by the
-//         // max request size `DEFAULT_HTTP_FETCH_SIZE`, but that we should still have a reasonable number of requests.
-//         let mut iter = fgb.select_bbox(-118.0, 42.0, -100.0, 47.0).await.unwrap();
-
-//         let mut feature_count = 0;
-//         while let Some(_feature) = iter.next().await.unwrap() {
-//             feature_count += 1;
-//         }
-//         assert_eq!(feature_count, 169);
-
-//         {
-//             // The read guard needs to be in a scoped block, else we won't release the lock and the test will hang when
-//             // the actual FGB client code tries to update the stats.
-//             let stats = stats.read().unwrap();
-//             // These numbers might change a little if the test data or logic changes, but they should be in the same ballpark.
-//             assert_eq!(stats.request_count, 5);
-//             assert_eq!(stats.bytes_requested, 2131152);
-//         }
-//     }
-// }
-
-// #[wasm_bindgen]
-// pub async fn fetch_partial(url: &str, start: u64, end: u64) -> Result<JsValue, JsValue> {
-//     // Construct the "Range" header, e.g. "bytes=0-1023"
-//     let range_header_value = format!("bytes={}-{}", start, end);
-
-//     // Perform a GET request using the `fetch` API under the hood
-//     let response = Request::get(url)
-//         .header("Range", &range_header_value)
-//         .send()
-//         .await
-//         .map_err(|err| JsValue::from_str(&err.to_string()))?;
-
-//     // If the server supports partial requests, often you'll get status 206
-//     // However, some servers might return 200 if they don't handle partial fetches
-//     if !response.ok() {
-//         // We'll forward the status as an error
-//         return Err(JsValue::from_str(&format!(
-//             "HTTP status: {}",
-//             response.status()
-//         )));
-//     }
-
-//     // Retrieve the bytes from the response
-//     let bytes = response
-//         .binary()
-//         .await
-//         .map_err(|err| JsValue::from_str(&err.to_string()))?;
-
-//     // Convert them to a JavaScript `Uint8Array` so JS code can read them
-//     let array = Uint8Array::from(bytes.as_slice());
-
-//     // Return the Uint8Array as a `JsValue`
-//     Ok(array.into())
-// }
-
-// #[wasm_bindgen]
-// pub fn hello() {
-//     println!("Hello, world!");
-// }

@@ -43,6 +43,7 @@ fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
 }
 
 /// Read FCB file and count geometry types
+#[allow(dead_code)]
 fn read_fcb_as_cj(path: &str) -> Result<(u64, u64, u64)> {
     let input_file = File::open(path)?;
     let inputreader = BufReader::new(input_file);

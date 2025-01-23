@@ -2,9 +2,7 @@
 
 // @generated
 
-use crate::fb::*;
-use core::cmp::Ordering;
-use core::mem;
+use crate::header_generated::*;
 
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
@@ -505,12 +503,8 @@ impl flatbuffers::SimpleToVerifyInSlice for GeometryType {}
 // struct Vertex, aligned to 4
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub struct Vertex(pub [u8; 12]);
-impl Default for Vertex {
-    fn default() -> Self {
-        Self([0; 12])
-    }
-}
 impl core::fmt::Debug for Vertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("Vertex")
@@ -551,7 +545,7 @@ impl<'a> flatbuffers::Verifiable for Vertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -753,7 +747,7 @@ impl flatbuffers::Verifiable for CityFeature<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
             .visit_field::<flatbuffers::ForwardsUOffset<
@@ -777,7 +771,7 @@ pub struct CityFeatureArgs<'a> {
     >,
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Vertex>>>,
 }
-impl<'a> Default for CityFeatureArgs<'a> {
+impl Default for CityFeatureArgs<'_> {
     #[inline]
     fn default() -> Self {
         CityFeatureArgs {
@@ -1037,7 +1031,7 @@ impl flatbuffers::Verifiable for CityObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.visit_table(pos)?
             .visit_field::<CityObjectType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
@@ -1091,7 +1085,7 @@ pub struct CityObjectArgs<'a> {
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>,
     >,
 }
-impl<'a> Default for CityObjectArgs<'a> {
+impl Default for CityObjectArgs<'_> {
     #[inline]
     fn default() -> Self {
         CityObjectArgs {
@@ -1409,7 +1403,7 @@ impl flatbuffers::Verifiable for Geometry<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.visit_table(pos)?
             .visit_field::<GeometryType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("lod", Self::VT_LOD, false)?
@@ -1465,7 +1459,7 @@ pub struct GeometryArgs<'a> {
         >,
     >,
 }
-impl<'a> Default for GeometryArgs<'a> {
+impl Default for GeometryArgs<'_> {
     #[inline]
     fn default() -> Self {
         GeometryArgs {
@@ -1676,7 +1670,7 @@ impl flatbuffers::Verifiable for SemanticObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.visit_table(pos)?
             .visit_field::<SemanticSurfaceType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(
@@ -1700,7 +1694,7 @@ pub struct SemanticObjectArgs<'a> {
     pub children: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub parent: Option<u32>,
 }
-impl<'a> Default for SemanticObjectArgs<'a> {
+impl Default for SemanticObjectArgs<'_> {
     #[inline]
     fn default() -> Self {
         SemanticObjectArgs {

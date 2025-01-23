@@ -14,3 +14,4 @@ http-range-client = { workspace = true, optional = true, default-features = fals
 tracing = { workspace = true }
 
 [dev-dependencies]
+rand = { workspace = true }

@@ -99,7 +99,6 @@ pub fn read_cityjson_from_reader<R: Read>(
 /// let test_data = include_str!("../tests/data/small.city.jsonl");
 /// let result = read_cityjson(test_data, CJTypeKind::Seq)?;
 /// ```
-
 #[cfg(test)]
 mod tests {
     use std::{fs::File, path::PathBuf};

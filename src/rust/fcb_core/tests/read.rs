@@ -5,7 +5,10 @@ use std::{fs::File, io::BufReader, path::PathBuf};
 #[test]
 fn read_bbox() -> Result<()> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let input_file = manifest_dir.join("tests").join("data").join("delft.fcb");
+    let input_file = manifest_dir
+        .join("tests")
+        .join("data")
+        .join("delft_bbox.fcb");
     let mut filein = BufReader::new(File::open(input_file.clone())?);
 
     let minx = -200000.0;
@@ -24,6 +27,12 @@ fn read_bbox() -> Result<()> {
         let cj_feat = feature.cur_cj_feature()?;
         features.push(cj_feat);
     }
+
+    println!("bbox_cnt: {}", bbox_cnt);
+    println!(
+        "fcb.header().features_count(): {}",
+        fcb.header().features_count()
+    );
 
     assert!(bbox_cnt < fcb.header().features_count());
 

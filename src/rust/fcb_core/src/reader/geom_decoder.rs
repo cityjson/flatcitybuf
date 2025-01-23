@@ -21,7 +21,7 @@ struct PartLists<'a> {
 /// # Returns
 ///
 /// The reconstructed CityJSON boundaries structure
-pub fn decode(
+pub(crate) fn decode(
     solids: &[u32],
     shells: &[u32],
     surfaces: &[u32],
@@ -164,7 +164,9 @@ pub fn decode(
 /// # Returns
 ///
 /// Vector of CityJSON semantic surface definitions
-pub fn decode_semantics_surfaces(semantics_objects: &[SemanticObject]) -> Vec<SemanticsSurface> {
+pub(crate) fn decode_semantics_surfaces(
+    semantics_objects: &[SemanticObject],
+) -> Vec<SemanticsSurface> {
     let surfaces = semantics_objects.iter().map(|s| {
         let surface_type_str = match s.type_() {
             SemanticSurfaceType::RoofSurface => "RoofSurface",
@@ -310,7 +312,7 @@ fn decode_semantics_(
 /// # Returns
 ///
 /// Complete CityJSON semantics structure with surfaces and values
-pub fn decode_semantics(
+pub(crate) fn decode_semantics(
     solids: &[u32],
     shells: &[u32],
     geometry_type: GeometryType,

@@ -74,7 +74,7 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the write operation
-    pub fn write_feature(&mut self) -> Result<()> {
+    fn write_feature(&mut self) -> Result<()> {
         if let Some(feat_writer) = &mut self.feat_writer {
             let mut node = feat_writer.bbox.clone();
             node.offset = self.feat_offsets.len() as u64;
@@ -152,7 +152,7 @@ impl<'a> FcbWriter<'a> {
                     offset += feat.size as u64;
                     node
                 })
-                .collect();
+                .collect::<Vec<_>>();
             let tree = PackedRTree::build(&index_nodes, &extent, index_node_size)?;
             tree.stream_write(&mut out)?;
         }

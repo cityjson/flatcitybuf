@@ -175,7 +175,7 @@ fn encode_semantics_values(
 /// # Arguments
 ///
 /// * `semantics` - Reference to the CityJSON Semantics object containing surfaces and values
-pub fn encode_semantics(semantics: &CjSemantics) -> GMSemantics {
+pub(crate) fn encode_semantics(semantics: &CjSemantics) -> GMSemantics {
     let mut values = Vec::new();
     let _ = encode_semantics_values(&semantics.values, &mut values);
 

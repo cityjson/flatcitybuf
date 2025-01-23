@@ -63,6 +63,11 @@ impl<R: Read> FcbReader<R> {
         Ok(reader)
     }
 
+    /// Open a reader without verifying the FlatBuffers data.
+    ///
+    /// # Safety
+    /// This function skips FlatBuffers verification. The caller must ensure that the input data
+    /// is valid and properly formatted to avoid undefined behavior.
     pub unsafe fn open_unchecked(reader: R) -> Result<FcbReader<R>> {
         Self::read_header(reader, false)
     }
@@ -77,7 +82,7 @@ impl<R: Read> FcbReader<R> {
         let mut size_buf: [u8; 4] = [0; 4]; // MEMO: 4 bytes for size prefix. This is comvention for FlatBuffers's size_prefixed_root
         reader.read_exact(&mut size_buf)?;
         let header_size = u32::from_le_bytes(size_buf) as usize;
-        if header_size > HEADER_MAX_BUFFER_SIZE || header_size < 8 {
+        if !((8..=HEADER_MAX_BUFFER_SIZE).contains(&header_size)) {
             return Err(anyhow!("Illegal header size: {header_size}"));
         }
 
@@ -298,6 +303,7 @@ impl<R: Read> FeatureIter<R, NotSeekable> {
         todo!("implement")
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<&Self>> {
         self.advance()?;
         if self.get().is_some() {
@@ -328,6 +334,7 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
         self.buffer.feature()
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<&Self>> {
         self.advance()?;
         if self.get().is_some() {
@@ -389,10 +396,6 @@ impl<R: Read, S> FeatureIter<R, S> {
     ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<Column>>> {
         self.buffer.header().columns()
     }
-
-    // pub fn features(&self) -> CityFeature {
-    //     self.buffer.feature()
-    // }
 
     pub fn features_count(&self) -> Option<usize> {
         self.count

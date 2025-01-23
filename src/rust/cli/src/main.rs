@@ -97,7 +97,6 @@ fn serialize(input: &str, output: &str) -> Result<()> {
         index_node_size: 16,
     });
     let mut fcb = FcbWriter::new(cj, header_options, attr_schema)?;
-    fcb.write_feature()?;
 
     for feature in features.iter() {
         fcb.add_feature(feature)?;

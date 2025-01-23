@@ -2,8 +2,6 @@
 
 // @generated
 
-use core::cmp::Ordering;
-use core::mem;
 
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
@@ -158,12 +156,8 @@ impl flatbuffers::SimpleToVerifyInSlice for ColumnType {}
 // struct Vector, aligned to 8
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub struct Vector(pub [u8; 24]);
-impl Default for Vector {
-    fn default() -> Self {
-        Self([0; 24])
-    }
-}
 impl core::fmt::Debug for Vector {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("Vector")
@@ -204,7 +198,7 @@ impl<'a> flatbuffers::Verifiable for Vector {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -356,7 +350,7 @@ impl<'a> flatbuffers::Verifiable for Transform {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -446,7 +440,7 @@ impl<'a> flatbuffers::Verifiable for GeographicalExtent {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -665,7 +659,7 @@ impl flatbuffers::Verifiable for Column<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.visit_table(pos)?
             .visit_field::<u16>("index", Self::VT_INDEX, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
@@ -703,7 +697,7 @@ pub struct ColumnArgs<'a> {
     pub primary_key: bool,
     pub metadata: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for ColumnArgs<'a> {
+impl Default for ColumnArgs<'_> {
     #[inline]
     fn default() -> Self {
         ColumnArgs {
@@ -907,7 +901,7 @@ impl flatbuffers::Verifiable for ReferenceSystem<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "authority",
@@ -931,7 +925,7 @@ pub struct ReferenceSystemArgs<'a> {
     pub code: i32,
     pub code_string: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for ReferenceSystemArgs<'a> {
+impl Default for ReferenceSystemArgs<'_> {
     #[inline]
     fn default() -> Self {
         ReferenceSystemArgs {
@@ -1356,7 +1350,7 @@ impl flatbuffers::Verifiable for Header<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
+        
         v.visit_table(pos)?
             .visit_field::<Transform>("transform", Self::VT_TRANSFORM, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<
@@ -1476,7 +1470,7 @@ pub struct HeaderArgs<'a> {
     pub attributes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
     pub version: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for HeaderArgs<'a> {
+impl Default for HeaderArgs<'_> {
     #[inline]
     fn default() -> Self {
         HeaderArgs {
