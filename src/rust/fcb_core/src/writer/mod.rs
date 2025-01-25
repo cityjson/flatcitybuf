@@ -1,7 +1,7 @@
 use crate::MAGIC_BYTES;
 use anyhow::Result;
 use attribute::AttributeSchema;
-use cjseq::{CityJSON, CityJSONFeature};
+use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use feature_writer::FeatureWriter;
 use header_writer::{HeaderWriter, HeaderWriterOptions};
 use packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
@@ -28,6 +28,9 @@ pub struct FcbWriter<'a> {
     /// Optional writer for features
     feat_writer: Option<FeatureWriter<'a>>,
     /// Offset of the feature in the feature data section
+    ///
+    /// transform: CjTransform
+    transform: CjTransform,
     feat_offsets: Vec<FeatureOffset>,
     feat_nodes: Vec<NodeItem>,
     attr_schema: AttributeSchema,
@@ -57,10 +60,11 @@ impl<'a> FcbWriter<'a> {
         attr_schema: Option<AttributeSchema>,
     ) -> Result<Self> {
         let attr_schema = attr_schema.unwrap_or_default();
-
+        let transform = cj.transform.clone();
         let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone());
         Ok(Self {
             header_writer,
+            transform,
             feat_writer: None,
             tmpout: BufWriter::new(tempfile::tempfile()?),
             attr_schema,
@@ -75,12 +79,15 @@ impl<'a> FcbWriter<'a> {
     ///
     /// A Result indicating success or failure of the write operation
     fn write_feature(&mut self) -> Result<()> {
+        let transform = &self.transform;
+
         if let Some(feat_writer) = &mut self.feat_writer {
-            let mut node = feat_writer.bbox.clone();
+            let feat_buf = feat_writer.finish_to_feature();
+            let mut node = Self::actual_bbox(transform, &feat_writer.bbox);
+
             node.offset = self.feat_offsets.len() as u64;
             self.feat_nodes.push(node);
 
-            let feat_buf = feat_writer.finish_to_feature();
             let tempoffset = self
                 .feat_offsets
                 .last()
@@ -94,6 +101,19 @@ impl<'a> FcbWriter<'a> {
             self.tmpout.write_all(&feat_buf)?;
         }
         Ok(())
+    }
+
+    fn actual_bbox(transform: &CjTransform, bbox: &NodeItem) -> NodeItem {
+        let scale_x = transform.scale[0];
+        let scale_y = transform.scale[1];
+        let translate_x = transform.translate[0];
+        let translate_y = transform.translate[1];
+        NodeItem::new(
+            bbox.min_x * scale_x + translate_x,
+            bbox.min_y * scale_y + translate_y,
+            bbox.max_x * scale_x + translate_x,
+            bbox.max_y * scale_y + translate_y,
+        )
     }
 
     /// Adds a new feature to be written
@@ -140,6 +160,7 @@ impl<'a> FcbWriter<'a> {
 
         if index_node_size > 0 && !self.feat_nodes.is_empty() {
             let extent = calc_extent(&self.feat_nodes);
+            println!("extent: {:?}", extent);
             hilbert_sort(&mut self.feat_nodes, &extent);
             let mut offset = 0;
             let index_nodes = self

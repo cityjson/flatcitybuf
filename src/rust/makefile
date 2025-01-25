@@ -22,13 +22,18 @@ check-wasm:
 
 .PHONY: ser
 ser:
-	cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o temp/delft_attr.fcb
+	cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o fcb_core/tests/data/delft_bbox.fcb
+# cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o temp/delft_bbox.fcb
 # cargo run --bin flatcitybuf_cli serialize -i tests/data/delft.city.jsonl -o temp/delft.fcb
 
 .PHONY: deser
 deser:
 	cargo run -p fcb_cli deser -i temp/delft_attr.fcb -o temp/delft_attr.city.jsonl
 # cargo run --bin flatcitybuf_cli deserialize -i temp/small.fcb -o temp/small.city.jsonl
+
+.PHONY: fcb_info
+fcb_info:
+	cargo run -p fcb_cli info -i fcb_core/tests/data/delft_bbox.fcb
 
 .PHONY: bench
 bench:

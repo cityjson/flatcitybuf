@@ -11,15 +11,14 @@ fn read_bbox() -> Result<()> {
         .join("delft_bbox.fcb");
     let mut filein = BufReader::new(File::open(input_file.clone())?);
 
-    let minx = -200000.0;
-    let miny = -200000.0;
-    let maxx = 200000.0;
-    let maxy = 200000.0;
+    let minx = 84227.77;
+    let miny = 445377.33;
+    let maxx = 85323.23;
+    let maxy = 446334.69;
 
     let mut fcb = FcbReader::open(&mut filein)?.select_bbox(minx, miny, maxx, maxy)?;
 
     assert_ne!(fcb.features_count(), None);
-
     let mut features = Vec::new();
     let mut bbox_cnt = 0;
     while let Some(feature) = fcb.next()? {
