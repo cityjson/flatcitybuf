@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>WASM Module Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    #output {
+      background-color: #f0f0f0;
+      padding: 10px;
+      white-space: pre-wrap;
+      border: 1px solid #ccc;
+      height: 400px;
+      overflow-y: scroll;
+    }
+
+    #test-btn {
+      padding: 10px 20px;
+      font-size: 16px;
+    }
+
+    #url-input {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>WASM Module Test</h1>
+
+  <label for="url-input">Enter URL for HttpFcbReader:</label>
+  <input type="text" id="url-input" placeholder="https://example.com/data"
+    value="http://127.0.0.1:5501/src/ts/delft_attr.fcb" />
+
+  <button id="test-btn">Run Test</button>
+
+  <h2>Output:</h2>
+  <pre id="output"></pre>
+
+  <script type="module">
+    import init, { HttpFcbReader } from './fcb_wasm.js';
+
+    /**
+     * Appends a message to the output area.
+     * @param {string} message - The message to append.
+     */
+    function log(message) {
+      const output = document.getElementById('output');
+      output.textContent += message + '\n';
+      output.scrollTop = output.scrollHeight; // Auto-scroll
+    }
+
+    /**
+     * Initializes the WASM module and runs the test.
+     */
+    async function runTest() {
+      const urlInput = document.getElementById('url-input');
+      const url = urlInput.value.trim();
+
+      if (!url) {
+        alert('Please enter a valid URL.');
+        return;
+      }
+
+      log('Initializing WASM module...');
+      try {
+        await init();
+        log('WASM module initialized successfully.');
+      } catch (err) {
+        log(`Error initializing WASM module: ${err}`);
+        console.error(err);
+        return;
+      }
+
+      try {
+        log(`Creating HttpFcbReader with URL: ${url}`);
+        const reader = await new HttpFcbReader(url);
+        console.log('HttpFcbReader instance created.');
+
+        console.log('Calling header()...');
+        const header = await reader.header();
+        console.log("header===", header);
+
+
+
+
+        log('Calling select_all()...');
+
+        // const featureIter = await reader.select_all();
+        // // Function to iterate through AsyncFeatureIter
+        const features = [];
+        async function iterateFeatures(iter) {
+          let count = 0;
+          while (true) {
+            log(`Fetching feature ${count + 1}...`);
+            const feature = await iter.next();
+            if (feature === undefined) {
+              log('No more features.');
+              break;
+            }
+            log(`Feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
+            features.push(feature);
+            count++;
+            // Optional: Limit the number of features to prevent excessive logs
+            if (count >= 10) {
+              log('Reached feature iteration limit (10).');
+              break;
+            }
+          }
+          log(`Total features fetched: ${count}`);
+        }
+        // await iterateFeatures(featureIter);
+        // log('Test completed successfully.');
+        // console.log("features", features);
+
+        let min_x = -200000.0;
+        let min_y = -200000.0;
+        let max_x = 200000.0;
+        let max_y = 200000.0;
+        const bboxIter = await reader.select_bbox(min_x, min_y, max_x, max_y);
+        await iterateFeatures(bboxIter);
+        log('Test completed successfully.');
+        console.log("features", features);
+
+
+
+      } catch (err) {
+        log(`Error during test: ${err}`);
+        console.error(err);
+      }
+    }
+
+    // Attach event listener to the button
+    document.getElementById('test-btn').addEventListener('click', runTest);
+  </script>
+</body>
+
+</html>
