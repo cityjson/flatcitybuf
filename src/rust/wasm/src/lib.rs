@@ -55,11 +55,11 @@ pub struct AsyncFeatureIter {
 
 #[wasm_bindgen]
 impl HttpFcbReader {
-    #[wasm_bindgen(constructor)]
+    #[wasm_bindgen(constructor, start)]
     pub async fn new(url: String) -> Result<HttpFcbReader, JsValue> {
         println!("open===: {:?}", url);
-        console_error_panic_hook::set_once();
-        init_with_level(log::Level::Debug).expect("Could not initialize logger");
+        // console_error_panic_hook::set_once();
+        // init_with_level(log::Level::Debug).expect("Could not initialize logger");
 
         trace!("starting: opening http reader, reading header");
         let client = WasmHttpClient::new(&url);
