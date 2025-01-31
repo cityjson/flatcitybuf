@@ -57,6 +57,14 @@ path = "src/lib.rs"
 name = "read"
 path = "src/bin/read.rs"
 
+[[bin]]
+name = "read_profile"
+path = "src/bin/read_profile.rs"
+
+[[bin]]
+name = "read_benches"
+path = "benches/read_profile.rs"
+
 
 [[bench]]
 name = "read"
@@ -68,3 +76,5 @@ memory-stats = { workspace = true }
 pretty_assertions = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+bson = { workspace = true }
+serde_cbor = { workspace = true }

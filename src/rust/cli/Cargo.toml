@@ -9,3 +9,6 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+bson = { workspace = true }
+serde_cbor = { workspace = true }
+cjseq = { workspace = true }
