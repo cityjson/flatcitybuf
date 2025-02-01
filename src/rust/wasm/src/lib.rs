@@ -1,5 +1,4 @@
 #![cfg(target_arch = "wasm32")]
-use console_log::init_with_level;
 use fcb_core::deserializer::{to_cj_feature, to_cj_metadata};
 use fcb_core::{size_prefixed_root_as_header, Header};
 // #[cfg(target_arch = "wasm32")]

@@ -7,7 +7,7 @@ pre-commit:
 check-common:
 	cargo fmt
 	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm
-	cargo clippy --fix --allow-dirty -p wasm --target wasm32-unknown-unknown
+	cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
 # cargo machete --all-features --workspace --exclude wasm
 	cargo nextest run --all-features --workspace --exclude fcb_wasm
 	cargo check --all-features --workspace --exclude fcb_wasm

@@ -2,7 +2,6 @@
 
 // @generated
 
-
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
@@ -155,8 +154,7 @@ impl<'a> flatbuffers::Verifiable for ColumnType {
 impl flatbuffers::SimpleToVerifyInSlice for ColumnType {}
 // struct Vector, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vector(pub [u8; 24]);
 impl core::fmt::Debug for Vector {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -198,7 +196,6 @@ impl<'a> flatbuffers::Verifiable for Vector {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -350,7 +347,6 @@ impl<'a> flatbuffers::Verifiable for Transform {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -440,7 +436,6 @@ impl<'a> flatbuffers::Verifiable for GeographicalExtent {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -659,7 +654,6 @@ impl flatbuffers::Verifiable for Column<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<u16>("index", Self::VT_INDEX, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
@@ -901,7 +895,6 @@ impl flatbuffers::Verifiable for ReferenceSystem<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "authority",
@@ -1350,7 +1343,6 @@ impl flatbuffers::Verifiable for Header<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<Transform>("transform", Self::VT_TRANSFORM, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<
