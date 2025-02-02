@@ -6,7 +6,7 @@ mod sorted_index;
 mod tests {
     use crate::byte_serializable::ByteSerializable;
     use crate::query::{MultiIndex, Operator, Query, QueryCondition};
-    use crate::sorted_index::{KeyValue, SortedIndex, ValueOffset};
+    use crate::sorted_index::{IndexSerializable, KeyValue, SortedIndex, ValueOffset};
     use chrono::NaiveDate;
     use ordered_float::OrderedFloat;
     use std::error::Error;
@@ -276,6 +276,70 @@ mod tests {
         };
         let result9 = multi_index.query(query9);
         assert_eq!(result9, vec![1, 2, 4, 6, 7]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_index_serialization() -> Result<(), Box<dyn Error>> {
+        // Sample records (id, city, height of the building, year of construction)
+        let records = vec![
+            (0, "Delft".to_string()),
+            (1, "Amsterdam".to_string()),
+            (2, "Rotterdam".to_string()),
+            (3, "Utrecht".to_string()),
+            (4, "Tokyo".to_string()),
+            (5, "Osaka".to_string()),
+            (6, "Kyoto".to_string()),
+            (7, "Fukuoka".to_string()),
+        ];
+
+        // Build index entries for each field.
+        let mut id_entries: Vec<KeyValue<u64>> = Vec::new();
+        let mut city_entries: Vec<KeyValue<String>> = Vec::new();
+
+        for (offset, record) in records.iter().enumerate() {
+            let (id, city) = record;
+            let voffset = offset as ValueOffset;
+
+            // Build or update the id index.
+            if let Some(kv) = id_entries.iter_mut().find(|kv| kv.key == *id) {
+                kv.offsets.push(voffset);
+            } else {
+                id_entries.push(KeyValue {
+                    key: *id,
+                    offsets: vec![voffset],
+                });
+            }
+
+            // Build or update the city index.
+            if let Some(kv) = city_entries.iter_mut().find(|kv| kv.key == *city) {
+                kv.offsets.push(voffset);
+            } else {
+                city_entries.push(KeyValue {
+                    key: city.clone(),
+                    offsets: vec![voffset],
+                });
+            }
+        }
+
+        // Create SortedIndices and build each index.
+        let mut id_index = SortedIndex::new();
+        id_index.build_index(id_entries);
+        let mut city_index = SortedIndex::new();
+        city_index.build_index(city_entries);
+
+        let mut id_index_bytes = Vec::new();
+        id_index.serialize(&mut id_index_bytes)?;
+        let mut city_index_bytes = Vec::new();
+        city_index.serialize(&mut city_index_bytes)?;
+
+        let id_index_deserialized = SortedIndex::<u64>::deserialize(&mut &id_index_bytes[..])?;
+        let city_index_deserialized =
+            SortedIndex::<String>::deserialize(&mut &city_index_bytes[..])?;
+
+        assert_eq!(id_index.entries, id_index_deserialized.entries);
+        assert_eq!(city_index.entries, city_index_deserialized.entries);
 
         Ok(())
     }

@@ -9,3 +9,4 @@ serde = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 ordered-float = { workspace = true }
+once_cell = { workspace = true }
