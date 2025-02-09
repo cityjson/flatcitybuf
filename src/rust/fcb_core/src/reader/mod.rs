@@ -44,6 +44,7 @@ pub struct FeatureIter<R, S> {
     /// Whether or not the underlying reader is Seek
     seekable_marker: PhantomData<S>,
     feature_offset: FeatureOffset,
+    total_feat_count: u64,
 }
 
 #[doc(hidden)]
@@ -127,6 +128,7 @@ impl<R: Read> FcbReader<R> {
             rtree_index: index_size,
             attributes: self.attr_index_size(),
         };
+        let total_feat_count = self.buffer.header().features_count();
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
@@ -134,6 +136,7 @@ impl<R: Read> FcbReader<R> {
             None,
             None,
             feature_offset,
+            total_feat_count,
         ))
     }
 
@@ -169,6 +172,7 @@ impl<R: Read> FcbReader<R> {
             rtree_index: self.rtree_index_size(),
             attributes: self.attr_index_size(),
         };
+        let total_feat_count = list.len() as u64;
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
@@ -176,6 +180,7 @@ impl<R: Read> FcbReader<R> {
             Some(list),
             None,
             feature_offset,
+            total_feat_count,
         ))
     }
 }
@@ -191,6 +196,7 @@ impl<R: Read + Seek> FcbReader<R> {
         };
         let index_size = self.attr_index_size() + self.rtree_index_size();
         self.reader.seek(SeekFrom::Current(index_size as i64))?;
+        let total_feat_count = self.buffer.header().features_count();
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
@@ -198,6 +204,7 @@ impl<R: Read + Seek> FcbReader<R> {
             None,
             None,
             feature_offset,
+            total_feat_count,
         ))
     }
 
@@ -236,7 +243,7 @@ impl<R: Read + Seek> FcbReader<R> {
             rtree_index: self.rtree_index_size(),
             attributes: self.attr_index_size(),
         };
-
+        let total_feat_count = list.len() as u64;
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
@@ -244,6 +251,7 @@ impl<R: Read + Seek> FcbReader<R> {
             Some(list),
             None,
             feature_offset,
+            total_feat_count,
         ))
     }
 }
@@ -305,12 +313,18 @@ impl<R: Read> FallibleStreamingIterator for FeatureIter<R, NotSeekable> {
             }
         }
 
-        // if let Some(attr_filter) = &self.item_attr_filter {
-        //     let item_offset = attr_filter[self.feat_no];
-        //     let seek_bytes = item_offset - self.cur_pos;
-        //     io::copy(&mut (&mut self.reader).take(seek_bytes), &mut io::sink())?;
-        //     self.cur_pos += seek_bytes;
-        // }
+        if let Some(attr_filter) = &self.item_attr_filter {
+            let item_offset = attr_filter[self.feat_no];
+            // only skip if we haven't reached the attribute offset yet
+            if item_offset > self.cur_pos {
+                if self.state == State::ReadFirstFeatureSize {
+                    self.state = State::Reading;
+                }
+                let seek_bytes = item_offset - self.cur_pos;
+                io::copy(&mut (&mut self.reader).take(seek_bytes), &mut io::sink())?;
+                self.cur_pos += seek_bytes;
+            }
+        }
 
         self.read_feature()
     }
@@ -435,6 +449,7 @@ impl<R: Read, S> FeatureIter<R, S> {
         item_filter: Option<Vec<packed_rtree::SearchResultItem>>,
         item_attr_filter: Option<Vec<ValueOffset>>,
         feature_offset: FeatureOffset,
+        total_feat_count: u64,
     ) -> FeatureIter<R, S> {
         let mut iter = FeatureIter {
             reader,
@@ -448,6 +463,7 @@ impl<R: Read, S> FeatureIter<R, S> {
             state: State::Init,
             seekable_marker: PhantomData,
             feature_offset,
+            total_feat_count,
         };
 
         if iter.read_feature_size() {
@@ -484,7 +500,7 @@ impl<R: Read, S> FeatureIter<R, S> {
     }
 
     pub fn features_count(&self) -> Option<usize> {
-        self.count
+        Some(self.total_feat_count as usize)
     }
 
     fn advance_finished(&mut self) -> bool {
