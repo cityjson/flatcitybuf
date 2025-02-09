@@ -30,6 +30,10 @@ enum Commands {
         /// Output file (use '-' for stdout)
         #[arg(short, long)]
         output: String,
+
+        /// Comma-separated list of attributes to create index for
+        #[arg(long)]
+        attr_index: Option<String>,
     },
 
     /// Convert FCB to CityJSON
@@ -65,7 +69,7 @@ fn get_writer(output: &str) -> Result<Box<dyn Write>> {
     }
 }
 
-fn serialize(input: &str, output: &str) -> Result<()> {
+fn serialize(input: &str, output: &str, attr_index: Option<String>) -> Result<()> {
     let reader = BufReader::new(get_reader(input)?);
     let writer = BufWriter::new(get_writer(output)?);
 
@@ -91,12 +95,21 @@ fn serialize(input: &str, output: &str) -> Result<()> {
         }
     };
 
-    let header_options = Some(HeaderWriterOptions {
+    let attr_index_vec = attr_index.map(|s| {
+        s.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+    });
+
+    let header_options = HeaderWriterOptions {
         write_index: true,
         feature_count: features.len() as u64,
         index_node_size: 16,
-    });
-    let mut fcb = FcbWriter::new(cj, header_options, attr_schema)?;
+        attribute_indices: attr_index_vec,
+    };
+
+    let mut fcb = FcbWriter::new(cj, Some(header_options), attr_schema)?;
 
     for feature in features.iter() {
         fcb.add_feature(feature)?;
@@ -177,7 +190,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Ser { input, output } => serialize(&input, &output),
+        Commands::Ser {
+            input,
+            output,
+            attr_index,
+        } => serialize(&input, &output, attr_index),
         Commands::Deser { input, output } => deserialize(&input, &output),
         Commands::Info { input } => show_info(input),
     }

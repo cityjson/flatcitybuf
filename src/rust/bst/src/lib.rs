@@ -2,6 +2,10 @@ mod byte_serializable;
 mod query;
 mod sorted_index;
 
+pub use byte_serializable::*;
+pub use query::*;
+pub use sorted_index::*;
+
 #[cfg(test)]
 mod tests {
     use crate::byte_serializable::ByteSerializable;

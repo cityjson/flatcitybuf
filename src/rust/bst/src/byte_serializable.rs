@@ -10,6 +10,24 @@ pub trait ByteSerializable {
     fn from_bytes(bytes: &[u8]) -> Self;
 }
 
+pub enum ByteSerializableValue {
+    I64(i64),
+    I32(i32),
+    I16(i16),
+    I8(i8),
+    U64(u64),
+    U32(u32),
+    U16(u16),
+    U8(u8),
+    F64(OrderedFloat<f64>),
+    F32(OrderedFloat<f32>),
+    Bool(bool),
+    String(String),
+    NaiveDateTime(NaiveDateTime),
+    NaiveDate(NaiveDate),
+    DateTime(DateTime<Utc>),
+}
+
 impl ByteSerializable for i64 {
     fn to_bytes(&self) -> Vec<u8> {
         self.to_le_bytes().to_vec()
@@ -32,6 +50,34 @@ impl ByteSerializable for i32 {
     }
 }
 
+impl ByteSerializable for i16 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().to_vec()
+    }
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let array = [0u8; 2];
+        i16::from_le_bytes(array)
+    }
+}
+
+impl ByteSerializable for i8 {
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![*self as u8]
+    }
+    fn from_bytes(bytes: &[u8]) -> Self {
+        bytes[0] as i8
+    }
+}
+impl ByteSerializable for u64 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().to_vec()
+    }
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut array = [0u8; 8];
+        array.copy_from_slice(&bytes[0..8]);
+        u64::from_le_bytes(array)
+    }
+}
 impl ByteSerializable for u32 {
     fn to_bytes(&self) -> Vec<u8> {
         self.to_le_bytes().to_vec()
@@ -43,14 +89,23 @@ impl ByteSerializable for u32 {
     }
 }
 
-impl ByteSerializable for u64 {
+impl ByteSerializable for u16 {
     fn to_bytes(&self) -> Vec<u8> {
         self.to_le_bytes().to_vec()
     }
     fn from_bytes(bytes: &[u8]) -> Self {
-        let mut array = [0u8; 8];
-        array.copy_from_slice(&bytes[0..8]);
-        u64::from_le_bytes(array)
+        let mut array = [0u8; 2];
+        array.copy_from_slice(&bytes[0..2]);
+        u16::from_le_bytes(array)
+    }
+}
+
+impl ByteSerializable for u8 {
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![*self]
+    }
+    fn from_bytes(bytes: &[u8]) -> Self {
+        bytes[0]
     }
 }
 

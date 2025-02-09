@@ -35,6 +35,12 @@ pub struct MultiIndex {
     pub indices: HashMap<String, Box<dyn AnyIndex>>,
 }
 
+impl Default for MultiIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MultiIndex {
     /// Create an empty MultiIndex.
     pub fn new() -> Self {

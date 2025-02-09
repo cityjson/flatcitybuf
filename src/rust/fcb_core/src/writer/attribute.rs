@@ -1,8 +1,11 @@
 use crate::fb::ColumnType;
 use byteorder::{ByteOrder, LittleEndian};
+use chrono::NaiveDateTime;
+use cjseq::CityJSONFeature;
 use serde_json::Value;
 use std::collections::HashMap;
 
+// Schema for attributes. The key is the attribute name, the value is a tuple of the column index and the column type.
 pub type AttributeSchema = HashMap<String, (u16, ColumnType)>;
 
 pub trait AttributeSchemaMethods {
@@ -181,6 +184,136 @@ pub(crate) fn encode_attributes_with_schema(attr: &Value, schema: &AttributeSche
         }
     }
     out
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum AttributeIndexEntry {
+    Bool { index: u16, val: bool },
+    Int { index: u16, val: i32 },
+    UInt { index: u16, val: u32 },
+    Long { index: u16, val: i64 },
+    ULong { index: u16, val: u64 },
+    Float { index: u16, val: f32 },
+    Double { index: u16, val: f64 },
+    String { index: u16, val: String },
+    DateTime { index: u16, val: NaiveDateTime },
+}
+
+pub fn cityfeature_to_index_entries(
+    cityfeature: &CityJSONFeature,
+    schema: &AttributeSchema,
+    indexing_attr: &[String],
+) -> Vec<AttributeIndexEntry> {
+    let mut index_entries = Vec::new();
+    for object in cityfeature.city_objects.values() {
+        if let Some(attr) = &object.attributes {
+            let attr_index_entries = attribute_to_index_entries(attr, schema, indexing_attr);
+            index_entries.extend(attr_index_entries);
+        }
+    }
+
+    index_entries
+}
+
+// this attr should be a json object with attribute name as key and attribute value as value
+pub fn attribute_to_index_entries(
+    attr: &Value,
+    schema: &AttributeSchema,
+    indexing_attr: &[String],
+) -> Vec<AttributeIndexEntry> {
+    if !attr.is_object() || attr.is_null() || attr.as_object().unwrap().is_empty() {
+        return Vec::new();
+    }
+
+    let mut index_entries = Vec::new();
+
+    let map = attr.as_object().unwrap();
+    for attr in indexing_attr {
+        let val: &Value = match map.get(attr) {
+            Some(val) => val,
+            None => {
+                println!("Attribute {} not found in schema", attr);
+                continue;
+            }
+        };
+
+        let index_coltype = schema.get(attr);
+        if let Some((index, coltype)) = index_coltype {
+            match *coltype {
+                ColumnType::Bool => {
+                    let b = val.as_bool().unwrap_or(false);
+                    index_entries.push(AttributeIndexEntry::Bool {
+                        index: *index,
+                        val: b,
+                    });
+                }
+                ColumnType::Int => {
+                    let i = val.as_i64().unwrap_or(0);
+                    index_entries.push(AttributeIndexEntry::Int {
+                        index: *index,
+                        val: i as i32,
+                    });
+                }
+                ColumnType::UInt => {
+                    let i = val.as_u64().unwrap_or(0);
+                    index_entries.push(AttributeIndexEntry::UInt {
+                        index: *index,
+                        val: i as u32,
+                    });
+                }
+                ColumnType::Long => {
+                    let i = val.as_i64().unwrap_or(0);
+                    index_entries.push(AttributeIndexEntry::Long {
+                        index: *index,
+                        val: i as i64,
+                    });
+                }
+                ColumnType::ULong => {
+                    let i = val.as_u64().unwrap_or(0);
+                    index_entries.push(AttributeIndexEntry::ULong {
+                        index: *index,
+                        val: i as u64,
+                    });
+                }
+                ColumnType::Float => {
+                    let f = val.as_f64().unwrap_or(0.0);
+                    index_entries.push(AttributeIndexEntry::Float {
+                        index: *index,
+                        val: f as f32,
+                    });
+                }
+                ColumnType::Double => {
+                    let f = val.as_f64().unwrap_or(0.0);
+                    index_entries.push(AttributeIndexEntry::Double {
+                        index: *index,
+                        val: f,
+                    });
+                }
+                ColumnType::String => {
+                    index_entries.push(AttributeIndexEntry::String {
+                        index: *index,
+                        val: val.as_str().unwrap_or("").to_string(),
+                    });
+                }
+                ColumnType::DateTime => {
+                    index_entries.push(AttributeIndexEntry::DateTime {
+                        index: *index,
+                        val: NaiveDateTime::parse_from_str(
+                            val.as_str().unwrap_or(""),
+                            "%Y-%m-%d %H:%M:%S",
+                        )
+                        .unwrap(),
+                    });
+                }
+                _ => {
+                    //Byte, Ubyte,
+                    println!("Attribute {} is not supported for indexing", attr);
+                }
+            }
+        }
+    }
+
+    index_entries
 }
 
 #[cfg(test)]

@@ -18,6 +18,12 @@ pub struct SortedIndex<T: Ord + ByteSerializable> {
     pub entries: Vec<KeyValue<T>>,
 }
 
+impl<T: Ord + ByteSerializable> Default for SortedIndex<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Ord + ByteSerializable> SortedIndex<T> {
     /// Create an empty index.
     pub fn new() -> Self {
@@ -126,7 +132,6 @@ impl<T: Ord + ByteSerializable> IndexSerializable for SortedIndex<T> {
         let mut len_bytes = [0u8; 8];
         reader.read_exact(&mut len_bytes)?;
         let num_entries = u64::from_le_bytes(len_bytes);
-
         let mut entries = Vec::with_capacity(num_entries as usize);
         for _ in 0..num_entries {
             // Read key length.

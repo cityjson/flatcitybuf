@@ -5,11 +5,11 @@ use fcb_core::{deserializer::to_cj_metadata, HttpFcbReader};
 use anyhow::Result;
 async fn read_http_file(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
-    let min_x = -200000.0;
-    let min_y = -200000.0;
-    let max_x = 200000.0;
-    let max_y = 200000.0;
-    let mut iter = http_reader.select_bbox(min_x, min_y, max_x, max_y).await?;
+    let minx = 84227.77;
+    let miny = 445377.33;
+    let maxx = 85323.23;
+    let maxy = 446334.69;
+    let mut iter = http_reader.select_bbox(minx, miny, maxx, maxy).await?;
     let header = iter.header();
     let cj = to_cj_metadata(&header)?;
 

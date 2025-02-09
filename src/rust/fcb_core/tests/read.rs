@@ -1,22 +1,62 @@
 use anyhow::Result;
-use fcb_core::FcbReader;
-use std::{fs::File, io::BufReader, path::PathBuf};
+use fcb_core::{
+    attribute::{AttributeSchema, AttributeSchemaMethods},
+    header_writer::HeaderWriterOptions,
+    read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
+};
+use std::{
+    fs::File,
+    io::{BufReader, Cursor, Seek},
+    path::PathBuf,
+};
 
 #[test]
 fn read_bbox() -> Result<()> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let input_file = manifest_dir
-        .join("tests")
-        .join("data")
-        .join("delft_bbox.fcb");
-    let mut filein = BufReader::new(File::open(input_file.clone())?);
+    let input_file = manifest_dir.join("tests/data/delft.city.jsonl");
+    let input_file = File::open(input_file)?;
+    let input_reader = BufReader::new(input_file);
+    let original_cj_seq = match read_cityjson_from_reader(input_reader, CJTypeKind::Seq)? {
+        CJType::Seq(seq) => seq,
+        _ => panic!("Expected CityJSONSeq"),
+    };
+
+    let mut attr_schema = AttributeSchema::new();
+    for feature in original_cj_seq.features.iter() {
+        for (_, co) in feature.city_objects.iter() {
+            if let Some(attributes) = &co.attributes {
+                attr_schema.add_attributes(attributes);
+            }
+        }
+    }
+    let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
+
+    let mut memory_buffer = Cursor::new(Vec::new());
+    let mut fcb = FcbWriter::new(
+        original_cj_seq.cj.clone(),
+        Some(HeaderWriterOptions {
+            write_index: true,
+            feature_count: original_cj_seq.features.len() as u64,
+            index_node_size: 16,
+            attribute_indices: Some(attr_indices),
+        }),
+        Some(attr_schema),
+    )?;
+
+    for feature in original_cj_seq.features.iter() {
+        fcb.add_feature(feature)?;
+    }
+
+    fcb.write(&mut memory_buffer)?;
+
+    memory_buffer.seek(std::io::SeekFrom::Start(0))?;
 
     let minx = 84227.77;
     let miny = 445377.33;
     let maxx = 85323.23;
     let maxy = 446334.69;
 
-    let mut fcb = FcbReader::open(&mut filein)?.select_bbox(minx, miny, maxx, maxy)?;
+    let mut fcb = FcbReader::open(&mut memory_buffer)?.select_bbox(minx, miny, maxx, maxy)?;
 
     assert_ne!(fcb.features_count(), None);
     let mut features = Vec::new();

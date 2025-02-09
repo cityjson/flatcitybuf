@@ -1,5 +1,6 @@
 pub mod city_buffer;
 pub mod deserializer;
+use bst::ValueOffset;
 use city_buffer::*;
 use cjseq::CityJSONFeature;
 use deserializer::to_cj_feature;
@@ -12,7 +13,7 @@ use anyhow::{anyhow, Result};
 use fallible_streaming_iterator::FallibleStreamingIterator;
 use packed_rtree::PackedRTree;
 use std::io::{self, Read, Seek, SeekFrom, Write};
-
+mod attr_query;
 pub mod geom_decoder;
 use std::marker::PhantomData;
 pub struct FcbReader<R> {
@@ -30,6 +31,8 @@ pub struct FeatureIter<R, S> {
     buffer: FcbBuffer,
     /// Select>ed features or None if no bbox filter
     item_filter: Option<Vec<packed_rtree::SearchResultItem>>,
+    /// Selected attributes or None if no attribute filter
+    item_attr_filter: Option<Vec<ValueOffset>>,
     /// Number of selected features (None for undefined feature count)
     count: Option<usize>,
     /// Current feature number
@@ -40,6 +43,15 @@ pub struct FeatureIter<R, S> {
     state: State,
     /// Whether or not the underlying reader is Seek
     seekable_marker: PhantomData<S>,
+    feature_offset: FeatureOffset,
+}
+
+#[doc(hidden)]
+pub(super) struct FeatureOffset {
+    magic_bytes: u64,
+    header: u64,
+    rtree_index: u64,
+    attributes: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -86,7 +98,7 @@ impl<R: Read> FcbReader<R> {
             return Err(anyhow!("Illegal header size: {header_size}"));
         }
 
-        let mut header_buf = Vec::with_capacity(header_size + 4);
+        let mut header_buf = Vec::with_capacity(header_size + 4); // 4 bytes for size prefix
         header_buf.extend_from_slice(&size_buf);
         header_buf.resize(header_buf.capacity(), 0);
         reader.read_exact(&mut header_buf[4..])?;
@@ -106,14 +118,22 @@ impl<R: Read> FcbReader<R> {
     }
 
     pub fn select_all_seq(mut self) -> Result<FeatureIter<R, NotSeekable>> {
-        let index_size = self.index_size();
+        let index_size = self.attr_index_size() + self.rtree_index_size();
         // discard bufer of index
         io::copy(&mut (&mut self.reader).take(index_size), &mut io::sink())?;
+        let feature_offset = FeatureOffset {
+            magic_bytes: 8,
+            header: 4 + self.buffer.header_buf.len() as u64,
+            rtree_index: index_size,
+            attributes: self.attr_index_size(),
+        };
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
             self.buffer,
             None,
+            None,
+            feature_offset,
         ))
     }
 
@@ -140,12 +160,22 @@ impl<R: Read> FcbReader<R> {
             list.windows(2).all(|w| w[0].offset < w[1].offset),
             "Since the tree is traversed breadth first, list should be sorted by construction."
         );
-
+        // skip attribute index
+        let index_size = self.attr_index_size();
+        io::copy(&mut (&mut self.reader).take(index_size), &mut io::sink())?;
+        let feature_offset = FeatureOffset {
+            magic_bytes: 8,
+            header: 4 + self.buffer.header_buf.len() as u64,
+            rtree_index: self.rtree_index_size(),
+            attributes: self.attr_index_size(),
+        };
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
             self.buffer,
             Some(list),
+            None,
+            feature_offset,
         ))
     }
 }
@@ -153,14 +183,21 @@ impl<R: Read> FcbReader<R> {
 impl<R: Read + Seek> FcbReader<R> {
     pub fn select_all(mut self) -> Result<FeatureIter<R, Seekable>> {
         // skip index
-        let index_size = self.index_size();
+        let feature_offset = FeatureOffset {
+            magic_bytes: 8,
+            header: 4 + self.buffer.header_buf.len() as u64,
+            rtree_index: self.rtree_index_size(),
+            attributes: self.attr_index_size(),
+        };
+        let index_size = self.attr_index_size() + self.rtree_index_size();
         self.reader.seek(SeekFrom::Current(index_size as i64))?;
-
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
             self.buffer,
             None,
+            None,
+            feature_offset,
         ))
     }
 
@@ -190,12 +227,23 @@ impl<R: Read + Seek> FcbReader<R> {
             list.windows(2).all(|w| w[0].offset < w[1].offset),
             "Since the tree is traversed breadth first, list should be sorted by construction."
         );
+        // skip index
+        self.reader
+            .seek(SeekFrom::Current(self.attr_index_size() as i64))?;
+        let feature_offset = FeatureOffset {
+            magic_bytes: 8,
+            header: 4 + self.buffer.header_buf.len() as u64,
+            rtree_index: self.rtree_index_size(),
+            attributes: self.attr_index_size(),
+        };
 
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
             self.buffer,
             Some(list),
+            None,
+            feature_offset,
         ))
     }
 }
@@ -211,7 +259,7 @@ impl<R: Read> FcbReader<R> {
         self.buffer.header().columns()
     }
 
-    fn index_size(&self) -> u64 {
+    fn rtree_index_size(&self) -> u64 {
         let header = self.buffer.header();
         let feat_count = header.features_count() as usize;
         if header.index_node_size() > 0 && feat_count > 0 {
@@ -219,6 +267,20 @@ impl<R: Read> FcbReader<R> {
         } else {
             0
         }
+    }
+
+    fn attr_index_size(&self) -> u64 {
+        let header = self.buffer.header();
+        header
+            .attribute_index()
+            .map(|attr_index| attr_index.iter().map(|ai| ai.length()).sum::<u32>())
+            .unwrap_or(0) as u64
+    }
+}
+
+impl FeatureOffset {
+    fn total_size(&self) -> u64 {
+        self.magic_bytes + self.header + self.rtree_index + self.attributes
     }
 }
 
@@ -242,6 +304,14 @@ impl<R: Read> FallibleStreamingIterator for FeatureIter<R, NotSeekable> {
                 self.cur_pos += seek_bytes;
             }
         }
+
+        // if let Some(attr_filter) = &self.item_attr_filter {
+        //     let item_offset = attr_filter[self.feat_no];
+        //     let seek_bytes = item_offset - self.cur_pos;
+        //     io::copy(&mut (&mut self.reader).take(seek_bytes), &mut io::sink())?;
+        //     self.cur_pos += seek_bytes;
+        // }
+
         self.read_feature()
     }
 
@@ -274,6 +344,18 @@ impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
                 self.cur_pos += seek_bytes;
             }
         }
+
+        if let Some(attr_filter) = &self.item_attr_filter {
+            if self.state == State::ReadFirstFeatureSize {
+                self.state = State::Reading;
+            }
+            let item_offset = attr_filter[self.feat_no];
+            self.reader.seek(SeekFrom::Start(
+                self.feature_offset.total_size() + item_offset,
+            ))?;
+            self.cur_pos = item_offset;
+        }
+
         self.read_feature()
     }
 
@@ -346,22 +428,26 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
 }
 
 impl<R: Read, S> FeatureIter<R, S> {
-    pub fn new(
+    pub(super) fn new(
         reader: R,
         verify: bool,
         buffer: FcbBuffer,
         item_filter: Option<Vec<packed_rtree::SearchResultItem>>,
+        item_attr_filter: Option<Vec<ValueOffset>>,
+        feature_offset: FeatureOffset,
     ) -> FeatureIter<R, S> {
         let mut iter = FeatureIter {
             reader,
             verify,
             buffer,
             item_filter,
+            item_attr_filter,
             count: None,
             feat_no: 0,
             cur_pos: 0,
             state: State::Init,
             seekable_marker: PhantomData,
+            feature_offset,
         };
 
         if iter.read_feature_size() {
@@ -407,6 +493,12 @@ impl<R: Read, S> FeatureIter<R, S> {
         }
         if let Some(count) = self.count {
             if self.feat_no >= count {
+                self.state = State::Finished;
+                return true;
+            }
+        }
+        if let Some(attr_filter) = &self.item_attr_filter {
+            if self.feat_no >= attr_filter.len() {
                 self.state = State::Finished;
                 return true;
             }

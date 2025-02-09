@@ -25,9 +25,6 @@ fn read_file() -> Result<(), Box<dyn Error>> {
     let mut feat_num = 0;
     while let Some(feat_buf) = reader.next()? {
         let feature = feat_buf.cur_cj_feature()?;
-        if feat_num == 0 {
-            println!("feature: {:?}", feature);
-        }
         features.push(feature);
         feat_num += 1;
         if feat_num >= feat_count {
