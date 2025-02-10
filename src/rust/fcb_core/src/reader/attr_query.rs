@@ -1,10 +1,8 @@
 use std::io::{self, Read, Seek, SeekFrom};
 
 use anyhow::{anyhow, Ok, Result};
-use bst::{
-    ByteSerializable, ByteSerializableValue, IndexSerializable, MultiIndex, Operator, Query,
-    QueryCondition, SortedIndex,
-};
+pub use bst::*;
+
 use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
 
@@ -15,11 +13,10 @@ use super::{
     FcbReader, FeatureIter,
 };
 
+pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;
+
 impl<R: Read + Seek> FcbReader<R> {
-    pub fn select_attr_query(
-        mut self,
-        query: Vec<(String, Operator, ByteSerializableValue)>,
-    ) -> Result<FeatureIter<R, Seekable>> {
+    pub fn select_attr_query(mut self, query: AttrQuery) -> Result<FeatureIter<R, Seekable>> {
         // query: vec<(field_name, operator, value)>
         let header = self.buffer.header();
         let attr_index_entries = header
@@ -142,7 +139,7 @@ impl<R: Read + Seek> FcbReader<R> {
 impl<R: Read> FcbReader<R> {
     pub fn select_attr_query_seq(
         mut self,
-        query: Vec<(String, Operator, ByteSerializableValue)>,
+        query: AttrQuery,
     ) -> anyhow::Result<FeatureIter<R, NotSeekable>> {
         // query: vec<(field_name, operator, value)>
         let header = self.buffer.header();

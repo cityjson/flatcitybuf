@@ -15,6 +15,7 @@ use packed_rtree::PackedRTree;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 mod attr_query;
 pub mod geom_decoder;
+pub use attr_query::*;
 use std::marker::PhantomData;
 pub struct FcbReader<R> {
     reader: R,
