@@ -55,7 +55,6 @@ pub struct AsyncFeatureIter<T: AsyncHttpRangeClient> {
 #[cfg(feature = "http")]
 impl HttpFcbReader<reqwest::Client> {
     pub async fn open(url: &str) -> Result<HttpFcbReader<reqwest::Client>> {
-        println!("open===: {:?}", url);
         trace!("starting: opening http reader, reading header");
         let client = BufferedHttpRangeClient::new(url);
         Self::_open(client).await

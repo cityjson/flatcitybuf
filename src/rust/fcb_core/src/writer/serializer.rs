@@ -7,7 +7,7 @@ use crate::fb::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
 use crate::geom_encoder::encode;
-use crate::{Column, ColumnArgs};
+use crate::{AttributeIndex, Column, ColumnArgs};
 use cjseq::{
     CityJSON, CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
     GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
@@ -20,6 +20,11 @@ use serde_json::Value;
 use super::geom_encoder::{GMBoundaries, GMSemantics};
 use super::header_writer::HeaderWriterOptions;
 
+#[derive(Debug, Clone)]
+pub(super) struct AttributeIndexInfo {
+    pub index: u16,
+    pub length: u32,
+}
 /// -----------------------------------
 /// Serializer for Header
 /// -----------------------------------
@@ -35,13 +40,24 @@ pub(super) fn to_fcb_header<'a>(
     cj: &CityJSON,
     header_options: HeaderWriterOptions,
     attr_schema: &AttributeSchema,
+    attribute_indices_info: Option<&[AttributeIndexInfo]>,
 ) -> flatbuffers::WIPOffset<Header<'a>> {
     let version = Some(fbb.create_string(&cj.version));
     let transform = to_transform(&cj.transform);
     let features_count: u64 = header_options.feature_count;
     let columns = Some(to_columns(fbb, attr_schema));
     let index_node_size = header_options.index_node_size;
-
+    let attribute_index = {
+        if let Some(attribute_indices_info) = attribute_indices_info {
+            let attribute_indices_info_vec = attribute_indices_info
+                .iter()
+                .map(|info| AttributeIndex::new(info.index, info.length))
+                .collect::<Vec<_>>();
+            Some(fbb.create_vector(&attribute_indices_info_vec))
+        } else {
+            None
+        }
+    };
     if let Some(meta) = cj.metadata.as_ref() {
         let reference_system = meta
             .reference_system
@@ -100,6 +116,7 @@ pub(super) fn to_fcb_header<'a>(
                 geographical_extent: geographical_extent.as_ref(),
                 reference_system,
                 identifier,
+                attribute_index,
                 reference_date,
                 title,
                 poc_contact_name,

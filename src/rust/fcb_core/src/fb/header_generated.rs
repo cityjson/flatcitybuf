@@ -2,7 +2,6 @@
 
 // @generated
 
-
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
@@ -155,8 +154,7 @@ impl<'a> flatbuffers::Verifiable for ColumnType {
 impl flatbuffers::SimpleToVerifyInSlice for ColumnType {}
 // struct Vector, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vector(pub [u8; 24]);
 impl core::fmt::Debug for Vector {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -198,7 +196,6 @@ impl<'a> flatbuffers::Verifiable for Vector {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -350,7 +347,6 @@ impl<'a> flatbuffers::Verifiable for Transform {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -440,7 +436,6 @@ impl<'a> flatbuffers::Verifiable for GeographicalExtent {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -476,6 +471,122 @@ impl<'a> GeographicalExtent {
     #[allow(clippy::identity_op)]
     pub fn set_max(&mut self, x: &Vector) {
         self.0[24..24 + 24].copy_from_slice(&x.0)
+    }
+}
+
+// struct AttributeIndex, aligned to 4
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct AttributeIndex(pub [u8; 8]);
+impl core::fmt::Debug for AttributeIndex {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.debug_struct("AttributeIndex")
+            .field("index", &self.index())
+            .field("length", &self.length())
+            .finish()
+    }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for AttributeIndex {}
+impl<'a> flatbuffers::Follow<'a> for AttributeIndex {
+    type Inner = &'a AttributeIndex;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        <&'a AttributeIndex>::follow(buf, loc)
+    }
+}
+impl<'a> flatbuffers::Follow<'a> for &'a AttributeIndex {
+    type Inner = &'a AttributeIndex;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        flatbuffers::follow_cast_ref::<AttributeIndex>(buf, loc)
+    }
+}
+impl<'b> flatbuffers::Push for AttributeIndex {
+    type Output = AttributeIndex;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        let src =
+            ::core::slice::from_raw_parts(self as *const AttributeIndex as *const u8, Self::size());
+        dst.copy_from_slice(src);
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for AttributeIndex {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.in_buffer::<Self>(pos)
+    }
+}
+
+impl<'a> AttributeIndex {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(index: u16, length: u32) -> Self {
+        let mut s = Self([0; 8]);
+        s.set_index(index);
+        s.set_length(length);
+        s
+    }
+
+    pub fn index(&self) -> u16 {
+        let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[0..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_index(&mut self, x: u16) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[0..].as_mut_ptr(),
+                core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+
+    pub fn length(&self) -> u32 {
+        let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[4..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_length(&mut self, x: u32) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[4..].as_mut_ptr(),
+                core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+            );
+        }
     }
 }
 
@@ -659,7 +770,6 @@ impl flatbuffers::Verifiable for Column<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<u16>("index", Self::VT_INDEX, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
@@ -901,7 +1011,6 @@ impl flatbuffers::Verifiable for ReferenceSystem<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "authority",
@@ -1015,24 +1124,25 @@ impl<'a> Header<'a> {
     pub const VT_COLUMNS: flatbuffers::VOffsetT = 6;
     pub const VT_FEATURES_COUNT: flatbuffers::VOffsetT = 8;
     pub const VT_INDEX_NODE_SIZE: flatbuffers::VOffsetT = 10;
-    pub const VT_GEOGRAPHICAL_EXTENT: flatbuffers::VOffsetT = 12;
-    pub const VT_REFERENCE_SYSTEM: flatbuffers::VOffsetT = 14;
-    pub const VT_IDENTIFIER: flatbuffers::VOffsetT = 16;
-    pub const VT_REFERENCE_DATE: flatbuffers::VOffsetT = 18;
-    pub const VT_TITLE: flatbuffers::VOffsetT = 20;
-    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 22;
-    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 24;
-    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 26;
-    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 28;
-    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 30;
-    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 32;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 34;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 36;
-    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 38;
-    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 40;
-    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 42;
-    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 44;
-    pub const VT_VERSION: flatbuffers::VOffsetT = 46;
+    pub const VT_ATTRIBUTE_INDEX: flatbuffers::VOffsetT = 12;
+    pub const VT_GEOGRAPHICAL_EXTENT: flatbuffers::VOffsetT = 14;
+    pub const VT_REFERENCE_SYSTEM: flatbuffers::VOffsetT = 16;
+    pub const VT_IDENTIFIER: flatbuffers::VOffsetT = 18;
+    pub const VT_REFERENCE_DATE: flatbuffers::VOffsetT = 20;
+    pub const VT_TITLE: flatbuffers::VOffsetT = 22;
+    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 24;
+    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 26;
+    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 28;
+    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 30;
+    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 32;
+    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 34;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 36;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 38;
+    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 40;
+    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 42;
+    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 44;
+    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 46;
+    pub const VT_VERSION: flatbuffers::VOffsetT = 48;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -1099,6 +1209,9 @@ impl<'a> Header<'a> {
         if let Some(x) = args.geographical_extent {
             builder.add_geographical_extent(x);
         }
+        if let Some(x) = args.attribute_index {
+            builder.add_attribute_index(x);
+        }
         if let Some(x) = args.columns {
             builder.add_columns(x);
         }
@@ -1149,6 +1262,19 @@ impl<'a> Header<'a> {
             self._tab
                 .get::<u16>(Header::VT_INDEX_NODE_SIZE, Some(16))
                 .unwrap()
+        }
+    }
+    #[inline]
+    pub fn attribute_index(&self) -> Option<flatbuffers::Vector<'a, AttributeIndex>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, AttributeIndex>>>(
+                    Header::VT_ATTRIBUTE_INDEX,
+                    None,
+                )
         }
     }
     #[inline]
@@ -1350,7 +1476,6 @@ impl flatbuffers::Verifiable for Header<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<Transform>("transform", Self::VT_TRANSFORM, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<
@@ -1358,6 +1483,11 @@ impl flatbuffers::Verifiable for Header<'_> {
             >>("columns", Self::VT_COLUMNS, false)?
             .visit_field::<u64>("features_count", Self::VT_FEATURES_COUNT, false)?
             .visit_field::<u16>("index_node_size", Self::VT_INDEX_NODE_SIZE, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, AttributeIndex>>>(
+                "attribute_index",
+                Self::VT_ATTRIBUTE_INDEX,
+                false,
+            )?
             .visit_field::<GeographicalExtent>(
                 "geographical_extent",
                 Self::VT_GEOGRAPHICAL_EXTENT,
@@ -1451,6 +1581,7 @@ pub struct HeaderArgs<'a> {
     >,
     pub features_count: u64,
     pub index_node_size: u16,
+    pub attribute_index: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, AttributeIndex>>>,
     pub geographical_extent: Option<&'a GeographicalExtent>,
     pub reference_system: Option<flatbuffers::WIPOffset<ReferenceSystem<'a>>>,
     pub identifier: Option<flatbuffers::WIPOffset<&'a str>>,
@@ -1478,6 +1609,7 @@ impl Default for HeaderArgs<'_> {
             columns: None,
             features_count: 0,
             index_node_size: 16,
+            attribute_index: None,
             geographical_extent: None,
             reference_system: None,
             identifier: None,
@@ -1529,6 +1661,16 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
     pub fn add_index_node_size(&mut self, index_node_size: u16) {
         self.fbb_
             .push_slot::<u16>(Header::VT_INDEX_NODE_SIZE, index_node_size, 16);
+    }
+    #[inline]
+    pub fn add_attribute_index(
+        &mut self,
+        attribute_index: flatbuffers::WIPOffset<flatbuffers::Vector<'b, AttributeIndex>>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Header::VT_ATTRIBUTE_INDEX,
+            attribute_index,
+        );
     }
     #[inline]
     pub fn add_geographical_extent(&mut self, geographical_extent: &GeographicalExtent) {
@@ -1685,6 +1827,7 @@ impl core::fmt::Debug for Header<'_> {
         ds.field("columns", &self.columns());
         ds.field("features_count", &self.features_count());
         ds.field("index_node_size", &self.index_node_size());
+        ds.field("attribute_index", &self.attribute_index());
         ds.field("geographical_extent", &self.geographical_extent());
         ds.field("reference_system", &self.reference_system());
         ds.field("identifier", &self.identifier());
