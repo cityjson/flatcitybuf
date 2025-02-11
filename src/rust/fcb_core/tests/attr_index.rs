@@ -341,14 +341,11 @@ fn test_attr_index_multiple_queries() -> Result<()> {
                 for co in feature.city_objects.values() {
                     if let Some(attrs) = &co.attributes {
                         if let Some(val) = attrs.get("tijdstipregistratie") {
-                            println!("val===: {:?}", val);
                             let val_tijdstip = chrono::NaiveDateTime::parse_from_str(
                                 val.as_str().unwrap(),
                                 "%Y-%m-%dT%H:%M:%S",
                             )
                             .unwrap();
-                            println!("val_tijdstip: {:?}", val_tijdstip);
-                            println!("query_tijdstip: {:?}", query_tijdstip);
                             if val_tijdstip < query_tijdstip {
                                 valid_tijdstip = false;
                             }
@@ -374,13 +371,13 @@ fn test_attr_index_multiple_queries() -> Result<()> {
                 for co in feature.city_objects.values() {
                     if let Some(attrs) = &co.attributes {
                         if let Some(val) = attrs.get("tijdstipregistratie") {
-                            println!("val===: {:?}", val);
                             let val_tijdstip =
                                 chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap())
-                                    .unwrap()
-                                    .naive_utc();
-                            println!("val_tijdstip: {:?}", val_tijdstip);
-                            println!("query_tijdstip: {:?}", query_tijdstip);
+                                    .map_err(|e| eprintln!("Failed to parse datetime: {}", e))
+                                    .map(|dt| dt.naive_utc())
+                                    .unwrap_or_else(|_| {
+                                        chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
+                                    });
                             if val_tijdstip > query_tijdstip {
                                 valid_tijdstip = true;
                             }
