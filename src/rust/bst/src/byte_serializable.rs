@@ -55,7 +55,8 @@ impl ByteSerializable for i16 {
         self.to_le_bytes().to_vec()
     }
     fn from_bytes(bytes: &[u8]) -> Self {
-        let array = [0u8; 2];
+        let mut array = [0u8; 2];
+        array.copy_from_slice(&bytes[0..2]);
         i16::from_le_bytes(array)
     }
 }

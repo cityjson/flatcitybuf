@@ -282,7 +282,19 @@ impl<R: Read> FcbReader<R> {
         let header = self.buffer.header();
         header
             .attribute_index()
-            .map(|attr_index| attr_index.iter().map(|ai| ai.length()).sum::<u32>())
+            .map(|attr_index| {
+                attr_index
+                    .iter()
+                    .try_fold(0u32, |acc, ai| {
+                        let len = ai.length();
+                        if len > u32::MAX - acc {
+                            Err(anyhow!("Attribute index size overflow"))
+                        } else {
+                            Ok(acc + len)
+                        }
+                    })
+                    .unwrap_or(0)
+            })
             .unwrap_or(0) as u64
     }
 }

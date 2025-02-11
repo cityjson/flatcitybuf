@@ -298,11 +298,18 @@ pub fn attribute_to_index_entries(
                 ColumnType::DateTime => {
                     index_entries.push(AttributeIndexEntry::DateTime {
                         index: *index,
-                        val: NaiveDateTime::parse_from_str(
+                        val: match NaiveDateTime::parse_from_str(
                             val.as_str().unwrap_or(""),
                             "%Y-%m-%d %H:%M:%S",
-                        )
-                        .unwrap(),
+                        ) {
+                            Ok(dt) => dt,
+                            Err(e) => {
+                                eprintln!("Failed to parse DateTime: {}", e);
+                                // Choose whether to skip, default, or handle differently
+                                // For example, default to 1970-01-01:
+                                NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
+                            }
+                        },
                     });
                 }
                 _ => {

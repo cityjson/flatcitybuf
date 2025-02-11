@@ -48,6 +48,9 @@ fn main() -> Result<()> {
         .join("tests")
         .join("data")
         .join("delft.city.jsonl");
-    read_cj(input_file_path.to_str().unwrap())?;
+    let input_path = input_file_path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 in path"))?;
+    read_cj(input_path)?;
     Ok(())
 }
