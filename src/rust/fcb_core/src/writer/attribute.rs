@@ -42,10 +42,17 @@ fn guess_type(value: &Value) -> Option<ColumnType> {
             } else if n.is_i64() {
                 Some(ColumnType::Long)
             } else {
-                Some(ColumnType::ULong) //TODO: check if this is correct. To accurately guess the type, we need to know the range of the value. But, to do that, we need to read all the data.
+                Some(ColumnType::ULong) // Fallback for unknown number type.
             }
         }
-        Value::String(_) => Some(ColumnType::String),
+        Value::String(s) => {
+            // Attempt to parse the string as an RFC3339 date.
+            if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+                Some(ColumnType::DateTime)
+            } else {
+                Some(ColumnType::String)
+            }
+        }
         Value::Array(_) => Some(ColumnType::Json),
         Value::Object(_) => Some(ColumnType::Json),
         _ => None,
@@ -298,11 +305,9 @@ pub fn attribute_to_index_entries(
                 ColumnType::DateTime => {
                     index_entries.push(AttributeIndexEntry::DateTime {
                         index: *index,
-                        val: match NaiveDateTime::parse_from_str(
-                            val.as_str().unwrap_or(""),
-                            "%Y-%m-%d %H:%M:%S",
-                        ) {
-                            Ok(dt) => dt,
+                        val: match chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap_or(""))
+                        {
+                            Ok(dt) => dt.naive_utc(),
                             Err(e) => {
                                 eprintln!("Failed to parse DateTime: {}", e);
                                 // Choose whether to skip, default, or handle differently

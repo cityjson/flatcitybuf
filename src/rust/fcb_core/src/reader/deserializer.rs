@@ -241,6 +241,14 @@ pub(crate) fn decode_attributes(
                 map.insert(column.name().to_string(), serde_json::Value::String(s));
                 offset += len as usize;
             }
+            ColumnType::DateTime => {
+                let len = LittleEndian::read_u32(&bytes[offset..offset + size_of::<u32>()]);
+                offset += size_of::<u32>();
+                let s = String::from_utf8(bytes[offset..offset + len as usize].to_vec())
+                    .unwrap_or_default();
+                map.insert(column.name().to_string(), serde_json::Value::String(s));
+                offset += len as usize;
+            }
             ColumnType::Json => {
                 let len = LittleEndian::read_u32(&bytes[offset..offset + size_of::<u32>()]);
                 offset += size_of::<u32>();

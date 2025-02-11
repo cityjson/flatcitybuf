@@ -10,6 +10,7 @@ pub trait ByteSerializable {
     fn from_bytes(bytes: &[u8]) -> Self;
 }
 
+#[derive(Debug, Clone)]
 pub enum ByteSerializableValue {
     I64(i64),
     I32(i32),
