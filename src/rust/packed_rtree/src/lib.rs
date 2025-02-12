@@ -567,6 +567,7 @@ impl PackedRTree {
     pub async fn http_stream_search<T: AsyncHttpRangeClient>(
         client: &mut AsyncBufferedHttpRangeClient<T>,
         index_begin: usize,
+        attr_index_size: usize,
         num_items: usize,
         branching_factor: u16,
         min_x: f64,
@@ -582,7 +583,8 @@ impl PackedRTree {
             return Ok(vec![]);
         }
         let level_bounds = PackedRTree::generate_level_bounds(num_items, branching_factor);
-        let feature_begin = index_begin + PackedRTree::index_size(num_items, branching_factor);
+        let feature_begin =
+            index_begin + attr_index_size + PackedRTree::index_size(num_items, branching_factor);
         debug!("http_stream_search - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, GPS bounds:[({min_x}, {min_y}), ({max_x},{max_y})]");
 
         #[derive(Debug, PartialEq, Eq)]

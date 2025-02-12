@@ -42,10 +42,7 @@ mod http {
 
     #[tokio::test]
     async fn test_read_http_file() -> Result<()> {
-        let res = read_http_file(
-            "https://github.com/HideBa/flatcitybuf-testing/raw/refs/heads/main/delft_attr.fcb",
-        )
-        .await;
+        let res = read_http_file("https://storage.googleapis.com/flatcitybuf/delft_bbox.fcb").await;
         assert!(res.is_ok());
         Ok(())
     }

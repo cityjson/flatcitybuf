@@ -1,5 +1,5 @@
 use crate::deserializer::to_cj_feature;
-use crate::fb::*;
+use crate::{build_query, fb::*, process_attr_index_entry, AttrQuery};
 
 use crate::reader::city_buffer::FcbBuffer;
 use crate::{
@@ -7,6 +7,7 @@ use crate::{
     HEADER_SIZE_SIZE, MAGIC_BYTES_SIZE,
 };
 use anyhow::{anyhow, Result};
+use bst::{ByteSerializable, MultiIndex};
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
 use cjseq::CityJSONFeature;
@@ -131,6 +132,37 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
     fn header_len(&self) -> usize {
         MAGIC_BYTES_SIZE + self.fbs.header_buf.len()
     }
+
+    fn rtree_index_size(&self) -> u64 {
+        let header = self.fbs.header();
+        let feat_count = header.features_count() as usize;
+        if header.index_node_size() > 0 && feat_count > 0 {
+            PackedRTree::index_size(feat_count, header.index_node_size()) as u64
+        } else {
+            0
+        }
+    }
+
+    fn attr_index_size(&self) -> u64 {
+        let header = self.fbs.header();
+        header
+            .attribute_index()
+            .map(|attr_index| {
+                attr_index
+                    .iter()
+                    .try_fold(0u32, |acc, ai| {
+                        let len = ai.length();
+                        if len > u32::MAX - acc {
+                            Err(anyhow!("Attribute index size overflow"))
+                        } else {
+                            Ok(acc + len)
+                        }
+                    }) // sum of all attribute index lengths
+                    .unwrap_or(0) as u64
+            })
+            .unwrap_or(0) as u64
+    }
+
     /// Select all features.
     pub async fn select_all(self) -> Result<AsyncFeatureIter<T>> {
         let header = self.fbs.header();
@@ -172,10 +204,11 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
 
         // request up to this many extra bytes if it means we can eliminate an extra request
         let combine_request_threshold = 256 * 1024;
-
+        let attr_index_size = self.attr_index_size() as usize;
         let list = PackedRTree::http_stream_search(
             &mut self.client,
             header_len,
+            attr_index_size,
             count,
             PackedRTree::DEFAULT_NODE_SIZE,
             min_x,
@@ -199,6 +232,67 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
             client: self.client,
             fbs: self.fbs,
             selection,
+            count,
+        })
+    }
+
+    /// This method uses the attribute index section to find matching feature offsets.
+    /// It then groups (batches) the remote feature ranges in order to reduce IO overhead.
+    pub async fn select_attr_query(mut self, query: &AttrQuery) -> Result<AsyncFeatureIter<T>> {
+        trace!("starting: select_attr_query via http reader");
+
+        let header = self.fbs.header();
+        let header_len = self.header_len();
+        // Assume the header provides rtree and attribute index sizes.
+        let rtree_index_size = self.rtree_index_size() as usize;
+        let attr_index_size = self.attr_index_size() as usize;
+        let attr_index_offset = header_len + rtree_index_size;
+        let feature_begin = header_len + rtree_index_size + attr_index_size;
+
+        // Fetch the attribute index block via HTTP range request.
+        let mut attr_index_bytes = self
+            .client
+            .get_range(attr_index_offset, attr_index_size)
+            .await?;
+
+        let attr_index_entries = header
+            .attribute_index()
+            .ok_or_else(|| anyhow!("attribute index not found"))?;
+        let columns: Vec<Column> = header
+            .columns()
+            .ok_or_else(|| anyhow!("no columns found in header"))?
+            .iter()
+            .collect();
+
+        let mut multi_index = MultiIndex::new();
+
+        for attr_info in attr_index_entries.iter() {
+            process_attr_index_entry(
+                &mut attr_index_bytes,
+                &mut multi_index,
+                &columns,
+                &query,
+                attr_info,
+            )?;
+        }
+
+        let query = build_query(&query);
+
+        let result = bst::stream_query(&multi_index, query, feature_begin).await?;
+
+        let count = result.len();
+        let combine_request_threshold = 256 * 1024;
+
+        let feature_batches = FeatureBatch::make_batches(result, combine_request_threshold).await?;
+
+        trace!(
+            "completed: select_attr_query via http reader, matched features: {}",
+            count
+        );
+        Ok(AsyncFeatureIter {
+            client: self.client,
+            fbs: self.fbs,
+            selection: FeatureSelection::SelectAttr(SelectAttr { feature_batches }),
             count,
         })
     }
@@ -253,6 +347,7 @@ impl<T: AsyncHttpRangeClient> AsyncFeatureIter<T> {
 enum FeatureSelection {
     SelectAll(SelectAll),
     SelectBbox(SelectBbox),
+    SelectAttr(SelectAttr),
 }
 
 impl FeatureSelection {
@@ -263,6 +358,7 @@ impl FeatureSelection {
         match self {
             FeatureSelection::SelectAll(select_all) => select_all.next_buffer(client).await,
             FeatureSelection::SelectBbox(select_bbox) => select_bbox.next_buffer(client).await,
+            FeatureSelection::SelectAttr(select_attr) => select_attr.next_buffer(client).await,
         }
     }
 }
@@ -424,6 +520,34 @@ impl FeatureBatch {
         feature_buffer.put(client.get_range(pos, feature_size).await?);
 
         Ok(Some(feature_buffer.freeze()))
+    }
+}
+
+/// NEW: Struct for attribute-based feature selection.
+struct SelectAttr {
+    /// Batches of features to be fetched from the remote file.
+    feature_batches: Vec<FeatureBatch>,
+}
+
+impl SelectAttr {
+    async fn next_buffer<T: AsyncHttpRangeClient>(
+        &mut self,
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+    ) -> Result<Option<Bytes>> {
+        let mut next_buffer = None;
+        // Similar to SelectBbox: try the last batch until one yields data.
+        while next_buffer.is_none() {
+            let Some(feature_batch) = self.feature_batches.last_mut() else {
+                break;
+            };
+            if let Some(buffer) = feature_batch.next_buffer(client).await? {
+                next_buffer = Some(buffer);
+            } else {
+                // Batch exhausted, remove it.
+                self.feature_batches.pop();
+            }
+        }
+        Ok(next_buffer)
     }
 }
 
