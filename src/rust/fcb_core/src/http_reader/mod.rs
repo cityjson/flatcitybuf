@@ -283,7 +283,7 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
         let count = result.len();
         let combine_request_threshold = 256 * 1024;
 
-        let feature_batches = FeatureBatch::make_batches(result, combine_request_threshold).await?;
+        let http_ranges: Vec<HttpRange> = result.into_iter().map(|item| item.range).collect();
 
         trace!(
             "completed: select_attr_query via http reader, matched features: {}",
@@ -292,7 +292,10 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
         Ok(AsyncFeatureIter {
             client: self.client,
             fbs: self.fbs,
-            selection: FeatureSelection::SelectAttr(SelectAttr { feature_batches }),
+            selection: FeatureSelection::SelectAttr(SelectAttr {
+                ranges: http_ranges,
+                range_pos: 0,
+            }),
             count,
         })
     }
@@ -331,17 +334,6 @@ impl<T: AsyncHttpRangeClient> AsyncFeatureIter<T> {
         let cj_feature = to_cj_feature(self.cur_feature().feature(), self.header().columns())?;
         Ok(cj_feature)
     }
-
-    // pub async fn cj_features(&mut self) -> Result<Vec<CityJSONFeature>> {
-    //     let mut cj_features = Vec::new();
-    //     let columns = self.header().columns().unwrap_or_default().to_owned();
-
-    //     while let Some(feature) = self.next().await.map_err(|e| anyhow!("NoFeature: {e}"))? {
-    //         let cj_feature = to_cj_feature(feature.feature(), &columns)?;
-    //         cj_features.push(cj_feature);
-    //     }
-    //     Ok(cj_features)
-    // }
 }
 
 enum FeatureSelection {
@@ -523,10 +515,10 @@ impl FeatureBatch {
     }
 }
 
-/// NEW: Struct for attribute-based feature selection.
 struct SelectAttr {
-    /// Batches of features to be fetched from the remote file.
-    feature_batches: Vec<FeatureBatch>,
+    // TODO: change this implementation so it can batch features
+    ranges: Vec<HttpRange>,
+    range_pos: usize,
 }
 
 impl SelectAttr {
@@ -534,20 +526,14 @@ impl SelectAttr {
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
     ) -> Result<Option<Bytes>> {
-        let mut next_buffer = None;
-        // Similar to SelectBbox: try the last batch until one yields data.
-        while next_buffer.is_none() {
-            let Some(feature_batch) = self.feature_batches.last_mut() else {
-                break;
-            };
-            if let Some(buffer) = feature_batch.next_buffer(client).await? {
-                next_buffer = Some(buffer);
-            } else {
-                // Batch exhausted, remove it.
-                self.feature_batches.pop();
-            }
-        }
-        Ok(next_buffer)
+        let Some(range) = self.ranges.get(self.range_pos) else {
+            return Ok(None);
+        };
+        let mut feature_buffer = BytesMut::from(client.get_range(range.start(), 4).await?);
+        let feature_size = LittleEndian::read_u32(&feature_buffer) as usize;
+        feature_buffer.put(client.get_range(range.start() + 4, feature_size).await?);
+        self.range_pos += 1;
+        Ok(Some(feature_buffer.freeze()))
     }
 }
 

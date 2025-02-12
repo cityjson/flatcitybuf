@@ -1,6 +1,6 @@
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
-use ordered_float::OrderedFloat;
 
+pub use ordered_float::OrderedFloat;
 /// A trait for converting types to and from bytes.
 pub trait ByteSerializable {
     /// Convert self into a vector of bytes.
