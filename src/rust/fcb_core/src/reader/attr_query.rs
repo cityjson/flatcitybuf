@@ -4,7 +4,6 @@ use anyhow::{anyhow, Ok, Result};
 pub use bst::*;
 
 use chrono::{DateTime, Utc};
-use ordered_float::OrderedFloat;
 
 use crate::{AttributeIndex, Column, ColumnType, FeatureOffset};
 
@@ -15,7 +14,7 @@ use super::{
 
 pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;
 
-pub(crate) fn process_attr_index_entry<R: Read>(
+pub fn process_attr_index_entry<R: Read>(
     reader: &mut R,
     multi_index: &mut MultiIndex,
     columns: &[Column],
@@ -86,7 +85,7 @@ fn byte_serializable_to_bytes(value: &ByteSerializableValue) -> Vec<u8> {
     }
 }
 
-pub(crate) fn build_query(query: &AttrQuery) -> Query {
+pub fn build_query(query: &AttrQuery) -> Query {
     Query {
         conditions: query
             .iter()

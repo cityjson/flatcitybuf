@@ -3,17 +3,23 @@ use fcb_core::deserializer::{to_cj_feature, to_cj_metadata};
 use fcb_core::{size_prefixed_root_as_header, Header};
 // #[cfg(target_arch = "wasm32")]
 use gloo_client::WasmHttpClient;
+use js_sys::Array;
 #[cfg(target_arch = "wasm32")]
 use log::{debug, info, trace};
+use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 
+use bst::{ByteSerializable, ByteSerializableValue, MultiIndex, Operator, OrderedFloat};
+
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use fcb_core::city_buffer::FcbBuffer;
 use fcb_core::{
-    check_magic_bytes, size_prefixed_root_as_city_feature, HEADER_MAX_BUFFER_SIZE,
-    HEADER_SIZE_SIZE, MAGIC_BYTES_SIZE,
+    build_query, check_magic_bytes, fb::*, process_attr_index_entry,
+    size_prefixed_root_as_city_feature, AttrQuery, HEADER_MAX_BUFFER_SIZE, HEADER_SIZE_SIZE,
+    MAGIC_BYTES_SIZE,
 };
 
 use std::fmt::Error;
@@ -146,26 +152,6 @@ impl HttpFcbReader {
         })
     }
 
-    fn attr_index_size(&self) -> u64 {
-        let header = self.fbs.header();
-        header
-            .attribute_index()
-            .map(|attr_index| {
-                attr_index
-                    .iter()
-                    .try_fold(0u32, |acc, ai| {
-                        let len = ai.length();
-                        if len > u32::MAX - acc {
-                            Err("Attribute index size overflow")
-                        } else {
-                            Ok(acc + len)
-                        }
-                    }) // sum of all attribute index lengths
-                    .unwrap_or(0) as u64
-            })
-            .unwrap_or(0)
-    }
-
     #[wasm_bindgen]
     pub fn header(&self) -> Result<JsValue, JsValue> {
         let header = self.fbs.header();
@@ -179,6 +165,37 @@ impl HttpFcbReader {
     fn header_len(&self) -> usize {
         MAGIC_BYTES_SIZE + self.fbs.header_buf.len()
     }
+
+    fn rtree_index_size(&self) -> u64 {
+        let header = self.fbs.header();
+        let feat_count = header.features_count() as usize;
+        if header.index_node_size() > 0 && feat_count > 0 {
+            PackedRTree::index_size(feat_count, header.index_node_size()) as u64
+        } else {
+            0
+        }
+    }
+
+    fn attr_index_size(&self) -> u64 {
+        let header = self.fbs.header();
+        header
+            .attribute_index()
+            .map(|attr_index| {
+                attr_index
+                    .iter()
+                    .try_fold(0u32, |acc, ai| {
+                        let len = ai.length();
+                        if len > u32::MAX - acc {
+                            Err(JsValue::from_str("attribute index size overflow"))
+                        } else {
+                            Ok(acc + len)
+                        }
+                    }) // sum of all attribute index lengths
+                    .unwrap_or(0) as u64
+            })
+            .unwrap_or(0) as u64
+    }
+
     /// Select all features.
     #[wasm_bindgen]
     pub async fn select_all(self) -> Result<AsyncFeatureIter, JsValue> {
@@ -257,6 +274,76 @@ impl HttpFcbReader {
             count,
         })
     }
+
+    #[wasm_bindgen]
+    pub async fn select_attr_query(
+        mut self,
+        query: &WasmAttrQuery,
+    ) -> Result<AsyncFeatureIter, JsValue> {
+        trace!("starting: select_attr_query via http reader");
+
+        let header = self.fbs.header();
+        let header_len = self.header_len();
+        // Assume the header provides rtree and attribute index sizes.
+        let rtree_index_size = self.rtree_index_size() as usize;
+        let attr_index_size = self.attr_index_size() as usize;
+        let attr_index_offset = header_len + rtree_index_size;
+        let feature_begin = header_len + rtree_index_size + attr_index_size;
+
+        // Fetch the attribute index block via HTTP range request.
+        let mut attr_index_bytes = self
+            .client
+            .get_range(attr_index_offset, attr_index_size)
+            .await
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let attr_index_entries = header
+            .attribute_index()
+            .ok_or_else(|| JsValue::from_str("attribute index not found"))?;
+        let columns: Vec<Column> = header
+            .columns()
+            .ok_or_else(|| JsValue::from_str("no columns found in header"))?
+            .iter()
+            .collect();
+
+        let mut multi_index = MultiIndex::new();
+
+        for attr_info in attr_index_entries.iter() {
+            process_attr_index_entry(
+                &mut attr_index_bytes,
+                &mut multi_index,
+                &columns,
+                &query.inner,
+                attr_info,
+            )
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        }
+
+        let query = build_query(&query.inner);
+
+        let result = bst::stream_query(&multi_index, query, feature_begin)
+            .await
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let count = result.len();
+        let combine_request_threshold = 256 * 1024;
+
+        let http_ranges: Vec<HttpRange> = result.into_iter().map(|item| item.range).collect();
+
+        trace!(
+            "completed: select_attr_query via http reader, matched features: {}",
+            count
+        );
+        Ok(AsyncFeatureIter {
+            client: self.client,
+            fbs: self.fbs,
+            selection: FeatureSelection::SelectAttr(SelectAttr {
+                ranges: http_ranges,
+                range_pos: 0,
+            }),
+            count,
+        })
+    }
 }
 
 #[wasm_bindgen]
@@ -313,6 +400,7 @@ impl AsyncFeatureIter {
 enum FeatureSelection {
     SelectAll(SelectAll),
     SelectBbox(SelectBbox),
+    SelectAttr(SelectAttr),
 }
 
 impl FeatureSelection {
@@ -323,6 +411,7 @@ impl FeatureSelection {
         match self {
             FeatureSelection::SelectAll(select_all) => select_all.next_buffer(client).await,
             FeatureSelection::SelectBbox(select_bbox) => select_bbox.next_buffer(client).await,
+            FeatureSelection::SelectAttr(select_attr) => select_attr.next_buffer(client).await,
         }
     }
 }
@@ -495,5 +584,160 @@ impl FeatureBatch {
         );
 
         Ok(Some(feature_buffer.freeze()))
+    }
+}
+
+struct SelectAttr {
+    // TODO: change this implementation so it can batch features
+    ranges: Vec<HttpRange>,
+    range_pos: usize,
+}
+
+impl SelectAttr {
+    async fn next_buffer<T: AsyncHttpRangeClient>(
+        &mut self,
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+    ) -> Result<Option<Bytes>, Error> {
+        let Some(range) = self.ranges.get(self.range_pos) else {
+            return Ok(None);
+        };
+        let mut feature_buffer = BytesMut::from(
+            client
+                .get_range(range.start(), 4)
+                .await
+                .map_err(|_| Error)?,
+        );
+        let feature_size = LittleEndian::read_u32(&feature_buffer) as usize;
+        feature_buffer.put(
+            client
+                .get_range(range.start() + 4, feature_size)
+                .await
+                .map_err(|_| Error)?,
+        );
+        self.range_pos += 1;
+        Ok(Some(feature_buffer.freeze()))
+    }
+}
+
+/// A wasm‑friendly wrapper over `AttrQuery`, which is defined as:
+/// `pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;`
+#[wasm_bindgen]
+pub struct WasmAttrQuery {
+    inner: AttrQuery,
+}
+
+#[wasm_bindgen]
+impl WasmAttrQuery {
+    /// Creates a new WasmAttrQuery from a JS array of query tuples.
+    ///
+    /// Each query tuple must be an array of three elements:
+    /// [field: string, operator: string, value: number | boolean | string | Date]
+    ///
+    /// For example, in JavaScript you could pass:
+    /// `[ ["b3_h_dak_50p", "Gt", 2.0],
+    ///   ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"],
+    ///   ["created", "Ge", new Date("2020-01-01T00:00:00Z")] ]`
+    #[wasm_bindgen(constructor)]
+    pub fn new(js_value: &JsValue) -> Result<WasmAttrQuery, JsValue> {
+        // Expect the JS value to be an array of query tuples.
+        let arr = Array::from(js_value);
+        let mut inner: AttrQuery = Vec::new();
+
+        for tuple in arr.iter() {
+            // Each tuple is expected to be an array with at least 3 elements.
+            let tuple_arr = Array::from(&tuple);
+            if tuple_arr.length() < 3 {
+                return Err(JsValue::from_str("Each query tuple must have 3 elements"));
+            }
+
+            // First element: field name (string)
+            let field = tuple_arr
+                .get(0)
+                .as_string()
+                .ok_or_else(|| JsValue::from_str("Field must be a string"))?;
+
+            // Second element: operator as string, converting to the Operator enum.
+            let op_str = tuple_arr
+                .get(1)
+                .as_string()
+                .ok_or_else(|| JsValue::from_str("Operator must be a string"))?;
+            let operator = match op_str.as_str() {
+                "Eq" => Operator::Eq,
+                "Gt" => Operator::Gt,
+                "Ge" => Operator::Ge,
+                "Lt" => Operator::Lt,
+                "Le" => Operator::Le,
+                "Ne" => Operator::Ne,
+                _ => return Err(JsValue::from_str("Invalid operator value")),
+            };
+
+            // Third element: the value
+            let value_js = tuple_arr.get(2);
+            let bs_value = if let Some(b) = value_js.as_bool() {
+                // If boolean then use Bool
+                ByteSerializableValue::Bool(b)
+            } else if value_js.is_instance_of::<js_sys::Date>() {
+                // If a JS Date, convert to milliseconds then to a NaiveDateTime.
+                let date: js_sys::Date = value_js.unchecked_into();
+                let millis = date.get_time();
+                let secs = (millis / 1000.0) as i64;
+                let nanos = ((millis % 1000.0) * 1_000_000.0) as u32;
+                match NaiveDateTime::from_timestamp_opt(secs, nanos) {
+                    Some(ndt) => ByteSerializableValue::NaiveDateTime(ndt),
+                    None => return Err(JsValue::from_str("Invalid Date value")),
+                }
+            } else if let Some(n) = value_js.as_f64() {
+                // All JS numbers are f64.
+                ByteSerializableValue::F64(OrderedFloat(n))
+            } else if let Some(s) = value_js.as_string() {
+                ByteSerializableValue::String(s)
+            } else {
+                return Err(JsValue::from_str("Unsupported value type in query tuple"));
+            };
+
+            inner.push((field, operator, bs_value));
+        }
+
+        Ok(WasmAttrQuery { inner })
+    }
+
+    /// Returns the inner AttrQuery as a JsValue (an array of query tuples)
+    /// useful for debugging.
+    #[wasm_bindgen(getter)]
+    pub fn inner(&self) -> JsValue {
+        let arr = Array::new();
+        for (field, op, val) in self.inner.iter() {
+            let tuple = Array::new();
+            tuple.push(&JsValue::from_str(field));
+            let op_str = match op {
+                Operator::Eq => "Eq",
+                Operator::Gt => "Gt",
+                Operator::Ge => "Ge",
+                Operator::Lt => "Lt",
+                Operator::Le => "Le",
+                Operator::Ne => "Ne",
+            };
+            tuple.push(&JsValue::from_str(op_str));
+            let val_js = match val {
+                ByteSerializableValue::I64(n) => JsValue::from_f64(*n as f64),
+                ByteSerializableValue::I32(n) => JsValue::from_f64(*n as f64),
+                ByteSerializableValue::I16(n) => JsValue::from_f64(*n as f64),
+                ByteSerializableValue::I8(n) => JsValue::from_f64(*n as f64),
+                ByteSerializableValue::U64(n) => JsValue::from_f64(*n as f64),
+                ByteSerializableValue::U32(n) => JsValue::from_f64(*n as f64),
+                ByteSerializableValue::U16(n) => JsValue::from_f64(*n as f64),
+                ByteSerializableValue::U8(n) => JsValue::from_f64(*n as f64),
+                ByteSerializableValue::F64(f) => JsValue::from_f64(f.into_inner()),
+                ByteSerializableValue::F32(f) => JsValue::from_f64(f.into_inner() as f64),
+                ByteSerializableValue::Bool(b) => JsValue::from_bool(*b),
+                ByteSerializableValue::String(s) => JsValue::from_str(s),
+                ByteSerializableValue::NaiveDateTime(ndt) => JsValue::from_str(&ndt.to_string()),
+                ByteSerializableValue::NaiveDate(nd) => JsValue::from_str(&nd.to_string()),
+                ByteSerializableValue::DateTime(dt) => JsValue::from_str(&dt.to_rfc3339()),
+            };
+            tuple.push(&val_js);
+            arr.push(&tuple);
+        }
+        arr.into()
     }
 }
