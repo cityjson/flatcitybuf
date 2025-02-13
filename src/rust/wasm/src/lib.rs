@@ -146,6 +146,26 @@ impl HttpFcbReader {
         })
     }
 
+    fn attr_index_size(&self) -> u64 {
+        let header = self.fbs.header();
+        header
+            .attribute_index()
+            .map(|attr_index| {
+                attr_index
+                    .iter()
+                    .try_fold(0u32, |acc, ai| {
+                        let len = ai.length();
+                        if len > u32::MAX - acc {
+                            Err("Attribute index size overflow")
+                        } else {
+                            Ok(acc + len)
+                        }
+                    }) // sum of all attribute index lengths
+                    .unwrap_or(0) as u64
+            })
+            .unwrap_or(0)
+    }
+
     #[wasm_bindgen]
     pub fn header(&self) -> Result<JsValue, JsValue> {
         let header = self.fbs.header();
@@ -202,10 +222,12 @@ impl HttpFcbReader {
 
         // request up to this many extra bytes if it means we can eliminate an extra request
         let combine_request_threshold = 256 * 1024;
+        let attr_index_size = self.attr_index_size() as usize;
 
         let list = PackedRTree::http_stream_search(
             &mut self.client,
             header_len,
+            attr_index_size,
             count,
             PackedRTree::DEFAULT_NODE_SIZE,
             min_x,

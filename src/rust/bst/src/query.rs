@@ -1,6 +1,10 @@
+use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
 use crate::sorted_index::{AnyIndex, ValueOffset};
+
+#[cfg(feature = "http")]
+use packed_rtree::http::{HttpRange, HttpSearchResultItem};
 
 /// Operators for comparisons in queries.
 #[derive(Debug, Clone, Copy)]
@@ -121,4 +125,70 @@ impl MultiIndex {
         result.sort();
         result
     }
+}
+
+// TODO: improve this method to process on stream. Also, do something to avoid fetching many discrete ranges.
+#[cfg(feature = "http")]
+pub async fn stream_query(
+    m_indices: &MultiIndex,
+    query: Query,
+    feature_begin: usize,
+) -> Result<Vec<HttpSearchResultItem>> {
+    // Compute candidate offset set for each query condition.
+
+    let mut candidate_sets: Vec<HashSet<ValueOffset>> = Vec::new();
+    for condition in query.conditions.iter() {
+        if let Some(idx) = m_indices.indices.get(&condition.field) {
+            let offsets: Vec<ValueOffset> = match condition.operator {
+                Operator::Eq => idx.query_exact_bytes(&condition.key),
+                Operator::Gt => {
+                    let offsets = idx.query_range_bytes(Some(&condition.key), None);
+                    let eq = idx.query_exact_bytes(&condition.key);
+                    offsets.into_iter().filter(|o| !eq.contains(o)).collect()
+                }
+                Operator::Ge => idx.query_range_bytes(Some(&condition.key), None),
+                Operator::Lt => idx.query_range_bytes(None, Some(&condition.key)),
+                Operator::Le => {
+                    let mut offsets = idx.query_range_bytes(None, Some(&condition.key));
+                    let eq = idx.query_exact_bytes(&condition.key);
+                    offsets.extend(eq);
+                    // Remove duplicates.
+                    offsets
+                        .into_iter()
+                        .collect::<HashSet<_>>()
+                        .into_iter()
+                        .collect()
+                }
+                Operator::Ne => {
+                    let all: HashSet<ValueOffset> =
+                        idx.query_range_bytes(None, None).into_iter().collect();
+                    let eq: HashSet<ValueOffset> =
+                        idx.query_exact_bytes(&condition.key).into_iter().collect();
+                    all.difference(&eq).cloned().collect::<Vec<_>>()
+                }
+            };
+            candidate_sets.push(offsets.into_iter().collect());
+        }
+    }
+
+    if candidate_sets.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Intersect candidate sets to get matching offsets.
+    let mut intersection: HashSet<ValueOffset> = candidate_sets.first().unwrap().clone();
+    for set in candidate_sets.iter().skip(1) {
+        intersection = intersection.intersection(set).cloned().collect();
+    }
+    let mut offsets: Vec<ValueOffset> = intersection.into_iter().collect();
+    offsets.sort(); // ascending order
+
+    let http_ranges: Vec<HttpSearchResultItem> = offsets
+        .into_iter()
+        .map(|offset| HttpSearchResultItem {
+            range: HttpRange::RangeFrom(offset as usize + feature_begin..),
+        })
+        .collect();
+
+    Ok(http_ranges)
 }

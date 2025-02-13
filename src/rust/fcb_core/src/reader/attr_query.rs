@@ -15,7 +15,7 @@ use super::{
 
 pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;
 
-fn process_attr_index_entry<R: Read>(
+pub(crate) fn process_attr_index_entry<R: Read>(
     reader: &mut R,
     multi_index: &mut MultiIndex,
     columns: &[Column],
@@ -86,7 +86,7 @@ fn byte_serializable_to_bytes(value: &ByteSerializableValue) -> Vec<u8> {
     }
 }
 
-fn build_query(query: &AttrQuery) -> Query {
+pub(crate) fn build_query(query: &AttrQuery) -> Query {
     Query {
         conditions: query
             .iter()

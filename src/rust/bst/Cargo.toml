@@ -3,6 +3,10 @@ name = "bst"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["http"]
+http = ["packed_rtree"]
+
 [dependencies]
 bincode = { workspace = true }
 serde = { workspace = true }
@@ -10,3 +14,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 ordered-float = { workspace = true }
 once_cell = { workspace = true }
+packed_rtree = { path = "../packed_rtree", optional = true }
+
+[target.'cfg(feature = "http")'.dependencies]
+packed_rtree = { path = "../packed_rtree" }
