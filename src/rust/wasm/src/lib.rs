@@ -4,6 +4,7 @@ use fcb_core::{size_prefixed_root_as_header, Header};
 // #[cfg(target_arch = "wasm32")]
 use gloo_client::WasmHttpClient;
 use js_sys::Array;
+use log::Level;
 #[cfg(target_arch = "wasm32")]
 use log::{debug, info, trace};
 use serde::{Deserialize, Serialize};
@@ -58,11 +59,13 @@ pub struct AsyncFeatureIter {
     count: usize,
 }
 
-#[wasm_bindgen]
+#[wasm_bindgen(start)]
 impl HttpFcbReader {
     #[wasm_bindgen(constructor, start)]
     pub async fn new(url: String) -> Result<HttpFcbReader, JsValue> {
         println!("open===: {:?}", url);
+        console_log::init_with_level(Level::Trace).expect("Failed to initialize logger");
+        log::info!("Logger initialized successfully.");
         // console_error_panic_hook::set_once();
         // init_with_level(log::Level::Debug).expect("Could not initialize logger");
 
@@ -136,7 +139,6 @@ impl HttpFcbReader {
         read_bytes += header_size;
 
         let header_buf = bytes.to_vec();
-
         // verify flatbuffer
         let header = size_prefixed_root_as_header(&header_buf)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -281,7 +283,7 @@ impl HttpFcbReader {
         query: &WasmAttrQuery,
     ) -> Result<AsyncFeatureIter, JsValue> {
         trace!("starting: select_attr_query via http reader");
-
+        log::info!("select_attr_query: {:?}", query);
         let header = self.fbs.header();
         let header_len = self.header_len();
         // Assume the header provides rtree and attribute index sizes.
@@ -622,6 +624,7 @@ impl SelectAttr {
 /// A wasm‑friendly wrapper over `AttrQuery`, which is defined as:
 /// `pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;`
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct WasmAttrQuery {
     inner: AttrQuery,
 }
