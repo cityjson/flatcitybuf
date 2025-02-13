@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>WASM Module Test</title>
+  <title>WASM Module Query Test</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -19,34 +19,45 @@
       overflow-y: scroll;
     }
 
-    #test-btn {
-      padding: 10px 20px;
-      font-size: 16px;
-    }
-
-    #url-input {
+    input,
+    textarea {
       width: 100%;
       padding: 8px;
       margin-bottom: 10px;
       font-size: 16px;
     }
+
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin-top: 10px;
+      margin-right: 10px;
+    }
   </style>
 </head>
 
 <body>
-  <h1>WASM Module Test</h1>
+  <h1>WASM Module Query Test</h1>
 
+  <!-- URL input for the FCB data -->
   <label for="url-input">Enter URL for HttpFcbReader:</label>
   <input type="text" id="url-input" placeholder="https://example.com/data"
-    value="http://127.0.0.1:5501/src/ts/delft_attr.fcb" />
+    value="https://storage.googleapis.com/flatcitybuf/delft_attr.fcb" />
 
-  <button id="test-btn">Run Test</button>
+  <!-- Textarea for the query JSON -->
+  <label for="query-input">Enter Query (as JSON array):</label>
+  <textarea id="query-input" rows="3">
+[["b3_h_dak_50p", "Gt", 2.0], ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"]]
+  </textarea>
+
+  <!-- Button to trigger query test -->
+  <button id="query-test-btn">Run Query Test</button>
 
   <h2>Output:</h2>
   <pre id="output"></pre>
 
   <script type="module">
-    import init, { HttpFcbReader } from './fcb_wasm.js';
+    import init, { HttpFcbReader, WasmAttrQuery } from './fcb_wasm.js';
 
     /**
      * Appends a message to the output area.
@@ -55,20 +66,61 @@
     function log(message) {
       const output = document.getElementById('output');
       output.textContent += message + '\n';
-      output.scrollTop = output.scrollHeight; // Auto-scroll
+      output.scrollTop = output.scrollHeight; // Auto-scroll to bottom
     }
 
     /**
-     * Initializes the WASM module and runs the test.
+     * Iterates through an AsyncFeatureIter, logging up to 10 features.
+     * @param {AsyncFeatureIter} iter - The async feature iterator.
      */
-    async function runTest() {
+    async function iterateFeatures(iter) {
+      let count = 0;
+      while (true) {
+        log(`Fetching feature ${count + 1}...`);
+        const feature = await iter.next();
+        if (feature === undefined || feature === null) {
+          log('No more features.');
+          break;
+        }
+        log(`Feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
+        count++;
+        // Limit iteration to avoid excessive logs
+        if (count >= 10) {
+          log('Reached feature iteration limit (10).');
+          break;
+        }
+      }
+      log(`Total features fetched: ${count}`);
+    }
+
+    /**
+     * Runs the query test by:
+     * 1. Initializing the WASM module.
+     * 2. Creating a HttpFcbReader from the given URL.
+     * 3. Parsing the query JSON and constructing a WasmAttrQuery.
+     * 4. Invoking select_attr_query() and iterating over the results.
+     */
+    async function runQueryTest() {
+      console.log('Running query test...');
       const urlInput = document.getElementById('url-input');
+      const queryInput = document.getElementById('query-input');
       const url = urlInput.value.trim();
+      const queryStr = queryInput.value.trim();
 
       if (!url) {
         alert('Please enter a valid URL.');
         return;
       }
+
+      let queryArray;
+      try {
+        queryArray = JSON.parse(queryStr);
+      } catch (e) {
+        alert('Invalid JSON for query.');
+        return;
+      }
+
+      console.log('Query array:', queryArray);
 
       log('Initializing WASM module...');
       try {
@@ -83,63 +135,28 @@
       try {
         log(`Creating HttpFcbReader with URL: ${url}`);
         const reader = await new HttpFcbReader(url);
-        console.log('HttpFcbReader instance created.');
+        log('HttpFcbReader instance created.');
 
-        console.log('Calling header()...');
+        log('Fetching header...');
         const header = await reader.header();
-        console.log("header===", header);
+        console.log(`Header: ${JSON.stringify(header, null, 2)}`);
 
+        log(`Constructing query: ${JSON.stringify(queryArray)}`);
+        const attrQuery = new WasmAttrQuery(queryArray);
+        console.log(`AttrQuery: ${JSON.stringify(attrQuery, null, 2)}`);
+        log('Calling select_attr_query()...');
+        const queryIter = await reader.select_attr_query(attrQuery);
 
-
-
-        log('Calling select_all()...');
-
-        // const featureIter = await reader.select_all();
-        // // Function to iterate through AsyncFeatureIter
-        const features = [];
-        async function iterateFeatures(iter) {
-          let count = 0;
-          while (true) {
-            log(`Fetching feature ${count + 1}...`);
-            const feature = await iter.next();
-            if (feature === undefined) {
-              log('No more features.');
-              break;
-            }
-            log(`Feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
-            features.push(feature);
-            count++;
-            // Optional: Limit the number of features to prevent excessive logs
-            if (count >= 10) {
-              log('Reached feature iteration limit (10).');
-              break;
-            }
-          }
-          log(`Total features fetched: ${count}`);
-        }
-        // await iterateFeatures(featureIter);
-        // log('Test completed successfully.');
-        // console.log("features", features);
-
-        let min_x = -200000.0;
-        let min_y = -200000.0;
-        let max_x = 200000.0;
-        let max_y = 200000.0;
-        const bboxIter = await reader.select_bbox(min_x, min_y, max_x, max_y);
-        await iterateFeatures(bboxIter);
-        log('Test completed successfully.');
-        console.log("features", features);
-
-
-
+        await iterateFeatures(queryIter);
+        log('Query test completed successfully.');
       } catch (err) {
-        log(`Error during test: ${err}`);
+        log(`Error during query test: ${err}`);
         console.error(err);
       }
     }
 
-    // Attach event listener to the button
-    document.getElementById('test-btn').addEventListener('click', runTest);
+    // Attach the event listener to the "Run Query Test" button
+    document.getElementById('query-test-btn').addEventListener('click', runQueryTest);
   </script>
 </body>
 
