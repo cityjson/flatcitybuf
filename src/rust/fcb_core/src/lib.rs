@@ -1,7 +1,7 @@
 mod cj_utils;
 mod const_vars;
 mod error;
-mod fb;
+pub mod fb;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 #[cfg(feature = "http")]
 #[cfg(feature = "wasm")]

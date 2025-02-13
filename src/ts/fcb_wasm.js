@@ -231,16 +231,22 @@ function takeFromExternrefTable0(idx) {
     wasm.__externref_table_dealloc(idx);
     return value;
 }
-function __wbg_adapter_34(arg0, arg1, arg2) {
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+function __wbg_adapter_38(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure271_externref_shim(arg0, arg1, arg2);
+    wasm.closure348_externref_shim(arg0, arg1, arg2);
 }
 
-function __wbg_adapter_111(arg0, arg1, arg2, arg3) {
+function __wbg_adapter_140(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure366_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure415_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -392,6 +398,75 @@ export class HttpFcbReader {
         const ret = wasm.httpfcbreader_select_bbox(ptr, min_x, min_y, max_x, max_y);
         return ret;
     }
+    /**
+     * @param {WasmAttrQuery} query
+     * @returns {Promise<AsyncFeatureIter>}
+     */
+    select_attr_query(query) {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        const ptr = this.__destroy_into_raw();
+        _assertNum(ptr);
+        _assertClass(query, WasmAttrQuery);
+        if (query.__wbg_ptr === 0) {
+            throw new Error('Attempt to use a moved value');
+        }
+        const ret = wasm.httpfcbreader_select_attr_query(ptr, query.__wbg_ptr);
+        return ret;
+    }
+}
+
+const WasmAttrQueryFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmattrquery_free(ptr >>> 0, 1));
+/**
+ * A wasm‑friendly wrapper over `AttrQuery`, which is defined as:
+ * `pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;`
+ */
+export class WasmAttrQuery {
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmAttrQueryFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmattrquery_free(ptr, 0);
+    }
+    /**
+     * Creates a new WasmAttrQuery from a JS array of query tuples.
+     *
+     * Each query tuple must be an array of three elements:
+     * [field: string, operator: string, value: number | boolean | string | Date]
+     *
+     * For example, in JavaScript you could pass:
+     * `[ ["b3_h_dak_50p", "Gt", 2.0],
+     *   ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"],
+     *   ["created", "Ge", new Date("2020-01-01T00:00:00Z")] ]`
+     * @param {any} js_value
+     */
+    constructor(js_value) {
+        const ret = wasm.wasmattrquery_new(js_value);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0] >>> 0;
+        WasmAttrQueryFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Returns the inner AttrQuery as a JsValue (an array of query tuples)
+     * useful for debugging.
+     * @returns {any}
+     */
+    get inner() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.wasmattrquery_inner(this.__wbg_ptr);
+        return ret;
+    }
 }
 
 async function __wbg_load(module, imports) {
@@ -455,12 +530,44 @@ function __wbg_get_imports() {
         const ret = arg0.call(arg1, arg2);
         return ret;
     }, arguments) };
+    imports.wbg.__wbg_debug_3cb59063b29f58c1 = function() { return logError(function (arg0) {
+        console.debug(arg0);
+    }, arguments) };
+    imports.wbg.__wbg_error_524f506f44df1645 = function() { return logError(function (arg0) {
+        console.error(arg0);
+    }, arguments) };
     imports.wbg.__wbg_fetch_a9bc66c159c18e19 = function() { return logError(function (arg0) {
         const ret = fetch(arg0);
         return ret;
     }, arguments) };
+    imports.wbg.__wbg_from_2a5d3e218e67aa85 = function() { return logError(function (arg0) {
+        const ret = Array.from(arg0);
+        return ret;
+    }, arguments) };
+    imports.wbg.__wbg_getTime_46267b1c24877e30 = function() { return logError(function (arg0) {
+        const ret = arg0.getTime();
+        return ret;
+    }, arguments) };
+    imports.wbg.__wbg_get_b9b93047fe3cf45b = function() { return logError(function (arg0, arg1) {
+        const ret = arg0[arg1 >>> 0];
+        return ret;
+    }, arguments) };
     imports.wbg.__wbg_httpfcbreader_new = function() { return logError(function (arg0) {
         const ret = HttpFcbReader.__wrap(arg0);
+        return ret;
+    }, arguments) };
+    imports.wbg.__wbg_info_3daf2e093e091b66 = function() { return logError(function (arg0) {
+        console.info(arg0);
+    }, arguments) };
+    imports.wbg.__wbg_instanceof_Date_e9a9be8b9cea7890 = function() { return logError(function (arg0) {
+        let result;
+        try {
+            result = arg0 instanceof Date;
+        } catch (_) {
+            result = false;
+        }
+        const ret = result;
+        _assertBoolean(ret);
         return ret;
     }, arguments) };
     imports.wbg.__wbg_instanceof_Error_4d54113b22d20306 = function() { return logError(function (arg0) {
@@ -490,6 +597,14 @@ function __wbg_get_imports() {
         _assertNum(ret);
         return ret;
     }, arguments) };
+    imports.wbg.__wbg_length_e2d2a49132c1b256 = function() { return logError(function (arg0) {
+        const ret = arg0.length;
+        _assertNum(ret);
+        return ret;
+    }, arguments) };
+    imports.wbg.__wbg_log_c222819a41e063d3 = function() { return logError(function (arg0) {
+        console.log(arg0);
+    }, arguments) };
     imports.wbg.__wbg_message_97a2af9b89d693a3 = function() { return logError(function (arg0) {
         const ret = arg0.message;
         return ret;
@@ -509,7 +624,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wbg_adapter_111(a, state0.b, arg0, arg1);
+                    return __wbg_adapter_140(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -559,6 +674,11 @@ function __wbg_get_imports() {
     imports.wbg.__wbg_ok_3aaf32d069979723 = function() { return logError(function (arg0) {
         const ret = arg0.ok;
         _assertBoolean(ret);
+        return ret;
+    }, arguments) };
+    imports.wbg.__wbg_push_737cfc8c1432c2c6 = function() { return logError(function (arg0, arg1) {
+        const ret = arg0.push(arg1);
+        _assertNum(ret);
         return ret;
     }, arguments) };
     imports.wbg.__wbg_queueMicrotask_97d92b4fcc8a61c5 = function() { return logError(function (arg0) {
@@ -645,12 +765,21 @@ function __wbg_get_imports() {
         getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
         getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
     }, arguments) };
+    imports.wbg.__wbg_warn_4ca3906c248c47c4 = function() { return logError(function (arg0) {
+        console.warn(arg0);
+    }, arguments) };
     imports.wbg.__wbindgen_bigint_from_i64 = function(arg0) {
         const ret = arg0;
         return ret;
     };
     imports.wbg.__wbindgen_bigint_from_u64 = function(arg0) {
         const ret = BigInt.asUintN(64, arg0);
+        return ret;
+    };
+    imports.wbg.__wbindgen_boolean_get = function(arg0) {
+        const v = arg0;
+        const ret = typeof(v) === 'boolean' ? (v ? 1 : 0) : 2;
+        _assertNum(ret);
         return ret;
     };
     imports.wbg.__wbindgen_cb_drop = function(arg0) {
@@ -663,8 +792,8 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper2866 = function() { return logError(function (arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 272, __wbg_adapter_34);
+    imports.wbg.__wbindgen_closure_wrapper4011 = function() { return logError(function (arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 349, __wbg_adapter_38);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {
@@ -706,6 +835,15 @@ function __wbg_get_imports() {
     imports.wbg.__wbindgen_memory = function() {
         const ret = wasm.memory;
         return ret;
+    };
+    imports.wbg.__wbindgen_number_get = function(arg0, arg1) {
+        const obj = arg1;
+        const ret = typeof(obj) === 'number' ? obj : undefined;
+        if (!isLikeNone(ret)) {
+            _assertNum(ret);
+        }
+        getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
+        getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
     };
     imports.wbg.__wbindgen_number_new = function(arg0) {
         const ret = arg0;

@@ -47,5 +47,5 @@ build-fcb_core:
 
 .PHONY: wasm-build
 wasm-build:
-	cd wasm && wasm-pack build --target web --debug --out-dir ../ts
+	cd wasm && wasm-pack build --target web --debug --out-dir ../../ts
 # cargo build --target web --release
