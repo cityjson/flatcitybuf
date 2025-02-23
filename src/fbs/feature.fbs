@@ -88,10 +88,83 @@ struct Vertex {
   z:int;
 }
 
+struct Vec2 {
+  u: float;
+  v: float;
+}
+
+table Material {
+  name: string (required);
+  ambientIntensity: float = 0.0; // from 0.0 to 1.0
+  // Expected to contain 3 items from 0.0 to 1.0 for (RGB); implementations MUST check length.
+  diffuseColor: [float];
+  emissiveColor: [float];
+  specularColor: [float];
+  shininess: float = 0.0; // from 0.0 to 1.0
+  transparency: float = 0.0; // from 0.0 to 1.0
+  isSmooth: bool = false;
+}
+
+enum TextureType:ubyte {
+  PNG,
+  JPG
+}
+
+enum WrapMode:ubyte {
+  None,
+  Wrap,
+  Mirror,
+  Clamp,
+  Border
+}
+
+enum TextureType:ubyte {
+  Unknown,
+  Specific,
+  Typical
+}
+
+table Texture {
+  type: TextureType;
+  image: string;        // Image file name / URL
+  wrapMode: WrapMode;
+  textureType: TextureType;  // e.g., "unknown", "specific", or "typical"
+  // Expected to contain 4 items (RGBA)
+  borderColor: [float]; // from 0.0 to 1.0 for (RGBA)
+}
+
+table MaterialMapping {
+  theme: string;
+  solids: [uint];
+  shells: [uint];
+  vertices: [uint]; // flat list of vertex indices.
+  //It also contains the material index. The depth of the material will be minus 2 of the boundaryies array. For more details see https://www.cityjson.org/specs/2.0.1/#geometry-object-having-material-s
+}
+
+table TextureMapping {
+  theme: string;
+  solids: [uint];
+  shells: [uint];
+  surfaces: [uint];
+  strings: [uint];
+  vertices: [uint]; // flat list of vertex indices.
+  //It also contains the texture index. The depth of the texture will be same as the boundaries array. For more details see https://www.cityjson.org/specs/2.0.1/#geometry-object-having-texture-s
+}
+
+table Appearance {
+  materials: [Material];
+  textures: [Texture];
+  // "vertices-texture" field: a list of UV coordinates.
+  vertices_texture: [Vec2];
+  default_theme_texture: string;
+  default_theme_material: string;
+}
+
 table CityFeature {
   id:string (key, required);
   objects:[CityObject];
   vertices:[Vertex];
+  appearance: Appearance;
 }
 
 table CityObject {
@@ -118,9 +191,12 @@ table Geometry {
   strings:[uint];           // Rings or LineStrings
 
   boundaries:[uint];        // flat list of vertex indices
-  semantics:[uint];         // flat list of semantic object indices
 
+  semantics:[uint];         // flat list of semantic object indices
   semantics_objects:[SemanticObject];
+
+  material: [MaterialMapping]; // Maps each surface/shells to an index in appearance.materials.
+  texture: [TextureMapping];   // Maps each primitives to an index in appearance.textures.
 }
 
 table SemanticObject {
