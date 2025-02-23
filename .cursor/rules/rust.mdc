@@ -10,6 +10,7 @@ globs:
 - Coding: Don't give me just `unwrap` except test cases to have proper error handling
 - Coding: If possible, try to generalise the implementation like using generics, trait, etc. Keep interface programming in your mind.
 - Coding: Since I'm not a native English speaker, if any grammer mistakes are found in comments, always give me suggestion to fix and improve writing.
+- Coding: When you add comments, don't give me comments to mention which lines are added/modified by you. You should only contains comments meaningful for final code base.
 
 # Directory structure
 The rust code base is consisit with multiple crates and their modules.
