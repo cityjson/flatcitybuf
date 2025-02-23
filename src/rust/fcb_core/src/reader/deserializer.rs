@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::{
     fb::*,
     geom_decoder::{decode, decode_semantics},
+    Error,
 };
-use anyhow::{Context, Result};
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
     Address as CjAddress, CityJSON, CityJSONFeature, CityObject as CjCityObject,
@@ -12,7 +12,7 @@ use cjseq::{
     ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, Transform as CjTransform,
 };
 
-pub fn to_cj_metadata(header: &Header) -> Result<CityJSON> {
+pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
     let mut cj = CityJSON::new();
 
     if let Some(transform) = header.transform() {
@@ -25,7 +25,7 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON> {
 
     let reference_system = header
         .reference_system()
-        .context("missing reference_system")?;
+        .ok_or(Error::MissingRequiredField("reference_system".to_string()))?;
     cj.version = header.version().to_string();
     cj.thetype = String::from("CityJSON");
 
@@ -60,18 +60,18 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON> {
     Ok(cj)
 }
 
-pub(crate) fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact> {
+pub(crate) fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact, Error> {
     Ok(CjPointOfContact {
         contact_name: header
             .poc_contact_name()
-            .context("missing contact_name")?
+            .ok_or(Error::MissingRequiredField("contact_name".to_string()))?
             .to_string(),
         contact_type: header.poc_contact_type().map(|ct| ct.to_string()),
         role: header.poc_role().map(|r| r.to_string()),
         phone: header.poc_phone().map(|p| p.to_string()),
         email_address: header
             .poc_email()
-            .context("missing email_address")?
+            .ok_or(Error::MissingRequiredField("email_address".to_string()))?
             .to_string(),
         website: header.poc_website().map(|w| w.to_string()),
         address: to_cj_address(header),
@@ -275,7 +275,7 @@ pub(crate) fn decode_attributes(
 pub fn to_cj_feature(
     feature: CityFeature,
     root_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
-) -> Result<CityJSONFeature> {
+) -> Result<CityJSONFeature, Error> {
     let mut cj = CityJSONFeature::new();
     cj.id = feature.id().to_string();
 
@@ -336,7 +336,7 @@ pub fn to_cj_feature(
     Ok(cj)
 }
 
-pub(crate) fn decode_geometry(g: Geometry) -> Result<CjGeometry> {
+pub(crate) fn decode_geometry(g: Geometry) -> Result<CjGeometry, Error> {
     let solids = g
         .solids()
         .map(|v| v.iter().collect::<Vec<_>>())

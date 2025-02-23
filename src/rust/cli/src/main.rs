@@ -1,5 +1,5 @@
-use anyhow::Result;
 use clap::{Parser, Subcommand};
+use fcb_core::error::Error;
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     deserializer,
@@ -55,27 +55,32 @@ enum Commands {
     },
 }
 
-fn get_reader(input: &str) -> Result<Box<dyn Read>> {
+fn get_reader(input: &str) -> Result<Box<dyn Read>, Error> {
     match input {
         "-" => Ok(Box::new(io::stdin())),
         path => Ok(Box::new(File::open(path)?)),
     }
 }
 
-fn get_writer(output: &str) -> Result<Box<dyn Write>> {
+fn get_writer(output: &str) -> Result<Box<dyn Write>, Error> {
     match output {
         "-" => Ok(Box::new(io::stdout())),
         path => Ok(Box::new(File::create(path)?)),
     }
 }
 
-fn serialize(input: &str, output: &str, attr_index: Option<String>) -> Result<()> {
+fn serialize(input: &str, output: &str, attr_index: Option<String>) -> Result<(), Error> {
     let reader = BufReader::new(get_reader(input)?);
     let writer = BufWriter::new(get_writer(output)?);
 
-    let cj_seq = match read_cityjson_from_reader(reader, CJTypeKind::Seq)? {
-        CJType::Seq(seq) => seq,
-        _ => anyhow::bail!("Expected CityJSONSeq"),
+    let cj_seq = match read_cityjson_from_reader(reader, CJTypeKind::Seq) {
+        Ok(CJType::Seq(seq)) => seq,
+        _ => {
+            return Err(Error::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "failed to read CityJSON Feature",
+            )))
+        }
     };
 
     let CityJSONSeq { cj, features } = cj_seq;
@@ -122,7 +127,7 @@ fn serialize(input: &str, output: &str, attr_index: Option<String>) -> Result<()
     Ok(())
 }
 
-fn deserialize(input: &str, output: &str) -> Result<()> {
+fn deserialize(input: &str, output: &str) -> Result<(), Error> {
     let reader = BufReader::new(get_reader(input)?);
     let mut writer = BufWriter::new(get_writer(output)?);
     let mut fcb_reader = FcbReader::open(reader)?.select_all_seq()?;
@@ -152,7 +157,7 @@ fn deserialize(input: &str, output: &str) -> Result<()> {
     Ok(())
 }
 
-fn show_info(input: PathBuf) -> Result<()> {
+fn show_info(input: PathBuf) -> Result<(), Error> {
     let reader = BufReader::new(File::open(input)?);
     let metadata = reader.get_ref().metadata()?.len() / 1024 / 1024; // show in megabytes
     let fcb_reader = FcbReader::open(reader)?.select_all()?;
@@ -186,7 +191,7 @@ fn show_info(input: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Error> {
     let cli = Cli::parse();
 
     match cli.command {

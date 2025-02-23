@@ -11,10 +11,9 @@
 //! Create and read a [packed Hilbert R-Tree](https://en.wikipedia.org/wiki/Hilbert_R-tree#Packed_Hilbert_R-trees)
 //! to enable fast bounding box spatial filtering.
 
-use anyhow::Result;
-
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use core::f64;
+pub use error::Error;
 #[cfg(feature = "http")]
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
 use std::cmp::min;
@@ -22,6 +21,8 @@ use std::collections::VecDeque;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::ops::Range;
+
+mod error;
 
 // This implementation was derived from FlatGeobuf's implemenation.
 
@@ -64,7 +65,7 @@ impl NodeItem {
         }
     }
 
-    pub fn from_reader(mut rdr: impl Read) -> Result<Self> {
+    pub fn from_reader(mut rdr: impl Read) -> Result<Self, Error> {
         Ok(NodeItem {
             min_x: rdr.read_f64::<LittleEndian>()?,
             min_y: rdr.read_f64::<LittleEndian>()?,
@@ -74,7 +75,7 @@ impl NodeItem {
         })
     }
 
-    fn from_bytes(raw: &[u8]) -> Result<Self> {
+    fn from_bytes(raw: &[u8]) -> Result<Self, Error> {
         Self::from_reader(&mut Cursor::new(raw))
     }
 
@@ -148,7 +149,7 @@ impl NodeItem {
 }
 
 /// Read full capacity of vec from data stream
-fn read_node_vec(node_items: &mut Vec<NodeItem>, mut data: impl Read) -> Result<()> {
+fn read_node_vec(node_items: &mut Vec<NodeItem>, mut data: impl Read) -> Result<(), Error> {
     node_items.clear();
     for _ in 0..node_items.capacity() {
         node_items.push(NodeItem::from_reader(&mut data)?);
@@ -162,7 +163,7 @@ fn read_node_items<R: Read + Seek>(
     base: u64,
     node_index: usize,
     length: usize,
-) -> Result<Vec<NodeItem>> {
+) -> Result<Vec<NodeItem>, Error> {
     let mut node_items = Vec::with_capacity(length);
     data.seek(SeekFrom::Start(
         base + (node_index * size_of::<NodeItem>()) as u64,
@@ -177,7 +178,7 @@ async fn read_http_node_items<T: AsyncHttpRangeClient>(
     client: &mut AsyncBufferedHttpRangeClient<T>,
     base: usize,
     node_ids: &Range<usize>,
-) -> Result<Vec<NodeItem>> {
+) -> Result<Vec<NodeItem>, Error> {
     let begin = base + node_ids.start * size_of::<NodeItem>();
     let length = node_ids.len() * size_of::<NodeItem>();
     let bytes = client
@@ -297,7 +298,7 @@ pub struct PackedRTree {
 impl PackedRTree {
     pub const DEFAULT_NODE_SIZE: u16 = 16;
 
-    fn init(&mut self, node_size: u16) -> Result<()> {
+    fn init(&mut self, node_size: u16) -> Result<(), Error> {
         assert!(node_size >= 2, "Node size must be at least 2");
         assert!(self.num_leaf_nodes > 0, "Cannot create empty tree");
         self.branching_factor = node_size.clamp(2u16, 65535u16);
@@ -369,7 +370,7 @@ impl PackedRTree {
         }
     }
 
-    fn read_data(&mut self, data: impl Read) -> Result<()> {
+    fn read_data(&mut self, data: impl Read) -> Result<(), Error> {
         read_node_vec(&mut self.node_items, data)?;
         for node in &self.node_items {
             self.extent.expand(node)
@@ -382,7 +383,7 @@ impl PackedRTree {
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
         index_begin: usize,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let min_req_size = self.size(); // read full index at once
         let mut pos = index_begin;
         for i in 0..self.num_nodes() {
@@ -402,7 +403,11 @@ impl PackedRTree {
         self.node_items.len()
     }
 
-    pub fn build(nodes: &[NodeItem], extent: &NodeItem, node_size: u16) -> Result<PackedRTree> {
+    pub fn build(
+        nodes: &[NodeItem],
+        extent: &NodeItem,
+        node_size: u16,
+    ) -> Result<PackedRTree, Error> {
         let mut tree = PackedRTree {
             extent: extent.clone(),
             node_items: Vec::new(),
@@ -419,7 +424,11 @@ impl PackedRTree {
         Ok(tree)
     }
 
-    pub fn from_buf(data: impl Read, num_items: usize, node_size: u16) -> Result<PackedRTree> {
+    pub fn from_buf(
+        data: impl Read,
+        num_items: usize,
+        node_size: u16,
+    ) -> Result<PackedRTree, Error> {
         let node_size = node_size.clamp(2u16, 65535u16);
         let level_bounds = PackedRTree::generate_level_bounds(num_items, node_size);
         let num_nodes = level_bounds
@@ -443,7 +452,7 @@ impl PackedRTree {
         index_begin: usize,
         num_items: usize,
         node_size: u16,
-    ) -> Result<PackedRTree> {
+    ) -> Result<PackedRTree, Error> {
         let mut tree = PackedRTree {
             extent: NodeItem::create(0),
             node_items: Vec::new(),
@@ -462,7 +471,7 @@ impl PackedRTree {
         min_y: f64,
         max_x: f64,
         max_y: f64,
-    ) -> Result<Vec<SearchResultItem>> {
+    ) -> Result<Vec<SearchResultItem>, Error> {
         let leaf_nodes_offset = self
             .level_bounds
             .first()
@@ -508,7 +517,7 @@ impl PackedRTree {
         min_y: f64,
         max_x: f64,
         max_y: f64,
-    ) -> Result<Vec<SearchResultItem>> {
+    ) -> Result<Vec<SearchResultItem>, Error> {
         let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
         let level_bounds = PackedRTree::generate_level_bounds(num_items, node_size);
         let Range {
@@ -575,7 +584,7 @@ impl PackedRTree {
         max_x: f64,
         max_y: f64,
         combine_request_threshold: usize,
-    ) -> Result<Vec<HttpSearchResultItem>> {
+    ) -> Result<Vec<HttpSearchResultItem>, Error> {
         use tracing::debug;
 
         let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);

@@ -7,15 +7,14 @@ use js_sys::Array;
 use log::Level;
 #[cfg(target_arch = "wasm32")]
 use log::{debug, info, trace};
-use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 
-use bst::{ByteSerializable, ByteSerializableValue, MultiIndex, Operator, OrderedFloat};
+use bst::{ByteSerializableValue, MultiIndex, Operator, OrderedFloat};
 
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use chrono::NaiveDateTime;
 use fcb_core::city_buffer::FcbBuffer;
 use fcb_core::{
     build_query, check_magic_bytes, fb::*, process_attr_index_entry,
@@ -195,7 +194,7 @@ impl HttpFcbReader {
                     }) // sum of all attribute index lengths
                     .unwrap_or(0) as u64
             })
-            .unwrap_or(0) as u64
+            .unwrap_or(0)
     }
 
     /// Select all features.

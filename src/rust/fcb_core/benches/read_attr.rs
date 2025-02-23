@@ -1,7 +1,6 @@
 use anyhow::Result;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::{AttrQuery, ByteSerializableValue, FcbReader, Operator};
-use ordered_float::OrderedFloat;
 use std::{fs::File, io::BufReader};
 
 // TODO: test these cases as well
@@ -23,15 +22,21 @@ fn read_fcb_without_attr_index(path: &str) -> Result<()> {
         let feature = feat_buf.cur_cj_feature()?;
         for (_, co) in feature.city_objects.iter() {
             if let Some(attributes) = &co.attributes {
-                if let Some(b3_h_dak_50p) = attributes.get("b3_h_dak_50p") {
-                    if b3_h_dak_50p.as_f64().unwrap() > 20.0
-                        && b3_h_dak_50p.as_f64().unwrap() < 50.0
-                    {
-                        // println!("b3_h_dak_50p: {:?}", b3_h_dak_50p);
+                if let Some(identificatie) = attributes.get("identificatie") {
+                    if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
                         target_feat_num += 1;
-                        continue;
+                        break;
                     }
                 }
+                // if let Some(b3_h_dak_50p) = attributes.get("b3_h_dak_50p") {
+                //     if b3_h_dak_50p.as_f64().unwrap() > 2.0
+                //     && b3_h_dak_50p.as_f64().unwrap() < 50.0
+                //     {
+                //         println!("b3_h_dak_50p: {:?}", b3_h_dak_50p);
+                //         target_feat_num += 1;
+                //         continue;
+                //     }
+                // }
             }
         }
         feat_total += 1;
@@ -50,15 +55,20 @@ fn read_fcb_with_attr_index(path: &str) -> Result<()> {
     let input_reader = BufReader::new(input_file);
 
     let query: AttrQuery = vec![
+        // (
+        //     "b3_h_dak_50p".to_string(),
+        //     Operator::Gt,
+        //     ByteSerializableValue::F64(OrderedFloat(2.0)),
+        // ),
+        // (
+        //     "b3_h_dak_50p".to_string(),
+        //     Operator::Lt,
+        //     ByteSerializableValue::F64(OrderedFloat(50.0)),
+        // ),
         (
-            "b3_h_dak_50p".to_string(),
-            Operator::Gt,
-            ByteSerializableValue::F64(OrderedFloat(20.0)),
-        ),
-        (
-            "b3_h_dak_50p".to_string(),
-            Operator::Lt,
-            ByteSerializableValue::F64(OrderedFloat(50.0)),
+            "identificatie".to_string(),
+            Operator::Eq,
+            ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
         ),
     ];
     let mut reader = FcbReader::open(input_reader)?.select_attr_query(query)?;
@@ -71,15 +81,21 @@ fn read_fcb_with_attr_index(path: &str) -> Result<()> {
         let feature = feat_buf.cur_cj_feature()?;
         for (_, co) in feature.city_objects.iter() {
             if let Some(attributes) = &co.attributes {
-                if let Some(b3_h_dak_50p) = attributes.get("b3_h_dak_50p") {
-                    if b3_h_dak_50p.as_f64().unwrap() > 20.0
-                        && b3_h_dak_50p.as_f64().unwrap() < 50.0
-                    {
-                        // println!("b3_h_dak_50p: {:?}", b3_h_dak_50p);
+                if let Some(identificatie) = attributes.get("identificatie") {
+                    if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
                         target_feat_num += 1;
-                        continue;
+                        break;
                     }
                 }
+                // if let Some(b3_h_dak_50p) = attributes.get("b3_h_dak_50p") {
+                //     if b3_h_dak_50p.as_f64().unwrap() > 2.0
+                //     && b3_h_dak_50p.as_f64().unwrap() < 50.0
+                //     {
+                //         println!("b3_h_dak_50p: {:?}", b3_h_dak_50p);
+                //         target_feat_num += 1;
+                //         continue;
+                //     }
+                // }
             }
         }
         feat_total += 1;

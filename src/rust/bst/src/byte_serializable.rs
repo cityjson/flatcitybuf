@@ -1,6 +1,8 @@
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
-
 pub use ordered_float::OrderedFloat;
+
+pub type Float<T> = OrderedFloat<T>;
+
 /// A trait for converting types to and from bytes.
 pub trait ByteSerializable {
     /// Convert self into a vector of bytes.
@@ -20,8 +22,8 @@ pub enum ByteSerializableValue {
     U32(u32),
     U16(u16),
     U8(u8),
-    F64(OrderedFloat<f64>),
-    F32(OrderedFloat<f32>),
+    F64(Float<f64>),
+    F32(Float<f32>),
     Bool(bool),
     String(String),
     NaiveDateTime(NaiveDateTime),
@@ -142,8 +144,8 @@ impl ByteSerializable for f32 {
     }
 }
 
-// Implement ByteSerializable for OrderedFloat<f64> because f64 doesn't implement Ord trait because of NaN values.
-impl ByteSerializable for OrderedFloat<f64> {
+// Implement ByteSerializable for Float<f64> because f64 doesn't implement Ord trait because of NaN values.
+impl ByteSerializable for Float<f64> {
     fn to_bytes(&self) -> Vec<u8> {
         self.0.to_le_bytes().to_vec()
     }
@@ -155,8 +157,8 @@ impl ByteSerializable for OrderedFloat<f64> {
     }
 }
 
-// Implement ByteSerializable for OrderedFloat<f64> because f64 doesn't implement Ord trait because of NaN values.
-impl ByteSerializable for OrderedFloat<f32> {
+// Implement ByteSerializable for Float<f32> because f32 doesn't implement Ord trait because of NaN values.
+impl ByteSerializable for Float<f32> {
     fn to_bytes(&self) -> Vec<u8> {
         self.0.to_le_bytes().to_vec()
     }

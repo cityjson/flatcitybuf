@@ -35,6 +35,7 @@ http-range-client = { workspace = true, default-features = false, optional = tru
   "reqwest-async",
 ] }
 reqwest = { workspace = true, optional = true }
+thiserror = { workspace = true }
 
 [target.'cfg(feature = "http")'.dependencies]
 tokio = { workspace = true }

@@ -1,16 +1,17 @@
 mod byte_serializable;
+mod error;
 mod query;
 mod sorted_index;
-
 pub use byte_serializable::*;
+pub use error::*;
 pub use query::*;
 pub use sorted_index::*;
-
 #[cfg(test)]
 mod tests {
     use crate::byte_serializable::ByteSerializable;
     use crate::query::{MultiIndex, Operator, Query, QueryCondition};
     use crate::sorted_index::{IndexSerializable, KeyValue, SortedIndex, ValueOffset};
+    use crate::Float;
     use chrono::NaiveDate;
     use ordered_float::OrderedFloat;
     use std::error::Error;
@@ -72,7 +73,7 @@ mod tests {
         // Build index entries for each field.
         let mut id_entries: Vec<KeyValue<u64>> = Vec::new();
         let mut city_entries: Vec<KeyValue<String>> = Vec::new();
-        let mut height_entries: Vec<KeyValue<OrderedFloat<f64>>> = Vec::new();
+        let mut height_entries: Vec<KeyValue<Float<f64>>> = Vec::new();
         let mut year_entries: Vec<KeyValue<NaiveDate>> = Vec::new();
 
         for (offset, record) in records.iter().enumerate() {
@@ -100,7 +101,10 @@ mod tests {
             }
 
             let height_f64 = *height;
-            if let Some(kv) = height_entries.iter_mut().find(|kv| kv.key == height_f64) {
+            if let Some(kv) = height_entries
+                .iter_mut()
+                .find(|kv| kv.key == OrderedFloat(height_f64))
+            {
                 kv.offsets.push(voffset);
             } else {
                 height_entries.push(KeyValue {
