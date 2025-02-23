@@ -1,7 +1,8 @@
 use std::io::{self, Read, Seek, SeekFrom};
 
-use anyhow::{anyhow, Ok, Result};
-pub use bst::*;
+use crate::error::Error;
+use bst::{ByteSerializable, IndexSerializable, OrderedFloat, SortedIndex};
+pub use bst::{ByteSerializableValue, MultiIndex, Operator, Query, QueryCondition};
 
 use chrono::{DateTime, Utc};
 
@@ -20,7 +21,7 @@ pub fn process_attr_index_entry<R: Read>(
     columns: &[Column],
     query: &AttrQuery,
     attr_info: &AttributeIndex,
-) -> Result<()> {
+) -> Result<(), Error> {
     let length = attr_info.length();
     let mut buffer = vec![0; length as usize];
     reader.read_exact(&mut buffer)?;
@@ -58,7 +59,7 @@ pub fn process_attr_index_entry<R: Read>(
                     let index = SortedIndex::<DateTime<Utc>>::deserialize(&mut buffer.as_slice())?;
                     multi_index.add_index(col.name().to_string(), Box::new(index));
                 }
-                _ => return Err(anyhow!("unsupported column type")),
+                _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
             }
         }
     }
@@ -99,15 +100,16 @@ pub fn build_query(query: &AttrQuery) -> Query {
 }
 
 impl<R: Read + Seek> FcbReader<R> {
-    pub fn select_attr_query(mut self, query: AttrQuery) -> Result<FeatureIter<R, Seekable>> {
+    pub fn select_attr_query(
+        mut self,
+        query: AttrQuery,
+    ) -> Result<FeatureIter<R, Seekable>, Error> {
         // query: vec<(field_name, operator, value)>
         let header = self.buffer.header();
         let attr_index_entries = header
             .attribute_index()
-            .ok_or_else(|| anyhow!("attribute index not found"))?;
-        let columns = header
-            .columns()
-            .ok_or_else(|| anyhow!("no columns found in header"))?;
+            .ok_or(Error::AttributeIndexNotFound)?;
+        let columns = header.columns().ok_or(Error::NoColumnsInHeader)?;
         let columns: Vec<Column> = columns.iter().collect();
 
         // skip the rtree index bytes; we know the correct offset for that

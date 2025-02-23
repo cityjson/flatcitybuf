@@ -1,6 +1,7 @@
 mod cj_utils;
+mod cjerror;
 mod const_vars;
-mod error;
+pub mod error;
 pub mod fb;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 #[cfg(feature = "http")]
@@ -12,6 +13,7 @@ mod writer;
 
 pub use cj_utils::*;
 pub use const_vars::*;
+pub use error::*;
 pub use fb::*;
 pub use reader::*;
 pub use writer::*;

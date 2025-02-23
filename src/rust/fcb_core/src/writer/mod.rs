@@ -1,8 +1,8 @@
 use crate::MAGIC_BYTES;
-use anyhow::Result;
 use attr_index::build_attribute_index_for_attr;
 use attribute::AttributeSchema;
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
+use error::Error;
 use feature_writer::{AttributeFeatureOffset, FeatureWriter};
 use header_writer::{HeaderWriter, HeaderWriterOptions};
 use packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
@@ -13,11 +13,11 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 mod attr_index;
 pub mod attribute;
+pub mod error;
 pub mod feature_writer;
 pub mod geom_encoder;
 pub mod header_writer;
 pub mod serializer;
-
 /// Main writer for FlatCityBuf (FCB) format
 ///
 /// FcbWriter handles the serialization of CityJSON data into the FCB binary format.
@@ -64,7 +64,7 @@ impl<'a> FcbWriter<'a> {
         cj: CityJSON,
         header_option: Option<HeaderWriterOptions>,
         attr_schema: Option<AttributeSchema>,
-    ) -> Result<Self> {
+    ) -> Result<Self, Error> {
         let attr_schema = attr_schema.unwrap_or_default();
         let transform = cj.transform.clone();
         let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone());
@@ -85,7 +85,7 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the write operation
-    fn write_feature(&mut self) -> Result<()> {
+    fn write_feature(&mut self) -> Result<(), Error> {
         let transform = &self.transform;
 
         if let Some(feat_writer) = &mut self.feat_writer {
@@ -140,7 +140,7 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the operation
-    pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<()> {
+    pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<(), Error> {
         if self.feat_writer.is_none() {
             self.feat_writer = Some(FeatureWriter::new(
                 feature,
@@ -171,7 +171,7 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the write operation
-    pub fn write(mut self, mut out: impl Write) -> Result<()> {
+    pub fn write(mut self, mut out: impl Write) -> Result<(), Error> {
         let attr_indices = self.header_writer.header_options.attribute_indices.clone();
 
         out.write_all(&MAGIC_BYTES)?;

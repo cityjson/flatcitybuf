@@ -5,11 +5,11 @@ use city_buffer::*;
 use cjseq::CityJSONFeature;
 use deserializer::to_cj_feature;
 
+use crate::error::Error;
 use crate::fb::{size_prefixed_root_as_city_feature, CityFeature};
 use crate::{
     check_magic_bytes, size_prefixed_root_as_header, Column, Header, HEADER_MAX_BUFFER_SIZE,
 };
-use anyhow::{anyhow, Result};
 use fallible_streaming_iterator::FallibleStreamingIterator;
 use packed_rtree::PackedRTree;
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -72,7 +72,7 @@ pub mod reader_trait {
 use reader_trait::*;
 
 impl<R: Read> FcbReader<R> {
-    pub fn open(reader: R) -> Result<FcbReader<R>> {
+    pub fn open(reader: R) -> Result<FcbReader<R>, Error> {
         let reader = Self::read_header(reader, true)?;
         Ok(reader)
     }
@@ -82,22 +82,22 @@ impl<R: Read> FcbReader<R> {
     /// # Safety
     /// This function skips FlatBuffers verification. The caller must ensure that the input data
     /// is valid and properly formatted to avoid undefined behavior.
-    pub unsafe fn open_unchecked(reader: R) -> Result<FcbReader<R>> {
+    pub unsafe fn open_unchecked(reader: R) -> Result<FcbReader<R>, Error> {
         Self::read_header(reader, false)
     }
 
-    fn read_header(mut reader: R, verify: bool) -> Result<FcbReader<R>> {
+    fn read_header(mut reader: R, verify: bool) -> Result<FcbReader<R>, Error> {
         let mut magic_buf: [u8; 8] = [0; 8];
         reader.read_exact(&mut magic_buf)?;
         if !check_magic_bytes(&magic_buf) {
-            return Err(anyhow!("Missing magic bytes. Is this an fcb file?"));
+            return Err(Error::MissingMagicBytes);
         }
 
         let mut size_buf: [u8; 4] = [0; 4]; // MEMO: 4 bytes for size prefix. This is comvention for FlatBuffers's size_prefixed_root
         reader.read_exact(&mut size_buf)?;
         let header_size = u32::from_le_bytes(size_buf) as usize;
         if !((8..=HEADER_MAX_BUFFER_SIZE).contains(&header_size)) {
-            return Err(anyhow!("Illegal header size: {header_size}"));
+            return Err(Error::IllegalHeaderSize(header_size));
         }
 
         let mut header_buf = Vec::with_capacity(header_size + 4); // 4 bytes for size prefix
@@ -119,7 +119,7 @@ impl<R: Read> FcbReader<R> {
         })
     }
 
-    pub fn select_all_seq(mut self) -> Result<FeatureIter<R, NotSeekable>> {
+    pub fn select_all_seq(mut self) -> Result<FeatureIter<R, NotSeekable>, Error> {
         let index_size = self.attr_index_size() + self.rtree_index_size();
         // discard bufer of index
         io::copy(&mut (&mut self.reader).take(index_size), &mut io::sink())?;
@@ -147,11 +147,11 @@ impl<R: Read> FcbReader<R> {
         min_y: f64,
         max_x: f64,
         max_y: f64,
-    ) -> Result<FeatureIter<R, NotSeekable>> {
+    ) -> Result<FeatureIter<R, NotSeekable>, Error> {
         // Read R-Tree index and build filter for features within bbox
         let header = self.buffer.header();
         if header.index_node_size() == 0 || header.features_count() == 0 {
-            return Err(anyhow!("No index"));
+            return Err(Error::NoIndex);
         }
         let index = PackedRTree::from_buf(
             &mut self.reader,
@@ -187,7 +187,7 @@ impl<R: Read> FcbReader<R> {
 }
 
 impl<R: Read + Seek> FcbReader<R> {
-    pub fn select_all(mut self) -> Result<FeatureIter<R, Seekable>> {
+    pub fn select_all(mut self) -> Result<FeatureIter<R, Seekable>, Error> {
         // skip index
         let feature_offset = FeatureOffset {
             magic_bytes: 8,
@@ -215,11 +215,11 @@ impl<R: Read + Seek> FcbReader<R> {
         min_y: f64,
         max_x: f64,
         max_y: f64,
-    ) -> Result<FeatureIter<R, Seekable>> {
+    ) -> Result<FeatureIter<R, Seekable>, Error> {
         // Read R-Tree index and build filter for features within bbox
         let header = self.buffer.header();
         if header.index_node_size() == 0 || header.features_count() == 0 {
-            return Err(anyhow!("No index"));
+            return Err(Error::NoIndex);
         }
         let (min_x, min_y, max_x, max_y) = (min_x as i64, min_y as i64, max_x as i64, max_y as i64);
         let list = PackedRTree::stream_search(
@@ -288,7 +288,7 @@ impl<R: Read> FcbReader<R> {
                     .try_fold(0u32, |acc, ai| {
                         let len = ai.length();
                         if len > u32::MAX - acc {
-                            Err(anyhow!("Attribute index size overflow"))
+                            Err(Error::AttributeIndexSizeOverflow)
                         } else {
                             Ok(acc + len)
                         }
@@ -307,9 +307,9 @@ impl FeatureOffset {
 
 impl<R: Read> FallibleStreamingIterator for FeatureIter<R, NotSeekable> {
     type Item = FcbBuffer;
-    type Error = anyhow::Error;
+    type Error = Error;
 
-    fn advance(&mut self) -> Result<()> {
+    fn advance(&mut self) -> Result<(), Error> {
         if self.advance_finished() {
             return Ok(());
         }
@@ -353,9 +353,9 @@ impl<R: Read> FallibleStreamingIterator for FeatureIter<R, NotSeekable> {
 
 impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
     type Item = FcbBuffer;
-    type Error = anyhow::Error;
+    type Error = Error;
 
-    fn advance(&mut self) -> Result<()> {
+    fn advance(&mut self) -> Result<(), Error> {
         if self.advance_finished() {
             return Ok(());
         }
@@ -400,20 +400,20 @@ impl<R: Read> FeatureIter<R, NotSeekable> {
         self.buffer.feature()
     }
 
-    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature> {
+    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature, Error> {
         let fcb_feature = self.buffer.feature();
         let root_attr_schema = self.buffer.header().columns();
 
         to_cj_feature(fcb_feature, root_attr_schema)
     }
 
-    pub fn get_features(&mut self) -> Result<Vec<CityFeature>> {
+    pub fn get_features(&mut self) -> Result<Vec<CityFeature>, Error> {
         // Ok(features)
         todo!("implement")
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<&Self>> {
+    pub fn next(&mut self) -> Result<Option<&Self>, Error> {
         self.advance()?;
         if self.get().is_some() {
             Ok(Some(self))
@@ -428,14 +428,14 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
         self.buffer.feature()
     }
     /// Return current feature
-    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature> {
+    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature, Error> {
         let fcb_feature = self.buffer.feature();
         let root_attr_schema = self.buffer.header().columns();
 
         to_cj_feature(fcb_feature, root_attr_schema)
     }
 
-    pub fn get_features(&mut self, _: impl Write) -> Result<()> {
+    pub fn get_features(&mut self, _: impl Write) -> Result<(), Error> {
         todo!("implement")
     }
 
@@ -444,7 +444,7 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<&Self>> {
+    pub fn next(&mut self) -> Result<Option<&Self>, Error> {
         self.advance()?;
         if self.get().is_some() {
             Ok(Some(self))
@@ -544,7 +544,7 @@ impl<R: Read, S> FeatureIter<R, S> {
             .is_err()
     }
 
-    fn read_feature(&mut self) -> Result<()> {
+    fn read_feature(&mut self) -> Result<(), Error> {
         match self.state {
             State::ReadFirstFeatureSize => {
                 self.state = State::Reading;

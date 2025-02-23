@@ -1,0 +1,118 @@
+---
+description: Coding rules for Rust implementation in FlatCityBuf
+globs: 
+---
+# Rules
+- Coding: flatcitybuf is an open source tool chain to encode and decode CityJSON files. It uses flatbuffers to encode and decode CityJSON files. It's written in Rust but other languages will be supported soon.
+- Coding: always give me the full code with comments and all.
+- Coding: always keep my style black and white, with some nerdy style and fonts pixelated / scientific style
+- Coding: Rust: use anyhow error for application code and thiserror for package, tokio instead of std stuff, avoid mutex if you can, prefer channels, write code easy to read for humans, fast for machines
+- Coding: Don't give me just `unwrap` except test cases to have proper error handling
+- Coding: If possible, try to generalise the implementation like using generics, trait, etc. Keep interface programming in your mind.
+- Coding: Since I'm not a native English speaker, if any grammer mistakes are found in comments, always give me suggestion to fix and improve writing.
+
+# Directory structure
+The rust code base is consisit with multiple crates and their modules.
+
+```
+├── Cargo.lock
+├── Cargo.toml
+├── bst
+│   ├── Cargo.toml
+│   └── src
+│       ├── byte_serializable.rs
+│       ├── error.rs
+│       ├── lib.rs
+│       ├── query.rs
+│       └── sorted_index.rs
+├── cli
+│   ├── Cargo.toml
+│   └── src
+│       ├── error.rs
+│       └── main.rs
+├── fcb_core
+│   ├── Cargo.toml
+│   ├── benches
+│   │   ├── read.rs
+│   │   └── read_attr.rs
+│   ├── scripts
+│   │   └── cjseq_to_fcb.sh
+│   ├── src
+│   │   ├── bin
+│   │   │   ├── read.rs
+│   │   │   ├── read_cj.rs
+│   │   │   └── write.rs
+│   │   ├── cj_utils.rs
+│   │   ├── cjerror.rs
+│   │   ├── const_vars.rs
+│   │   ├── error.rs
+│   │   ├── fb
+│   │   │   ├── feature_generated.rs
+│   │   │   ├── header_generated.rs
+│   │   │   └── mod.rs
+│   │   ├── http_reader
+│   │   │   ├── mock_http_range_client.rs
+│   │   │   └── mod.rs
+│   │   ├── lib.rs
+│   │   ├── reader
+│   │   │   ├── attr_query.rs
+│   │   │   ├── city_buffer.rs
+│   │   │   ├── deserializer.rs
+│   │   │   ├── geom_decoder.rs
+│   │   │   └── mod.rs
+│   │   └── writer
+│   │       ├── attr_index.rs
+│   │       ├── attribute.rs
+│   │       ├── error.rs
+│   │       ├── feature_writer.rs
+│   │       ├── geom_encoder.rs
+│   │       ├── header_writer.rs
+│   │       ├── mod.rs
+│   │       └── serializer.rs
+│   └── tests
+│       ├── attr_index.rs
+│       ├── data
+│       │   ├── delft.city.json
+│       │   ├── delft.city.jsonl
+│       │   ├── delft_attr.fcb
+│       │   ├── delft_bbox.fcb
+│       │   ├── header.json
+│       │   ├── small.city.jsonl
+│       │   └── small.fcb
+│       ├── e2e.rs
+│       ├── http.rs
+│       └── read.rs
+├── makefile
+├── packed_rtree
+│   ├── Cargo.toml
+│   └── src
+│       ├── error.rs
+│       └── lib.rs
+├── src
+│   └── lib.rs
+├── temp
+│   ├── delft.fcb
+│   ├── delft_attr.city.jsonl
+│   ├── delft_attr.fcb
+│   ├── small.city.jsonl
+│   ├── small.fcb
+│   └── test_e2e.fcb
+└── wasm
+    ├── Cargo.toml
+    ├── pkg
+    └── src
+        ├── gloo_client.rs
+        └── lib.rs
+```
+
+
+- FlatBuffers schema: [header.fbs](mdc:src/fbs/header.fbs) [feature.fbs](mdc:src/fbs/feature.fbs) these files defines the schema of FlatBuffers.
+- Auto generated code by FlatBuffers compiler: [header_generated.rs](mdc:src/rust/fcb_core/src/fb/header_generated.rs) [feature_generated.rs](mdc:src/rust/fcb_core/src/fb/feature_generated.rs)
+- Packed-rtree: [lib.rs](mdc:src/rust/packed_rtree/src/lib.rs) packed-rtree implementation
+- BST(Binary Search Tree): [byte_serializable.rs](mdc:src/rust/bst/src/byte_serializable.rs) [query.rs](mdc:src/rust/bst/src/query.rs)[sorted_index.rs](mdc:src/rust/bst/src/sorted_index.rs)[lib.rs](mdc:src/rust/bst/src/lib.rs) Binary searth tree implementation for attributes index
+- CLI: command line implementation to serialize/deserialize FlatCityBuf [main.rs](mdc:src/rust/cli/src/main.rs)
+- fcb_core: the core implementation of FlatCityBuf serializer and deserializer.
+   - [mod.rs](mdc:src/rust/fcb_core/src/reader/mod.rs) [city_buffer.rs](mdc:src/rust/fcb_core/src/reader/city_buffer.rs) [attr_query.rs](mdc:src/rust/fcb_core/src/reader/attr_query.rs) [deserializer.rs](mdc:src/rust/fcb_core/src/reader/deserializer.rs) [geom_decoder.rs](mdc:src/rust/fcb_core/src/reader/geom_decoder.rs) these files read/deserialize FlatBuffer encoded CityJSON. (FCB/FlatCityBuf)
+   - [attr_index.rs](mdc:src/rust/fcb_core/src/writer/attr_index.rs) [attribute.rs](mdc:src/rust/fcb_core/src/writer/attribute.rs) [feature_writer.rs](mdc:src/rust/fcb_core/src/writer/feature_writer.rs) [geom_encoder.rs](mdc:src/rust/fcb_core/src/writer/geom_encoder.rs) [mod.rs](mdc:src/rust/fcb_core/src/writer/mod.rs) [header_writer.rs](mdc:src/rust/fcb_core/src/writer/header_writer.rs) [serializer.rs](mdc:src/rust/fcb_core/src/writer/serializer.rs) these files write/serialize CityJSON into FlatCityBuf
+   - [lib.rs](mdc:src/rust/fcb_core/src/lib.rs) Root file of fcb_core
+

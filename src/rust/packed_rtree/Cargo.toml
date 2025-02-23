@@ -12,6 +12,6 @@ anyhow = { workspace = true }
 byteorder = { workspace = true }
 http-range-client = { workspace = true, optional = true, default-features = false }
 tracing = { workspace = true }
-
+thiserror = { workspace = true }
 [dev-dependencies]
 rand = { workspace = true }

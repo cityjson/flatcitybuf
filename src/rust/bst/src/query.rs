@@ -1,8 +1,8 @@
-use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
 use crate::sorted_index::{AnyIndex, ValueOffset};
 
+use crate::error::Error;
 #[cfg(feature = "http")]
 use packed_rtree::http::{HttpRange, HttpSearchResultItem};
 
@@ -133,7 +133,7 @@ pub async fn stream_query(
     m_indices: &MultiIndex,
     query: Query,
     feature_begin: usize,
-) -> Result<Vec<HttpSearchResultItem>> {
+) -> Result<Vec<HttpSearchResultItem>, Error> {
     // Compute candidate offset set for each query condition.
 
     let mut candidate_sets: Vec<HashSet<ValueOffset>> = Vec::new();
