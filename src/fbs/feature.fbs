@@ -95,17 +95,17 @@ struct Vec2 {
 
 table Material {
   name: string (required);
-  ambientIntensity: float = 0.0; // from 0.0 to 1.0
+  ambient_intensity: float = 0.0; // from 0.0 to 1.0
   // Expected to contain 3 items from 0.0 to 1.0 for (RGB); implementations MUST check length.
-  diffuseColor: [float];
-  emissiveColor: [float];
-  specularColor: [float];
+  diffuse_color: [float];
+  emissive_color: [float];
+  specular_color: [float];
   shininess: float = 0.0; // from 0.0 to 1.0
   transparency: float = 0.0; // from 0.0 to 1.0
-  isSmooth: bool = false;
+  is_smooth: bool = false;
 }
 
-enum TextureType:ubyte {
+enum TextureFormat:ubyte {
   PNG,
   JPG
 }
@@ -125,12 +125,12 @@ enum TextureType:ubyte {
 }
 
 table Texture {
-  type: TextureType;
+  type: TextureFormat; // NOTICE: "type" fields refers to TextureFormat while "textureType" refers to TextureType.
   image: string;        // Image file name / URL
-  wrapMode: WrapMode;
-  textureType: TextureType;  // e.g., "unknown", "specific", or "typical"
+  wrap_mode: WrapMode;
+  texture_type: TextureType;  // e.g., "unknown", "specific", or "typical"
   // Expected to contain 4 items (RGBA)
-  borderColor: [float]; // from 0.0 to 1.0 for (RGBA)
+  border_color: [float]; // from 0.0 to 1.0 for (RGBA)
 }
 
 table MaterialMapping {
