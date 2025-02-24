@@ -97,6 +97,7 @@ table MaterialMapping {
   // - For MultiSurface/CompositeSurface: one material index per surface
   // - For Solid: one material index per surface in each shell
   // - For MultiSolid/CompositeSolid: one material index per surface in each shell of each solid
+  value: uint; // used only when it uses the shared material of CityJSON
 }
 
 table TextureMapping {
@@ -109,14 +110,6 @@ table TextureMapping {
   // The depth of texture indices matches the boundaries array:
   // - For each ring: first vertex is texture index, remaining vertices are UV coordinate indices
   // - UV coordinates must be between 0.0 and 1.0 and reference vertices_texture array
-}
-
-table Appearance {
-  materials: [Material];
-  textures: [Texture];
-  vertices_texture: [Vec2];  // List of UV coordinates, each coordinate must be between 0.0 and 1.0
-  default_theme_texture: string;  // Default theme name for textures when multiple themes exist
-  default_theme_material: string; // Default theme name for materials when multiple themes exist
 }
 
 table CityFeature {
