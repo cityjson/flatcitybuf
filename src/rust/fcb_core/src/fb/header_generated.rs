@@ -1683,11 +1683,11 @@ impl<'a> Texture<'a> {
     unsafe { self._tab.get::<TextureFormat>(Texture::VT_TYPE_, Some(TextureFormat::PNG)).unwrap()}
   }
   #[inline]
-  pub fn image(&self) -> Option<&'a str> {
+  pub fn image(&self) -> &'a str {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(Texture::VT_IMAGE, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(Texture::VT_IMAGE, None).unwrap()}
   }
   #[inline]
   pub fn wrap_mode(&self) -> WrapMode {
@@ -1720,7 +1720,7 @@ impl flatbuffers::Verifiable for Texture<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<TextureFormat>("type_", Self::VT_TYPE_, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("image", Self::VT_IMAGE, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("image", Self::VT_IMAGE, true)?
      .visit_field::<WrapMode>("wrap_mode", Self::VT_WRAP_MODE, false)?
      .visit_field::<TextureType>("texture_type", Self::VT_TEXTURE_TYPE, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("border_color", Self::VT_BORDER_COLOR, false)?
@@ -1740,7 +1740,7 @@ impl<'a> Default for TextureArgs<'a> {
   fn default() -> Self {
     TextureArgs {
       type_: TextureFormat::PNG,
-      image: None,
+      image: None, // required field
       wrap_mode: WrapMode::None,
       texture_type: TextureType::Unknown,
       border_color: None,
@@ -1784,6 +1784,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> TextureBuilder<'a, 'b, A> {
   #[inline]
   pub fn finish(self) -> flatbuffers::WIPOffset<Texture<'a>> {
     let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, Texture::VT_IMAGE,"image");
     flatbuffers::WIPOffset::new(o.value())
   }
 }

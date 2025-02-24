@@ -103,7 +103,7 @@ enum TextureType:ubyte {
 
 table Texture {
   type: TextureFormat; // NOTICE: "type" fields refers to TextureFormat while "textureType" refers to TextureType.
-  image: string;        // Image file name / URL
+  image: string (required);        // Image file name / URL
   wrap_mode: WrapMode;
   texture_type: TextureType;  // e.g., "unknown", "specific", or "typical"
   // Expected to contain 4 items (RGBA)
