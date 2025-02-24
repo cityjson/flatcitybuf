@@ -1,7 +1,9 @@
 use crate::attribute::{encode_attributes_with_schema, AttributeSchema, AttributeSchemaMethods};
 use crate::fb::{
-    CityFeature, CityFeatureArgs, CityObject, CityObjectArgs, CityObjectType, Geometry,
-    GeometryArgs, GeometryType, SemanticObject, SemanticObjectArgs, SemanticSurfaceType, Vertex,
+    Appearance, AppearanceArgs, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
+    CityObjectType, Geometry, GeometryArgs, GeometryType, Material, MaterialArgs, SemanticObject,
+    SemanticObjectArgs, SemanticSurfaceType, Texture, TextureArgs, TextureType, Vec2, Vertex,
+    WrapMode,
 };
 use crate::fb::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
