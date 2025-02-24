@@ -138,7 +138,10 @@ table MaterialMapping {
   solids: [uint];
   shells: [uint];
   vertices: [uint]; // flat list of vertex indices.
-  //It also contains the material index. The depth of the material will be minus 2 of the boundaryies array. For more details see https://www.cityjson.org/specs/2.0.1/#geometry-object-having-material-s
+  // The depth of material indices will be boundaries depth minus 2:
+  // - For MultiSurface/CompositeSurface: one material index per surface
+  // - For Solid: one material index per surface in each shell
+  // - For MultiSolid/CompositeSolid: one material index per surface in each shell of each solid
 }
 
 table TextureMapping {
@@ -148,16 +151,17 @@ table TextureMapping {
   surfaces: [uint];
   strings: [uint];
   vertices: [uint]; // flat list of vertex indices.
-  //It also contains the texture index. The depth of the texture will be same as the boundaries array. For more details see https://www.cityjson.org/specs/2.0.1/#geometry-object-having-texture-s
+  // The depth of texture indices matches the boundaries array:
+  // - For each ring: first vertex is texture index, remaining vertices are UV coordinate indices
+  // - UV coordinates must be between 0.0 and 1.0 and reference vertices_texture array
 }
 
 table Appearance {
   materials: [Material];
   textures: [Texture];
-  // "vertices-texture" field: a list of UV coordinates.
-  vertices_texture: [Vec2];
-  default_theme_texture: string;
-  default_theme_material: string;
+  vertices_texture: [Vec2];  // List of UV coordinates, each coordinate must be between 0.0 and 1.0
+  default_theme_texture: string;  // Default theme name for textures when multiple themes exist
+  default_theme_material: string; // Default theme name for materials when multiple themes exist
 }
 
 table CityFeature {

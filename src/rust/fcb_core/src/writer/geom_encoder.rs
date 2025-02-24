@@ -1,7 +1,11 @@
 use cjseq::{
-    Boundaries as CjBoundaries, Semantics as CjSemantics, SemanticsSurface as CjSemanticsSurface,
-    SemanticsValues as CjSemanticsValues,
+    Boundaries as CjBoundaries, Material as CjMaterial, Semantics as CjSemantics,
+    SemanticsSurface as CjSemanticsSurface, SemanticsValues as CjSemanticsValues,
+    Texture as CjTexture,
 };
+use flatbuffers::{FlatBufferBuilder, WIPOffset};
+use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct GMBoundaries {
@@ -10,6 +14,30 @@ pub(crate) struct GMBoundaries {
     pub(crate) surfaces: Vec<u32>, // Number of rings per surface
     pub(crate) strings: Vec<u32>,  // Number of indices per ring
     pub(crate) indices: Vec<u32>,  // Flattened list of all indices
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MaterialMapping {
+    pub(crate) theme: String,
+    pub(crate) solids: Vec<u32>,
+    pub(crate) shells: Vec<u32>,
+    pub(crate) vertices: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TextureMapping {
+    pub(crate) theme: String,
+    pub(crate) solids: Vec<u32>,
+    pub(crate) shells: Vec<u32>,
+    pub(crate) surfaces: Vec<u32>,
+    pub(crate) strings: Vec<u32>,
+    pub(crate) vertices: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GMAppearance {
+    pub(crate) materials: Vec<MaterialMapping>,
+    pub(crate) textures: Vec<TextureMapping>,
 }
 
 #[derive(Debug, Clone, Default)]
