@@ -1,8 +1,9 @@
+use crate::fb::header_generated::Vec2;
 use cjseq::{
     Appearance as CjAppearance, Boundaries as CjBoundaries, MaterialObject as CjMaterial,
-    MaterialReference as CjMaterialReference, Semantics as CjSemantics,
+    MaterialReference as CjMaterialReference, MaterialValues, Semantics as CjSemantics,
     SemanticsSurface as CjSemanticsSurface, SemanticsValues as CjSemanticsValues,
-    TextureObject as CjTexture, TextureReference as CjTextureReference,
+    TextureObject as CjTexture, TextureReference as CjTextureReference, TextureValues,
 };
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 use serde_json::Value;
@@ -110,58 +111,42 @@ pub(crate) fn encode_appearance(appearance: &CjAppearance) -> GMAppearance {
     // Handle materials if present
     if let Some(materials) = &appearance.materials {
         for material in materials {
-            if let Some(material_refs) = &material.values {
-                let mut mapping = MaterialMapping {
-                    theme: material.theme.clone(),
-                    solids: Vec::new(),
-                    shells: Vec::new(),
-                    vertices: Vec::new(),
-                };
+            let mut mapping = MaterialMapping {
+                theme: material.name.clone(),
+                solids: Vec::new(),
+                shells: Vec::new(),
+                vertices: Vec::new(),
+            };
 
-                // Process material references
-                for reference in material_refs {
-                    match reference {
-                        CjMaterialReference::Value(value) => {
-                            mapping.vertices.push(*value as u32);
-                        }
-                        CjMaterialReference::Values(values) => {
-                            mapping.vertices.extend(values.iter().map(|v| *v as u32));
-                        }
-                    }
-                }
-
-                gm_appearance.materials.push(mapping);
+            // Add material properties
+            if let Some(value) = material.ambient_intensity {
+                mapping.vertices.push(value as u32);
             }
+
+            gm_appearance.materials.push(mapping);
         }
     }
 
     // Handle textures if present
     if let Some(textures) = &appearance.textures {
         for texture in textures {
-            if let Some(texture_refs) = &texture.values {
-                let mut mapping = TextureMapping {
-                    theme: texture.theme.clone(),
-                    solids: Vec::new(),
-                    shells: Vec::new(),
-                    surfaces: Vec::new(),
-                    strings: Vec::new(),
-                    vertices: Vec::new(),
-                };
+            let mut mapping = TextureMapping {
+                theme: texture.image.clone(),
+                solids: Vec::new(),
+                shells: Vec::new(),
+                surfaces: Vec::new(),
+                strings: Vec::new(),
+                vertices: Vec::new(),
+            };
 
-                // Process texture references
-                for reference in texture_refs {
-                    match reference {
-                        CjTextureReference::Value(value) => {
-                            mapping.vertices.push(*value as u32);
-                        }
-                        CjTextureReference::Values(values) => {
-                            mapping.vertices.extend(values.iter().map(|v| *v as u32));
-                        }
-                    }
-                }
-
-                gm_appearance.textures.push(mapping);
+            // Add texture properties
+            if let Some(border_color) = &texture.border_color {
+                mapping
+                    .vertices
+                    .extend(border_color.iter().map(|&x| x as u32));
             }
+
+            gm_appearance.textures.push(mapping);
         }
     }
 
