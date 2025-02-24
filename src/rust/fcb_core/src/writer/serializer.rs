@@ -9,8 +9,8 @@ use crate::fb::{
 use crate::geom_encoder::encode;
 use crate::{AttributeIndex, Column, ColumnArgs};
 use cjseq::{
-    CityJSON, CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
-    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
+    Appearance as CjAppearance, CityJSON, CityJSONFeature, CityObject as CjCityObject,
+    Geometry as CjGeometry, GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
     ReferenceSystem as CjReferenceSystem, Transform as CjTransform,
 };
 use flatbuffers::FlatBufferBuilder;
@@ -345,6 +345,7 @@ pub(super) fn to_fcb_city_feature<'a>(
                 id,
                 objects,
                 vertices,
+                appearance,
             },
         ),
         bbox,
@@ -596,6 +597,8 @@ pub(crate) fn to_geometry<'a>(
             boundaries: boundary_indices,
             semantics: semantics_values,
             semantics_objects,
+            material: material_mappings,
+            texture: texture_mappings,
         },
     )
 }

@@ -1,7 +1,8 @@
 use cjseq::{
-    Boundaries as CjBoundaries, Material as CjMaterial, Semantics as CjSemantics,
+    Appearance as CjAppearance, Boundaries as CjBoundaries, MaterialObject as CjMaterial,
+    MaterialReference as CjMaterialReference, Semantics as CjSemantics,
     SemanticsSurface as CjSemanticsSurface, SemanticsValues as CjSemanticsValues,
-    Texture as CjTexture,
+    TextureObject as CjTexture, TextureReference as CjTextureReference,
 };
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 use serde_json::Value;
@@ -38,6 +39,9 @@ pub(crate) struct TextureMapping {
 pub(crate) struct GMAppearance {
     pub(crate) materials: Vec<MaterialMapping>,
     pub(crate) textures: Vec<TextureMapping>,
+    pub(crate) vertices_texture: Vec<Vec2>,
+    pub(crate) default_theme_texture: Option<String>,
+    pub(crate) default_theme_material: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -51,6 +55,7 @@ pub(crate) struct GMSemantics {
 pub(crate) struct EncodedGeometry {
     pub(crate) boundaries: GMBoundaries,
     pub(crate) semantics: Option<GMSemantics>,
+    pub(crate) appearance: Option<GMAppearance>,
 }
 
 /// Encodes the provided CityJSON boundaries and semantics into flattened arrays.
@@ -59,12 +64,14 @@ pub(crate) struct EncodedGeometry {
 ///
 /// * `boundaries` - Reference to the CityJSON boundaries to encode.
 /// * `semantics` - Optional reference to the semantics associated with the boundaries.
+/// * `appearance` - Optional reference to the appearance data.
 ///
 /// # Returns
 /// Nothing.
 pub(crate) fn encode(
     cj_boundaries: &CjBoundaries,
     semantics: Option<&CjSemantics>,
+    appearance: Option<&CjAppearance>,
 ) -> EncodedGeometry {
     let mut boundaries = GMBoundaries {
         solids: vec![],
@@ -79,10 +86,95 @@ pub(crate) fn encode(
     // Encode semantics if provided
     let semantics = semantics.map(encode_semantics);
 
+    // Encode appearance if provided
+    let appearance = appearance.map(encode_appearance);
+
     EncodedGeometry {
         boundaries,
         semantics,
+        appearance,
     }
+}
+
+/// Encodes the CityJSON appearance data into our internal representation
+///
+/// # Arguments
+///
+/// * `appearance` - Reference to the CityJSON appearance object
+///
+/// # Returns
+/// A GMAppearance containing the encoded appearance data
+pub(crate) fn encode_appearance(appearance: &CjAppearance) -> GMAppearance {
+    let mut gm_appearance = GMAppearance::default();
+
+    // Handle materials if present
+    if let Some(materials) = &appearance.materials {
+        for material in materials {
+            if let Some(material_refs) = &material.values {
+                let mut mapping = MaterialMapping {
+                    theme: material.theme.clone(),
+                    solids: Vec::new(),
+                    shells: Vec::new(),
+                    vertices: Vec::new(),
+                };
+
+                // Process material references
+                for reference in material_refs {
+                    match reference {
+                        CjMaterialReference::Value(value) => {
+                            mapping.vertices.push(*value as u32);
+                        }
+                        CjMaterialReference::Values(values) => {
+                            mapping.vertices.extend(values.iter().map(|v| *v as u32));
+                        }
+                    }
+                }
+
+                gm_appearance.materials.push(mapping);
+            }
+        }
+    }
+
+    // Handle textures if present
+    if let Some(textures) = &appearance.textures {
+        for texture in textures {
+            if let Some(texture_refs) = &texture.values {
+                let mut mapping = TextureMapping {
+                    theme: texture.theme.clone(),
+                    solids: Vec::new(),
+                    shells: Vec::new(),
+                    surfaces: Vec::new(),
+                    strings: Vec::new(),
+                    vertices: Vec::new(),
+                };
+
+                // Process texture references
+                for reference in texture_refs {
+                    match reference {
+                        CjTextureReference::Value(value) => {
+                            mapping.vertices.push(*value as u32);
+                        }
+                        CjTextureReference::Values(values) => {
+                            mapping.vertices.extend(values.iter().map(|v| *v as u32));
+                        }
+                    }
+                }
+
+                gm_appearance.textures.push(mapping);
+            }
+        }
+    }
+
+    // Handle vertices-texture if present
+    if let Some(vertices) = &appearance.vertices_texture {
+        gm_appearance.vertices_texture = vertices.iter().map(|v| Vec2::new(v[0], v[1])).collect();
+    }
+
+    // Handle default themes
+    gm_appearance.default_theme_texture = appearance.default_theme_texture.clone();
+    gm_appearance.default_theme_material = appearance.default_theme_material.clone();
+
+    gm_appearance
 }
 
 /// Recursively encodes the CityJSON boundaries into flattened arrays.
@@ -215,20 +307,83 @@ pub(crate) fn encode_semantics(semantics: &CjSemantics) -> GMSemantics {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use anyhow::Result;
     use cjseq::Geometry as CjGeometry;
     use pretty_assertions::assert_eq;
-
     use serde_json::json;
+
+    #[test]
+    fn test_encode_appearance() -> Result<()> {
+        let appearance_json = json!({
+            "materials": [
+                {
+                    "name": "roofandground",
+                    "ambientIntensity": 0.2000,
+                    "diffuseColor": [0.9000, 0.1000, 0.7500],
+                    "emissiveColor": [0.9000, 0.1000, 0.7500],
+                    "specularColor": [0.9000, 0.1000, 0.7500],
+                    "shininess": 0.2,
+                    "transparency": 0.5,
+                    "isSmooth": false,
+                    "theme": "theme1",
+                    "values": [0, 1, 2]
+                }
+            ],
+            "textures": [
+                {
+                    "type": "PNG",
+                    "image": "appearances/myroof.jpg",
+                    "wrapMode": "wrap",
+                    "textureType": "unknown",
+                    "borderColor": [0.0, 0.1, 0.2, 1.0],
+                    "theme": "theme2",
+                    "values": [0, 1, 2, 3]
+                }
+            ],
+            "vertices-texture": [
+                [0.0, 0.5],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0]
+            ],
+            "default-theme-texture": "theme2",
+            "default-theme-material": "theme1"
+        });
+
+        let appearance: CjAppearance = serde_json::from_value(appearance_json)?;
+        let encoded = encode_appearance(&appearance);
+
+        // Check materials
+        assert_eq!(encoded.materials.len(), 1);
+        assert_eq!(encoded.materials[0].theme, "theme1");
+        assert_eq!(encoded.materials[0].vertices, vec![0, 1, 2]);
+
+        // Check textures
+        assert_eq!(encoded.textures.len(), 1);
+        assert_eq!(encoded.textures[0].theme, "theme2");
+        assert_eq!(encoded.textures[0].vertices, vec![0, 1, 2, 3]);
+
+        // Check vertices-texture
+        assert_eq!(encoded.vertices_texture.len(), 4);
+        assert_eq!(encoded.vertices_texture[0], Vec2::new(0.0, 0.5));
+        assert_eq!(encoded.vertices_texture[1], Vec2::new(1.0, 0.0));
+        assert_eq!(encoded.vertices_texture[2], Vec2::new(1.0, 1.0));
+        assert_eq!(encoded.vertices_texture[3], Vec2::new(0.0, 1.0));
+
+        // Check default themes
+        assert_eq!(encoded.default_theme_texture.unwrap(), "theme2");
+        assert_eq!(encoded.default_theme_material.unwrap(), "theme1");
+
+        Ok(())
+    }
 
     #[test]
     fn test_encode_boundaries() -> Result<()> {
         // MultiPoint
         let boundaries = json!([2, 44, 0, 7]);
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
-        let encoded_boundaries = encode(&boundaries, None);
+        let encoded_boundaries = encode(&boundaries, None, None);
         assert_eq!(vec![2, 44, 0, 7], encoded_boundaries.boundaries.indices);
         assert_eq!(vec![4], encoded_boundaries.boundaries.strings);
         assert!(encoded_boundaries.boundaries.surfaces.is_empty());
@@ -238,7 +393,7 @@ mod tests {
         // MultiLineString
         let boundaries = json!([[2, 3, 5], [77, 55, 212]]);
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
-        let encoded_boundaries = encode(&boundaries, None);
+        let encoded_boundaries = encode(&boundaries, None, None);
 
         assert_eq!(
             vec![2, 3, 5, 77, 55, 212],
@@ -252,7 +407,7 @@ mod tests {
         // MultiSurface
         let boundaries = json!([[[0, 3, 2, 1]], [[4, 5, 6, 7]], [[0, 1, 5, 4]]]);
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
-        let encoded_boundaries = encode(&boundaries, None);
+        let encoded_boundaries = encode(&boundaries, None, None);
 
         assert_eq!(
             vec![0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4],
@@ -279,7 +434,7 @@ mod tests {
             ]
         ]);
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
-        let encoded_boundaries = encode(&boundaries, None);
+        let encoded_boundaries = encode(&boundaries, None, None);
 
         assert_eq!(
             vec![
@@ -323,7 +478,7 @@ mod tests {
             ]]
         ]);
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
-        let encoded_boundaries = encode(&boundaries, None);
+        let encoded_boundaries = encode(&boundaries, None, None);
         assert_eq!(
             vec![
                 0, 3, 2, 1, 22, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 240, 243, 124, 244, 246, 724,
