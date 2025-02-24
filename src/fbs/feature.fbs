@@ -88,51 +88,6 @@ struct Vertex {
   z:int;
 }
 
-struct Vec2 {
-  u: float;
-  v: float;
-}
-
-table Material {
-  name: string (required);
-  ambient_intensity: float = 0.0; // from 0.0 to 1.0
-  // Expected to contain 3 items from 0.0 to 1.0 for (RGB); implementations MUST check length.
-  diffuse_color: [float];
-  emissive_color: [float];
-  specular_color: [float];
-  shininess: float = 0.0; // from 0.0 to 1.0
-  transparency: float = 0.0; // from 0.0 to 1.0
-  is_smooth: bool = false;
-}
-
-enum TextureFormat:ubyte {
-  PNG,
-  JPG
-}
-
-enum WrapMode:ubyte {
-  None,
-  Wrap,
-  Mirror,
-  Clamp,
-  Border
-}
-
-enum TextureType:ubyte {
-  Unknown,
-  Specific,
-  Typical
-}
-
-table Texture {
-  type: TextureFormat; // NOTICE: "type" fields refers to TextureFormat while "textureType" refers to TextureType.
-  image: string;        // Image file name / URL
-  wrap_mode: WrapMode;
-  texture_type: TextureType;  // e.g., "unknown", "specific", or "typical"
-  // Expected to contain 4 items (RGBA)
-  border_color: [float]; // from 0.0 to 1.0 for (RGBA)
-}
-
 table MaterialMapping {
   theme: string;
   solids: [uint];
