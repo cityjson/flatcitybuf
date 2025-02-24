@@ -312,6 +312,85 @@ pub(super) fn to_fcb_city_feature<'a>(
                 .collect::<Vec<_>>(),
         ),
     );
+
+    // Handle appearance if present
+    let appearance = city_feature.appearance.as_ref().map(|app| {
+        let materials = app.materials.as_ref().map(|materials| {
+            let material_offsets: Vec<_> = materials
+                .iter()
+                .map(|m| {
+                    let name = fbb.create_string(&m.name);
+                    let diffuse_color = m.diffuse_color.map(|c| fbb.create_vector(&c));
+                    let emissive_color = m.emissive_color.map(|c| fbb.create_vector(&c));
+                    let specular_color = m.specular_color.map(|c| fbb.create_vector(&c));
+                    Material::create(
+                        fbb,
+                        &MaterialArgs {
+                            name: Some(name),
+                            ambient_intensity: m.ambient_intensity,
+                            diffuse_color,
+                            emissive_color,
+                            specular_color,
+                            shininess: m.shininess,
+                            transparency: m.transparency,
+                            is_smooth: m.is_smooth,
+                        },
+                    )
+                })
+                .collect();
+            fbb.create_vector(&material_offsets)
+        });
+
+        let textures = app.textures.as_ref().map(|textures| {
+            let texture_offsets: Vec<_> = textures
+                .iter()
+                .map(|t| {
+                    let image = fbb.create_string(&t.image);
+                    let border_color = t.border_color.map(|c| fbb.create_vector(&c));
+                    Texture::create(
+                        fbb,
+                        &TextureArgs {
+                            texture_type: t.texture_type.into(),
+                            image: Some(image),
+                            wrap_mode: t.wrap_mode.map(|w| w.into()),
+                            texture_type_semantic: t.texture_type_semantic.map(|s| s.into()),
+                            border_color,
+                        },
+                    )
+                })
+                .collect();
+            fbb.create_vector(&texture_offsets)
+        });
+
+        let vertices_texture = app.vertices_texture.as_ref().map(|vertices| {
+            fbb.create_vector(
+                &vertices
+                    .iter()
+                    .map(|v| Vec2::new(v[0], v[1]))
+                    .collect::<Vec<_>>(),
+            )
+        });
+
+        let default_theme_texture = app
+            .default_theme_texture
+            .as_ref()
+            .map(|t| fbb.create_string(t));
+        let default_theme_material = app
+            .default_theme_material
+            .as_ref()
+            .map(|m| fbb.create_string(m));
+
+        Appearance::create(
+            fbb,
+            &AppearanceArgs {
+                materials,
+                textures,
+                vertices_texture,
+                default_theme_texture,
+                default_theme_material,
+            },
+        )
+    });
     let min_x = city_feature
         .vertices
         .iter()
