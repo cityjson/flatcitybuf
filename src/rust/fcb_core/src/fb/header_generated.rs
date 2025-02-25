@@ -1452,8 +1452,8 @@ impl<'a> Material<'a> {
     args: &'args MaterialArgs<'args>
   ) -> flatbuffers::WIPOffset<Material<'bldr>> {
     let mut builder = MaterialBuilder::new(_fbb);
-    builder.add_transparency(args.transparency);
-    builder.add_shininess(args.shininess);
+    if let Some(x) = args.transparency { builder.add_transparency(x); }
+    if let Some(x) = args.shininess { builder.add_shininess(x); }
     if let Some(x) = args.ambient_intensity { builder.add_ambient_intensity(x); }
     if let Some(x) = args.specular_color { builder.add_specular_color(x); }
     if let Some(x) = args.emissive_color { builder.add_emissive_color(x); }
@@ -1500,18 +1500,18 @@ impl<'a> Material<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(Material::VT_SPECULAR_COLOR, None)}
   }
   #[inline]
-  pub fn shininess(&self) -> f64 {
+  pub fn shininess(&self) -> Option<f64> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<f64>(Material::VT_SHININESS, Some(0.0)).unwrap()}
+    unsafe { self._tab.get::<f64>(Material::VT_SHININESS, None)}
   }
   #[inline]
-  pub fn transparency(&self) -> f64 {
+  pub fn transparency(&self) -> Option<f64> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<f64>(Material::VT_TRANSPARENCY, Some(0.0)).unwrap()}
+    unsafe { self._tab.get::<f64>(Material::VT_TRANSPARENCY, None)}
   }
   #[inline]
   pub fn is_smooth(&self) -> Option<bool> {
@@ -1547,8 +1547,8 @@ pub struct MaterialArgs<'a> {
     pub diffuse_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
     pub emissive_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
     pub specular_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
-    pub shininess: f64,
-    pub transparency: f64,
+    pub shininess: Option<f64>,
+    pub transparency: Option<f64>,
     pub is_smooth: Option<bool>,
 }
 impl<'a> Default for MaterialArgs<'a> {
@@ -1560,8 +1560,8 @@ impl<'a> Default for MaterialArgs<'a> {
       diffuse_color: None,
       emissive_color: None,
       specular_color: None,
-      shininess: 0.0,
-      transparency: 0.0,
+      shininess: None,
+      transparency: None,
       is_smooth: None,
     }
   }
@@ -1594,11 +1594,11 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> MaterialBuilder<'a, 'b, A> {
   }
   #[inline]
   pub fn add_shininess(&mut self, shininess: f64) {
-    self.fbb_.push_slot::<f64>(Material::VT_SHININESS, shininess, 0.0);
+    self.fbb_.push_slot_always::<f64>(Material::VT_SHININESS, shininess);
   }
   #[inline]
   pub fn add_transparency(&mut self, transparency: f64) {
-    self.fbb_.push_slot::<f64>(Material::VT_TRANSPARENCY, transparency, 0.0);
+    self.fbb_.push_slot_always::<f64>(Material::VT_TRANSPARENCY, transparency);
   }
   #[inline]
   pub fn add_is_smooth(&mut self, is_smooth: bool) {

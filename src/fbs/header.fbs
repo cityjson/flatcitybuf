@@ -77,8 +77,8 @@ table Material {
   diffuse_color: [double];
   emissive_color: [double];
   specular_color: [double];
-  shininess: double; // from 0.0 to 1.0
-  transparency: double; // from 0.0 to 1.0
+  shininess: double = null; // from 0.0 to 1.0
+  transparency: double = null; // from 0.0 to 1.0
   is_smooth: bool = null;
 }
 
