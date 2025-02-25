@@ -594,6 +594,7 @@ mod tests {
                         id: Some(id),
                         vertices: None,
                         objects: Some(city_objects),
+                        appearance: None,
                     },
                 )
             };
@@ -754,6 +755,7 @@ mod tests {
                         id: Some(id),
                         vertices: None,
                         objects: Some(city_objects),
+                        appearance: None,
                     },
                 )
             };

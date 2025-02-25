@@ -1,8 +1,7 @@
 use cjseq::{
-    Boundaries as CjBoundaries,
-    MaterialReference as CjMaterialReference,
-    Semantics as CjSemantics, SemanticsSurface as CjSemanticsSurface,
-    SemanticsValues as CjSemanticsValues,
+    Boundaries as CjBoundaries, MaterialReference as CjMaterialReference,
+    MaterialValues as CjMaterialValues, Semantics as CjSemantics,
+    SemanticsSurface as CjSemanticsSurface, SemanticsValues as CjSemanticsValues,
     TextureReference as CjTextureReference,
 };
 use std::collections::HashMap;
@@ -116,40 +115,64 @@ pub(crate) fn encode_material(
     let mut material_mappings = Vec::new();
     for (theme, material) in materials {
         if let Some(value) = material.value {
+            // Handle single material value
             let mapping = MaterialMapping::Value(MaterialValue {
                 theme: theme.clone(),
                 value: value as u32,
             });
             material_mappings.push(mapping);
         } else if let Some(values) = &material.values {
-            let mapping = MaterialMapping::Values(MaterialValues {
+            // Handle material values array
+            let mut material_values = MaterialValues {
                 theme: theme.clone(),
-                solids: vec![],
-                shells: vec![],
-                vertices: vec![],
-            });
-            // depending on the type of geometry such as multisurface, compositesurface, solid, etc, the implementation is different. As the depth of the CjMaterialValues is same as the depth of the boundaries -2, we need to handle the different cases.
-            // For example,
-            // {
-            //   "type": "Solid",
-            //   "lod": "2.1",
-            //   "boundaries": [
-            //     [ [[0, 3, 2, 1]], [[4, 5, 6, 7]], [[0, 1, 5, 4]], [[1, 2, 6, 5]] ]
-            //   ],
-            //   "material": {
-            //     "irradiation": {
-            //       "values": [[0, 0, 1, null]]
-            //     },
-            //   }
-            // }
-            // The implementation should be like this:
-            // MaterialMapping::Values(
-            //   theme: theme.to_string(),
-            //   solids: vec![1],
-            //   shells: vec![],
-            //   vertices: vec![0, 0, 1, u32::MAX],
-            // )
-            material_mappings.push(mapping);
+                solids: Vec::new(),
+                shells: Vec::new(),
+                vertices: Vec::new(),
+            };
+
+            // Process the material values based on their structure
+            match values {
+                // For MultiSurface/CompositeSurface: values is array of indices
+                CjMaterialValues::Indices(indices) => {
+                    // Convert indices to u32, replacing None with u32::MAX
+                    material_values
+                        .vertices
+                        .extend(indices.iter().map(|i| i.map_or(u32::MAX, |v| v as u32)));
+                }
+                // For Solid/MultiSolid/CompositeSolid: values is nested array
+                CjMaterialValues::Nested(nested) => {
+                    // First level is solids
+                    material_values.solids.push(nested.len() as u32);
+
+                    for solid in nested {
+                        match solid {
+                            // For Solid: values is array of surface indices
+                            CjMaterialValues::Indices(indices) => {
+                                material_values.shells.push(indices.len() as u32);
+                                material_values.vertices.extend(
+                                    indices.iter().map(|i| i.map_or(u32::MAX, |v| v as u32)),
+                                );
+                            }
+                            // For MultiSolid/CompositeSolid: values is nested array of shells
+                            CjMaterialValues::Nested(shells_array) => {
+                                material_values.shells.push(shells_array.len() as u32);
+
+                                for shell in shells_array {
+                                    if let CjMaterialValues::Indices(indices) = shell {
+                                        material_values.vertices.extend(
+                                            indices
+                                                .iter()
+                                                .map(|i| i.map_or(u32::MAX, |v| v as u32)),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            material_mappings.push(MaterialMapping::Values(material_values));
         }
     }
     material_mappings
@@ -765,23 +788,42 @@ mod tests {
 
         let encoded = encode_material(&materials);
         assert_eq!(encoded.len(), 2);
-        // First mapping should be Value
-        match &encoded[0] {
+
+        // Find and verify each mapping by theme name instead of relying on order
+        let theme4_mapping = encoded
+            .iter()
+            .find(|m| match m {
+                MaterialMapping::Value(v) => v.theme == "theme4",
+                MaterialMapping::Values(v) => v.theme == "theme4",
+            })
+            .expect("Should have theme4 mapping");
+
+        let theme5_mapping = encoded
+            .iter()
+            .find(|m| match m {
+                MaterialMapping::Value(v) => v.theme == "theme5",
+                MaterialMapping::Values(v) => v.theme == "theme5",
+            })
+            .expect("Should have theme5 mapping");
+
+        // Verify theme4 mapping
+        match theme4_mapping {
             MaterialMapping::Value(value) => {
                 assert_eq!(value.theme, "theme4");
                 assert_eq!(value.value, 7);
             }
-            _ => panic!("Expected MaterialMapping::Value"),
+            _ => panic!("Expected MaterialMapping::Value for theme4"),
         }
-        // Second mapping should be Values
-        match &encoded[1] {
+
+        // Verify theme5 mapping
+        match theme5_mapping {
             MaterialMapping::Values(values) => {
                 assert_eq!(values.theme, "theme5");
                 assert_eq!(values.vertices, vec![8, 9]);
                 assert!(values.shells.is_empty());
                 assert!(values.solids.is_empty());
             }
-            _ => panic!("Expected MaterialMapping::Values"),
+            _ => panic!("Expected MaterialMapping::Values for theme5"),
         }
 
         // Test case 5: CompositeSolid material values
