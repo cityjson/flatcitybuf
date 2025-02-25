@@ -97,7 +97,7 @@ table MaterialMapping {
   // - For MultiSurface/CompositeSurface: one material index per surface
   // - For Solid: one material index per surface in each shell
   // - For MultiSolid/CompositeSolid: one material index per surface in each shell of each solid
-  value: uint; // used only when it uses the shared material of CityJSON
+  value: uint = null; // used only when it uses the shared material of CityJSON
 }
 
 table TextureMapping {

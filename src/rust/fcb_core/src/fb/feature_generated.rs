@@ -661,7 +661,7 @@ impl<'a> MaterialMapping<'a> {
     args: &'args MaterialMappingArgs<'args>
   ) -> flatbuffers::WIPOffset<MaterialMapping<'bldr>> {
     let mut builder = MaterialMappingBuilder::new(_fbb);
-    builder.add_value(args.value);
+    if let Some(x) = args.value { builder.add_value(x); }
     if let Some(x) = args.vertices { builder.add_vertices(x); }
     if let Some(x) = args.shells { builder.add_shells(x); }
     if let Some(x) = args.solids { builder.add_solids(x); }
@@ -699,11 +699,11 @@ impl<'a> MaterialMapping<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(MaterialMapping::VT_VERTICES, None)}
   }
   #[inline]
-  pub fn value(&self) -> u32 {
+  pub fn value(&self) -> Option<u32> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(MaterialMapping::VT_VALUE, Some(0)).unwrap()}
+    unsafe { self._tab.get::<u32>(MaterialMapping::VT_VALUE, None)}
   }
 }
 
@@ -728,7 +728,7 @@ pub struct MaterialMappingArgs<'a> {
     pub solids: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub shells: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
-    pub value: u32,
+    pub value: Option<u32>,
 }
 impl<'a> Default for MaterialMappingArgs<'a> {
   #[inline]
@@ -738,7 +738,7 @@ impl<'a> Default for MaterialMappingArgs<'a> {
       solids: None,
       shells: None,
       vertices: None,
-      value: 0,
+      value: None,
     }
   }
 }
@@ -766,7 +766,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> MaterialMappingBuilder<'a, 'b, 
   }
   #[inline]
   pub fn add_value(&mut self, value: u32) {
-    self.fbb_.push_slot::<u32>(MaterialMapping::VT_VALUE, value, 0);
+    self.fbb_.push_slot_always::<u32>(MaterialMapping::VT_VALUE, value);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> MaterialMappingBuilder<'a, 'b, A> {
