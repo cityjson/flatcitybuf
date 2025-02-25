@@ -1454,12 +1454,12 @@ impl<'a> Material<'a> {
     let mut builder = MaterialBuilder::new(_fbb);
     builder.add_transparency(args.transparency);
     builder.add_shininess(args.shininess);
-    builder.add_ambient_intensity(args.ambient_intensity);
+    if let Some(x) = args.ambient_intensity { builder.add_ambient_intensity(x); }
     if let Some(x) = args.specular_color { builder.add_specular_color(x); }
     if let Some(x) = args.emissive_color { builder.add_emissive_color(x); }
     if let Some(x) = args.diffuse_color { builder.add_diffuse_color(x); }
     if let Some(x) = args.name { builder.add_name(x); }
-    builder.add_is_smooth(args.is_smooth);
+    if let Some(x) = args.is_smooth { builder.add_is_smooth(x); }
     builder.finish()
   }
 
@@ -1472,11 +1472,11 @@ impl<'a> Material<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(Material::VT_NAME, None).unwrap()}
   }
   #[inline]
-  pub fn ambient_intensity(&self) -> f64 {
+  pub fn ambient_intensity(&self) -> Option<f64> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<f64>(Material::VT_AMBIENT_INTENSITY, Some(0.0)).unwrap()}
+    unsafe { self._tab.get::<f64>(Material::VT_AMBIENT_INTENSITY, None)}
   }
   #[inline]
   pub fn diffuse_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
@@ -1514,11 +1514,11 @@ impl<'a> Material<'a> {
     unsafe { self._tab.get::<f64>(Material::VT_TRANSPARENCY, Some(0.0)).unwrap()}
   }
   #[inline]
-  pub fn is_smooth(&self) -> bool {
+  pub fn is_smooth(&self) -> Option<bool> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(Material::VT_IS_SMOOTH, Some(false)).unwrap()}
+    unsafe { self._tab.get::<bool>(Material::VT_IS_SMOOTH, None)}
   }
 }
 
@@ -1543,26 +1543,26 @@ impl flatbuffers::Verifiable for Material<'_> {
 }
 pub struct MaterialArgs<'a> {
     pub name: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub ambient_intensity: f64,
+    pub ambient_intensity: Option<f64>,
     pub diffuse_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
     pub emissive_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
     pub specular_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
     pub shininess: f64,
     pub transparency: f64,
-    pub is_smooth: bool,
+    pub is_smooth: Option<bool>,
 }
 impl<'a> Default for MaterialArgs<'a> {
   #[inline]
   fn default() -> Self {
     MaterialArgs {
       name: None, // required field
-      ambient_intensity: 0.0,
+      ambient_intensity: None,
       diffuse_color: None,
       emissive_color: None,
       specular_color: None,
       shininess: 0.0,
       transparency: 0.0,
-      is_smooth: false,
+      is_smooth: None,
     }
   }
 }
@@ -1578,7 +1578,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> MaterialBuilder<'a, 'b, A> {
   }
   #[inline]
   pub fn add_ambient_intensity(&mut self, ambient_intensity: f64) {
-    self.fbb_.push_slot::<f64>(Material::VT_AMBIENT_INTENSITY, ambient_intensity, 0.0);
+    self.fbb_.push_slot_always::<f64>(Material::VT_AMBIENT_INTENSITY, ambient_intensity);
   }
   #[inline]
   pub fn add_diffuse_color(&mut self, diffuse_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f64>>) {
@@ -1602,7 +1602,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> MaterialBuilder<'a, 'b, A> {
   }
   #[inline]
   pub fn add_is_smooth(&mut self, is_smooth: bool) {
-    self.fbb_.push_slot::<bool>(Material::VT_IS_SMOOTH, is_smooth, false);
+    self.fbb_.push_slot_always::<bool>(Material::VT_IS_SMOOTH, is_smooth);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> MaterialBuilder<'a, 'b, A> {
@@ -1668,8 +1668,8 @@ impl<'a> Texture<'a> {
     let mut builder = TextureBuilder::new(_fbb);
     if let Some(x) = args.border_color { builder.add_border_color(x); }
     if let Some(x) = args.image { builder.add_image(x); }
-    builder.add_texture_type(args.texture_type);
-    builder.add_wrap_mode(args.wrap_mode);
+    if let Some(x) = args.texture_type { builder.add_texture_type(x); }
+    if let Some(x) = args.wrap_mode { builder.add_wrap_mode(x); }
     builder.add_type_(args.type_);
     builder.finish()
   }
@@ -1690,18 +1690,18 @@ impl<'a> Texture<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(Texture::VT_IMAGE, None).unwrap()}
   }
   #[inline]
-  pub fn wrap_mode(&self) -> WrapMode {
+  pub fn wrap_mode(&self) -> Option<WrapMode> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<WrapMode>(Texture::VT_WRAP_MODE, Some(WrapMode::None)).unwrap()}
+    unsafe { self._tab.get::<WrapMode>(Texture::VT_WRAP_MODE, None)}
   }
   #[inline]
-  pub fn texture_type(&self) -> TextureType {
+  pub fn texture_type(&self) -> Option<TextureType> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<TextureType>(Texture::VT_TEXTURE_TYPE, Some(TextureType::Unknown)).unwrap()}
+    unsafe { self._tab.get::<TextureType>(Texture::VT_TEXTURE_TYPE, None)}
   }
   #[inline]
   pub fn border_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
@@ -1731,8 +1731,8 @@ impl flatbuffers::Verifiable for Texture<'_> {
 pub struct TextureArgs<'a> {
     pub type_: TextureFormat,
     pub image: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub wrap_mode: WrapMode,
-    pub texture_type: TextureType,
+    pub wrap_mode: Option<WrapMode>,
+    pub texture_type: Option<TextureType>,
     pub border_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
 }
 impl<'a> Default for TextureArgs<'a> {
@@ -1741,8 +1741,8 @@ impl<'a> Default for TextureArgs<'a> {
     TextureArgs {
       type_: TextureFormat::PNG,
       image: None, // required field
-      wrap_mode: WrapMode::None,
-      texture_type: TextureType::Unknown,
+      wrap_mode: None,
+      texture_type: None,
       border_color: None,
     }
   }
@@ -1763,11 +1763,11 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> TextureBuilder<'a, 'b, A> {
   }
   #[inline]
   pub fn add_wrap_mode(&mut self, wrap_mode: WrapMode) {
-    self.fbb_.push_slot::<WrapMode>(Texture::VT_WRAP_MODE, wrap_mode, WrapMode::None);
+    self.fbb_.push_slot_always::<WrapMode>(Texture::VT_WRAP_MODE, wrap_mode);
   }
   #[inline]
   pub fn add_texture_type(&mut self, texture_type: TextureType) {
-    self.fbb_.push_slot::<TextureType>(Texture::VT_TEXTURE_TYPE, texture_type, TextureType::Unknown);
+    self.fbb_.push_slot_always::<TextureType>(Texture::VT_TEXTURE_TYPE, texture_type);
   }
   #[inline]
   pub fn add_border_color(&mut self, border_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f64>>) {
