@@ -2,7 +2,7 @@ use cjseq::{
     Boundaries as CjBoundaries, MaterialReference as CjMaterialReference,
     MaterialValues as CjMaterialValues, Semantics as CjSemantics,
     SemanticsSurface as CjSemanticsSurface, SemanticsValues as CjSemanticsValues,
-    TextureReference as CjTextureReference,
+    TextureReference as CjTextureReference, TextureValues as CjTextureValues,
 };
 use std::collections::HashMap;
 
