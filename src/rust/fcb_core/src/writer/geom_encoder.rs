@@ -181,32 +181,64 @@ pub(crate) fn encode_material(
 pub(crate) fn encode_texture(
     texture_map: &HashMap<String, CjTextureReference>,
 ) -> Vec<TextureMapping> {
-    todo!("not implemented")
-    // TODO: implement
-    // depending on the type of geometry such as multisurface, compositesurface, solid, etc, the implementation is different. As the depth of the CjTextureReference is same as the depth of the boundaries -2, we need to handle the different cases.
-    // {
-    //   "type": "Solid",
-    //   "lod": "2.2",
-    //   "boundaries": [
-    //     [ [[0, 3, 2, 1]], [[4, 5, 6, 7]], [[0, 1, 5, 4]], [[1, 2, 6, 5]] ]
-    //   ],
-    //   "texture": {
-    //     "winter-textures": {
-    //       "values": [
-    //         [ [[0, 10, 23, 22, 21]], [[0, 1, 2, 6, 5]], [[null]], [[null]] ]
-    //       ]
-    //     },
-    //   }
-    // }
-    // The implementation should be like this:
-    // TextureMapping::Values(
-    //   theme: theme.to_string(),
-    //   solids: vec![1],
-    //   shells: vec![1, 1, 1, 1],
-    //   surfaces: vec![1, 1, 1, 1],
-    //   strings: vec![5, 5, 1, 1],
-    //   vertices: vec![0, 10, 23, 22, 21, 0, 1, 2, 6, 5, u32::MAX, u32::MAX],
-    // )
+    let mut texture_mappings = Vec::new();
+
+    for (theme, texture) in texture_map {
+        let mut texture_mapping = TextureMapping {
+            theme: theme.clone(),
+            solids: Vec::new(),
+            shells: Vec::new(),
+            surfaces: Vec::new(),
+            strings: Vec::new(),
+            vertices: Vec::new(),
+        };
+
+        // Process the texture values based on their structure
+        process_texture_values(&texture.values, &mut texture_mapping, 0);
+
+        texture_mappings.push(texture_mapping);
+    }
+
+    texture_mappings
+}
+
+/// Recursively processes texture values and populates the TextureMapping struct
+///
+/// # Arguments
+///
+/// * `values` - Reference to the texture values to process
+/// * `mapping` - Mutable reference to the TextureMapping struct to populate
+/// * `depth` - Current depth in the nested structure
+fn process_texture_values(values: &CjTextureValues, mapping: &mut TextureMapping, depth: usize) {
+    match values {
+        // Leaf node (indices)
+        CjTextureValues::Indices(indices) => {
+            // Record the number of indices in this ring
+            mapping.strings.push(indices.len() as u32);
+
+            // Convert indices to u32, replacing None with u32::MAX
+            mapping
+                .vertices
+                .extend(indices.iter().map(|i| i.map_or(u32::MAX, |v| v as u32)));
+        }
+        // Nested structure
+        CjTextureValues::Nested(nested) => {
+            let length = nested.len();
+
+            // Update the appropriate level counter based on depth
+            match depth {
+                0 => mapping.solids.push(length as u32), // Top level: solids
+                1 => mapping.shells.push(length as u32), // Second level: shells
+                2 => mapping.surfaces.push(length as u32), // Third level: surfaces
+                _ => {}                                  // Deeper levels not tracked
+            }
+
+            // Recursively process each nested value
+            for sub in nested {
+                process_texture_values(sub, mapping, depth + 1);
+            }
+        }
+    }
 }
 
 /// Recursively encodes the CityJSON boundaries into flattened arrays.
