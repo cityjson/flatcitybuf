@@ -9,17 +9,23 @@ use crate::fb::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
 use crate::geom_encoder::encode;
-use crate::{AttributeIndex, Column, ColumnArgs};
+use crate::{
+    AttributeIndex, Column, ColumnArgs, MaterialMapping, MaterialMappingArgs, TextureFormat,
+    TextureMapping, TextureMappingArgs,
+};
 use cjseq::{
-    Appearance as CjAppearance, CityJSON, CityJSONFeature, CityObject as CjCityObject,
+    CityJSON, CityJSONFeature, CityObject as CjCityObject,
     Geometry as CjGeometry, GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, Transform as CjTransform,
+    ReferenceSystem as CjReferenceSystem, TextFormat as CjTextFormat, TextType as CjTextType,
+    Transform as CjTransform, WrapMode as CjWrapMode,
 };
 use flatbuffers::FlatBufferBuilder;
 use packed_rtree::NodeItem;
 use serde_json::Value;
 
-use super::geom_encoder::{GMBoundaries, GMSemantics};
+use super::geom_encoder::{
+    GMBoundaries, GMSemantics, MaterialMapping as GMMaterialMapping,
+};
 use super::header_writer::HeaderWriterOptions;
 
 #[derive(Debug, Clone)]
@@ -134,6 +140,7 @@ pub(super) fn to_fcb_header<'a>(
                 poc_address_country,
                 attributes: None,
                 version,
+                appearance: None, //TODO: add appearance
             },
         )
     } else {
@@ -349,13 +356,29 @@ pub(super) fn to_fcb_city_feature<'a>(
                 .map(|t| {
                     let image = fbb.create_string(&t.image);
                     let border_color = t.border_color.map(|c| fbb.create_vector(&c));
+                    let texture_format = match t.texture_format {
+                        CjTextFormat::Png => TextureFormat::PNG,
+                        CjTextFormat::Jpg => TextureFormat::JPG,
+                    };
+                    let wrap_mode = t.wrap_mode.as_ref().map(|w| match w {
+                        CjWrapMode::None => WrapMode::None,
+                        CjWrapMode::Wrap => WrapMode::Wrap,
+                        CjWrapMode::Mirror => WrapMode::Mirror,
+                        CjWrapMode::Clamp => WrapMode::Clamp,
+                        CjWrapMode::Border => WrapMode::Border,
+                    });
+                    let texture_type = t.texture_type.as_ref().map(|t| match t {
+                        CjTextType::Unknown => TextureType::Unknown,
+                        CjTextType::Specific => TextureType::Specific,
+                        CjTextType::Typical => TextureType::Typical,
+                    });
                     Texture::create(
                         fbb,
                         &TextureArgs {
-                            texture_type: t.texture_type.into(),
+                            type_: texture_format,
                             image: Some(image),
-                            wrap_mode: t.wrap_mode.map(|w| w.into()),
-                            texture_type_semantic: t.texture_type_semantic.map(|s| s.into()),
+                            wrap_mode,
+                            texture_type,
                             border_color,
                         },
                     )
@@ -624,7 +647,12 @@ pub(crate) fn to_geometry<'a>(
     let type_ = to_geom_type(&geometry.thetype);
     let lod = geometry.lod.as_ref().map(|lod| fbb.create_string(lod));
 
-    let encoded = encode(&geometry.boundaries, geometry.semantics.as_ref());
+    let encoded = encode(
+        &geometry.boundaries,
+        geometry.semantics.as_ref(),
+        geometry.texture.as_ref(),
+        geometry.material.as_ref(),
+    );
     let GMBoundaries {
         solids,
         shells,
@@ -665,6 +693,72 @@ pub(crate) fn to_geometry<'a>(
                 Some(fbb.create_vector(&values)),
             )
         });
+
+    let material_mappings = encoded.materials.map(|m| {
+        let mappings = m
+            .iter()
+            .map(|m| match m {
+                GMMaterialMapping::Value(v) => {
+                    let theme = Some(fbb.create_string(&v.theme));
+                    let value = Some(v.value);
+                    MaterialMapping::create(
+                        fbb,
+                        &MaterialMappingArgs {
+                            theme,
+                            solids: None,
+                            shells: None,
+                            vertices: None,
+                            value,
+                        },
+                    )
+                }
+                GMMaterialMapping::Values(v) => {
+                    let theme = Some(fbb.create_string(&v.theme));
+                    let solids = Some(fbb.create_vector(&v.solids));
+                    let shells = Some(fbb.create_vector(&v.shells));
+                    let vertices = Some(fbb.create_vector(&v.vertices));
+                    let value = None;
+                    MaterialMapping::create(
+                        fbb,
+                        &MaterialMappingArgs {
+                            theme,
+                            solids,
+                            shells,
+                            vertices,
+                            value,
+                        },
+                    )
+                }
+            })
+            .collect::<Vec<_>>();
+        fbb.create_vector(&mappings)
+    });
+
+    let texture_mappings = encoded.textures.map(|t| {
+        let mappings = t
+            .iter()
+            .map(|t| {
+                let theme = Some(fbb.create_string(&t.theme));
+                let solids = Some(fbb.create_vector(&t.solids));
+                let shells = Some(fbb.create_vector(&t.shells));
+                let surfaces = Some(fbb.create_vector(&t.surfaces));
+                let strings = Some(fbb.create_vector(&t.strings));
+                let vertices = Some(fbb.create_vector(&t.vertices));
+                TextureMapping::create(
+                    fbb,
+                    &TextureMappingArgs {
+                        theme,
+                        solids,
+                        shells,
+                        surfaces,
+                        strings,
+                        vertices,
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        fbb.create_vector(&mappings)
+    });
 
     Geometry::create(
         fbb,

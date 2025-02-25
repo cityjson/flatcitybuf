@@ -1,13 +1,10 @@
-use crate::fb::header_generated::Vec2;
 use cjseq::{
-    Boundaries as CjBoundaries, MaterialObject as CjMaterial,
-    MaterialReference as CjMaterialReference, MaterialValues as CjMaterialValues,
+    Boundaries as CjBoundaries,
+    MaterialReference as CjMaterialReference,
     Semantics as CjSemantics, SemanticsSurface as CjSemanticsSurface,
-    SemanticsValues as CjSemanticsValues, TextureObject as CjTexture,
-    TextureReference as CjTextureReference, TextureValues as CjTextureValues,
+    SemanticsValues as CjSemanticsValues,
+    TextureReference as CjTextureReference,
 };
-use flatbuffers::{FlatBufferBuilder, WIPOffset};
-use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default)]
@@ -95,16 +92,8 @@ pub(crate) fn encode(
     let semantics = semantics.map(encode_semantics);
 
     // Encode appearance if provided
-    let textures = if let Some(textures) = textures {
-        Some(encode_texture(textures))
-    } else {
-        None
-    };
-    let materials = if let Some(materials) = materials {
-        Some(encode_material(materials))
-    } else {
-        None
-    };
+    let textures = textures.map(|textures| encode_texture(textures));
+    let materials = materials.map(|materials| encode_material(materials));
     EncodedGeometry {
         boundaries,
         semantics,
@@ -127,61 +116,39 @@ pub(crate) fn encode_material(
     let mut material_mappings = Vec::new();
     for (theme, material) in materials {
         if let Some(value) = material.value {
-            // Handle single material value
             let mapping = MaterialMapping::Value(MaterialValue {
                 theme: theme.clone(),
                 value: value as u32,
             });
             material_mappings.push(mapping);
         } else if let Some(values) = &material.values {
-            // Handle material values array
-            let mut solids = Vec::new();
-            let mut shells = Vec::new();
-            let mut vertices = Vec::new();
-
-            match values {
-                // For MultiSurface/CompositeSurface: values is array of indices
-                CjMaterialValues::Indices(indices) => {
-                    vertices.extend(indices.iter().map(|i| i.map_or(u32::MAX, |v| v as u32)));
-                }
-                // For Solid/MultiSolid/CompositeSolid: values is nested array
-                CjMaterialValues::Nested(nested) => {
-                    // First level is solids
-                    solids.push(nested.len() as u32);
-
-                    for solid in nested {
-                        match solid {
-                            // For Solid: values is array of surface indices
-                            CjMaterialValues::Indices(indices) => {
-                                shells.push(indices.len() as u32);
-                                vertices.extend(
-                                    indices.iter().map(|i| i.map_or(u32::MAX, |v| v as u32)),
-                                );
-                            }
-                            // For MultiSolid/CompositeSolid: values is nested array of shells
-                            CjMaterialValues::Nested(shells_array) => {
-                                for shell in shells_array {
-                                    if let CjMaterialValues::Indices(indices) = shell {
-                                        shells.push(indices.len() as u32);
-                                        vertices.extend(
-                                            indices
-                                                .iter()
-                                                .map(|i| i.map_or(u32::MAX, |v| v as u32)),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             let mapping = MaterialMapping::Values(MaterialValues {
                 theme: theme.clone(),
-                solids,
-                shells,
-                vertices,
+                solids: vec![],
+                shells: vec![],
+                vertices: vec![],
             });
+            // depending on the type of geometry such as multisurface, compositesurface, solid, etc, the implementation is different. As the depth of the CjMaterialValues is same as the depth of the boundaries -2, we need to handle the different cases.
+            // For example,
+            // {
+            //   "type": "Solid",
+            //   "lod": "2.1",
+            //   "boundaries": [
+            //     [ [[0, 3, 2, 1]], [[4, 5, 6, 7]], [[0, 1, 5, 4]], [[1, 2, 6, 5]] ]
+            //   ],
+            //   "material": {
+            //     "irradiation": {
+            //       "values": [[0, 0, 1, null]]
+            //     },
+            //   }
+            // }
+            // The implementation should be like this:
+            // MaterialMapping::Values(
+            //   theme: theme.to_string(),
+            //   solids: vec![1],
+            //   shells: vec![],
+            //   vertices: vec![0, 0, 1, u32::MAX],
+            // )
             material_mappings.push(mapping);
         }
     }
@@ -191,6 +158,7 @@ pub(crate) fn encode_material(
 pub(crate) fn encode_texture(
     texture_map: &HashMap<String, CjTextureReference>,
 ) -> Vec<TextureMapping> {
+    todo!("not implemented")
     // TODO: implement
     // depending on the type of geometry such as multisurface, compositesurface, solid, etc, the implementation is different. As the depth of the CjTextureReference is same as the depth of the boundaries -2, we need to handle the different cases.
     // {
@@ -350,74 +318,9 @@ pub(crate) fn encode_semantics(semantics: &CjSemantics) -> GMSemantics {
 mod tests {
     use super::*;
     use anyhow::Result;
-    use cjseq::Geometry as CjGeometry;
+    use cjseq::{Appearance, Geometry as CjGeometry};
     use pretty_assertions::assert_eq;
     use serde_json::json;
-
-    #[test]
-    fn test_encode_appearance() -> Result<()> {
-        let appearance_json = json!({
-            "materials": [
-                {
-                    "name": "roofandground",
-                    "ambientIntensity": 0.2000,
-                    "diffuseColor": [0.9000, 0.1000, 0.7500],
-                    "emissiveColor": [0.9000, 0.1000, 0.7500],
-                    "specularColor": [0.9000, 0.1000, 0.7500],
-                    "shininess": 0.2,
-                    "transparency": 0.5,
-                    "isSmooth": false,
-                    "theme": "theme1",
-                    "values": [0, 1, 2]
-                }
-            ],
-            "textures": [
-                {
-                    "type": "PNG",
-                    "image": "appearances/myroof.jpg",
-                    "wrapMode": "wrap",
-                    "textureType": "unknown",
-                    "borderColor": [0.0, 0.1, 0.2, 1.0],
-                    "theme": "theme2",
-                    "values": [0, 1, 2, 3]
-                }
-            ],
-            "vertices-texture": [
-                [0.0, 0.5],
-                [1.0, 0.0],
-                [1.0, 1.0],
-                [0.0, 1.0]
-            ],
-            "default-theme-texture": "theme2",
-            "default-theme-material": "theme1"
-        });
-
-        let appearance: CjAppearance = serde_json::from_value(appearance_json)?;
-        let encoded = encode_material(&appearance);
-
-        // Check materials
-        assert_eq!(encoded.materials.len(), 1);
-        assert_eq!(encoded.materials[0].theme, "theme1");
-        assert_eq!(encoded.materials[0].vertices, vec![0, 1, 2]);
-
-        // Check textures
-        assert_eq!(encoded.textures.len(), 1);
-        assert_eq!(encoded.textures[0].theme, "theme2");
-        assert_eq!(encoded.textures[0].vertices, vec![0, 1, 2, 3]);
-
-        // Check vertices-texture
-        assert_eq!(encoded.vertices_texture.len(), 4);
-        assert_eq!(encoded.vertices_texture[0], Vec2::new(0.0, 0.5));
-        assert_eq!(encoded.vertices_texture[1], Vec2::new(1.0, 0.0));
-        assert_eq!(encoded.vertices_texture[2], Vec2::new(1.0, 1.0));
-        assert_eq!(encoded.vertices_texture[3], Vec2::new(0.0, 1.0));
-
-        // Check default themes
-        assert_eq!(encoded.default_theme_texture.unwrap(), "theme2");
-        assert_eq!(encoded.default_theme_material.unwrap(), "theme1");
-
-        Ok(())
-    }
 
     #[test]
     fn test_encode_boundaries() -> Result<()> {
@@ -475,7 +378,7 @@ mod tests {
             ]
         ]);
         let boundaries: CjBoundaries = serde_json::from_value(boundaries)?;
-        let encoded_boundaries = encode(&boundaries, None, &HashMap::new(), &HashMap::new());
+        let encoded_boundaries = encode(&boundaries, None, None, None);
 
         assert_eq!(
             vec![
@@ -774,7 +677,7 @@ mod tests {
 
     #[test]
     fn test_encode_material() -> Result<()> {
-        // Test with a single value
+        // Test case 1: Single material value
         let mut materials = HashMap::new();
         materials.insert(
             "theme1".to_string(),
@@ -785,7 +688,6 @@ mod tests {
         );
 
         let encoded = encode_material(&materials);
-
         assert_eq!(encoded.len(), 1);
         match &encoded[0] {
             MaterialMapping::Value(value) => {
@@ -795,19 +697,18 @@ mod tests {
             _ => panic!("Expected MaterialMapping::Value"),
         }
 
-        // Test with surface values
+        // Test case 2: MultiSurface material values
         let mut materials = HashMap::new();
-        let surface_values = vec![Some(0), Some(1), None, Some(2)];
+        let multi_surface_values = CjMaterialValues::Indices(vec![Some(0), Some(1), None, Some(2)]);
         materials.insert(
             "theme2".to_string(),
             CjMaterialReference {
                 value: None,
-                values: Some(CjMaterialValues::Surface(surface_values)),
+                values: Some(multi_surface_values),
             },
         );
 
         let encoded = encode_material(&materials);
-
         assert_eq!(encoded.len(), 1);
         match &encoded[0] {
             MaterialMapping::Values(values) => {
@@ -819,29 +720,95 @@ mod tests {
             _ => panic!("Expected MaterialMapping::Values"),
         }
 
-        // Test with solid values
+        // Test case 3: Solid material values
         let mut materials = HashMap::new();
-        let solid_values = vec![
-            vec![Some(0), Some(1), None],
-            vec![Some(2), Some(3), Some(4)],
-        ];
+        let solid_values = CjMaterialValues::Nested(vec![
+            CjMaterialValues::Indices(vec![Some(0), Some(1), None]),
+            CjMaterialValues::Indices(vec![Some(2), Some(3), Some(4)]),
+        ]);
         materials.insert(
             "theme3".to_string(),
             CjMaterialReference {
                 value: None,
-                values: Some(CjMaterialValues::Solid(solid_values)),
+                values: Some(solid_values),
             },
         );
 
         let encoded = encode_material(&materials);
-
         assert_eq!(encoded.len(), 1);
         match &encoded[0] {
             MaterialMapping::Values(values) => {
                 assert_eq!(values.theme, "theme3");
+                assert_eq!(values.solids, vec![2]); // Two shells
+                assert_eq!(values.shells, vec![3, 3]); // Each shell has 3 surfaces
                 assert_eq!(values.vertices, vec![0, 1, u32::MAX, 2, 3, 4]);
-                assert_eq!(values.shells, vec![2]);
+            }
+            _ => panic!("Expected MaterialMapping::Values"),
+        }
+
+        // Test case 4: Multiple themes
+        let mut materials = HashMap::new();
+        materials.insert(
+            "theme4".to_string(),
+            CjMaterialReference {
+                value: Some(7),
+                values: None,
+            },
+        );
+        materials.insert(
+            "theme5".to_string(),
+            CjMaterialReference {
+                value: None,
+                values: Some(CjMaterialValues::Indices(vec![Some(8), Some(9)])),
+            },
+        );
+
+        let encoded = encode_material(&materials);
+        assert_eq!(encoded.len(), 2);
+        // First mapping should be Value
+        match &encoded[0] {
+            MaterialMapping::Value(value) => {
+                assert_eq!(value.theme, "theme4");
+                assert_eq!(value.value, 7);
+            }
+            _ => panic!("Expected MaterialMapping::Value"),
+        }
+        // Second mapping should be Values
+        match &encoded[1] {
+            MaterialMapping::Values(values) => {
+                assert_eq!(values.theme, "theme5");
+                assert_eq!(values.vertices, vec![8, 9]);
+                assert!(values.shells.is_empty());
                 assert!(values.solids.is_empty());
+            }
+            _ => panic!("Expected MaterialMapping::Values"),
+        }
+
+        // Test case 5: CompositeSolid material values
+        let mut materials = HashMap::new();
+        let composite_solid_values = CjMaterialValues::Nested(vec![
+            CjMaterialValues::Nested(vec![
+                CjMaterialValues::Indices(vec![Some(0), Some(1)]),
+                CjMaterialValues::Indices(vec![Some(2), None]),
+            ]),
+            CjMaterialValues::Nested(vec![CjMaterialValues::Indices(vec![Some(3), Some(4)])]),
+        ]);
+        materials.insert(
+            "theme6".to_string(),
+            CjMaterialReference {
+                value: None,
+                values: Some(composite_solid_values),
+            },
+        );
+
+        let encoded = encode_material(&materials);
+        assert_eq!(encoded.len(), 1);
+        match &encoded[0] {
+            MaterialMapping::Values(values) => {
+                assert_eq!(values.theme, "theme6");
+                assert_eq!(values.solids, vec![2]); // Two solids
+                assert_eq!(values.shells, vec![2, 1]); // First solid has 2 shells, second has 1
+                assert_eq!(values.vertices, vec![0, 1, 2, u32::MAX, 3, 4]);
             }
             _ => panic!("Expected MaterialMapping::Values"),
         }
@@ -849,54 +816,54 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_encode_texture() -> Result<()> {
-        // Test with surface texture values
-        let mut textures = HashMap::new();
-        let surface_values = vec![
-            vec![vec![Some(0), Some(10), Some(11), Some(12)]],
-            vec![vec![Some(1), Some(13), Some(14), Some(15)]],
-        ];
-        textures.insert(
-            "theme1".to_string(),
-            CjTextureReference {
-                values: CjTextureValues::Surface(surface_values),
-            },
-        );
+    // #[test]
+    // fn test_encode_texture() -> Result<()> {
+    //     // Test with surface texture values
+    //     let mut textures = HashMap::new();
+    //     let surface_values = vec![
+    //         vec![vec![Some(0), Some(10), Some(11), Some(12)]],
+    //         vec![vec![Some(1), Some(13), Some(14), Some(15)]],
+    //     ];
+    //     textures.insert(
+    //         "theme1".to_string(),
+    //         CjTextureReference {
+    //             values: CjTextureValues::Surface(surface_values),
+    //         },
+    //     );
 
-        let encoded = encode_texture(&textures);
+    //     let encoded = encode_texture(&textures);
 
-        assert_eq!(encoded.len(), 1);
-        assert_eq!(encoded[0].theme, "theme1");
-        assert_eq!(encoded[0].vertices, vec![0, 10, 11, 12, 1, 13, 14, 15]);
-        assert_eq!(encoded[0].strings, vec![1, 1]);
-        assert_eq!(encoded[0].surfaces, vec![2]);
-        assert!(encoded[0].shells.is_empty());
-        assert!(encoded[0].solids.is_empty());
+    //     assert_eq!(encoded.len(), 1);
+    //     assert_eq!(encoded[0].theme, "theme1");
+    //     assert_eq!(encoded[0].vertices, vec![0, 10, 11, 12, 1, 13, 14, 15]);
+    //     assert_eq!(encoded[0].strings, vec![1, 1]);
+    //     assert_eq!(encoded[0].surfaces, vec![2]);
+    //     assert!(encoded[0].shells.is_empty());
+    //     assert!(encoded[0].solids.is_empty());
 
-        // Test with solid texture values
-        let mut textures = HashMap::new();
-        let solid_values = vec![vec![
-            vec![vec![Some(0), Some(10), Some(11), Some(12)]],
-            vec![vec![Some(1), Some(13), Some(14), Some(15)]],
-        ]];
-        textures.insert(
-            "theme2".to_string(),
-            CjTextureReference {
-                values: CjTextureValues::Solid(solid_values),
-            },
-        );
+    //     // Test with solid texture values
+    //     let mut textures = HashMap::new();
+    //     let solid_values = vec![vec![
+    //         vec![vec![Some(0), Some(10), Some(11), Some(12)]],
+    //         vec![vec![Some(1), Some(13), Some(14), Some(15)]],
+    //     ]];
+    //     textures.insert(
+    //         "theme2".to_string(),
+    //         CjTextureReference {
+    //             values: CjTextureValues::Solid(solid_values),
+    //         },
+    //     );
 
-        let encoded = encode_texture(&textures);
+    //     let encoded = encode_texture(&textures);
 
-        assert_eq!(encoded.len(), 1);
-        assert_eq!(encoded[0].theme, "theme2");
-        assert_eq!(encoded[0].vertices, vec![0, 10, 11, 12, 1, 13, 14, 15]);
-        assert_eq!(encoded[0].strings, vec![1, 1]);
-        assert_eq!(encoded[0].surfaces, vec![2]);
-        assert_eq!(encoded[0].shells, vec![1]);
-        assert_eq!(encoded[0].solids, vec![1]);
+    //     assert_eq!(encoded.len(), 1);
+    //     assert_eq!(encoded[0].theme, "theme2");
+    //     assert_eq!(encoded[0].vertices, vec![0, 10, 11, 12, 1, 13, 14, 15]);
+    //     assert_eq!(encoded[0].strings, vec![1, 1]);
+    //     assert_eq!(encoded[0].surfaces, vec![2]);
+    //     assert_eq!(encoded[0].shells, vec![1]);
+    //     assert_eq!(encoded[0].solids, vec![1]);
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
