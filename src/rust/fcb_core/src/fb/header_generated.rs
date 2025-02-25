@@ -877,13 +877,13 @@ impl<'a> AttributeIndex {
 
 }
 
-// struct Vec2, aligned to 4
+// struct Vec2, aligned to 8
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
-pub struct Vec2(pub [u8; 8]);
+pub struct Vec2(pub [u8; 16]);
 impl Default for Vec2 { 
   fn default() -> Self { 
-    Self([0; 8])
+    Self([0; 16])
   }
 }
 impl core::fmt::Debug for Vec2 {
@@ -932,17 +932,17 @@ impl<'a> flatbuffers::Verifiable for Vec2 {
 impl<'a> Vec2 {
   #[allow(clippy::too_many_arguments)]
   pub fn new(
-    u: f32,
-    v: f32,
+    u: f64,
+    v: f64,
   ) -> Self {
-    let mut s = Self([0; 8]);
+    let mut s = Self([0; 16]);
     s.set_u(u);
     s.set_v(v);
     s
   }
 
-  pub fn u(&self) -> f32 {
-    let mut mem = core::mem::MaybeUninit::<<f32 as EndianScalar>::Scalar>::uninit();
+  pub fn u(&self) -> f64 {
+    let mut mem = core::mem::MaybeUninit::<<f64 as EndianScalar>::Scalar>::uninit();
     // Safety:
     // Created from a valid Table for this object
     // Which contains a valid value in this slot
@@ -950,13 +950,13 @@ impl<'a> Vec2 {
       core::ptr::copy_nonoverlapping(
         self.0[0..].as_ptr(),
         mem.as_mut_ptr() as *mut u8,
-        core::mem::size_of::<<f32 as EndianScalar>::Scalar>(),
+        core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
       );
       mem.assume_init()
     })
   }
 
-  pub fn set_u(&mut self, x: f32) {
+  pub fn set_u(&mut self, x: f64) {
     let x_le = x.to_little_endian();
     // Safety:
     // Created from a valid Table for this object
@@ -965,27 +965,27 @@ impl<'a> Vec2 {
       core::ptr::copy_nonoverlapping(
         &x_le as *const _ as *const u8,
         self.0[0..].as_mut_ptr(),
-        core::mem::size_of::<<f32 as EndianScalar>::Scalar>(),
+        core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
       );
     }
   }
 
-  pub fn v(&self) -> f32 {
-    let mut mem = core::mem::MaybeUninit::<<f32 as EndianScalar>::Scalar>::uninit();
+  pub fn v(&self) -> f64 {
+    let mut mem = core::mem::MaybeUninit::<<f64 as EndianScalar>::Scalar>::uninit();
     // Safety:
     // Created from a valid Table for this object
     // Which contains a valid value in this slot
     EndianScalar::from_little_endian(unsafe {
       core::ptr::copy_nonoverlapping(
-        self.0[4..].as_ptr(),
+        self.0[8..].as_ptr(),
         mem.as_mut_ptr() as *mut u8,
-        core::mem::size_of::<<f32 as EndianScalar>::Scalar>(),
+        core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
       );
       mem.assume_init()
     })
   }
 
-  pub fn set_v(&mut self, x: f32) {
+  pub fn set_v(&mut self, x: f64) {
     let x_le = x.to_little_endian();
     // Safety:
     // Created from a valid Table for this object
@@ -993,8 +993,8 @@ impl<'a> Vec2 {
     unsafe {
       core::ptr::copy_nonoverlapping(
         &x_le as *const _ as *const u8,
-        self.0[4..].as_mut_ptr(),
-        core::mem::size_of::<<f32 as EndianScalar>::Scalar>(),
+        self.0[8..].as_mut_ptr(),
+        core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
       );
     }
   }
@@ -1454,10 +1454,10 @@ impl<'a> Material<'a> {
     let mut builder = MaterialBuilder::new(_fbb);
     builder.add_transparency(args.transparency);
     builder.add_shininess(args.shininess);
+    builder.add_ambient_intensity(args.ambient_intensity);
     if let Some(x) = args.specular_color { builder.add_specular_color(x); }
     if let Some(x) = args.emissive_color { builder.add_emissive_color(x); }
     if let Some(x) = args.diffuse_color { builder.add_diffuse_color(x); }
-    builder.add_ambient_intensity(args.ambient_intensity);
     if let Some(x) = args.name { builder.add_name(x); }
     builder.add_is_smooth(args.is_smooth);
     builder.finish()
@@ -1472,46 +1472,46 @@ impl<'a> Material<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(Material::VT_NAME, None).unwrap()}
   }
   #[inline]
-  pub fn ambient_intensity(&self) -> f32 {
+  pub fn ambient_intensity(&self) -> f64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<f32>(Material::VT_AMBIENT_INTENSITY, Some(0.0)).unwrap()}
+    unsafe { self._tab.get::<f64>(Material::VT_AMBIENT_INTENSITY, Some(0.0)).unwrap()}
   }
   #[inline]
-  pub fn diffuse_color(&self) -> Option<flatbuffers::Vector<'a, f32>> {
+  pub fn diffuse_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f32>>>(Material::VT_DIFFUSE_COLOR, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(Material::VT_DIFFUSE_COLOR, None)}
   }
   #[inline]
-  pub fn emissive_color(&self) -> Option<flatbuffers::Vector<'a, f32>> {
+  pub fn emissive_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f32>>>(Material::VT_EMISSIVE_COLOR, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(Material::VT_EMISSIVE_COLOR, None)}
   }
   #[inline]
-  pub fn specular_color(&self) -> Option<flatbuffers::Vector<'a, f32>> {
+  pub fn specular_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f32>>>(Material::VT_SPECULAR_COLOR, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(Material::VT_SPECULAR_COLOR, None)}
   }
   #[inline]
-  pub fn shininess(&self) -> f32 {
+  pub fn shininess(&self) -> f64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<f32>(Material::VT_SHININESS, Some(0.0)).unwrap()}
+    unsafe { self._tab.get::<f64>(Material::VT_SHININESS, Some(0.0)).unwrap()}
   }
   #[inline]
-  pub fn transparency(&self) -> f32 {
+  pub fn transparency(&self) -> f64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<f32>(Material::VT_TRANSPARENCY, Some(0.0)).unwrap()}
+    unsafe { self._tab.get::<f64>(Material::VT_TRANSPARENCY, Some(0.0)).unwrap()}
   }
   #[inline]
   pub fn is_smooth(&self) -> bool {
@@ -1530,12 +1530,12 @@ impl flatbuffers::Verifiable for Material<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
-     .visit_field::<f32>("ambient_intensity", Self::VT_AMBIENT_INTENSITY, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("diffuse_color", Self::VT_DIFFUSE_COLOR, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("emissive_color", Self::VT_EMISSIVE_COLOR, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("specular_color", Self::VT_SPECULAR_COLOR, false)?
-     .visit_field::<f32>("shininess", Self::VT_SHININESS, false)?
-     .visit_field::<f32>("transparency", Self::VT_TRANSPARENCY, false)?
+     .visit_field::<f64>("ambient_intensity", Self::VT_AMBIENT_INTENSITY, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f64>>>("diffuse_color", Self::VT_DIFFUSE_COLOR, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f64>>>("emissive_color", Self::VT_EMISSIVE_COLOR, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f64>>>("specular_color", Self::VT_SPECULAR_COLOR, false)?
+     .visit_field::<f64>("shininess", Self::VT_SHININESS, false)?
+     .visit_field::<f64>("transparency", Self::VT_TRANSPARENCY, false)?
      .visit_field::<bool>("is_smooth", Self::VT_IS_SMOOTH, false)?
      .finish();
     Ok(())
@@ -1543,12 +1543,12 @@ impl flatbuffers::Verifiable for Material<'_> {
 }
 pub struct MaterialArgs<'a> {
     pub name: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub ambient_intensity: f32,
-    pub diffuse_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
-    pub emissive_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
-    pub specular_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
-    pub shininess: f32,
-    pub transparency: f32,
+    pub ambient_intensity: f64,
+    pub diffuse_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
+    pub emissive_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
+    pub specular_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
+    pub shininess: f64,
+    pub transparency: f64,
     pub is_smooth: bool,
 }
 impl<'a> Default for MaterialArgs<'a> {
@@ -1577,28 +1577,28 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> MaterialBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Material::VT_NAME, name);
   }
   #[inline]
-  pub fn add_ambient_intensity(&mut self, ambient_intensity: f32) {
-    self.fbb_.push_slot::<f32>(Material::VT_AMBIENT_INTENSITY, ambient_intensity, 0.0);
+  pub fn add_ambient_intensity(&mut self, ambient_intensity: f64) {
+    self.fbb_.push_slot::<f64>(Material::VT_AMBIENT_INTENSITY, ambient_intensity, 0.0);
   }
   #[inline]
-  pub fn add_diffuse_color(&mut self, diffuse_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f32>>) {
+  pub fn add_diffuse_color(&mut self, diffuse_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f64>>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Material::VT_DIFFUSE_COLOR, diffuse_color);
   }
   #[inline]
-  pub fn add_emissive_color(&mut self, emissive_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f32>>) {
+  pub fn add_emissive_color(&mut self, emissive_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f64>>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Material::VT_EMISSIVE_COLOR, emissive_color);
   }
   #[inline]
-  pub fn add_specular_color(&mut self, specular_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f32>>) {
+  pub fn add_specular_color(&mut self, specular_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f64>>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Material::VT_SPECULAR_COLOR, specular_color);
   }
   #[inline]
-  pub fn add_shininess(&mut self, shininess: f32) {
-    self.fbb_.push_slot::<f32>(Material::VT_SHININESS, shininess, 0.0);
+  pub fn add_shininess(&mut self, shininess: f64) {
+    self.fbb_.push_slot::<f64>(Material::VT_SHININESS, shininess, 0.0);
   }
   #[inline]
-  pub fn add_transparency(&mut self, transparency: f32) {
-    self.fbb_.push_slot::<f32>(Material::VT_TRANSPARENCY, transparency, 0.0);
+  pub fn add_transparency(&mut self, transparency: f64) {
+    self.fbb_.push_slot::<f64>(Material::VT_TRANSPARENCY, transparency, 0.0);
   }
   #[inline]
   pub fn add_is_smooth(&mut self, is_smooth: bool) {
@@ -1704,11 +1704,11 @@ impl<'a> Texture<'a> {
     unsafe { self._tab.get::<TextureType>(Texture::VT_TEXTURE_TYPE, Some(TextureType::Unknown)).unwrap()}
   }
   #[inline]
-  pub fn border_color(&self) -> Option<flatbuffers::Vector<'a, f32>> {
+  pub fn border_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f32>>>(Texture::VT_BORDER_COLOR, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(Texture::VT_BORDER_COLOR, None)}
   }
 }
 
@@ -1723,7 +1723,7 @@ impl flatbuffers::Verifiable for Texture<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("image", Self::VT_IMAGE, true)?
      .visit_field::<WrapMode>("wrap_mode", Self::VT_WRAP_MODE, false)?
      .visit_field::<TextureType>("texture_type", Self::VT_TEXTURE_TYPE, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("border_color", Self::VT_BORDER_COLOR, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f64>>>("border_color", Self::VT_BORDER_COLOR, false)?
      .finish();
     Ok(())
   }
@@ -1733,7 +1733,7 @@ pub struct TextureArgs<'a> {
     pub image: Option<flatbuffers::WIPOffset<&'a str>>,
     pub wrap_mode: WrapMode,
     pub texture_type: TextureType,
-    pub border_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
+    pub border_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
 }
 impl<'a> Default for TextureArgs<'a> {
   #[inline]
@@ -1770,7 +1770,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> TextureBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<TextureType>(Texture::VT_TEXTURE_TYPE, texture_type, TextureType::Unknown);
   }
   #[inline]
-  pub fn add_border_color(&mut self, border_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f32>>) {
+  pub fn add_border_color(&mut self, border_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f64>>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Texture::VT_BORDER_COLOR, border_color);
   }
   #[inline]

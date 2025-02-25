@@ -66,19 +66,19 @@ struct AttributeIndex {
 }
 
 struct Vec2 {
-  u: float;
-  v: float;
+  u: double;
+  v: double;
 }
 
 table Material {
   name: string (required);
-  ambient_intensity: float = 0.0; // from 0.0 to 1.0
+  ambient_intensity: double = 0.0; // from 0.0 to 1.0
   // Expected to contain 3 items from 0.0 to 1.0 for (RGB); implementations MUST check length.
-  diffuse_color: [float];
-  emissive_color: [float];
-  specular_color: [float];
-  shininess: float = 0.0; // from 0.0 to 1.0
-  transparency: float = 0.0; // from 0.0 to 1.0
+  diffuse_color: [double];
+  emissive_color: [double];
+  specular_color: [double];
+  shininess: double = 0.0; // from 0.0 to 1.0
+  transparency: double = 0.0; // from 0.0 to 1.0
   is_smooth: bool = false;
 }
 
@@ -107,7 +107,7 @@ table Texture {
   wrap_mode: WrapMode;
   texture_type: TextureType;  // e.g., "unknown", "specific", or "typical"
   // Expected to contain 4 items (RGBA)
-  border_color: [float]; // from 0.0 to 1.0 for (RGBA)
+  border_color: [double]; // from 0.0 to 1.0 for (RGBA)
 }
 
 table Appearance {
