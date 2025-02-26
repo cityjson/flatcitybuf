@@ -1,9 +1,14 @@
 use cjseq::{
-    Boundaries as CjBoundaries, GeometryType as CjGeometryType, Semantics, SemanticsSurface,
-    SemanticsValues,
+    Boundaries as CjBoundaries, GeometryType as CjGeometryType,
+    MaterialReference as CjMaterialReference, MaterialValues as CjMaterialValues, Semantics,
+    SemanticsSurface, SemanticsValues, TextureReference as CjTextureReference,
+    TextureValues as CjTextureValues,
 };
 
-use crate::fb::{GeometryType, SemanticObject, SemanticSurfaceType};
+use crate::fb::{
+    GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType, TextureMapping,
+};
+use std::collections::HashMap;
 
 /// For semantics decoding, we only care about solids and shells.
 /// We stop recursing at d <= 2 which are surfaces, rings and points (meaning we just return semantic_indices).
@@ -384,6 +389,360 @@ impl GeometryType {
             _ => CjGeometryType::Solid,
         }
     }
+}
+
+/// Decodes FlatBuffers material mappings into CityJSON material references.
+///
+/// # Arguments
+///
+/// * `material_mappings` - Vector of FlatBuffers material mappings
+///
+/// # Returns
+///
+/// HashMap of theme names to CityJSON material references
+pub(crate) fn decode_materials(
+    material_mappings: &[MaterialMapping],
+) -> Option<HashMap<String, CjMaterialReference>> {
+    if material_mappings.is_empty() {
+        return None;
+    }
+
+    let mut materials = HashMap::new();
+
+    for mapping in material_mappings {
+        let theme = mapping.theme().unwrap_or("theme").to_string();
+
+        // Check if this is a single value material reference
+        if let Some(value) = mapping.value() {
+            materials.insert(
+                theme,
+                CjMaterialReference {
+                    value: Some(value as usize),
+                    values: None,
+                },
+            );
+            continue;
+        }
+
+        // Otherwise, it's a material values mapping
+        let solids = mapping.solids().map(|s| s.iter().collect::<Vec<_>>());
+        let shells = mapping.shells().map(|s| s.iter().collect::<Vec<_>>());
+        let vertices = mapping.vertices().map(|v| v.iter().collect::<Vec<_>>());
+
+        if solids.is_none() || vertices.is_none() {
+            continue;
+        }
+
+        let solids = solids.unwrap();
+        let shells = shells.unwrap_or_default();
+        let vertices = vertices.unwrap();
+
+        // Determine the structure based on the presence of solids and shells
+        let values = if !solids.is_empty() {
+            // For MultiSolid/CompositeSolid: values is nested array of shells
+            let mut nested_values = Vec::new();
+            let mut vertex_index = 0;
+
+            for &solid_size in &solids {
+                let mut solid_values = Vec::new();
+
+                for _ in 0..solid_size {
+                    if shells.is_empty() {
+                        // For Solid: values is array of surface indices
+                        let mut shell_values = Vec::new();
+                        for &vertex in &vertices[vertex_index..] {
+                            shell_values.push(if vertex == u32::MAX {
+                                None
+                            } else {
+                                Some(vertex as usize)
+                            });
+                            vertex_index += 1;
+                        }
+                        solid_values.push(CjMaterialValues::Indices(shell_values));
+                    } else {
+                        // For MultiSolid/CompositeSolid: values is nested array of shells
+                        let mut shell_values = Vec::new();
+                        for &shell_size in &shells {
+                            let mut surface_values = Vec::new();
+                            for _ in 0..shell_size {
+                                if vertex_index < vertices.len() {
+                                    let vertex = vertices[vertex_index];
+                                    surface_values.push(if vertex == u32::MAX {
+                                        None
+                                    } else {
+                                        Some(vertex as usize)
+                                    });
+                                    vertex_index += 1;
+                                }
+                            }
+                            shell_values.push(CjMaterialValues::Indices(surface_values));
+                        }
+                        solid_values.push(CjMaterialValues::Nested(shell_values));
+                    }
+                }
+
+                nested_values.push(CjMaterialValues::Nested(solid_values));
+            }
+
+            CjMaterialValues::Nested(nested_values)
+        } else {
+            // For MultiSurface/CompositeSurface: values is array of indices
+            let indices = vertices
+                .iter()
+                .map(|&v| {
+                    if v == u32::MAX {
+                        None
+                    } else {
+                        Some(v as usize)
+                    }
+                })
+                .collect();
+
+            CjMaterialValues::Indices(indices)
+        };
+
+        materials.insert(
+            theme,
+            CjMaterialReference {
+                value: None,
+                values: Some(values),
+            },
+        );
+    }
+
+    Some(materials)
+}
+
+/// Decodes FlatBuffers texture mappings into CityJSON texture references.
+///
+/// # Arguments
+///
+/// * `texture_mappings` - Vector of FlatBuffers texture mappings
+///
+/// # Returns
+///
+/// HashMap of theme names to CityJSON texture references
+pub(crate) fn decode_textures(
+    texture_mappings: &[TextureMapping],
+) -> Option<HashMap<String, CjTextureReference>> {
+    if texture_mappings.is_empty() {
+        return None;
+    }
+
+    let mut textures = HashMap::new();
+
+    for mapping in texture_mappings {
+        let theme = mapping.theme().unwrap_or("theme").to_string();
+
+        // Get all the arrays from the mapping
+        let solids = mapping
+            .solids()
+            .map(|s| s.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let shells = mapping
+            .shells()
+            .map(|s| s.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let surfaces = mapping
+            .surfaces()
+            .map(|s| s.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let strings = mapping
+            .strings()
+            .map(|s| s.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let vertices = mapping
+            .vertices()
+            .map(|v| v.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        if vertices.is_empty() {
+            continue;
+        }
+
+        // Determine the structure based on the presence of solids, shells, surfaces, and strings
+        let values = if !solids.is_empty() {
+            // For Solid/MultiSolid/CompositeSolid
+            let mut solid_values = Vec::new();
+            let mut shell_index = 0;
+            let mut surface_index = 0;
+            let mut string_index = 0;
+            let mut vertex_index = 0;
+
+            for &solid_size in &solids {
+                let mut shell_values = Vec::new();
+
+                for _ in 0..solid_size {
+                    if shell_index < shells.len() {
+                        let shell_size = shells[shell_index];
+                        shell_index += 1;
+
+                        let mut surface_values = Vec::new();
+                        for _ in 0..shell_size {
+                            if surface_index < surfaces.len() {
+                                let surface_size = surfaces[surface_index];
+                                surface_index += 1;
+
+                                let mut string_values = Vec::new();
+                                for _ in 0..surface_size {
+                                    if string_index < strings.len() {
+                                        let string_size = strings[string_index];
+                                        string_index += 1;
+
+                                        let mut indices = Vec::new();
+                                        for _ in 0..string_size {
+                                            if vertex_index < vertices.len() {
+                                                let vertex = vertices[vertex_index];
+                                                indices.push(if vertex == u32::MAX {
+                                                    None
+                                                } else {
+                                                    Some(vertex as usize)
+                                                });
+                                                vertex_index += 1;
+                                            }
+                                        }
+
+                                        string_values.push(CjTextureValues::Indices(indices));
+                                    }
+                                }
+
+                                surface_values.push(CjTextureValues::Nested(string_values));
+                            }
+                        }
+
+                        shell_values.push(CjTextureValues::Nested(surface_values));
+                    }
+                }
+
+                solid_values.push(CjTextureValues::Nested(shell_values));
+            }
+
+            CjTextureValues::Nested(solid_values)
+        } else if !shells.is_empty() {
+            // For Solid
+            let mut shell_values = Vec::new();
+            let mut surface_index = 0;
+            let mut string_index = 0;
+            let mut vertex_index = 0;
+
+            for &shell_size in &shells {
+                let mut surface_values = Vec::new();
+
+                for _ in 0..shell_size {
+                    if surface_index < surfaces.len() {
+                        let surface_size = surfaces[surface_index];
+                        surface_index += 1;
+
+                        let mut string_values = Vec::new();
+                        for _ in 0..surface_size {
+                            if string_index < strings.len() {
+                                let string_size = strings[string_index];
+                                string_index += 1;
+
+                                let mut indices = Vec::new();
+                                for _ in 0..string_size {
+                                    if vertex_index < vertices.len() {
+                                        let vertex = vertices[vertex_index];
+                                        indices.push(if vertex == u32::MAX {
+                                            None
+                                        } else {
+                                            Some(vertex as usize)
+                                        });
+                                        vertex_index += 1;
+                                    }
+                                }
+
+                                string_values.push(CjTextureValues::Indices(indices));
+                            }
+                        }
+
+                        surface_values.push(CjTextureValues::Nested(string_values));
+                    }
+                }
+
+                shell_values.push(CjTextureValues::Nested(surface_values));
+            }
+
+            CjTextureValues::Nested(shell_values)
+        } else if !surfaces.is_empty() {
+            // For MultiSurface/CompositeSurface
+            let mut surface_values = Vec::new();
+            let mut string_index = 0;
+            let mut vertex_index = 0;
+
+            for &surface_size in &surfaces {
+                let mut string_values = Vec::new();
+
+                for _ in 0..surface_size {
+                    if string_index < strings.len() {
+                        let string_size = strings[string_index];
+                        string_index += 1;
+
+                        let mut indices = Vec::new();
+                        for _ in 0..string_size {
+                            if vertex_index < vertices.len() {
+                                let vertex = vertices[vertex_index];
+                                indices.push(if vertex == u32::MAX {
+                                    None
+                                } else {
+                                    Some(vertex as usize)
+                                });
+                                vertex_index += 1;
+                            }
+                        }
+
+                        string_values.push(CjTextureValues::Indices(indices));
+                    }
+                }
+
+                surface_values.push(CjTextureValues::Nested(string_values));
+            }
+
+            CjTextureValues::Nested(surface_values)
+        } else if !strings.is_empty() {
+            // For MultiLineString
+            let mut string_values = Vec::new();
+            let mut vertex_index = 0;
+
+            for &string_size in &strings {
+                let mut indices = Vec::new();
+
+                for _ in 0..string_size {
+                    if vertex_index < vertices.len() {
+                        let vertex = vertices[vertex_index];
+                        indices.push(if vertex == u32::MAX {
+                            None
+                        } else {
+                            Some(vertex as usize)
+                        });
+                        vertex_index += 1;
+                    }
+                }
+
+                string_values.push(CjTextureValues::Indices(indices));
+            }
+
+            CjTextureValues::Nested(string_values)
+        } else {
+            // For MultiPoint or simple indices
+            let indices = vertices
+                .iter()
+                .map(|&v| {
+                    if v == u32::MAX {
+                        None
+                    } else {
+                        Some(v as usize)
+                    }
+                })
+                .collect();
+
+            CjTextureValues::Indices(indices)
+        };
+
+        textures.insert(theme, CjTextureReference { values });
+    }
+
+    Some(textures)
 }
 
 #[cfg(test)]
