@@ -1398,6 +1398,65 @@ mod tests {
             assert_eq!(material_ref2.values, Some(expected));
         }
 
+        // Test case 5: CompositeSolid material values
+        {
+            let mut fbb = FlatBufferBuilder::new();
+            let theme = fbb.create_string("theme6");
+
+            // Create vertices for CompositeSolid with multiple shells
+            // This matches the test case in geom_encoder.rs
+            let vertices = fbb.create_vector(&[0u32, 1, 2, u32::MAX, 3, 4]);
+
+            // Two solids: first with 2 shells, second with 1 shell
+            let solids = fbb.create_vector(&[2u32, 1u32]);
+
+            // Shell counts
+            let shells = fbb.create_vector(&[2u32, 1u32, 1u32]);
+
+            let mapping = MaterialMapping::create(
+                &mut fbb,
+                &MaterialMappingArgs {
+                    theme: Some(theme),
+                    solids: Some(solids),
+                    shells: Some(shells),
+                    vertices: Some(vertices),
+                    value: None,
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let material_mapping = unsafe { flatbuffers::root_unchecked::<MaterialMapping>(buf) };
+
+            let decoded = decode_materials(&[material_mapping]);
+
+            assert!(decoded.is_some());
+            let materials = decoded.unwrap();
+            assert_eq!(materials.len(), 1);
+            assert!(materials.contains_key("theme6"));
+
+            let material_ref = &materials["theme6"];
+            assert!(material_ref.value.is_none());
+            assert!(material_ref.values.is_some());
+
+            println!(
+                "material_ref.values: {:?}",
+                material_ref.values.as_ref().unwrap()
+            );
+
+            // Expected structure based on the encoder test case
+            let expected = CjMaterialValues::Nested(vec![
+                CjMaterialValues::Nested(vec![
+                    CjMaterialValues::Indices(vec![Some(0), Some(1)]),
+                    CjMaterialValues::Indices(vec![Some(2), None]),
+                ]),
+                CjMaterialValues::Nested(vec![CjMaterialValues::Indices(vec![Some(3), Some(4)])]),
+            ]);
+
+            println!("expected: {:?}", expected);
+            assert_eq!(material_ref.values, Some(expected));
+        }
+
         Ok(())
     }
 
