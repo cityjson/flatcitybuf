@@ -194,7 +194,7 @@ pub(crate) fn encode_texture(
         };
 
         // Process the texture values based on their structure
-        let _ = process_texture_values(&texture.values, &mut texture_mapping);
+        let _ = encode_texture_values(&texture.values, &mut texture_mapping);
 
         texture_mappings.push(texture_mapping);
     }
@@ -202,17 +202,17 @@ pub(crate) fn encode_texture(
     texture_mappings
 }
 
-/// Recursively processes texture values and populates the TextureMapping struct
+/// Recursively encodes the texture values into flattened arrays.
 ///
 /// # Arguments
 ///
-/// * `values` - Reference to the texture values to process
-/// * `mapping` - Mutable reference to the TextureMapping struct to populate
+/// * `values` - Reference to the texture values to encode.
+/// * `mapping` - Mutable reference to the TextureMapping struct to populate.
 ///
 /// # Returns
 ///
-/// The maximum depth encountered during processing.
-fn process_texture_values(values: &CjTextureValues, mapping: &mut TextureMapping) -> usize {
+/// The maximum depth encountered during encoding.
+fn encode_texture_values(values: &CjTextureValues, mapping: &mut TextureMapping) -> usize {
     match values {
         // Leaf node (indices)
         CjTextureValues::Indices(indices) => {
@@ -231,13 +231,13 @@ fn process_texture_values(values: &CjTextureValues, mapping: &mut TextureMapping
         CjTextureValues::Nested(nested) => {
             let mut max_depth = 0;
 
-            // Recursively process each nested value and track the maximum depth
+            // Recursively encode each nested value and track the maximum depth
             for sub in nested {
-                let d = process_texture_values(sub, mapping);
+                let d = encode_texture_values(sub, mapping);
                 max_depth = max_depth.max(d);
             }
 
-            // Number of sub-boundaries at the current level
+            // Number of nested values at the current level
             let length = nested.len();
 
             // Interpret the `max_depth` to determine the current geometry type
@@ -248,12 +248,10 @@ fn process_texture_values(values: &CjTextureValues, mapping: &mut TextureMapping
                 }
                 // max_depth = 2 indicates the children are surfaces, so this level represents shells
                 2 => {
-                    // Push the number of surfaces in this shell
                     mapping.shells.push(length as u32);
                 }
                 // max_depth = 3 indicates the children are shells, so this level represents solids
                 3 => {
-                    // Push the number of shells in this solid
                     mapping.solids.push(length as u32);
                 }
                 // Any other depth is invalid and should be ignored
@@ -958,7 +956,7 @@ mod tests {
         assert_eq!(encoded[0].theme, theme);
         assert_eq!(encoded[0].vertices, vec![0, 10, 20, 1, 11, u32::MAX]);
         assert_eq!(encoded[0].strings, vec![3, 3]);
-        assert!(encoded[0].surfaces.is_empty());
+        assert_eq!(encoded[0].surfaces, vec![2]);
         assert!(encoded[0].shells.is_empty());
         assert!(encoded[0].solids.is_empty());
 
@@ -983,7 +981,7 @@ mod tests {
         );
         assert_eq!(encoded[0].strings, vec![4, 4, 4]);
         assert_eq!(encoded[0].surfaces, vec![1, 1, 1]);
-        assert!(encoded[0].shells.is_empty());
+        assert_eq!(encoded[0].shells, vec![3]);
         assert!(encoded[0].solids.is_empty());
 
         // Solid-like texture values
