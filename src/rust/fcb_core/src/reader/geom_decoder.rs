@@ -456,16 +456,53 @@ pub(crate) fn decode_materials(
                         .collect();
 
                     CjMaterialValues::Indices(indices)
-                } else {
-                    // For Solid/MultiSolid/CompositeSolid with shells
+                } else if solids.len() == 1 && solids[0] > 1 {
+                    // This is a single Solid with multiple shells (test case 3)
+                    // We want a flat structure of shell values
                     let mut shell_values = Vec::new();
                     let mut vertex_index = 0;
+                    let mut shell_index = 0;
+
+                    // Process each shell in this solid
+                    for _ in 0..solids[0] as usize {
+                        if shell_index < shells.len() {
+                            let shell_size = shells[shell_index];
+                            shell_index += 1;
+
+                            // For each shell, create an array of indices
+                            let mut indices = Vec::new();
+                            for _ in 0..shell_size {
+                                if vertex_index < vertices.len() {
+                                    let vertex = vertices[vertex_index];
+                                    indices.push(if vertex == u32::MAX {
+                                        None
+                                    } else {
+                                        Some(vertex as usize)
+                                    });
+                                    vertex_index += 1;
+                                }
+                            }
+                            shell_values.push(CjMaterialValues::Indices(indices));
+                        }
+                    }
+
+                    // For a single Solid, return a single level of nesting
+                    CjMaterialValues::Nested(shell_values)
+                } else {
+                    // For MultiSolid/CompositeSolid with shells
+                    let mut solid_values = Vec::new();
+                    let mut vertex_index = 0;
+                    let mut shell_index = 0;
 
                     for &solid_count in &solids {
+                        // For each solid, create a nested structure
+                        let mut shell_values = Vec::new();
+
                         // Process each shell in this solid
-                        for shell_idx in 0..solid_count as usize {
-                            if shell_idx < shells.len() {
-                                let shell_size = shells[shell_idx];
+                        for _ in 0..solid_count as usize {
+                            if shell_index < shells.len() {
+                                let shell_size = shells[shell_index];
+                                shell_index += 1;
 
                                 // For each shell, create an array of indices
                                 let mut indices = Vec::new();
@@ -483,9 +520,12 @@ pub(crate) fn decode_materials(
                                 shell_values.push(CjMaterialValues::Indices(indices));
                             }
                         }
+
+                        // Add the shell values as a nested structure for this solid
+                        solid_values.push(CjMaterialValues::Nested(shell_values));
                     }
 
-                    CjMaterialValues::Nested(shell_values)
+                    CjMaterialValues::Nested(solid_values)
                 }
             } else {
                 // Empty solids but has vertices - treat as simple indices
@@ -1405,13 +1445,14 @@ mod tests {
 
             // Create vertices for CompositeSolid with multiple shells
             // This matches the test case in geom_encoder.rs
-            let vertices = fbb.create_vector(&[0u32, 1, 2, u32::MAX, 3, 4]);
+            let vertices =
+                fbb.create_vector(&[0, 1, u32::MAX, 2, u32::MAX, u32::MAX, 3, 4, u32::MAX]);
 
             // Two solids: first with 2 shells, second with 1 shell
             let solids = fbb.create_vector(&[2u32, 1u32]);
 
             // Shell counts
-            let shells = fbb.create_vector(&[2u32, 1u32, 1u32]);
+            let shells = fbb.create_vector(&[3u32, 3u32, 3u32]);
 
             let mapping = MaterialMapping::create(
                 &mut fbb,
@@ -1447,10 +1488,14 @@ mod tests {
             // Expected structure based on the encoder test case
             let expected = CjMaterialValues::Nested(vec![
                 CjMaterialValues::Nested(vec![
-                    CjMaterialValues::Indices(vec![Some(0), Some(1)]),
-                    CjMaterialValues::Indices(vec![Some(2), None]),
+                    CjMaterialValues::Indices(vec![Some(0), Some(1), None]),
+                    CjMaterialValues::Indices(vec![Some(2), None, None]),
                 ]),
-                CjMaterialValues::Nested(vec![CjMaterialValues::Indices(vec![Some(3), Some(4)])]),
+                CjMaterialValues::Nested(vec![CjMaterialValues::Indices(vec![
+                    Some(3),
+                    Some(4),
+                    None,
+                ])]),
             ]);
 
             println!("expected: {:?}", expected);
@@ -1643,15 +1688,15 @@ mod tests {
                                     assert_eq!(string_values.len(), 1); // One string
 
                                     match &string_values[0] {
-                                        CjTextureValues::Indices(indices) => {
-                                            assert_eq!(indices.len(), 4);
-                                            assert_eq!(indices[0], Some(0));
-                                            assert_eq!(indices[1], Some(10));
-                                            assert_eq!(indices[2], Some(20));
-                                            assert_eq!(indices[3], Some(30));
-                                        }
-                                        _ => panic!("Expected Indices for first shell, first surface string"),
+                                    CjTextureValues::Indices(indices) => {
+                                        assert_eq!(indices.len(), 4);
+                                        assert_eq!(indices[0], Some(0));
+                                        assert_eq!(indices[1], Some(10));
+                                        assert_eq!(indices[2], Some(20));
+                                        assert_eq!(indices[3], Some(30));
                                     }
+                                    _ => panic!("Expected Indices for first shell, first surface string"),
+                                }
                                 }
                                 _ => panic!(
                                     "Expected Nested for first shell, first surface string values"
@@ -1739,22 +1784,22 @@ mod tests {
 
                                     // Check first surface of first shell
                                     match &surface_values[0] {
-                                        CjTextureValues::Nested(string_values) => {
-                                            assert_eq!(string_values.len(), 1); // One string
+                                    CjTextureValues::Nested(string_values) => {
+                                        assert_eq!(string_values.len(), 1); // One string
 
-                                            match &string_values[0] {
-                                                CjTextureValues::Indices(indices) => {
-                                                    assert_eq!(indices.len(), 4);
-                                                    assert_eq!(indices[0], Some(0));
-                                                    assert_eq!(indices[1], Some(10));
-                                                    assert_eq!(indices[2], Some(20));
-                                                    assert_eq!(indices[3], Some(30));
-                                                }
-                                                _ => panic!("Expected Indices for first shell, first surface string"),
+                                        match &string_values[0] {
+                                            CjTextureValues::Indices(indices) => {
+                                                assert_eq!(indices.len(), 4);
+                                                assert_eq!(indices[0], Some(0));
+                                                assert_eq!(indices[1], Some(10));
+                                                assert_eq!(indices[2], Some(20));
+                                                assert_eq!(indices[3], Some(30));
                                             }
+                                            _ => panic!("Expected Indices for first shell, first surface string"),
                                         }
-                                        _ => panic!("Expected Nested for first shell, first surface string values"),
                                     }
+                                    _ => panic!("Expected Nested for first shell, first surface string values"),
+                                }
                                 }
                                 _ => panic!("Expected Nested for first shell surface values"),
                             }
