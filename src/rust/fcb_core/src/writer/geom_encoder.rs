@@ -141,24 +141,23 @@ pub(crate) fn encode_material(
                 }
                 // For Solid/MultiSolid/CompositeSolid: values is nested array
                 CjMaterialValues::Nested(nested) => {
-                    // First level is solids
-                    material_values.solids.push(nested.len() as u32);
+                    // Check if this is a CompositeSolid (nested contains Nested) or a Solid (nested contains Indices)
+                    let is_composite_solid = nested
+                        .iter()
+                        .any(|v| matches!(v, CjMaterialValues::Nested(_)));
 
-                    for solid in nested {
-                        match solid {
-                            // For Solid: values is array of surface indices
-                            CjMaterialValues::Indices(indices) => {
-                                material_values.shells.push(indices.len() as u32);
-                                material_values.vertices.extend(
-                                    indices.iter().map(|i| i.map_or(u32::MAX, |v| v as u32)),
-                                );
-                            }
-                            // For MultiSolid/CompositeSolid: values is nested array of shells
-                            CjMaterialValues::Nested(shells_array) => {
-                                material_values.shells.push(shells_array.len() as u32);
+                    if is_composite_solid {
+                        // CompositeSolid case (test case 5)
+                        // For each solid in the nested array
+                        for solid in nested {
+                            if let CjMaterialValues::Nested(shells_array) = solid {
+                                // Push the number of shells in this solid
+                                material_values.solids.push(shells_array.len() as u32);
 
+                                // Process each shell
                                 for shell in shells_array {
                                     if let CjMaterialValues::Indices(indices) = shell {
+                                        material_values.shells.push(indices.len() as u32);
                                         material_values.vertices.extend(
                                             indices
                                                 .iter()
@@ -166,6 +165,20 @@ pub(crate) fn encode_material(
                                         );
                                     }
                                 }
+                            }
+                        }
+                    } else {
+                        // Solid case (test case 3)
+                        // This is a single solid with multiple shells
+                        material_values.solids.push(nested.len() as u32);
+
+                        // Process each shell
+                        for shell in nested {
+                            if let CjMaterialValues::Indices(indices) = shell {
+                                material_values.shells.push(indices.len() as u32);
+                                material_values.vertices.extend(
+                                    indices.iter().map(|i| i.map_or(u32::MAX, |v| v as u32)),
+                                );
                             }
                         }
                     }
@@ -816,8 +829,9 @@ mod tests {
         assert_eq!(encoded.len(), 1);
         match &encoded[0] {
             MaterialMapping::Values(values) => {
+                println!("values: {:?}", values);
                 assert_eq!(values.theme, "theme3");
-                assert_eq!(values.solids, vec![2]); // Two shells
+                assert_eq!(values.solids, vec![2]); // 1 solid with 2 shells
                 assert_eq!(values.shells, vec![3, 3]); // Each shell has 3 surfaces
                 assert_eq!(values.vertices, vec![0, 1, u32::MAX, 2, 3, 4]);
             }
@@ -885,10 +899,14 @@ mod tests {
         let mut materials = HashMap::new();
         let composite_solid_values = CjMaterialValues::Nested(vec![
             CjMaterialValues::Nested(vec![
-                CjMaterialValues::Indices(vec![Some(0), Some(1)]),
-                CjMaterialValues::Indices(vec![Some(2), None]),
+                CjMaterialValues::Indices(vec![Some(0), Some(1), None]),
+                CjMaterialValues::Indices(vec![Some(2), None, None]),
             ]),
-            CjMaterialValues::Nested(vec![CjMaterialValues::Indices(vec![Some(3), Some(4)])]),
+            CjMaterialValues::Nested(vec![CjMaterialValues::Indices(vec![
+                Some(3),
+                Some(4),
+                None,
+            ])]),
         ]);
         materials.insert(
             "theme6".to_string(),
@@ -902,10 +920,14 @@ mod tests {
         assert_eq!(encoded.len(), 1);
         match &encoded[0] {
             MaterialMapping::Values(values) => {
+                println!("values: {:?}", values);
                 assert_eq!(values.theme, "theme6");
-                assert_eq!(values.solids, vec![2]); // Two solids
-                assert_eq!(values.shells, vec![2, 1]); // First solid has 2 shells, second has 1
-                assert_eq!(values.vertices, vec![0, 1, 2, u32::MAX, 3, 4]);
+                assert_eq!(values.solids, vec![2, 1]); // Two solids, the first solid has 2 shells, the second solid has 1 shell
+                assert_eq!(values.shells, vec![3, 3, 3]); // Each shell has 3 surfaces
+                assert_eq!(
+                    values.vertices,
+                    vec![0, 1, u32::MAX, 2, u32::MAX, u32::MAX, 3, 4, u32::MAX]
+                );
             }
             _ => panic!("Expected MaterialMapping::Values"),
         }
