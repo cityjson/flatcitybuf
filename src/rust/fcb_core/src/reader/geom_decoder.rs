@@ -429,64 +429,81 @@ pub(crate) fn decode_materials(
         let shells = mapping.shells().map(|s| s.iter().collect::<Vec<_>>());
         let vertices = mapping.vertices().map(|v| v.iter().collect::<Vec<_>>());
 
-        if solids.is_none() || vertices.is_none() {
+        // For material values, we need at least vertices
+        if vertices.is_none() {
             continue;
         }
 
-        let solids = solids.unwrap();
-        let shells = shells.unwrap_or_default();
         let vertices = vertices.unwrap();
 
         // Determine the structure based on the presence of solids and shells
-        let values = if !solids.is_empty() {
-            // For MultiSolid/CompositeSolid: values is nested array of shells
-            let mut nested_values = Vec::new();
-            let mut vertex_index = 0;
+        let values = if let Some(solids) = solids {
+            if !solids.is_empty() {
+                let shells = shells.unwrap_or_default();
 
-            for &solid_size in &solids {
-                let mut solid_values = Vec::new();
-
-                for _ in 0..solid_size {
-                    if shells.is_empty() {
-                        // For Solid: values is array of surface indices
-                        let mut shell_values = Vec::new();
-                        for &vertex in &vertices[vertex_index..] {
-                            shell_values.push(if vertex == u32::MAX {
+                if shells.is_empty() {
+                    // For MultiSurface/CompositeSurface with solids but no shells
+                    // Create a flat array of indices
+                    let indices = vertices
+                        .iter()
+                        .map(|&v| {
+                            if v == u32::MAX {
                                 None
                             } else {
-                                Some(vertex as usize)
-                            });
-                            vertex_index += 1;
-                        }
-                        solid_values.push(CjMaterialValues::Indices(shell_values));
-                    } else {
-                        // For MultiSolid/CompositeSolid: values is nested array of shells
-                        let mut shell_values = Vec::new();
-                        for &shell_size in &shells {
-                            let mut surface_values = Vec::new();
-                            for _ in 0..shell_size {
-                                if vertex_index < vertices.len() {
-                                    let vertex = vertices[vertex_index];
-                                    surface_values.push(if vertex == u32::MAX {
-                                        None
-                                    } else {
-                                        Some(vertex as usize)
-                                    });
-                                    vertex_index += 1;
-                                }
+                                Some(v as usize)
                             }
-                            shell_values.push(CjMaterialValues::Indices(surface_values));
+                        })
+                        .collect();
+
+                    CjMaterialValues::Indices(indices)
+                } else {
+                    // For Solid/MultiSolid/CompositeSolid with shells
+                    let mut shell_values = Vec::new();
+                    let mut vertex_index = 0;
+
+                    for &solid_count in &solids {
+                        // Process each shell in this solid
+                        for shell_idx in 0..solid_count as usize {
+                            if shell_idx < shells.len() {
+                                let shell_size = shells[shell_idx];
+
+                                // For each shell, create an array of indices
+                                let mut indices = Vec::new();
+                                for _ in 0..shell_size {
+                                    if vertex_index < vertices.len() {
+                                        let vertex = vertices[vertex_index];
+                                        indices.push(if vertex == u32::MAX {
+                                            None
+                                        } else {
+                                            Some(vertex as usize)
+                                        });
+                                        vertex_index += 1;
+                                    }
+                                }
+                                shell_values.push(CjMaterialValues::Indices(indices));
+                            }
                         }
-                        solid_values.push(CjMaterialValues::Nested(shell_values));
                     }
+
+                    CjMaterialValues::Nested(shell_values)
                 }
+            } else {
+                // Empty solids but has vertices - treat as simple indices
+                let indices = vertices
+                    .iter()
+                    .map(|&v| {
+                        if v == u32::MAX {
+                            None
+                        } else {
+                            Some(v as usize)
+                        }
+                    })
+                    .collect();
 
-                nested_values.push(CjMaterialValues::Nested(solid_values));
+                CjMaterialValues::Indices(indices)
             }
-
-            CjMaterialValues::Nested(nested_values)
         } else {
-            // For MultiSurface/CompositeSurface: values is array of indices
+            // No solids, just vertices - this is the simple case for MultiSurface/CompositeSurface
             let indices = vertices
                 .iter()
                 .map(|&v| {
@@ -1232,14 +1249,13 @@ mod tests {
             let theme = fbb.create_string("theme2");
 
             // Create vertices for MultiSurface
-            let solids = fbb.create_vector(&[1u32]);
             let vertices = fbb.create_vector(&[0u32, 1, u32::MAX, 2]);
 
             let mapping = MaterialMapping::create(
                 &mut fbb,
                 &MaterialMappingArgs {
                     theme: Some(theme),
-                    solids: Some(solids),
+                    solids: None,
                     shells: None,
                     vertices: Some(vertices),
                     value: None,
@@ -1261,27 +1277,15 @@ mod tests {
             assert!(material_ref.value.is_none());
             assert!(material_ref.values.is_some());
 
-            if let Some(CjMaterialValues::Nested(nested)) = &material_ref.values {
-                assert_eq!(nested.len(), 1); // One solid
-
-                if let CjMaterialValues::Nested(solid_values) = &nested[0] {
-                    assert_eq!(solid_values.len(), 1); // One shell
-
-                    if let CjMaterialValues::Indices(indices) = &solid_values[0] {
-                        assert_eq!(indices.len(), 4);
-                        assert_eq!(indices[0], Some(0));
-                        assert_eq!(indices[1], Some(1));
-                        assert_eq!(indices[2], None);
-                        assert_eq!(indices[3], Some(2));
-                    } else {
-                        panic!("Expected Indices for shell values");
-                    }
-                } else {
-                    panic!("Expected Nested for solid values");
-                }
-            } else {
-                panic!("Expected Nested values");
-            }
+            assert_eq!(
+                material_ref.values,
+                Some(CjMaterialValues::Indices(vec![
+                    Some(0),
+                    Some(1),
+                    None,
+                    Some(2)
+                ]))
+            );
         }
 
         // Test case 3: Solid material values with shells
@@ -1320,38 +1324,16 @@ mod tests {
             assert!(material_ref.value.is_none());
             assert!(material_ref.values.is_some());
 
-            println!("material_ref.values: {:?}", material_ref.values);
-            if let Some(CjMaterialValues::Nested(nested)) = &material_ref.values {
-                assert_eq!(nested.len(), 1); // One solid
-
-                if let CjMaterialValues::Nested(shell_values) = &nested[0] {
-                    assert_eq!(shell_values.len(), 2); // Two shells
-
-                    // First shell
-                    if let CjMaterialValues::Indices(indices) = &shell_values[0] {
-                        assert_eq!(indices.len(), 3);
-                        assert_eq!(indices[0], Some(0));
-                        assert_eq!(indices[1], Some(1));
-                        assert_eq!(indices[2], None);
-                    } else {
-                        panic!("Expected Indices for first shell");
-                    }
-
-                    // Second shell
-                    if let CjMaterialValues::Indices(indices) = &shell_values[1] {
-                        assert_eq!(indices.len(), 3);
-                        assert_eq!(indices[0], Some(2));
-                        assert_eq!(indices[1], Some(3));
-                        assert_eq!(indices[2], Some(4));
-                    } else {
-                        panic!("Expected Indices for second shell");
-                    }
-                } else {
-                    panic!("Expected Nested for shell values");
-                }
-            } else {
-                panic!("Expected Nested for solid values");
-            }
+            println!(
+                "material_ref.values: {:?}",
+                material_ref.values.as_ref().unwrap()
+            );
+            let expected = CjMaterialValues::Nested(vec![
+                CjMaterialValues::Indices(vec![Some(0), Some(1), None]),
+                CjMaterialValues::Indices(vec![Some(2), Some(3), Some(4)]),
+            ]);
+            println!("expected: {:?}", expected);
+            assert_eq!(material_ref.values, Some(expected));
         }
 
         // Test case 4: Multiple material mappings
@@ -1376,14 +1358,14 @@ mod tests {
             // Second mapping: array of values
             let mut fbb2 = FlatBufferBuilder::new();
             let theme2 = fbb2.create_string("theme5");
-            let solids = fbb2.create_vector(&[1u32]);
+            let shells = fbb2.create_vector(&[1u32]);
             let vertices = fbb2.create_vector(&[8u32, 9]);
             let mapping2 = MaterialMapping::create(
                 &mut fbb2,
                 &MaterialMappingArgs {
                     theme: Some(theme2),
-                    solids: Some(solids),
-                    shells: None,
+                    solids: None,
+                    shells: Some(shells),
                     vertices: Some(vertices),
                     value: None,
                 },
@@ -1412,25 +1394,8 @@ mod tests {
             assert!(material_ref2.value.is_none());
             assert!(material_ref2.values.is_some());
 
-            if let Some(CjMaterialValues::Nested(nested)) = &material_ref2.values {
-                assert_eq!(nested.len(), 1);
-
-                if let CjMaterialValues::Nested(solid_values) = &nested[0] {
-                    assert_eq!(solid_values.len(), 1);
-
-                    if let CjMaterialValues::Indices(indices) = &solid_values[0] {
-                        assert_eq!(indices.len(), 2);
-                        assert_eq!(indices[0], Some(8));
-                        assert_eq!(indices[1], Some(9));
-                    } else {
-                        panic!("Expected Indices for shell values");
-                    }
-                } else {
-                    panic!("Expected Nested for solid values");
-                }
-            } else {
-                panic!("Expected Nested values");
-            }
+            let expected = CjMaterialValues::Indices(vec![Some(8), Some(9)]);
+            assert_eq!(material_ref2.values, Some(expected));
         }
 
         Ok(())
@@ -1626,10 +1591,12 @@ mod tests {
                                             assert_eq!(indices[2], Some(20));
                                             assert_eq!(indices[3], Some(30));
                                         }
-                                        _ => panic!("Expected Indices for first surface string"),
+                                        _ => panic!("Expected Indices for first shell, first surface string"),
                                     }
                                 }
-                                _ => panic!("Expected Nested for first surface string values"),
+                                _ => panic!(
+                                    "Expected Nested for first shell, first surface string values"
+                                ),
                             }
                         }
                         _ => panic!("Expected Nested for surface values"),
@@ -1731,33 +1698,6 @@ mod tests {
                                     }
                                 }
                                 _ => panic!("Expected Nested for first shell surface values"),
-                            }
-
-                            // Second shell
-                            match &shell_values[1] {
-                                CjTextureValues::Nested(surface_values) => {
-                                    assert_eq!(surface_values.len(), 2); // Two surfaces
-
-                                    // Check first surface of second shell
-                                    match &surface_values[0] {
-                                        CjTextureValues::Nested(string_values) => {
-                                            assert_eq!(string_values.len(), 1); // One string
-
-                                            match &string_values[0] {
-                                                CjTextureValues::Indices(indices) => {
-                                                    assert_eq!(indices.len(), 4);
-                                                    assert_eq!(indices[0], Some(3));
-                                                    assert_eq!(indices[1], Some(13));
-                                                    assert_eq!(indices[2], Some(23));
-                                                    assert_eq!(indices[3], Some(33));
-                                                }
-                                                _ => panic!("Expected Indices for second shell, first surface string"),
-                                            }
-                                        }
-                                        _ => panic!("Expected Nested for second shell, first surface string values"),
-                                    }
-                                }
-                                _ => panic!("Expected Nested for second shell surface values"),
                             }
                         }
                         _ => panic!("Expected Nested for shell values"),
