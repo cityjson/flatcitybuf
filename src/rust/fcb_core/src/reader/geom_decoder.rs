@@ -750,7 +750,7 @@ mod tests {
     use crate::{
         fb::feature_generated::{
             root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
-            GeometryType,
+            GeometryType, MaterialMapping, MaterialMappingArgs, TextureMapping, TextureMappingArgs,
         },
         serializer::to_geometry,
     };
@@ -1190,5 +1190,666 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    #[test]
+    fn test_decode_materials() -> Result<()> {
+        let mut fbb = FlatBufferBuilder::new();
+
+        // Test case 1: Single material value
+        {
+            let theme = fbb.create_string("theme1");
+            let mapping = MaterialMapping::create(
+                &mut fbb,
+                &MaterialMappingArgs {
+                    theme: Some(theme),
+                    solids: None,
+                    shells: None,
+                    vertices: None,
+                    value: Some(5),
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let material_mapping = unsafe { flatbuffers::root_unchecked::<MaterialMapping>(buf) };
+
+            let decoded = decode_materials(&[material_mapping]);
+
+            assert!(decoded.is_some());
+            let materials = decoded.unwrap();
+            assert_eq!(materials.len(), 1);
+            assert!(materials.contains_key("theme1"));
+
+            let material_ref = &materials["theme1"];
+            assert_eq!(material_ref.value, Some(5));
+            assert!(material_ref.values.is_none());
+        }
+
+        // Test case 2: MultiSurface material values
+        {
+            let mut fbb = FlatBufferBuilder::new();
+            let theme = fbb.create_string("theme2");
+
+            // Create vertices for MultiSurface
+            let solids = fbb.create_vector(&[1u32]);
+            let vertices = fbb.create_vector(&[0u32, 1, u32::MAX, 2]);
+
+            let mapping = MaterialMapping::create(
+                &mut fbb,
+                &MaterialMappingArgs {
+                    theme: Some(theme),
+                    solids: Some(solids),
+                    shells: None,
+                    vertices: Some(vertices),
+                    value: None,
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let material_mapping = unsafe { flatbuffers::root_unchecked::<MaterialMapping>(buf) };
+
+            let decoded = decode_materials(&[material_mapping]);
+
+            assert!(decoded.is_some());
+            let materials = decoded.unwrap();
+            assert_eq!(materials.len(), 1);
+            assert!(materials.contains_key("theme2"));
+
+            let material_ref = &materials["theme2"];
+            assert!(material_ref.value.is_none());
+            assert!(material_ref.values.is_some());
+
+            if let Some(CjMaterialValues::Nested(nested)) = &material_ref.values {
+                assert_eq!(nested.len(), 1); // One solid
+
+                if let CjMaterialValues::Nested(solid_values) = &nested[0] {
+                    assert_eq!(solid_values.len(), 1); // One shell
+
+                    if let CjMaterialValues::Indices(indices) = &solid_values[0] {
+                        assert_eq!(indices.len(), 4);
+                        assert_eq!(indices[0], Some(0));
+                        assert_eq!(indices[1], Some(1));
+                        assert_eq!(indices[2], None);
+                        assert_eq!(indices[3], Some(2));
+                    } else {
+                        panic!("Expected Indices for shell values");
+                    }
+                } else {
+                    panic!("Expected Nested for solid values");
+                }
+            } else {
+                panic!("Expected Nested values");
+            }
+        }
+
+        // Test case 3: Solid material values with shells
+        {
+            let mut fbb = FlatBufferBuilder::new();
+            let theme = fbb.create_string("theme3");
+
+            // Create vertices for Solid with shells
+            let vertices = fbb.create_vector(&[0u32, 1, u32::MAX, 2, 3, 4]);
+            let solids = fbb.create_vector(&[2u32]); // One solid
+            let shells = fbb.create_vector(&[3u32, 3u32]); // Two shells
+
+            let mapping = MaterialMapping::create(
+                &mut fbb,
+                &MaterialMappingArgs {
+                    theme: Some(theme),
+                    solids: Some(solids),
+                    shells: Some(shells),
+                    vertices: Some(vertices),
+                    value: None,
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let material_mapping = unsafe { flatbuffers::root_unchecked::<MaterialMapping>(buf) };
+
+            let decoded = decode_materials(&[material_mapping]);
+
+            assert!(decoded.is_some());
+            let materials = decoded.unwrap();
+            assert_eq!(materials.len(), 1);
+            assert!(materials.contains_key("theme3"));
+
+            let material_ref = &materials["theme3"];
+            assert!(material_ref.value.is_none());
+            assert!(material_ref.values.is_some());
+
+            println!("material_ref.values: {:?}", material_ref.values);
+            if let Some(CjMaterialValues::Nested(nested)) = &material_ref.values {
+                assert_eq!(nested.len(), 1); // One solid
+
+                if let CjMaterialValues::Nested(shell_values) = &nested[0] {
+                    assert_eq!(shell_values.len(), 2); // Two shells
+
+                    // First shell
+                    if let CjMaterialValues::Indices(indices) = &shell_values[0] {
+                        assert_eq!(indices.len(), 3);
+                        assert_eq!(indices[0], Some(0));
+                        assert_eq!(indices[1], Some(1));
+                        assert_eq!(indices[2], None);
+                    } else {
+                        panic!("Expected Indices for first shell");
+                    }
+
+                    // Second shell
+                    if let CjMaterialValues::Indices(indices) = &shell_values[1] {
+                        assert_eq!(indices.len(), 3);
+                        assert_eq!(indices[0], Some(2));
+                        assert_eq!(indices[1], Some(3));
+                        assert_eq!(indices[2], Some(4));
+                    } else {
+                        panic!("Expected Indices for second shell");
+                    }
+                } else {
+                    panic!("Expected Nested for shell values");
+                }
+            } else {
+                panic!("Expected Nested for solid values");
+            }
+        }
+
+        // Test case 4: Multiple material mappings
+        {
+            // First mapping: single value
+            let mut fbb1 = FlatBufferBuilder::new();
+            let theme1 = fbb1.create_string("theme4");
+            let mapping1 = MaterialMapping::create(
+                &mut fbb1,
+                &MaterialMappingArgs {
+                    theme: Some(theme1),
+                    solids: None,
+                    shells: None,
+                    vertices: None,
+                    value: Some(7),
+                },
+            );
+            fbb1.finish(mapping1, None);
+            let buf1 = fbb1.finished_data();
+            let material_mapping1 = unsafe { flatbuffers::root_unchecked::<MaterialMapping>(buf1) };
+
+            // Second mapping: array of values
+            let mut fbb2 = FlatBufferBuilder::new();
+            let theme2 = fbb2.create_string("theme5");
+            let solids = fbb2.create_vector(&[1u32]);
+            let vertices = fbb2.create_vector(&[8u32, 9]);
+            let mapping2 = MaterialMapping::create(
+                &mut fbb2,
+                &MaterialMappingArgs {
+                    theme: Some(theme2),
+                    solids: Some(solids),
+                    shells: None,
+                    vertices: Some(vertices),
+                    value: None,
+                },
+            );
+            fbb2.finish(mapping2, None);
+            let buf2 = fbb2.finished_data();
+            let material_mapping2 = unsafe { flatbuffers::root_unchecked::<MaterialMapping>(buf2) };
+
+            let mappings = [material_mapping1, material_mapping2];
+
+            let decoded = decode_materials(&mappings);
+
+            assert!(decoded.is_some());
+            let materials = decoded.unwrap();
+            assert_eq!(materials.len(), 2);
+
+            // Check first mapping
+            assert!(materials.contains_key("theme4"));
+            let material_ref1 = &materials["theme4"];
+            assert_eq!(material_ref1.value, Some(7));
+            assert!(material_ref1.values.is_none());
+
+            // Check second mapping
+            assert!(materials.contains_key("theme5"));
+            let material_ref2 = &materials["theme5"];
+            assert!(material_ref2.value.is_none());
+            assert!(material_ref2.values.is_some());
+
+            if let Some(CjMaterialValues::Nested(nested)) = &material_ref2.values {
+                assert_eq!(nested.len(), 1);
+
+                if let CjMaterialValues::Nested(solid_values) = &nested[0] {
+                    assert_eq!(solid_values.len(), 1);
+
+                    if let CjMaterialValues::Indices(indices) = &solid_values[0] {
+                        assert_eq!(indices.len(), 2);
+                        assert_eq!(indices[0], Some(8));
+                        assert_eq!(indices[1], Some(9));
+                    } else {
+                        panic!("Expected Indices for shell values");
+                    }
+                } else {
+                    panic!("Expected Nested for solid values");
+                }
+            } else {
+                panic!("Expected Nested values");
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_textures() -> Result<()> {
+        // Test case 1: MultiPoint-like texture values
+        {
+            let mut fbb = FlatBufferBuilder::new();
+            let theme = fbb.create_string("theme1");
+
+            // Create vertices for MultiPoint
+            let vertices = fbb.create_vector(&[0u32, 10, 20, u32::MAX]);
+            let strings = fbb.create_vector(&[4u32]); // One string with 4 vertices
+
+            let mapping = TextureMapping::create(
+                &mut fbb,
+                &TextureMappingArgs {
+                    theme: Some(theme),
+                    solids: None,
+                    shells: None,
+                    surfaces: None,
+                    strings: Some(strings),
+                    vertices: Some(vertices),
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let texture_mapping = unsafe { flatbuffers::root_unchecked::<TextureMapping>(buf) };
+
+            let decoded = decode_textures(&[texture_mapping]);
+
+            assert!(decoded.is_some());
+            let textures = decoded.unwrap();
+            assert_eq!(textures.len(), 1);
+            assert!(textures.contains_key("theme1"));
+
+            let texture_ref = &textures["theme1"];
+
+            match &texture_ref.values {
+                CjTextureValues::Indices(indices) => {
+                    assert_eq!(indices.len(), 4);
+                    assert_eq!(indices[0], Some(0));
+                    assert_eq!(indices[1], Some(10));
+                    assert_eq!(indices[2], Some(20));
+                    assert_eq!(indices[3], None);
+                }
+                _ => panic!("Expected Indices"),
+            }
+        }
+
+        // Test case 2: MultiLineString-like texture values
+        {
+            let mut fbb = FlatBufferBuilder::new();
+            let theme = fbb.create_string("theme2");
+
+            // Create vertices for MultiLineString
+            let vertices = fbb.create_vector(&[0u32, 10, 20, 1, 11, u32::MAX]);
+            let strings = fbb.create_vector(&[3u32, 3u32]); // Two strings with 3 vertices each
+            let surfaces = fbb.create_vector(&[2u32]); // One surface with 2 strings
+            let mapping = TextureMapping::create(
+                &mut fbb,
+                &TextureMappingArgs {
+                    theme: Some(theme),
+                    solids: None,
+                    shells: None,
+                    surfaces: Some(surfaces),
+                    strings: Some(strings),
+                    vertices: Some(vertices),
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let texture_mapping = unsafe { flatbuffers::root_unchecked::<TextureMapping>(buf) };
+
+            let decoded = decode_textures(&[texture_mapping]);
+
+            assert!(decoded.is_some());
+            let textures = decoded.unwrap();
+            assert_eq!(textures.len(), 1);
+            assert!(textures.contains_key("theme2"));
+
+            let texture_ref = &textures["theme2"];
+
+            match &texture_ref.values {
+                CjTextureValues::Nested(surface_values) => {
+                    assert_eq!(surface_values.len(), 1); // One surface
+
+                    match &surface_values[0] {
+                        CjTextureValues::Nested(string_values) => {
+                            assert_eq!(string_values.len(), 2); // Two strings
+
+                            // First string
+                            match &string_values[0] {
+                                CjTextureValues::Indices(indices) => {
+                                    assert_eq!(indices.len(), 3);
+                                    assert_eq!(indices[0], Some(0));
+                                    assert_eq!(indices[1], Some(10));
+                                    assert_eq!(indices[2], Some(20));
+                                }
+                                _ => panic!("Expected Indices for first string"),
+                            }
+
+                            // Second string
+                            match &string_values[1] {
+                                CjTextureValues::Indices(indices) => {
+                                    assert_eq!(indices.len(), 3);
+                                    assert_eq!(indices[0], Some(1));
+                                    assert_eq!(indices[1], Some(11));
+                                    assert_eq!(indices[2], None);
+                                }
+                                _ => panic!("Expected Indices for second string"),
+                            }
+                        }
+                        _ => panic!("Expected Nested for string values"),
+                    }
+                }
+                _ => panic!("Expected Nested for surface values"),
+            }
+        }
+
+        // Test case 3: MultiSurface-like texture values
+        {
+            let mut fbb = FlatBufferBuilder::new();
+            let theme = fbb.create_string("theme3");
+
+            // Create vertices for MultiSurface
+            let vertices = fbb.create_vector(&[
+                0u32,
+                10,
+                20,
+                30, // First surface, first string
+                1,
+                11,
+                21,
+                u32::MAX, // Second surface, first string
+                2,
+                12,
+                u32::MAX,
+                32, // Third surface, first string
+            ]);
+
+            let strings = fbb.create_vector(&[4u32, 4u32, 4u32]); // Three strings with 4 vertices each
+            let surfaces = fbb.create_vector(&[1u32, 1u32, 1u32]); // Three surfaces with 1 string each
+            let shells = fbb.create_vector(&[3u32]); // One shell with 3 surfaces
+
+            let mapping = TextureMapping::create(
+                &mut fbb,
+                &TextureMappingArgs {
+                    theme: Some(theme),
+                    solids: None,
+                    shells: Some(shells),
+                    surfaces: Some(surfaces),
+                    strings: Some(strings),
+                    vertices: Some(vertices),
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let texture_mapping = unsafe { flatbuffers::root_unchecked::<TextureMapping>(buf) };
+
+            let decoded = decode_textures(&[texture_mapping]);
+
+            assert!(decoded.is_some());
+            let textures = decoded.unwrap();
+            assert_eq!(textures.len(), 1);
+            assert!(textures.contains_key("theme3"));
+
+            let texture_ref = &textures["theme3"];
+
+            match &texture_ref.values {
+                CjTextureValues::Nested(shell_values) => {
+                    assert_eq!(shell_values.len(), 1); // One shell
+
+                    match &shell_values[0] {
+                        CjTextureValues::Nested(surface_values) => {
+                            assert_eq!(surface_values.len(), 3); // Three surfaces
+
+                            // First surface
+                            match &surface_values[0] {
+                                CjTextureValues::Nested(string_values) => {
+                                    assert_eq!(string_values.len(), 1); // One string
+
+                                    match &string_values[0] {
+                                        CjTextureValues::Indices(indices) => {
+                                            assert_eq!(indices.len(), 4);
+                                            assert_eq!(indices[0], Some(0));
+                                            assert_eq!(indices[1], Some(10));
+                                            assert_eq!(indices[2], Some(20));
+                                            assert_eq!(indices[3], Some(30));
+                                        }
+                                        _ => panic!("Expected Indices for first surface string"),
+                                    }
+                                }
+                                _ => panic!("Expected Nested for first surface string values"),
+                            }
+                        }
+                        _ => panic!("Expected Nested for surface values"),
+                    }
+                }
+                _ => panic!("Expected Nested for shell values"),
+            }
+        }
+
+        // Test case 4: Solid-like texture values
+        {
+            let mut fbb = FlatBufferBuilder::new();
+            let theme = fbb.create_string("theme4");
+
+            // Create vertices for Solid
+            let vertices = fbb.create_vector(&[
+                0u32,
+                10,
+                20,
+                30, // First shell, first surface, first string
+                1,
+                11,
+                21,
+                u32::MAX, // First shell, second surface, first string
+                2,
+                12,
+                u32::MAX,
+                32, // First shell, third surface, first string
+                3,
+                13,
+                23,
+                33, // Second shell, first surface, first string
+                4,
+                14,
+                24,
+                u32::MAX, // Second shell, second surface, first string
+            ]);
+
+            let strings = fbb.create_vector(&[4u32, 4u32, 4u32, 4u32, 4u32]); // Five strings with 4 vertices each
+            let surfaces = fbb.create_vector(&[1u32, 1u32, 1u32, 1u32, 1u32]); // Five surfaces with 1 string each
+            let shells = fbb.create_vector(&[3u32, 2u32]); // Two shells with 3 and 2 surfaces
+            let solids = fbb.create_vector(&[2u32]); // One solid with 2 shells
+
+            let mapping = TextureMapping::create(
+                &mut fbb,
+                &TextureMappingArgs {
+                    theme: Some(theme),
+                    solids: Some(solids),
+                    shells: Some(shells),
+                    surfaces: Some(surfaces),
+                    strings: Some(strings),
+                    vertices: Some(vertices),
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let texture_mapping = unsafe { flatbuffers::root_unchecked::<TextureMapping>(buf) };
+
+            let decoded = decode_textures(&[texture_mapping]);
+
+            assert!(decoded.is_some());
+            let textures = decoded.unwrap();
+            assert_eq!(textures.len(), 1);
+            assert!(textures.contains_key("theme4"));
+
+            let texture_ref = &textures["theme4"];
+
+            match &texture_ref.values {
+                CjTextureValues::Nested(solid_values) => {
+                    assert_eq!(solid_values.len(), 1); // One solid
+
+                    match &solid_values[0] {
+                        CjTextureValues::Nested(shell_values) => {
+                            assert_eq!(shell_values.len(), 2); // Two shells
+
+                            // First shell
+                            match &shell_values[0] {
+                                CjTextureValues::Nested(surface_values) => {
+                                    assert_eq!(surface_values.len(), 3); // Three surfaces
+
+                                    // Check first surface of first shell
+                                    match &surface_values[0] {
+                                        CjTextureValues::Nested(string_values) => {
+                                            assert_eq!(string_values.len(), 1); // One string
+
+                                            match &string_values[0] {
+                                                CjTextureValues::Indices(indices) => {
+                                                    assert_eq!(indices.len(), 4);
+                                                    assert_eq!(indices[0], Some(0));
+                                                    assert_eq!(indices[1], Some(10));
+                                                    assert_eq!(indices[2], Some(20));
+                                                    assert_eq!(indices[3], Some(30));
+                                                }
+                                                _ => panic!("Expected Indices for first shell, first surface string"),
+                                            }
+                                        }
+                                        _ => panic!("Expected Nested for first shell, first surface string values"),
+                                    }
+                                }
+                                _ => panic!("Expected Nested for first shell surface values"),
+                            }
+
+                            // Second shell
+                            match &shell_values[1] {
+                                CjTextureValues::Nested(surface_values) => {
+                                    assert_eq!(surface_values.len(), 2); // Two surfaces
+
+                                    // Check first surface of second shell
+                                    match &surface_values[0] {
+                                        CjTextureValues::Nested(string_values) => {
+                                            assert_eq!(string_values.len(), 1); // One string
+
+                                            match &string_values[0] {
+                                                CjTextureValues::Indices(indices) => {
+                                                    assert_eq!(indices.len(), 4);
+                                                    assert_eq!(indices[0], Some(3));
+                                                    assert_eq!(indices[1], Some(13));
+                                                    assert_eq!(indices[2], Some(23));
+                                                    assert_eq!(indices[3], Some(33));
+                                                }
+                                                _ => panic!("Expected Indices for second shell, first surface string"),
+                                            }
+                                        }
+                                        _ => panic!("Expected Nested for second shell, first surface string values"),
+                                    }
+                                }
+                                _ => panic!("Expected Nested for second shell surface values"),
+                            }
+                        }
+                        _ => panic!("Expected Nested for shell values"),
+                    }
+                }
+                _ => panic!("Expected Nested for solid values"),
+            }
+        }
+
+        // Test case 5: Multiple texture mappings
+        {
+            // First mapping
+            let mut fbb1 = FlatBufferBuilder::new();
+            let theme1 = fbb1.create_string("winter");
+            let vertices1 = fbb1.create_vector(&[0u32, 10, 20]);
+            let strings1 = fbb1.create_vector(&[3u32]);
+
+            let mapping1 = TextureMapping::create(
+                &mut fbb1,
+                &TextureMappingArgs {
+                    theme: Some(theme1),
+                    solids: None,
+                    shells: None,
+                    surfaces: None,
+                    strings: Some(strings1),
+                    vertices: Some(vertices1),
+                },
+            );
+
+            fbb1.finish(mapping1, None);
+            let buf1 = fbb1.finished_data();
+            let texture_mapping1 = unsafe { flatbuffers::root_unchecked::<TextureMapping>(buf1) };
+
+            // Second mapping
+            let mut fbb2 = FlatBufferBuilder::new();
+            let theme2 = fbb2.create_string("summer");
+            let vertices2 = fbb2.create_vector(&[1u32, 11, u32::MAX]);
+            let strings2 = fbb2.create_vector(&[3u32]);
+
+            let mapping2 = TextureMapping::create(
+                &mut fbb2,
+                &TextureMappingArgs {
+                    theme: Some(theme2),
+                    solids: None,
+                    shells: None,
+                    surfaces: None,
+                    strings: Some(strings2),
+                    vertices: Some(vertices2),
+                },
+            );
+
+            fbb2.finish(mapping2, None);
+            let buf2 = fbb2.finished_data();
+            let texture_mapping2 = unsafe { flatbuffers::root_unchecked::<TextureMapping>(buf2) };
+
+            let mappings = [texture_mapping1, texture_mapping2];
+
+            let decoded = decode_textures(&mappings);
+
+            assert!(decoded.is_some());
+            let textures = decoded.unwrap();
+            assert_eq!(textures.len(), 2);
+
+            // Check first mapping
+            assert!(textures.contains_key("winter"));
+            let texture_ref1 = &textures["winter"];
+
+            match &texture_ref1.values {
+                CjTextureValues::Indices(indices) => {
+                    assert_eq!(indices.len(), 3);
+                    assert_eq!(indices[0], Some(0));
+                    assert_eq!(indices[1], Some(10));
+                    assert_eq!(indices[2], Some(20));
+                }
+                _ => panic!("Expected Indices for winter theme"),
+            }
+
+            // Check second mapping
+            assert!(textures.contains_key("summer"));
+            let texture_ref2 = &textures["summer"];
+
+            match &texture_ref2.values {
+                CjTextureValues::Indices(indices) => {
+                    assert_eq!(indices.len(), 3);
+                    assert_eq!(indices[0], Some(1));
+                    assert_eq!(indices[1], Some(11));
+                    assert_eq!(indices[2], None);
+                }
+                _ => panic!("Expected Indices for summer theme"),
+            }
+        }
+
+        Ok(())
     }
 }
