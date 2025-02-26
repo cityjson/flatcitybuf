@@ -915,54 +915,215 @@ mod tests {
         Ok(())
     }
 
-    // #[test]
-    // fn test_encode_texture() -> Result<()> {
-    //     // Test with surface texture values
-    //     let mut textures = HashMap::new();
-    //     let surface_values = vec![
-    //         vec![vec![Some(0), Some(10), Some(11), Some(12)]],
-    //         vec![vec![Some(1), Some(13), Some(14), Some(15)]],
-    //     ];
-    //     textures.insert(
-    //         "theme1".to_string(),
-    //         CjTextureReference {
-    //             values: CjTextureValues::Surface(surface_values),
-    //         },
-    //     );
+    #[test]
+    fn test_encode_texture() -> Result<()> {
+        // Create a theme for testing
+        let theme = "test-theme".to_string();
 
-    //     let encoded = encode_texture(&textures);
+        // MultiPoint-like texture values
+        let texture_values = json!([0, 10, 20, null]);
+        let texture_values: CjTextureValues = serde_json::from_value(texture_values)?;
 
-    //     assert_eq!(encoded.len(), 1);
-    //     assert_eq!(encoded[0].theme, "theme1");
-    //     assert_eq!(encoded[0].vertices, vec![0, 10, 11, 12, 1, 13, 14, 15]);
-    //     assert_eq!(encoded[0].strings, vec![1, 1]);
-    //     assert_eq!(encoded[0].surfaces, vec![2]);
-    //     assert!(encoded[0].shells.is_empty());
-    //     assert!(encoded[0].solids.is_empty());
+        let mut textures = HashMap::new();
+        textures.insert(
+            theme.clone(),
+            CjTextureReference {
+                values: texture_values,
+            },
+        );
 
-    //     // Test with solid texture values
-    //     let mut textures = HashMap::new();
-    //     let solid_values = vec![vec![
-    //         vec![vec![Some(0), Some(10), Some(11), Some(12)]],
-    //         vec![vec![Some(1), Some(13), Some(14), Some(15)]],
-    //     ]];
-    //     textures.insert(
-    //         "theme2".to_string(),
-    //         CjTextureReference {
-    //             values: CjTextureValues::Solid(solid_values),
-    //         },
-    //     );
+        let encoded = encode_texture(&textures);
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].theme, theme);
+        assert_eq!(encoded[0].vertices, vec![0, 10, 20, u32::MAX]);
+        assert_eq!(encoded[0].strings, vec![4]);
+        assert!(encoded[0].surfaces.is_empty());
+        assert!(encoded[0].shells.is_empty());
+        assert!(encoded[0].solids.is_empty());
 
-    //     let encoded = encode_texture(&textures);
+        // MultiLineString-like texture values
+        let texture_values = json!([[0, 10, 20], [1, 11, null]]);
+        let texture_values: CjTextureValues = serde_json::from_value(texture_values)?;
 
-    //     assert_eq!(encoded.len(), 1);
-    //     assert_eq!(encoded[0].theme, "theme2");
-    //     assert_eq!(encoded[0].vertices, vec![0, 10, 11, 12, 1, 13, 14, 15]);
-    //     assert_eq!(encoded[0].strings, vec![1, 1]);
-    //     assert_eq!(encoded[0].surfaces, vec![2]);
-    //     assert_eq!(encoded[0].shells, vec![1]);
-    //     assert_eq!(encoded[0].solids, vec![1]);
+        let mut textures = HashMap::new();
+        textures.insert(
+            theme.clone(),
+            CjTextureReference {
+                values: texture_values,
+            },
+        );
 
-    //     Ok(())
-    // }
+        let encoded = encode_texture(&textures);
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].theme, theme);
+        assert_eq!(encoded[0].vertices, vec![0, 10, 20, 1, 11, u32::MAX]);
+        assert_eq!(encoded[0].strings, vec![3, 3]);
+        assert!(encoded[0].surfaces.is_empty());
+        assert!(encoded[0].shells.is_empty());
+        assert!(encoded[0].solids.is_empty());
+
+        // MultiSurface-like texture values
+        let texture_values = json!([[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]]);
+        let texture_values: CjTextureValues = serde_json::from_value(texture_values)?;
+
+        let mut textures = HashMap::new();
+        textures.insert(
+            theme.clone(),
+            CjTextureReference {
+                values: texture_values,
+            },
+        );
+
+        let encoded = encode_texture(&textures);
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].theme, theme);
+        assert_eq!(
+            encoded[0].vertices,
+            vec![0, 10, 20, 30, 1, 11, 21, u32::MAX, 2, 12, u32::MAX, 32]
+        );
+        assert_eq!(encoded[0].strings, vec![4, 4, 4]);
+        assert_eq!(encoded[0].surfaces, vec![1, 1, 1]);
+        assert!(encoded[0].shells.is_empty());
+        assert!(encoded[0].solids.is_empty());
+
+        // Solid-like texture values
+        let texture_values = json!([
+            [[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]],
+            [[[3, 13, 23, 33]], [[4, 14, 24, null]]]
+        ]);
+        let texture_values: CjTextureValues = serde_json::from_value(texture_values)?;
+
+        let mut textures = HashMap::new();
+        textures.insert(
+            theme.clone(),
+            CjTextureReference {
+                values: texture_values,
+            },
+        );
+
+        let encoded = encode_texture(&textures);
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].theme, theme);
+        assert_eq!(
+            encoded[0].vertices,
+            vec![
+                0,
+                10,
+                20,
+                30,
+                1,
+                11,
+                21,
+                u32::MAX,
+                2,
+                12,
+                u32::MAX,
+                32,
+                3,
+                13,
+                23,
+                33,
+                4,
+                14,
+                24,
+                u32::MAX
+            ]
+        );
+        assert_eq!(encoded[0].strings, vec![4, 4, 4, 4, 4]);
+        assert_eq!(encoded[0].surfaces, vec![1, 1, 1, 1, 1]);
+        assert_eq!(encoded[0].shells, vec![3, 2]);
+        assert_eq!(encoded[0].solids, vec![2]);
+
+        // CompositeSolid-like texture values
+        let texture_values = json!([
+            [
+                [[[0, 10, 20]], [[1, 11, null]]],
+                [[[2, 12, 22]], [[3, null, 23]]]
+            ],
+            [[[[4, 14, 24]], [[5, 15, 25]]]]
+        ]);
+        let texture_values: CjTextureValues = serde_json::from_value(texture_values)?;
+
+        let mut textures = HashMap::new();
+        textures.insert(
+            theme.clone(),
+            CjTextureReference {
+                values: texture_values,
+            },
+        );
+
+        let encoded = encode_texture(&textures);
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].theme, theme);
+        assert_eq!(
+            encoded[0].vertices,
+            vec![
+                0,
+                10,
+                20,
+                1,
+                11,
+                u32::MAX,
+                2,
+                12,
+                22,
+                3,
+                u32::MAX,
+                23,
+                4,
+                14,
+                24,
+                5,
+                15,
+                25
+            ]
+        );
+        assert_eq!(encoded[0].strings, vec![3, 3, 3, 3, 3, 3]);
+        assert_eq!(encoded[0].surfaces, vec![1, 1, 1, 1, 1, 1]);
+        assert_eq!(encoded[0].shells, vec![2, 2, 2]);
+        assert_eq!(encoded[0].solids, vec![2, 1]);
+
+        // Multiple themes
+        let texture_values1 = json!([0, 10, 20]);
+        let texture_values1: CjTextureValues = serde_json::from_value(texture_values1)?;
+
+        let texture_values2 = json!([1, 11, null]);
+        let texture_values2: CjTextureValues = serde_json::from_value(texture_values2)?;
+
+        let mut textures = HashMap::new();
+        textures.insert(
+            "winter".to_string(),
+            CjTextureReference {
+                values: texture_values1,
+            },
+        );
+        textures.insert(
+            "summer".to_string(),
+            CjTextureReference {
+                values: texture_values2,
+            },
+        );
+
+        let encoded = encode_texture(&textures);
+        assert_eq!(encoded.len(), 2);
+
+        // Find and verify each mapping by theme name instead of relying on order
+        let winter_mapping = encoded
+            .iter()
+            .find(|m| m.theme == "winter")
+            .expect("Should have winter mapping");
+
+        let summer_mapping = encoded
+            .iter()
+            .find(|m| m.theme == "summer")
+            .expect("Should have summer mapping");
+
+        assert_eq!(winter_mapping.vertices, vec![0, 10, 20]);
+        assert_eq!(winter_mapping.strings, vec![3]);
+
+        assert_eq!(summer_mapping.vertices, vec![1, 11, u32::MAX]);
+        assert_eq!(summer_mapping.strings, vec![3]);
+
+        Ok(())
+    }
 }
