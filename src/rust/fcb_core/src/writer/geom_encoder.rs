@@ -194,7 +194,7 @@ pub(crate) fn encode_texture(
         };
 
         // Process the texture values based on their structure
-        process_texture_values(&texture.values, &mut texture_mapping, 0);
+        let _ = process_texture_values(&texture.values, &mut texture_mapping);
 
         texture_mappings.push(texture_mapping);
     }
@@ -208,8 +208,11 @@ pub(crate) fn encode_texture(
 ///
 /// * `values` - Reference to the texture values to process
 /// * `mapping` - Mutable reference to the TextureMapping struct to populate
-/// * `depth` - Current depth in the nested structure
-fn process_texture_values(values: &CjTextureValues, mapping: &mut TextureMapping, depth: usize) {
+///
+/// # Returns
+///
+/// The maximum depth encountered during processing.
+fn process_texture_values(values: &CjTextureValues, mapping: &mut TextureMapping) -> usize {
     match values {
         // Leaf node (indices)
         CjTextureValues::Indices(indices) => {
@@ -220,23 +223,45 @@ fn process_texture_values(values: &CjTextureValues, mapping: &mut TextureMapping
             mapping
                 .vertices
                 .extend(indices.iter().map(|i| i.map_or(u32::MAX, |v| v as u32)));
+
+            // Return the current depth level (1 for rings)
+            1 // ring-level
         }
         // Nested structure
         CjTextureValues::Nested(nested) => {
+            let mut max_depth = 0;
+
+            // Recursively process each nested value and track the maximum depth
+            for sub in nested {
+                let d = process_texture_values(sub, mapping);
+                max_depth = max_depth.max(d);
+            }
+
+            // Number of sub-boundaries at the current level
             let length = nested.len();
 
-            // Update the appropriate level counter based on depth
-            match depth {
-                0 => mapping.solids.push(length as u32), // Top level: solids
-                1 => mapping.shells.push(length as u32), // Second level: shells
-                2 => mapping.surfaces.push(length as u32), // Third level: surfaces
-                _ => {}                                  // Deeper levels not tracked
+            // Interpret the `max_depth` to determine the current geometry type
+            match max_depth {
+                // max_depth = 1 indicates the children are rings, so this level represents surfaces
+                1 => {
+                    mapping.surfaces.push(length as u32);
+                }
+                // max_depth = 2 indicates the children are surfaces, so this level represents shells
+                2 => {
+                    // Push the number of surfaces in this shell
+                    mapping.shells.push(length as u32);
+                }
+                // max_depth = 3 indicates the children are shells, so this level represents solids
+                3 => {
+                    // Push the number of shells in this solid
+                    mapping.solids.push(length as u32);
+                }
+                // Any other depth is invalid and should be ignored
+                _ => {}
             }
 
-            // Recursively process each nested value
-            for sub in nested {
-                process_texture_values(sub, mapping, depth + 1);
-            }
+            // Return the updated depth level
+            max_depth + 1
         }
     }
 }
