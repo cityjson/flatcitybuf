@@ -14,8 +14,8 @@ use crate::{
     TextureMapping, TextureMappingArgs,
 };
 use cjseq::{
-    CityJSON, CityJSONFeature, CityObject as CjCityObject,
-    Geometry as CjGeometry, GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
+    CityJSON, CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
+    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
     ReferenceSystem as CjReferenceSystem, TextFormat as CjTextFormat, TextType as CjTextType,
     Transform as CjTransform, WrapMode as CjWrapMode,
 };
@@ -23,9 +23,7 @@ use flatbuffers::FlatBufferBuilder;
 use packed_rtree::NodeItem;
 use serde_json::Value;
 
-use super::geom_encoder::{
-    GMBoundaries, GMSemantics, MaterialMapping as GMMaterialMapping,
-};
+use super::geom_encoder::{GMBoundaries, GMSemantics, MaterialMapping as GMMaterialMapping};
 use super::header_writer::HeaderWriterOptions;
 
 #[derive(Debug, Clone)]

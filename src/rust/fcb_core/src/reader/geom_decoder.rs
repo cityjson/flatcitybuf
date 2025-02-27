@@ -846,7 +846,7 @@ mod tests {
         serializer::to_geometry,
     };
     use pretty_assertions::assert_eq;
-    use reqwest::header::EXPECT;
+    
 
     use super::*;
     use anyhow::Result;
@@ -1804,8 +1804,7 @@ mod tests {
         {
             // First mapping
             let expected: CjTextureValues = serde_json::from_value(json!([0, 10, 20])).unwrap();
-            let expected2: CjTextureValues =
-                serde_json::from_value(json!([1, 11, null])).unwrap();
+            let expected2: CjTextureValues = serde_json::from_value(json!([1, 11, null])).unwrap();
             let mut fbb1 = FlatBufferBuilder::new();
             let theme1 = fbb1.create_string("winter");
             let vertices1 = fbb1.create_vector(&[0u32, 10, 20]);

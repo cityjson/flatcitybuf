@@ -91,8 +91,8 @@ pub(crate) fn encode(
     let semantics = semantics.map(encode_semantics);
 
     // Encode appearance if provided
-    let textures = textures.map(|textures| encode_texture(textures));
-    let materials = materials.map(|materials| encode_material(materials));
+    let textures = textures.map(encode_texture);
+    let materials = materials.map(encode_material);
     EncodedGeometry {
         boundaries,
         semantics,
@@ -409,7 +409,7 @@ pub(crate) fn encode_semantics(semantics: &CjSemantics) -> GMSemantics {
 mod tests {
     use super::*;
     use anyhow::Result;
-    use cjseq::{Appearance, Geometry as CjGeometry};
+    use cjseq::Geometry as CjGeometry;
     use pretty_assertions::assert_eq;
     use serde_json::json;
 

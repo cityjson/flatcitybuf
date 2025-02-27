@@ -354,7 +354,7 @@ pub fn to_cj_feature(
                     // Helper function to convert color vectors
                     let convert_color = |color_opt: Option<flatbuffers::Vector<'_, f64>>| {
                         color_opt.map(|c| {
-                            let color_vec: Vec<f64> = c.iter().map(|f| f as f64).collect();
+                            let color_vec: Vec<f64> = c.iter().collect();
                             assert!(color_vec.len() == 3, "color must be a vector of 3 elements");
                             [color_vec[0], color_vec[1], color_vec[2]]
                         })
@@ -403,7 +403,7 @@ pub fn to_cj_feature(
                             _ => CjTextType::Unknown, // Default to Unknown
                         }),
                         border_color: t.border_color().map(|c| {
-                            let color_vec: Vec<f64> = c.iter().map(|f| f).collect();
+                            let color_vec: Vec<f64> = c.iter().collect();
                             assert!(color_vec.len() == 4, "color must be a vector of 4 elements");
                             [color_vec[0], color_vec[1], color_vec[2], color_vec[3]]
                         }),
