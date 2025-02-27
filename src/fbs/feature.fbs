@@ -88,10 +88,35 @@ struct Vertex {
   z:int;
 }
 
+table MaterialMapping {
+  theme: string;
+  solids: [uint];
+  shells: [uint];
+  vertices: [uint]; // flat list of vertex indices.
+  // The depth of material indices will be boundaries depth minus 2:
+  // - For MultiSurface/CompositeSurface: one material index per surface
+  // - For Solid: one material index per surface in each shell
+  // - For MultiSolid/CompositeSolid: one material index per surface in each shell of each solid
+  value: uint = null; // used only when it uses the shared material of CityJSON
+}
+
+table TextureMapping {
+  theme: string;
+  solids: [uint];
+  shells: [uint];
+  surfaces: [uint];
+  strings: [uint];
+  vertices: [uint]; // flat list of vertex indices.
+  // The depth of texture indices matches the boundaries array:
+  // - For each ring: first vertex is texture index, remaining vertices are UV coordinate indices
+  // - UV coordinates must be between 0.0 and 1.0 and reference vertices_texture array
+}
+
 table CityFeature {
   id:string (key, required);
   objects:[CityObject];
   vertices:[Vertex];
+  appearance: Appearance;
 }
 
 table CityObject {
@@ -118,9 +143,12 @@ table Geometry {
   strings:[uint];           // Rings or LineStrings
 
   boundaries:[uint];        // flat list of vertex indices
-  semantics:[uint];         // flat list of semantic object indices
 
+  semantics:[uint];         // flat list of semantic object indices
   semantics_objects:[SemanticObject];
+
+  material: [MaterialMapping]; // Maps each surface/shells to an index in appearance.materials.
+  texture: [TextureMapping];   // Maps each primitives to an index in appearance.textures.
 }
 
 table SemanticObject {

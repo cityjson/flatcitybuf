@@ -1,15 +1,18 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, mem::size_of};
 
 use crate::{
     fb::*,
-    geom_decoder::{decode, decode_semantics},
+    geom_decoder::{decode, decode_materials, decode_semantics, decode_textures},
     Error,
 };
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
-    Address as CjAddress, CityJSON, CityJSONFeature, CityObject as CjCityObject,
-    Geometry as CjGeometry, Metadata as CjMetadata, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, Transform as CjTransform,
+    Address as CjAddress, Appearance as CjAppearance, CityJSON, CityJSONFeature,
+    CityObject as CjCityObject, Geometry as CjGeometry, MaterialObject as CjMaterial,
+    Metadata as CjMetadata, PointOfContact as CjPointOfContact,
+    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, TextFormat as CjTextFormat,
+    TextType as CjTextType, TextureObject as CjTexture, Transform as CjTransform,
+    WrapMode as CjWrapMode,
 };
 
 pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
@@ -333,6 +336,106 @@ pub fn to_cj_feature(
         .vertices()
         .map_or(Vec::new(), |v| to_cj_vertices(v.iter().collect()));
 
+    // Decode appearance if present
+    if let Some(appearance) = feature.appearance() {
+        let mut cj_appearance = CjAppearance {
+            materials: None,
+            textures: None,
+            vertices_texture: None,
+            default_theme_texture: None,
+            default_theme_material: None,
+        };
+
+        // Decode materials
+        if let Some(materials) = appearance.materials() {
+            let cj_materials = materials
+                .iter()
+                .map(|m| {
+                    // Helper function to convert color vectors
+                    let convert_color = |color_opt: Option<flatbuffers::Vector<'_, f64>>| {
+                        color_opt.map(|c| {
+                            let color_vec: Vec<f64> = c.iter().collect();
+                            assert!(color_vec.len() == 3, "color must be a vector of 3 elements");
+                            [color_vec[0], color_vec[1], color_vec[2]]
+                        })
+                    };
+
+                    CjMaterial {
+                        name: m.name().to_string(),
+                        ambient_intensity: m.ambient_intensity(),
+                        diffuse_color: convert_color(m.diffuse_color()),
+                        emissive_color: convert_color(m.emissive_color()),
+                        specular_color: convert_color(m.specular_color()),
+                        shininess: m.shininess(),
+                        transparency: m.transparency(),
+                        is_smooth: m.is_smooth(),
+                    }
+                })
+                .collect();
+
+            cj_appearance.materials = Some(cj_materials);
+        }
+
+        // Decode textures
+        if let Some(textures) = appearance.textures() {
+            let cj_textures = textures
+                .iter()
+                .map(|t| {
+                    CjTexture {
+                        image: t.image().to_string(),
+                        texture_format: match t.type_() {
+                            TextureFormat::PNG => CjTextFormat::Png,
+                            TextureFormat::JPG => CjTextFormat::Jpg,
+                            _ => CjTextFormat::Png, // Default to PNG
+                        },
+                        wrap_mode: t.wrap_mode().map(|w| match w {
+                            WrapMode::None => CjWrapMode::None,
+                            WrapMode::Wrap => CjWrapMode::Wrap,
+                            WrapMode::Mirror => CjWrapMode::Mirror,
+                            WrapMode::Clamp => CjWrapMode::Clamp,
+                            WrapMode::Border => CjWrapMode::Border,
+                            _ => CjWrapMode::None, // Default to None
+                        }),
+                        texture_type: t.texture_type().map(|t| match t {
+                            TextureType::Unknown => CjTextType::Unknown,
+                            TextureType::Specific => CjTextType::Specific,
+                            TextureType::Typical => CjTextType::Typical,
+                            _ => CjTextType::Unknown, // Default to Unknown
+                        }),
+                        border_color: t.border_color().map(|c| {
+                            let color_vec: Vec<f64> = c.iter().collect();
+                            assert!(color_vec.len() == 4, "color must be a vector of 4 elements");
+                            [color_vec[0], color_vec[1], color_vec[2], color_vec[3]]
+                        }),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            cj_appearance.textures = Some(cj_textures);
+        }
+
+        // Decode vertices_texture
+        if let Some(vertices_texture) = appearance.vertices_texture() {
+            cj_appearance.vertices_texture = Some(
+                vertices_texture
+                    .iter()
+                    .map(|v| [v.u(), v.v()])
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        // Decode default themes
+        if let Some(default_theme_texture) = appearance.default_theme_texture() {
+            cj_appearance.default_theme_texture = Some(default_theme_texture.to_string());
+        }
+
+        if let Some(default_theme_material) = appearance.default_theme_material() {
+            cj_appearance.default_theme_material = Some(default_theme_material.to_string());
+        }
+
+        cj.appearance = Some(cj_appearance);
+    }
+
     Ok(cj)
 }
 
@@ -374,13 +477,27 @@ pub(crate) fn decode_geometry(g: Geometry) -> Result<CjGeometry, Error> {
         None
     };
 
+    // Decode material mappings if present
+    let material = if let Some(material_mappings) = g.material() {
+        decode_materials(&material_mappings.iter().collect::<Vec<_>>())
+    } else {
+        None
+    };
+
+    // Decode texture mappings if present
+    let texture = if let Some(texture_mappings) = g.texture() {
+        decode_textures(&texture_mappings.iter().collect::<Vec<_>>())
+    } else {
+        None
+    };
+
     Ok(CjGeometry {
         thetype: g.type_().to_cj(),
         lod: g.lod().map(|v| v.to_string()),
         boundaries,
         semantics,
-        material: None,
-        texture: None,
+        material,
+        texture,
         template: None,
         transformation_matrix: None,
     })

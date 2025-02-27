@@ -1,23 +1,29 @@
 use crate::attribute::{encode_attributes_with_schema, AttributeSchema, AttributeSchemaMethods};
 use crate::fb::{
-    CityFeature, CityFeatureArgs, CityObject, CityObjectArgs, CityObjectType, Geometry,
-    GeometryArgs, GeometryType, SemanticObject, SemanticObjectArgs, SemanticSurfaceType, Vertex,
+    Appearance, AppearanceArgs, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
+    CityObjectType, Geometry, GeometryArgs, GeometryType, Material, MaterialArgs, SemanticObject,
+    SemanticObjectArgs, SemanticSurfaceType, Texture, TextureArgs, TextureType, Vec2, Vertex,
+    WrapMode,
 };
 use crate::fb::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
 use crate::geom_encoder::encode;
-use crate::{AttributeIndex, Column, ColumnArgs};
+use crate::{
+    AttributeIndex, Column, ColumnArgs, MaterialMapping, MaterialMappingArgs, TextureFormat,
+    TextureMapping, TextureMappingArgs,
+};
 use cjseq::{
     CityJSON, CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
     GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, Transform as CjTransform,
+    ReferenceSystem as CjReferenceSystem, TextFormat as CjTextFormat, TextType as CjTextType,
+    Transform as CjTransform, WrapMode as CjWrapMode,
 };
 use flatbuffers::FlatBufferBuilder;
 use packed_rtree::NodeItem;
 use serde_json::Value;
 
-use super::geom_encoder::{GMBoundaries, GMSemantics};
+use super::geom_encoder::{GMBoundaries, GMSemantics, MaterialMapping as GMMaterialMapping};
 use super::header_writer::HeaderWriterOptions;
 
 #[derive(Debug, Clone)]
@@ -132,6 +138,7 @@ pub(super) fn to_fcb_header<'a>(
                 poc_address_country,
                 attributes: None,
                 version,
+                appearance: None, //TODO: add appearance
             },
         )
     } else {
@@ -312,6 +319,101 @@ pub(super) fn to_fcb_city_feature<'a>(
                 .collect::<Vec<_>>(),
         ),
     );
+
+    // Handle appearance if present
+    let appearance = city_feature.appearance.as_ref().map(|app| {
+        let materials = app.materials.as_ref().map(|materials| {
+            let material_offsets: Vec<_> = materials
+                .iter()
+                .map(|m| {
+                    let name = fbb.create_string(&m.name);
+                    let diffuse_color = m.diffuse_color.map(|c| fbb.create_vector(&c));
+                    let emissive_color = m.emissive_color.map(|c| fbb.create_vector(&c));
+                    let specular_color = m.specular_color.map(|c| fbb.create_vector(&c));
+                    Material::create(
+                        fbb,
+                        &MaterialArgs {
+                            name: Some(name),
+                            ambient_intensity: m.ambient_intensity,
+                            diffuse_color,
+                            emissive_color,
+                            specular_color,
+                            shininess: m.shininess,
+                            transparency: m.transparency,
+                            is_smooth: m.is_smooth,
+                        },
+                    )
+                })
+                .collect();
+            fbb.create_vector(&material_offsets)
+        });
+
+        let textures = app.textures.as_ref().map(|textures| {
+            let texture_offsets: Vec<_> = textures
+                .iter()
+                .map(|t| {
+                    let image = fbb.create_string(&t.image);
+                    let border_color = t.border_color.map(|c| fbb.create_vector(&c));
+                    let texture_format = match t.texture_format {
+                        CjTextFormat::Png => TextureFormat::PNG,
+                        CjTextFormat::Jpg => TextureFormat::JPG,
+                    };
+                    let wrap_mode = t.wrap_mode.as_ref().map(|w| match w {
+                        CjWrapMode::None => WrapMode::None,
+                        CjWrapMode::Wrap => WrapMode::Wrap,
+                        CjWrapMode::Mirror => WrapMode::Mirror,
+                        CjWrapMode::Clamp => WrapMode::Clamp,
+                        CjWrapMode::Border => WrapMode::Border,
+                    });
+                    let texture_type = t.texture_type.as_ref().map(|t| match t {
+                        CjTextType::Unknown => TextureType::Unknown,
+                        CjTextType::Specific => TextureType::Specific,
+                        CjTextType::Typical => TextureType::Typical,
+                    });
+                    Texture::create(
+                        fbb,
+                        &TextureArgs {
+                            type_: texture_format,
+                            image: Some(image),
+                            wrap_mode,
+                            texture_type,
+                            border_color,
+                        },
+                    )
+                })
+                .collect();
+            fbb.create_vector(&texture_offsets)
+        });
+
+        let vertices_texture = app.vertices_texture.as_ref().map(|vertices| {
+            fbb.create_vector(
+                &vertices
+                    .iter()
+                    .map(|v| Vec2::new(v[0], v[1]))
+                    .collect::<Vec<_>>(),
+            )
+        });
+
+        let default_theme_texture = app
+            .default_theme_texture
+            .as_ref()
+            .map(|t| fbb.create_string(t));
+        let default_theme_material = app
+            .default_theme_material
+            .as_ref()
+            .map(|m| fbb.create_string(m));
+
+        Appearance::create(
+            fbb,
+            &AppearanceArgs {
+                materials,
+                textures,
+                vertices_texture,
+                default_theme_texture,
+                default_theme_material,
+            },
+        )
+    });
     let min_x = city_feature
         .vertices
         .iter()
@@ -345,6 +447,7 @@ pub(super) fn to_fcb_city_feature<'a>(
                 id,
                 objects,
                 vertices,
+                appearance,
             },
         ),
         bbox,
@@ -542,7 +645,12 @@ pub(crate) fn to_geometry<'a>(
     let type_ = to_geom_type(&geometry.thetype);
     let lod = geometry.lod.as_ref().map(|lod| fbb.create_string(lod));
 
-    let encoded = encode(&geometry.boundaries, geometry.semantics.as_ref());
+    let encoded = encode(
+        &geometry.boundaries,
+        geometry.semantics.as_ref(),
+        geometry.texture.as_ref(),
+        geometry.material.as_ref(),
+    );
     let GMBoundaries {
         solids,
         shells,
@@ -584,6 +692,72 @@ pub(crate) fn to_geometry<'a>(
             )
         });
 
+    let material_mappings = encoded.materials.map(|m| {
+        let mappings = m
+            .iter()
+            .map(|m| match m {
+                GMMaterialMapping::Value(v) => {
+                    let theme = Some(fbb.create_string(&v.theme));
+                    let value = Some(v.value);
+                    MaterialMapping::create(
+                        fbb,
+                        &MaterialMappingArgs {
+                            theme,
+                            solids: None,
+                            shells: None,
+                            vertices: None,
+                            value,
+                        },
+                    )
+                }
+                GMMaterialMapping::Values(v) => {
+                    let theme = Some(fbb.create_string(&v.theme));
+                    let solids = Some(fbb.create_vector(&v.solids));
+                    let shells = Some(fbb.create_vector(&v.shells));
+                    let vertices = Some(fbb.create_vector(&v.vertices));
+                    let value = None;
+                    MaterialMapping::create(
+                        fbb,
+                        &MaterialMappingArgs {
+                            theme,
+                            solids,
+                            shells,
+                            vertices,
+                            value,
+                        },
+                    )
+                }
+            })
+            .collect::<Vec<_>>();
+        fbb.create_vector(&mappings)
+    });
+
+    let texture_mappings = encoded.textures.map(|t| {
+        let mappings = t
+            .iter()
+            .map(|t| {
+                let theme = Some(fbb.create_string(&t.theme));
+                let solids = Some(fbb.create_vector(&t.solids));
+                let shells = Some(fbb.create_vector(&t.shells));
+                let surfaces = Some(fbb.create_vector(&t.surfaces));
+                let strings = Some(fbb.create_vector(&t.strings));
+                let vertices = Some(fbb.create_vector(&t.vertices));
+                TextureMapping::create(
+                    fbb,
+                    &TextureMappingArgs {
+                        theme,
+                        solids,
+                        shells,
+                        surfaces,
+                        strings,
+                        vertices,
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        fbb.create_vector(&mappings)
+    });
+
     Geometry::create(
         fbb,
         &GeometryArgs {
@@ -596,6 +770,8 @@ pub(crate) fn to_geometry<'a>(
             boundaries: boundary_indices,
             semantics: semantics_values,
             semantics_objects,
+            material: material_mappings,
+            texture: texture_mappings,
         },
     )
 }
