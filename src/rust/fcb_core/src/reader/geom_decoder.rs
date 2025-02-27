@@ -1663,8 +1663,7 @@ mod tests {
             assert!(textures.contains_key("theme3"));
 
             let texture_ref = &textures["theme3"];
-            println!("texture : {:?}", texture_ref.values);
-            println!("expected: {:?}", expected);
+
             assert_eq!(texture_ref.values, expected);
         }
 
@@ -1731,15 +1730,82 @@ mod tests {
             assert!(textures.contains_key("theme4"));
 
             let texture_ref = &textures["theme4"];
-            println!("texture : {:?}", texture_ref.values);
-            println!("expected: {:?}", expected);
             assert_eq!(texture_ref.values, expected);
         }
 
-        // Test case 5: Multiple texture mappings
+        // Test case 5: CompositeSolid texture values
+        {
+            let expected: CjTextureValues = serde_json::from_value(json!([
+                [
+                    [[[0, 10, 20]], [[1, 11, null]]],
+                    [[[2, 12, 22]], [[3, null, 23]]]
+                ],
+                [[[[4, 14, 24]], [[5, 15, 25]]]]
+            ]))
+            .unwrap();
+            let mut fbb = FlatBufferBuilder::new();
+            let theme = fbb.create_string("theme5");
+
+            // Create vertices for CompositeSolid
+            let vertices = fbb.create_vector(&[
+                0,
+                10,
+                20, // First solid, first shell, first surface, first string
+                1,
+                11,
+                u32::MAX, // First solid, first shell, second surface, first string
+                2,
+                12,
+                22, // First solid, second shell, first surface, first string
+                3,
+                u32::MAX,
+                23, // First solid, second shell, second surface, first string
+                4,
+                14,
+                24, // Second solid, first shell, first surface, first string
+                5,
+                15,
+                25, // Second solid, first shell, second surface, first string
+            ]);
+
+            let strings = fbb.create_vector(&[3u32, 3u32, 3u32, 3u32, 3u32, 3u32]); // Six strings with 3 vertices each
+            let surfaces = fbb.create_vector(&[1u32, 1u32, 1u32, 1u32, 1u32, 1u32]); // Six surfaces with 1 string each
+            let shells = fbb.create_vector(&[2u32, 2u32, 2u32]); // Three shells with 2 surfaces each
+            let solids = fbb.create_vector(&[2u32, 1u32]); // Two solids with 2 and 1 shells respectively
+
+            let mapping = TextureMapping::create(
+                &mut fbb,
+                &TextureMappingArgs {
+                    theme: Some(theme),
+                    solids: Some(solids),
+                    shells: Some(shells),
+                    surfaces: Some(surfaces),
+                    strings: Some(strings),
+                    vertices: Some(vertices),
+                },
+            );
+
+            fbb.finish(mapping, None);
+            let buf = fbb.finished_data();
+            let texture_mapping = unsafe { flatbuffers::root_unchecked::<TextureMapping>(buf) };
+
+            let decoded = decode_textures(&[texture_mapping]);
+
+            assert!(decoded.is_some());
+            let textures = decoded.unwrap();
+            assert_eq!(textures.len(), 1);
+            assert!(textures.contains_key("theme5"));
+
+            let texture_ref = &textures["theme5"];
+            assert_eq!(texture_ref.values, expected);
+        }
+
+        // Test case 6: Multiple texture mappings
         {
             // First mapping
-
+            let expected: CjTextureValues = serde_json::from_value(json!([0, 10, 20])).unwrap();
+            let expected2: CjTextureValues =
+                serde_json::from_value(json!([1, 11, null])).unwrap();
             let mut fbb1 = FlatBufferBuilder::new();
             let theme1 = fbb1.create_string("winter");
             let vertices1 = fbb1.create_vector(&[0u32, 10, 20]);
@@ -1795,29 +1861,12 @@ mod tests {
             assert!(textures.contains_key("winter"));
             let texture_ref1 = &textures["winter"];
 
-            match &texture_ref1.values {
-                CjTextureValues::Indices(indices) => {
-                    assert_eq!(indices.len(), 3);
-                    assert_eq!(indices[0], Some(0));
-                    assert_eq!(indices[1], Some(10));
-                    assert_eq!(indices[2], Some(20));
-                }
-                _ => panic!("Expected Indices for winter theme"),
-            }
+            assert_eq!(texture_ref1.values, expected);
 
             // Check second mapping
             assert!(textures.contains_key("summer"));
             let texture_ref2 = &textures["summer"];
-
-            match &texture_ref2.values {
-                CjTextureValues::Indices(indices) => {
-                    assert_eq!(indices.len(), 3);
-                    assert_eq!(indices[0], Some(1));
-                    assert_eq!(indices[1], Some(11));
-                    assert_eq!(indices[2], None);
-                }
-                _ => panic!("Expected Indices for summer theme"),
-            }
+            assert_eq!(texture_ref2.values, expected2);
         }
 
         Ok(())
