@@ -51,6 +51,50 @@
     h2 {
       font-family: monospace;
     }
+
+    .query-section {
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+      padding: 15px;
+    }
+
+    .query-mode {
+      display: flex;
+      margin-bottom: 15px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 10px;
+      text-align: center;
+      cursor: pointer;
+      background-color: #f0f0f0;
+      border: 1px solid #000;
+    }
+
+    .mode-btn.active {
+      background-color: #000;
+      color: #fff;
+    }
+
+    .query-inputs {
+      display: none;
+    }
+
+    .query-inputs.active {
+      display: block;
+    }
+
+    .bbox-input-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .bbox-input-group label {
+      margin-bottom: 5px;
+      display: block;
+    }
   </style>
 </head>
 
@@ -60,13 +104,47 @@
   <!-- URL input for the FCB data -->
   <label for="url-input">enter url for httpfcbreader:</label>
   <input type="text" id="url-input" placeholder="https://example.com/data"
-    value="https://storage.googleapis.com/flatcitybuf/delft_attr.fcb" />
+    value="https://storage.googleapis.com/flatcitybuf/3dbag_100k.fcb" />
+  <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
+    value="https://storage.googleapis.com/flatcitybuf/delft_attr.fcb" /> -->
 
-  <!-- Textarea for the query JSON -->
-  <label for="query-input">enter query (as json array):</label>
-  <textarea id="query-input" rows="3">
+  <!-- Query mode selection -->
+  <div class="query-section">
+    <div class="query-mode">
+      <div id="attr-mode-btn" class="mode-btn active">attribute query</div>
+      <div id="bbox-mode-btn" class="mode-btn">bbox query</div>
+    </div>
+
+    <!-- Attribute query inputs -->
+    <div id="attr-query-inputs" class="query-inputs active">
+      <label for="query-input">enter query (as json array):</label>
+      <textarea id="query-input" rows="3">
 [["b3_h_dak_50p", "Gt", 2.0], ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"]]
-  </textarea>
+      </textarea>
+    </div>
+
+    <!-- BBox query inputs -->
+    <div id="bbox-query-inputs" class="query-inputs">
+      <div class="bbox-input-group">
+        <div>
+          <label for="min-x-input">min x:</label>
+          <input type="number" id="min-x-input" value="68989.19384501831" step="0.000001" />
+        </div>
+        <div>
+          <label for="min-y-input">min y:</label>
+          <input type="number" id="min-y-input" value="444614.3991728433" step="0.000001" />
+        </div>
+        <div>
+          <label for="max-x-input">max x:</label>
+          <input type="number" id="max-x-input" value="70685.16687543111" step="0.000001" />
+        </div>
+        <div>
+          <label for="max-y-input">max y:</label>
+          <input type="number" id="max-y-input" value="446023.6031208569" step="0.000001" />
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Button to trigger query test -->
   <button id="query-test-btn">run query test</button>
@@ -83,6 +161,7 @@
     let currentReader = null;
     let currentIter = null;
     let currentQuery = null;
+    let currentQueryMode = 'attr'; // 'attr' or 'bbox'
 
     /**
      * Appends a message to the output area.
@@ -183,23 +262,12 @@
     }
 
     /**
-     * Runs the query test by:
-     * 1. Initializing the WASM module if needed.
-     * 2. Creating a HttpFcbReader from the given URL.
-     * 3. Parsing the query JSON and constructing a WasmAttrQuery.
-     * 4. Invoking select_attr_query() and iterating over the results.
+     * Runs the attribute query test
+     * @param {string} url - The URL to the FCB data
      */
-    async function runQueryTest() {
-      log('running query test...');
-      const urlInput = document.getElementById('url-input');
+    async function runAttributeQuery(url) {
       const queryInput = document.getElementById('query-input');
-      const url = urlInput.value.trim();
       const queryStr = queryInput.value.trim();
-
-      if (!url) {
-        log('error: please enter a valid url.');
-        return;
-      }
 
       let queryArray;
       try {
@@ -209,16 +277,67 @@
         return;
       }
 
-      console.log('query array:', queryArray);
+      log(`constructing attribute query: ${JSON.stringify(queryArray)}`);
+      currentQuery = new WasmAttrQuery(queryArray);
+      log('calling select_attr_query()...');
+
+      // The select_attr_query method consumes the reader in Rust
+      // After this call, currentReader is no longer valid
+      currentIter = await currentReader.select_attr_query(currentQuery);
+      currentReader = null; // Reader is consumed by select_attr_query
+
+      await iterateFeatures(currentIter);
+    }
+
+    /**
+     * Runs the bbox query test
+     * @param {string} url - The URL to the FCB data
+     */
+    async function runBboxQuery(url) {
+      const minX = parseFloat(document.getElementById('min-x-input').value);
+      const minY = parseFloat(document.getElementById('min-y-input').value);
+      const maxX = parseFloat(document.getElementById('max-x-input').value);
+      const maxY = parseFloat(document.getElementById('max-y-input').value);
+
+      if (isNaN(minX) || isNaN(minY) || isNaN(maxX) || isNaN(maxY)) {
+        log('error: invalid bbox coordinates. please enter valid numbers.');
+        return;
+      }
+
+      log(`running bbox query with: [${minX}, ${minY}, ${maxX}, ${maxY}]`);
+
+      // Call the select_bbox method
+      currentIter = await currentReader.select_bbox(minX, minY, maxX, maxY);
+      currentReader = null; // Reader is consumed by select_bbox
+
+      await iterateFeatures(currentIter);
+    }
+
+    /**
+     * Runs the query test by:
+     * 1. Initializing the WASM module if needed.
+     * 2. Creating a HttpFcbReader from the given URL.
+     * 3. Based on the query mode, either:
+     *    a. Parsing the query JSON and constructing a WasmAttrQuery.
+     *    b. Getting the bbox coordinates and calling select_bbox.
+     * 4. Iterating over the results.
+     */
+    async function runQueryTest() {
+      log('running query test...');
+      const urlInput = document.getElementById('url-input');
+      const url = urlInput.value.trim();
+
+      if (!url) {
+        log('error: please enter a valid url.');
+        return;
+      }
 
       try {
         // Clean up any existing resources before starting a new query
         cleanupResources();
 
-        console.log('initializing wasm...');
         // Initialize WASM if needed
         await initializeWasm();
-        console.log('wasm initialized');
 
         log(`creating httpfcbreader with url: ${url}`);
         currentReader = await new HttpFcbReader(url);
@@ -227,18 +346,13 @@
         log('fetching header...');
         const header = await currentReader.header();
         log(`header: ${JSON.stringify(header, null, 2)}`);
-        console.log(`header:`, header);
 
-        log(`constructing query: ${JSON.stringify(queryArray)}`);
-        currentQuery = new WasmAttrQuery(queryArray);
-        log('calling select_attr_query()...');
-
-        // The select_attr_query method consumes the reader in Rust
-        // After this call, currentReader is no longer valid
-        currentIter = await currentReader.select_attr_query(currentQuery);
-        currentReader = null; // Reader is consumed by select_attr_query
-
-        await iterateFeatures(currentIter);
+        // Run the appropriate query based on the current mode
+        if (currentQueryMode === 'attr') {
+          await runAttributeQuery(url);
+        } else if (currentQueryMode === 'bbox') {
+          await runBboxQuery(url);
+        }
 
         log('query test completed successfully.');
       } catch (err) {
@@ -249,9 +363,37 @@
       }
     }
 
+    /**
+     * Switches between attribute and bbox query modes
+     * @param {string} mode - The mode to switch to ('attr' or 'bbox')
+     */
+    function switchQueryMode(mode) {
+      currentQueryMode = mode;
+
+      // Update UI
+      const attrModeBtn = document.getElementById('attr-mode-btn');
+      const bboxModeBtn = document.getElementById('bbox-mode-btn');
+      const attrInputs = document.getElementById('attr-query-inputs');
+      const bboxInputs = document.getElementById('bbox-query-inputs');
+
+      if (mode === 'attr') {
+        attrModeBtn.classList.add('active');
+        bboxModeBtn.classList.remove('active');
+        attrInputs.classList.add('active');
+        bboxInputs.classList.remove('active');
+      } else {
+        attrModeBtn.classList.remove('active');
+        bboxModeBtn.classList.add('active');
+        attrInputs.classList.remove('active');
+        bboxInputs.classList.add('active');
+      }
+    }
+
     // Attach the event listeners
     document.getElementById('query-test-btn').addEventListener('click', runQueryTest);
     document.getElementById('clear-output-btn').addEventListener('click', clearOutput);
+    document.getElementById('attr-mode-btn').addEventListener('click', () => switchQueryMode('attr'));
+    document.getElementById('bbox-mode-btn').addEventListener('click', () => switchQueryMode('bbox'));
 
     // Initialize WASM on page load
     initializeWasm().catch(err => {
