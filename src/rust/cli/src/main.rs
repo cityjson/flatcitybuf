@@ -167,6 +167,7 @@ fn show_info(input: PathBuf) -> Result<(), Error> {
     println!("    File size: {} MB", metadata);
     println!("  Version: {}", header.version());
     println!("  Features count: {}", header.features_count());
+    println!("  bbox: {:?}", header.geographical_extent());
 
     if let Some(title) = header.title() {
         println!("  Title: {}", title);
