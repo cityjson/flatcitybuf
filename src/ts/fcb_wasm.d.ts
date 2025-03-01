@@ -13,6 +13,7 @@ export class AsyncFeatureIter {
    */
   next(): Promise<any | undefined>;
   cur_cj_feature(): any;
+  free(): void;
 }
 /**
  * FlatCityBuf dataset HTTP reader
@@ -21,6 +22,7 @@ export class HttpFcbReader {
   free(): void;
   constructor(url: string);
   header(): any;
+  free(): void;
   /**
    * Select all features.
    */
@@ -64,6 +66,7 @@ export interface InitOutput {
   readonly __wbg_asyncfeatureiter_free: (a: number, b: number) => void;
   readonly httpfcbreader_new: (a: number, b: number) => any;
   readonly httpfcbreader_header: (a: number) => [number, number, number];
+  readonly httpfcbreader_free: (a: number) => void;
   readonly httpfcbreader_select_all: (a: number) => any;
   readonly httpfcbreader_select_bbox: (a: number, b: number, c: number, d: number, e: number) => any;
   readonly httpfcbreader_select_attr_query: (a: number, b: number) => any;
@@ -71,6 +74,7 @@ export interface InitOutput {
   readonly asyncfeatureiter_features_count: (a: number) => number;
   readonly asyncfeatureiter_next: (a: number) => any;
   readonly asyncfeatureiter_cur_cj_feature: (a: number) => [number, number, number];
+  readonly asyncfeatureiter_free: (a: number) => void;
   readonly __wbg_wasmattrquery_free: (a: number, b: number) => void;
   readonly wasmattrquery_new: (a: any) => [number, number, number];
   readonly wasmattrquery_inner: (a: number) => any;
@@ -81,8 +85,8 @@ export interface InitOutput {
   readonly __wbindgen_export_4: WebAssembly.Table;
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure333_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure400_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure332_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure399_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

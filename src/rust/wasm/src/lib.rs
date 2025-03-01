@@ -24,6 +24,7 @@ use fcb_core::{
 
 use std::fmt::Error;
 use std::result::Result;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
 
@@ -36,6 +37,9 @@ mod gloo_client;
 // The largest request we'll speculatively make.
 // If a single huge feature requires, we'll necessarily exceed this limit.
 const DEFAULT_HTTP_FETCH_SIZE: usize = 1_048_576; // 1MB
+
+// Static variable to track if logger has been initialized
+static LOGGER_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// FlatCityBuf dataset HTTP reader
 #[wasm_bindgen]
@@ -63,10 +67,14 @@ impl HttpFcbReader {
     #[wasm_bindgen(constructor, start)]
     pub async fn new(url: String) -> Result<HttpFcbReader, JsValue> {
         println!("open===: {:?}", url);
-        console_log::init_with_level(Level::Trace).expect("Failed to initialize logger");
-        log::info!("Logger initialized successfully.");
-        // console_error_panic_hook::set_once();
-        // init_with_level(log::Level::Debug).expect("Could not initialize logger");
+
+        // Only initialize the logger once
+        if !LOGGER_INITIALIZED.load(Ordering::SeqCst) {
+            if let Ok(_) = console_log::init_with_level(Level::Trace) {
+                LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
+                log::info!("Logger initialized successfully.");
+            }
+        }
 
         trace!("starting: opening http reader, reading header");
         let client = WasmHttpClient::new(&url);
@@ -161,6 +169,11 @@ impl HttpFcbReader {
         let jsval = to_value(&cj).map_err(|e| JsValue::from_str(&e.to_string()))?;
         info!("jsval: {:?}", jsval);
         Ok(jsval)
+    }
+
+    #[wasm_bindgen]
+    pub fn free(self) {
+        println!("freeing reader");
     }
 
     fn header_len(&self) -> usize {
@@ -395,6 +408,11 @@ impl AsyncFeatureIter {
         let cj_feature = to_cj_feature(self.fbs.feature(), self._header().columns())
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(to_value(&cj_feature)?)
+    }
+
+    #[wasm_bindgen]
+    pub fn free(self) {
+        println!("freeing iterator");
     }
 }
 

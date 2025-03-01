@@ -240,13 +240,13 @@ function _assertClass(instance, klass) {
 function __wbg_adapter_38(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure333_externref_shim(arg0, arg1, arg2);
+    wasm.closure332_externref_shim(arg0, arg1, arg2);
 }
 
-function __wbg_adapter_140(arg0, arg1, arg2, arg3) {
+function __wbg_adapter_142(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure400_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure399_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -322,6 +322,12 @@ export class AsyncFeatureIter {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    free() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        const ptr = this.__destroy_into_raw();
+        _assertNum(ptr);
+        wasm.asyncfeatureiter_free(ptr);
+    }
 }
 
 const HttpFcbReaderFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -371,6 +377,12 @@ export class HttpFcbReader {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
+    }
+    free() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        const ptr = this.__destroy_into_raw();
+        _assertNum(ptr);
+        wasm.httpfcbreader_free(ptr);
     }
     /**
      * Select all features.
@@ -624,7 +636,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wbg_adapter_140(a, state0.b, arg0, arg1);
+                    return __wbg_adapter_142(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -792,8 +804,8 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper4421 = function() { return logError(function (arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 334, __wbg_adapter_38);
+    imports.wbg.__wbindgen_closure_wrapper4427 = function() { return logError(function (arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 333, __wbg_adapter_38);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {

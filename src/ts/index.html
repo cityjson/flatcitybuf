@@ -6,8 +6,10 @@
   <title>WASM Module Query Test</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: monospace;
       margin: 20px;
+      color: #000;
+      background-color: #fff;
     }
 
     #output {
@@ -17,6 +19,7 @@
       border: 1px solid #ccc;
       height: 400px;
       overflow-y: scroll;
+      font-family: monospace;
     }
 
     input,
@@ -25,6 +28,8 @@
       padding: 8px;
       margin-bottom: 10px;
       font-size: 16px;
+      font-family: monospace;
+      border: 1px solid #000;
     }
 
     button {
@@ -32,6 +37,19 @@
       font-size: 16px;
       margin-top: 10px;
       margin-right: 10px;
+      background-color: #fff;
+      border: 2px solid #000;
+      font-family: monospace;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #f0f0f0;
+    }
+
+    h1,
+    h2 {
+      font-family: monospace;
     }
   </style>
 </head>
@@ -40,24 +58,31 @@
   <h1>WASM Module Query Test</h1>
 
   <!-- URL input for the FCB data -->
-  <label for="url-input">Enter URL for HttpFcbReader:</label>
+  <label for="url-input">enter url for httpfcbreader:</label>
   <input type="text" id="url-input" placeholder="https://example.com/data"
     value="https://storage.googleapis.com/flatcitybuf/delft_attr.fcb" />
 
   <!-- Textarea for the query JSON -->
-  <label for="query-input">Enter Query (as JSON array):</label>
+  <label for="query-input">enter query (as json array):</label>
   <textarea id="query-input" rows="3">
 [["b3_h_dak_50p", "Gt", 2.0], ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"]]
   </textarea>
 
   <!-- Button to trigger query test -->
-  <button id="query-test-btn">Run Query Test</button>
+  <button id="query-test-btn">run query test</button>
+  <button id="clear-output-btn">clear output</button>
 
-  <h2>Output:</h2>
+  <h2>output:</h2>
   <pre id="output"></pre>
 
   <script type="module">
     import init, { HttpFcbReader, WasmAttrQuery } from './fcb_wasm.js';
+
+    // Initialize the WASM module once at the beginning
+    let wasmInitialized = false;
+    let currentReader = null;
+    let currentIter = null;
+    let currentQuery = null;
 
     /**
      * Appends a message to the output area.
@@ -70,45 +95,109 @@
     }
 
     /**
+     * Clears the output area.
+     */
+    function clearOutput() {
+      const output = document.getElementById('output');
+      output.textContent = '';
+    }
+
+    /**
+     * Safely frees a WASM resource if it exists and has a free method
+     * @param {Object} resource - The WASM resource to free
+     * @param {string} name - Name for logging
+     */
+    function safelyFreeResource(resource, name) {
+      if (resource && typeof resource.free === 'function') {
+        try {
+          log(`freeing ${name}...`);
+          resource.free();
+          log(`${name} freed successfully`);
+        } catch (err) {
+          log(`warning: error freeing ${name}: ${err}`);
+          console.warn(`error freeing ${name}:`, err);
+        }
+      }
+    }
+
+    /**
      * Iterates through an AsyncFeatureIter, logging up to 10 features.
      * @param {AsyncFeatureIter} iter - The async feature iterator.
      */
     async function iterateFeatures(iter) {
       let count = 0;
-      while (true) {
-        log(`Fetching feature ${count + 1}...`);
-        const feature = await iter.next();
-        if (feature === undefined || feature === null) {
-          log('No more features.');
-          break;
+      try {
+        while (true) {
+          log(`fetching feature ${count + 1}...`);
+          const feature = await iter.next();
+          if (feature === undefined || feature === null) {
+            log('no more features.');
+            break;
+          }
+          log(`feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
+          count++;
+          // Limit iteration to avoid excessive logs
+          if (count >= 10) {
+            log('reached feature iteration limit (10).');
+            break;
+          }
         }
-        log(`Feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
-        count++;
-        // Limit iteration to avoid excessive logs
-        if (count >= 10) {
-          log('Reached feature iteration limit (10).');
-          break;
+        log(`total features fetched: ${count}`);
+      } catch (err) {
+        log(`error during iteration: ${err}`);
+        console.error('iteration error:', err);
+      }
+    }
+
+    /**
+     * Initializes the WASM module if not already initialized.
+     */
+    async function initializeWasm() {
+      if (!wasmInitialized) {
+        log('initializing wasm module...');
+        try {
+          await init();
+          wasmInitialized = true;
+          log('wasm module initialized successfully.');
+        } catch (err) {
+          log(`error initializing wasm module: ${err}`);
+          console.error(`error initializing wasm module:`, err);
+          throw err;
         }
       }
-      log(`Total features fetched: ${count}`);
+    }
+
+    /**
+     * Cleans up all WASM resources to prevent memory leaks
+     */
+    function cleanupResources() {
+      // Clean up in reverse order of creation
+      safelyFreeResource(currentIter, 'iterator');
+      currentIter = null;
+
+      safelyFreeResource(currentQuery, 'query');
+      currentQuery = null;
+
+      safelyFreeResource(currentReader, 'reader');
+      currentReader = null;
     }
 
     /**
      * Runs the query test by:
-     * 1. Initializing the WASM module.
+     * 1. Initializing the WASM module if needed.
      * 2. Creating a HttpFcbReader from the given URL.
      * 3. Parsing the query JSON and constructing a WasmAttrQuery.
      * 4. Invoking select_attr_query() and iterating over the results.
      */
     async function runQueryTest() {
-      console.log('Running query test...');
+      log('running query test...');
       const urlInput = document.getElementById('url-input');
       const queryInput = document.getElementById('query-input');
       const url = urlInput.value.trim();
       const queryStr = queryInput.value.trim();
 
       if (!url) {
-        alert('Please enter a valid URL.');
+        log('error: please enter a valid url.');
         return;
       }
 
@@ -116,47 +205,61 @@
       try {
         queryArray = JSON.parse(queryStr);
       } catch (e) {
-        alert('Invalid JSON for query.');
+        log(`error: invalid json for query: ${e.message}`);
         return;
       }
 
-      console.log('Query array:', queryArray);
-
-      log('Initializing WASM module...');
-      try {
-        await init();
-        log('WASM module initialized successfully.');
-      } catch (err) {
-        log(`Error initializing WASM module: ${err}`);
-        console.error(err);
-        return;
-      }
+      console.log('query array:', queryArray);
 
       try {
-        log(`Creating HttpFcbReader with URL: ${url}`);
-        const reader = await new HttpFcbReader(url);
-        log('HttpFcbReader instance created.');
+        // Clean up any existing resources before starting a new query
+        cleanupResources();
 
-        log('Fetching header...');
-        const header = await reader.header();
-        console.log(`Header: ${JSON.stringify(header, null, 2)}`);
+        console.log('initializing wasm...');
+        // Initialize WASM if needed
+        await initializeWasm();
+        console.log('wasm initialized');
 
-        log(`Constructing query: ${JSON.stringify(queryArray)}`);
-        const attrQuery = new WasmAttrQuery(queryArray);
-        console.log(`AttrQuery: ${JSON.stringify(attrQuery, null, 2)}`);
-        log('Calling select_attr_query()...');
-        const queryIter = await reader.select_attr_query(attrQuery);
+        log(`creating httpfcbreader with url: ${url}`);
+        currentReader = await new HttpFcbReader(url);
+        log('httpfcbreader instance created.');
 
-        await iterateFeatures(queryIter);
-        log('Query test completed successfully.');
+        log('fetching header...');
+        const header = await currentReader.header();
+        log(`header: ${JSON.stringify(header, null, 2)}`);
+        console.log(`header:`, header);
+
+        log(`constructing query: ${JSON.stringify(queryArray)}`);
+        currentQuery = new WasmAttrQuery(queryArray);
+        log('calling select_attr_query()...');
+
+        // The select_attr_query method consumes the reader in Rust
+        // After this call, currentReader is no longer valid
+        currentIter = await currentReader.select_attr_query(currentQuery);
+        currentReader = null; // Reader is consumed by select_attr_query
+
+        await iterateFeatures(currentIter);
+
+        log('query test completed successfully.');
       } catch (err) {
-        log(`Error during query test: ${err}`);
-        console.error(err);
+        log(`error during query test: ${err}`);
+        console.error('query test error:', err);
+        // Clean up resources even if there was an error
+        cleanupResources();
       }
     }
 
-    // Attach the event listener to the "Run Query Test" button
+    // Attach the event listeners
     document.getElementById('query-test-btn').addEventListener('click', runQueryTest);
+    document.getElementById('clear-output-btn').addEventListener('click', clearOutput);
+
+    // Initialize WASM on page load
+    initializeWasm().catch(err => {
+      console.error('Failed to initialize WASM:', err);
+    });
+
+    // Clean up resources when the page is unloaded
+    window.addEventListener('beforeunload', cleanupResources);
   </script>
 </body>
 
