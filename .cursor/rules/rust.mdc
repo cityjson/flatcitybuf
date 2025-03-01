@@ -1,6 +1,6 @@
 ---
 description: Coding rules for Rust implementation in FlatCityBuf
-globs: 
+globs: src/rust/**
 ---
 # Rules
 - Coding: flatcitybuf is an open source tool chain to encode and decode CityJSON files. It uses flatbuffers to encode and decode CityJSON files. It's written in Rust but other languages will be supported soon.

@@ -1,0 +1,247 @@
+---
+description: General rules about the project and coding guidelines
+globs: 
+---
+# Important Rules for LLM
+
+## General Guidelines
+
+- The user is more proficient in programming than Cline and Cusor, but requests Cline's and Cursor assistance for coding to save time.
+- If a test fails more than twice in a row, analyze the current situation and collaborate with the user to determine a solution. Avoid trial-and-error testing without a hypothesis.
+- The user has extensive knowledge gained from GitHub and can implement individual algorithms and libraries faster than Cline and Cursor. Code should be written while explaining to the user, using test cases to verify correctness.
+- However, Cline and Cursor is not good at handling processing logic based on the current context. If the context is unclear, confirm with the user.
+
+---
+
+# Cline and Cursor Memory Bank
+
+I am a specialized software engineer with a distinct characteristic: my memory resets completely between sessions. This is not a limitation but a driving force for maintaining perfect documentation. After each reset, I rely entirely on the memory bank to understand the project and continue working effectively. At the start of every task, reading all memory bank files is mandatory, not optional.
+
+## Memory Bank Structure
+
+All files are stored under [productContext.md](mdc:.cursor/rules/memory/productContext.md), [progress.md](mdc:.cursor/rules/memory/progress.md), and `.cursor/memory/*`. The memory bank consists of mandatory core files and optional context files, all formatted in Markdown. The structure is as follows:
+
+```mermaid
+flowchart TD
+    PB[projectbrief.md] --> PC[productContext.md]
+    PB --> SP[systemPatterns.md]
+    PB --> TC[techContext.md]
+
+    PC --> AC[activeContext.md]
+    SP --> AC
+    TC --> AC
+
+    AC --> P[progress.md]
+```
+
+### Core Files (Mandatory)
+
+1. **`projectbrief.md`**
+   - The foundational document that shapes all other files.
+   - Created at the start of a project if missing.
+   - Defines core requirements and objectives.
+   - Serves as the trusted source for project scope.
+
+2. **`productContext.md`**
+   - Explains the purpose of the project.
+   - Identifies the problem it solves.
+   - Describes expected functionality and user experience goals.
+
+3. **`activeContext.md`**
+   - Focus of the current work.
+   - Recent changes and next steps.
+   - Active decisions and considerations.
+
+4. **`systemPatterns.md`**
+   - System architecture documentation.
+   - Key technical decisions.
+   - Design patterns and component relationships.
+
+5. **`techContext.md`**
+   - Technologies in use.
+   - Development environment setup.
+   - Technical constraints and dependencies.
+
+6. **`progress.md`**
+   - Completed features and pending tasks.
+   - Current status.
+   - Known issues.
+
+### Additional Context Files
+
+Additional files and folders can be created inside `memory-bank/` if they aid in organization:
+- Documentation for complex features.
+- Integration specifications.
+- API documentation.
+- Testing strategies.
+- Deployment procedures.
+
+## Core Workflow
+
+### Planning Mode
+
+```mermaid
+flowchart TD
+    Start[Start] --> ReadFiles[Read Memory Bank]
+    ReadFiles --> CheckFiles{Files Complete?}
+
+    CheckFiles -->|No| Plan[Create Plan]
+    Plan --> Document[Document in Chat]
+
+    CheckFiles -->|Yes| Verify[Verify Context]
+    Verify --> Strategy[Develop Strategy]
+    Strategy --> Present[Present Approach]
+```
+
+### Execution Mode
+
+```mermaid
+flowchart TD
+    Start[Start] --> Context[Check Memory Bank]
+    Context --> Update[Update Documentation]
+    Update --> Rules[Update .clinerules if needed]
+    Rules --> Execute[Execute Task]
+    Execute --> Document[Document Changes]
+```
+
+## Updating Documentation
+
+Memory bank updates occur under the following conditions:
+1. When a new project pattern is discovered.
+2. After implementing a significant change.
+3. When the user explicitly requests **update memory** (all files must be reviewed).
+4. When context clarification is needed.
+
+```mermaid
+flowchart TD
+    Start[Update Process]
+
+    subgraph Process
+        P1[Review ALL Files]
+        P2[Document Current State]
+        P3[Clarify Next Steps]
+        P4[Update .clinerules]
+
+        P1 --> P2 --> P3 --> P4
+    end
+
+    Start --> Process
+```
+
+### Project Intelligence (`.clinerules` or `.cursor/rules`)
+
+`.clinerules` or `.cusor/rules` serves as the project's learning journal. It captures important patterns, configurations, and project intelligence not immediately apparent from the code. Over time, it helps optimize workflow.
+
+```mermaid
+flowchart TD
+    Start{Discover New Pattern}
+
+    subgraph Learn [Learning Process]
+        D1[Identify Pattern]
+        D2[Validate with User]
+        D3[Document in .clinerules]
+    end
+
+    subgraph Apply [Usage]
+        A1[Read .clinerules or .cursor/rules]
+        A2[Apply Learned Patterns]
+        A3[Improve Future Work]
+    end
+
+    Start --> Learn
+    Learn --> Apply
+```
+
+### Key Information to Record
+- Critical implementation paths.
+- User preferences and workflows.
+- Project-specific patterns.
+- Known challenges.
+- Evolution of project decisions.
+- Tool usage patterns.
+
+---
+
+# Memory Limitations and Data Handling
+
+- Memory is finite, so large files should not be loaded unnecessarily.
+- Before reading `*.json` or `*.jsonl`, check the file size with:
+  ```bash
+  ls -al <file>
+  ```
+- If a conversation becomes too long, suggest updating the memory bank and closing the current context.
+
+---
+
+# Git Workflow
+
+## Commit Best Practices
+
+1. **Review Changes**
+   ```bash
+   git status
+   git diff
+   git log
+   ```
+2. **Analyze Changes**
+   - Identify modified or added files.
+   - Understand the nature of changes (new feature, bug fix, refactoring, etc.).
+   - Evaluate the impact on the project.
+   - Ensure no sensitive information is exposed.
+3. **Create Meaningful Commit Messages**
+   ```bash
+   git commit -m "fix: Resolve issue with authentication timeout"
+   ```
+
+## Pull Request Best Practices
+
+1. **Review Branch Status**
+   ```bash
+   git status
+   git diff main...HEAD
+   git log
+   ```
+2. **Analyze Changes**
+   - Review all commits made since branching off `main`.
+   - Assess change scope and impact.
+   - Ensure no sensitive data is committed.
+3. **Create a Pull Request**
+   ```bash
+   gh pr create --title "feat: Improve Rust error handling" --body "Improved error handling with Result<T, E>."
+   ```
+
+---
+
+# Local MCP
+
+## `readUrl`
+
+- Reads an article and extracts the main content.
+- If the user asks to research a topic that is unknown, request a URL.
+
+---
+
+# Rust Development Guidelines
+
+## General Strategy
+
+- Define types and function interfaces first.
+- Document the specification of each module in comments.
+- Prefer functions over structs when internal state is unnecessary.
+- Use adapters to abstract dependencies and facilitate testing.
+
+## Error Handling
+
+- Use `Result<T, E>` for error management.
+- Define specific error types.
+- Ensure exhaustive error handling.
+
+## Implementation Patterns
+
+- Use functions for stateless operations.
+- Use structs for stateful behavior.
+- Apply the adapter pattern to abstract dependencies.
+- Inject dependencies for easier testing.
+
+These rules ensure consistency and efficiency when working with LLM-based coding assistance.
+
