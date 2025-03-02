@@ -245,12 +245,42 @@ geometry boundaries in flatcitybuf use a hierarchical indexing approach:
 boundaries: [v1, v2, v3, v4, v5, v6, ...] // vertex indices
 ```
 
-this structure allows for efficient representation of complex 3d geometries:
+the encoding strategy follows a dimensional hierarchy:
+
+- **indices/boundaries**: a flattened array of vertex indices. each element is an index pointing to a vertex in the vertices array.
+
+- **strings**: an array where each element represents the number of vertices in a string (line segment). the length of this array indicates the total number of strings in the geometry. for example, `[3, 4]` means there are 2 strings, the first with 3 vertices and the second with 4 vertices.
+
+- **surfaces**: follows the same strategy as strings. each element represents the number of strings that form a surface. the length of the array indicates the total number of surfaces. for example, `[1, 2]` means there are 2 surfaces, the first consisting of 1 string and the second consisting of 2 strings.
+
+- **shells**: follows the same pattern. each element represents the number of surfaces in a shell. the length of the array indicates the total number of shells.
+
+- **solids**: each element represents the number of shells in a solid. the length of the array indicates the total number of solids.
+
+this hierarchical structure allows for efficient representation of complex 3d geometries:
 - **multipoint**: only boundaries array is used
 - **multilinestring**: strings and boundaries arrays are used
 - **multisurface/compositesurface**: surfaces, strings, and boundaries arrays are used
 - **solid**: shells, surfaces, strings, and boundaries arrays are used
 - **multisolid/compositesolid**: all arrays are used
+
+#### example encoding
+
+for a simple triangle:
+```
+boundaries: [0, 1, 2]  // indices of 3 vertices
+strings: [3]           // 1 string with 3 vertices
+surfaces: [1]          // 1 surface with 1 string
+```
+
+for a cube (6 faces, each a quadrilateral):
+```
+boundaries: [0, 1, 2, 3, 0, 4, 5, 1, ...]  // indices of vertices for each face
+strings: [4, 4, 4, 4, 4, 4]                // 6 strings, each with 4 vertices
+surfaces: [1, 1, 1, 1, 1, 1]               // 6 surfaces, each with 1 string
+shells: [6]                                // 1 shell with 6 surfaces
+solids: [1]                                // 1 solid with 1 shell
+```
 
 ### semantics encoding
 
