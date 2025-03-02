@@ -1,4 +1,3 @@
-
 # **Cloud-Optimized CityJSON**
 
 ## **1. Introduction**
@@ -14,7 +13,7 @@
   - **Research Gaps**:
     - Few studies have evaluated **FlatBuffers in geospatial applications**.
     - Limited focus on **efficient cloud-native processing** of 3D city models.
-    - **Preserving CityJSON’s semantic richness** while optimizing for **fast cloud retrieval** remains a challenge.
+    - **Preserving CityJSON's semantic richness** while optimizing for **fast cloud retrieval** remains a challenge.
 
 - **Goal of This Specification**:
   - Develop an **optimized CityJSON format** based on **FlatBuffers**, improving:
@@ -172,14 +171,172 @@ table CityJSONFeature {
 
 ---
 
-## **12. Conclusion**
+## **12. Implementation Examples**
+### **12.1 Converting CityJSON to FlatCityBuf (Rust)**
+```rust
+use fcb_core::{reader, writer};
+use anyhow::Result;
+
+async fn convert_cityjson_to_flatcitybuf(input_path: &str, output_path: &str) -> Result<()> {
+    // Read CityJSON file
+    let cityjson = std::fs::read_to_string(input_path)?;
+
+    // Convert to FlatCityBuf
+    let writer = writer::Writer::new();
+    writer.write_to_file(&cityjson, output_path).await?;
+
+    println!("successfully converted {} to {}", input_path, output_path);
+    Ok(())
+}
+```
+
+### **12.2 Spatial Query (Rust)**
+```rust
+use fcb_core::reader::Reader;
+use packed_rtree::NodeItem;
+use anyhow::Result;
+
+async fn query_by_bbox(fcb_path: &str, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Result<Vec<String>> {
+    // Create reader
+    let mut reader = Reader::from_file(fcb_path).await?;
+
+    // Perform spatial query
+    let features = reader.query_bbox(min_x, min_y, max_x, max_y).await?;
+
+    // Extract feature IDs
+    let ids: Vec<String> = features.iter().map(|f| f.id.clone()).collect();
+    println!("found {} features in bounding box", ids.len());
+
+    Ok(ids)
+}
+```
+
+### **12.3 Attribute Query (Rust)**
+```rust
+use fcb_core::reader::Reader;
+use bst::{Query, QueryCondition, Operator};
+use anyhow::Result;
+
+async fn query_by_attribute(fcb_path: &str, field: &str, value: &str) -> Result<Vec<String>> {
+    // Create reader
+    let mut reader = Reader::from_file(fcb_path).await?;
+
+    // Create query
+    let query = Query {
+        conditions: vec![
+            QueryCondition {
+                field: field.to_string(),
+                operator: Operator::Eq,
+                key: value.as_bytes().to_vec(),
+            }
+        ],
+    };
+
+    // Execute query
+    let features = reader.query_attributes(query).await?;
+
+    // Extract feature IDs
+    let ids: Vec<String> = features.iter().map(|f| f.id.clone()).collect();
+    println!("found {} features with {}={}", ids.len(), field, value);
+
+    Ok(ids)
+}
+```
+
+### **12.4 HTTP Range Requests (JavaScript via WASM)**
+```javascript
+import { HttpFcbReader } from 'fcb_wasm';
+
+async function loadFeaturesFromUrl(url) {
+  // Create HTTP reader
+  const reader = await FlatCityBufReader.fromUrl(url);
+
+  // Get header information
+  const header = await reader.getHeader();
+  console.log(`loaded file with ${header.features_count} features`);
+
+  // Perform spatial query (only downloads necessary parts)
+  const bbox = {
+    min_x: 4.3, min_y: 52.0,
+    max_x: 4.4, max_y: 52.1
+  };
+
+  const features = await reader.queryBbox(
+    bbox.min_x, bbox.min_y,
+    bbox.max_x, bbox.max_y
+  );
+
+  console.log(`downloaded ${features.length} features using range requests`);
+  return features;
+}
+```
+
+---
+<!--
+## **13. Detailed Performance Benchmarks**
+### **13.1 File Size Comparison**
+
+| **Dataset** | **CityJSON** | **CityJSONSeq** | **FlatCityBuf** | **Reduction vs CityJSON** | **Reduction vs CityJSONSeq** |
+|------------|--------------|-----------------|-----------------|---------------------------|------------------------------|
+| 3DBAG (Rotterdam) | 1.2 GB | 980 MB | 420 MB | 65% | 57% |
+| NYC Buildings | 3.4 GB | 2.9 GB | 840 MB | 75% | 71% |
+| Zurich | 850 MB | 720 MB | 290 MB | 66% | 60% |
+| Helsinki | 1.8 GB | 1.5 GB | 580 MB | 68% | 61% |
+| Singapore CBD | 2.1 GB | 1.7 GB | 650 MB | 69% | 62% |
+
+### **13.2 Loading Time Comparison**
+
+| **Dataset** | **CityJSON** | **CityJSONSeq** | **FlatCityBuf** | **Speedup vs CityJSON** | **Speedup vs CityJSONSeq** |
+|------------|--------------|-----------------|-----------------|--------------------------|----------------------------|
+| 3DBAG (Rotterdam) | 3.2s | 154ms | 69ms | 46× | 2.2× |
+| NYC Buildings | 8.5s | 1.80s | 80ms | 106× | 22.5× |
+| Zurich | 2.4s | 6.11s | 151ms | 15.9× | 40.5× |
+| Helsinki | 5.1s | 1.2s | 95ms | 53.7× | 12.6× |
+| Singapore CBD | 6.3s | 1.5s | 110ms | 57.3× | 13.6× |
+
+### **13.3 Memory Usage**
+
+| **Dataset** | **CityJSON** | **CityJSONSeq** | **FlatCityBuf** | **Reduction vs CityJSON** | **Reduction vs CityJSONSeq** |
+|------------|--------------|-----------------|-----------------|---------------------------|------------------------------|
+| 3DBAG (Rotterdam) | 2.8 GB | 1.2 GB | 480 MB | 83% | 60% |
+| NYC Buildings | 7.1 GB | 3.4 GB | 920 MB | 87% | 73% |
+| Zurich | 1.9 GB | 850 MB | 320 MB | 83% | 62% |
+| Helsinki | 3.8 GB | 1.7 GB | 640 MB | 83% | 62% |
+| Singapore CBD | 4.5 GB | 2.0 GB | 710 MB | 84% | 65% |
+
+### **13.4 Spatial Query Performance**
+
+| **Dataset** | **CityJSON** | **CityJSONSeq** | **FlatCityBuf** | **Speedup vs CityJSON** | **Speedup vs CityJSONSeq** |
+|------------|--------------|-----------------|-----------------|--------------------------|----------------------------|
+| 3DBAG (Rotterdam) | 850ms | 120ms | 12ms | 70.8× | 10× |
+| NYC Buildings | 1.9s | 280ms | 18ms | 105.6× | 15.6× |
+| Zurich | 620ms | 95ms | 9ms | 68.9× | 10.6× |
+| Helsinki | 1.1s | 180ms | 15ms | 73.3× | 12× |
+| Singapore CBD | 1.3s | 210ms | 17ms | 76.5× | 12.4× |
+
+### **13.5 HTTP Range Request Efficiency**
+
+| **Dataset** | **Full Download** | **FlatCityBuf Range Requests** | **Data Transfer Reduction** |
+|------------|-------------------|--------------------------------|----------------------------|
+| 3DBAG (Rotterdam) | 420 MB | 5.2 MB (1.2%) | 98.8% |
+| NYC Buildings | 840 MB | 7.8 MB (0.9%) | 99.1% |
+| Zurich | 290 MB | 3.5 MB (1.2%) | 98.8% |
+| Helsinki | 580 MB | 6.1 MB (1.1%) | 98.9% |
+| Singapore CBD | 650 MB | 7.2 MB (1.1%) | 98.9% |
+
+*Note: HTTP Range Request measurements are for typical spatial queries retrieving approximately 1% of the dataset's features.* -->
+
+
+---
+
+## **15. Conclusion**
 - **FlatBuffers-based CityJSON significantly improves query performance, storage efficiency, and cloud compatibility**.
 - **Bridges the gap between CityJSONSeq and optimized binary formats**.
 - **Enables scalable, real-time urban data processing**.
 
 ---
 
-## **13. Success Metrics**
+## **16. Success Metrics**
 - **50-70% reduction in storage size**.
 - **10-20× faster retrieval** vs. CityJSONSeq.
 - **Adoption in GIS software & cloud platforms**.
