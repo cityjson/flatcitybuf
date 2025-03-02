@@ -245,14 +245,18 @@ async fn query_by_attribute(fcb_path: &str, field: &str, value: &str) -> Result<
 
 ### **12.4 HTTP Range Requests (JavaScript via WASM)**
 ```javascript
-import { HttpFcbReader } from 'fcb_wasm';
+import init, { HttpFcbReader, WasmAttrQuery } from './fcb_wasm.js';
 
 async function loadFeaturesFromUrl(url) {
+  // Initialize WASM module
+  await init();
+
   // Create HTTP reader
-  const reader = await FlatCityBufReader.fromUrl(url);
+  const reader = await new HttpFcbReader(url);
+  console.log('httpfcbreader instance created.');
 
   // Get header information
-  const header = await reader.getHeader();
+  const header = await reader.header();
   console.log(`loaded file with ${header.features_count} features`);
 
   // Perform spatial query (only downloads necessary parts)
@@ -261,10 +265,18 @@ async function loadFeaturesFromUrl(url) {
     max_x: 4.4, max_y: 52.1
   };
 
-  const features = await reader.queryBbox(
+  // Call the select_bbox method
+  const iter = await reader.select_bbox(
     bbox.min_x, bbox.min_y,
     bbox.max_x, bbox.max_y
   );
+
+  // Iterate through features
+  let features = [];
+  let feature;
+  while ((feature = await iter.next()) !== null) {
+    features.push(feature);
+  }
 
   console.log(`downloaded ${features.length} features using range requests`);
   return features;
