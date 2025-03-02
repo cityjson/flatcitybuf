@@ -81,67 +81,130 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 
 1. **Streaming Processing for Attribute Index**
    - Current approach loads all attributes at once; needs optimization for streaming access.
+   - Implement progressive loading of attribute indices to reduce memory footprint.
+   - Develop a buffering strategy that only keeps frequently accessed indices in memory.
+   - Research efficient serialization formats for attribute indices that support partial loading.
 
 2. **Performance Optimization for HTTP Fetching**
    - Improve fetching efficiency, reducing per-feature requests for batch retrieval.
+   - Implement intelligent batching of nearby features based on spatial proximity.
+   - Add client-side caching to avoid redundant requests for previously fetched data.
+
 
 3. **Performance Benchmarking for Large Datasets**
    - Evaluate large-scale data retrieval and identify performance bottlenecks.
+   - Develop standardized benchmark suite for comparing with other formats.
+   - Test with datasets exceeding 10GB to validate scalability claims.
+   - Measure memory usage patterns during complex spatial and attribute queries.
+   - Profile CPU and I/O usage to identify optimization opportunities.
 
 4. **Support for Additional Encoding Formats**
-   - Investigate formats like Parquet, Arrow, and Cap’n Proto for better efficiency.
+   - Investigate formats like Parquet, Arrow, and Cap'n Proto for better efficiency.
+   - Benchmark alternative formats against FlatBuffers for specific use cases.
+   - Develop adapters for seamless conversion between encoding formats.
+   - Research compression techniques specific to 3D city model data.
+   - Evaluate trade-offs between encoding complexity and query performance.
 
 5. **Multi-Language Implementations**
    - Expand implementation to other languages such as Python and C++.
+   - Ensure consistent API design across language implementations.
+   - Develop language-specific optimizations while maintaining format compatibility.
+   - Create comprehensive test suites for cross-language validation.
+   - Publish language-specific packages to relevant package repositories.
 
 6. **Web Viewer Integration**
    - Enhance the WebAssembly demo by integrating Three.js for visualization.
+   - Implement level-of-detail rendering for efficient visualization of large models.
+   - Add support for texture and material rendering in web environments.
+   - Develop UI components for spatial and attribute filtering.
+   - Optimize WebGL rendering for mobile devices.
 
 7. **Browser-Based Conversion to Other Formats**
    - Enable conversion from FlatCityBuf to OBJ, PLY, GLB, and GLTF.
+   - Implement streaming conversion to avoid memory limitations in browsers.
+   - Add support for selective export of filtered subsets.
+   - Develop preview capabilities before full conversion.
+   - Ensure compatibility with common 3D modeling and GIS software.
 
 8. **Improvement in Testing Strategy**
    - Introduce property-based testing, expand edge case coverage, and improve test automation.
+   - Implement fuzzing tests to identify potential vulnerabilities or parsing issues.
+   - Develop performance regression tests to prevent slowdowns in future versions.
+   - Create integration tests with real-world GIS software.
+   - Implement continuous benchmarking in CI pipeline.
 
 9. **Documentation Enhancements**
    - Improve API documentation, add more usage examples, and create tutorials.
+   - Develop interactive documentation with live code examples.
+   - Create video tutorials for common workflows.
+   - Document performance optimization strategies for different use cases.
+   - Provide migration guides for users of other formats.
 
 10. **CI/CD Pipeline Strengthening**
     - Automate dependency validation, integrate performance tests, and optimize deployment processes.
+    - Implement cross-platform testing on Windows, macOS, and Linux.
+    - Add security scanning for dependencies and generated code.
+    - Automate release processes including changelog generation.
+    - Implement canary releases for early testing of new features.
 
 ### Known Issues
 
 1. **Testing Limitations**
-   - Platform-dependent test execution issues.
-   - Incomplete test coverage in certain modules.
+   - Platform-dependent test execution issues, particularly on Windows systems.
+   - Lack of automated performance regression tests.
+   - Inconsistent test behavior with large datasets (>5GB).
+   - Limited integration testing with third-party GIS software.
 
 2. **CI/CD Pipeline Gaps**
-   - Manual dependency validation.
-   - Unstable test performance in CI environments.
+   - Manual dependency validation process prone to human error.
+   - Lack of automated benchmarking in the CI pipeline.
+   - Incomplete cross-platform testing, especially for WebAssembly builds.
+   - Missing security scanning for dependencies.
 
 3. **Documentation Deficiencies**
-   - Incomplete API documentation.
-   - Lack of design pattern guidelines.
+   - Incomplete API documentation, particularly for advanced features.
+   - Lack of design pattern guidelines for extending the library.
+   - Missing examples for integration with popular GIS software.
+   - Limited documentation for performance optimization techniques.
+
+4. **Performance Bottlenecks**
+   - Suboptimal memory usage during attribute indexing of large datasets.
+   - Inefficient HTTP request patterns when querying dispersed features.
 
 ## Next Milestones
 
-### Milestone 1
-- Optimize Attribute Index for streaming.
-- Improve batch retrieval for HTTP Fetching.
+### Milestone 1: Core Optimization
+- Optimize Attribute Index for streaming with progressive loading.
+- Implement intelligent batching for HTTP Range Requests.
+- Complete comprehensive benchmarking suite for large datasets.
+- Address critical performance bottlenecks identified in profiling.
+- Enhance documentation with performance optimization guidelines.
 
-### Milestone 2
-- Conduct performance benchmarking on large datasets.
-- Introduce additional encoding formats (Parquet, Arrow, etc.).
+### Milestone 2: Format Extensions
+- Evaluate and implement support for Arrow and Parquet encoding.
+- Develop compression strategies for geometry and attribute data.
+- Create adapters for seamless format conversion.
+- Implement advanced spatial indexing techniques.
+- Enhance CI/CD pipeline with automated performance testing.
 
-### Milestone 3
-- Expand implementations to Python and C++.
-- Implement Three.js-based Web Viewer.
+### Milestone 3: Language Support
+- Release Python implementation.
+- Develop C++ implementation.
+- Create JavaScript/TypeScript SDK for browser environments.
+- Ensure cross-language test compatibility.
+- Publish packages to language-specific repositories.
 
-### Milestone 4
-- Strengthen CI/CD workflows.
-- Improve browser-based format conversions.
+### Milestone 4: Visualization & Integration
+- Implement Three.js-based Web Viewer with LOD support.
+- Develop browser-based conversion tools for common 3D formats.
+- Create plugins for QGIS, ArcGIS, and other GIS software.
+- Implement texture and material rendering in web environments.
+- Release comprehensive integration examples for third-party tools.
+
 
 ## Recent Updates
 - Integrated spatial indexing and binary search tree.
 - Added WebAssembly support for FlatCityBuf.
 - Improved texture handling in CityJSON encoding.
+- Completed initial benchmarking against CityJSON and CityJSONSeq.
+- Created preliminary documentation for the file format specification.
