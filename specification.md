@@ -170,44 +170,84 @@ for 3d filtering, additional z-coordinate filtering must be performed after retr
 
 ## attribute indexing
 
-flatcitybuf implements binary search trees (bst) for efficient attribute queries:
+flatcitybuf implements a sorted array-based index for efficient attribute queries:
 
 ### encoding structure
 
-for each indexed attribute, a binary search tree is stored:
+for each indexed attribute, a sorted index is stored:
 
 ```
 ┌─────────────────┐
-│ attribute index │ 2 bytes uint16 (column index)
+│ entry count     │ 8 bytes uint64 (number of key-value entries)
 ├─────────────────┤
-│ node count      │ 4 bytes uint32
-├─────────────────┤
-│ nodes           │ array of bst nodes
+│ entries         │ array of key-value entries
 └─────────────────┘
 ```
 
-each bst node contains:
-- **key**: the attribute value (variable size based on type)
-- **left_child**: index of left child node
-- **right_child**: index of right child node
-- **feature_offsets**: array of byte offsets to features with this value
+each key-value entry contains:
+- **key length**: 8 bytes uint64 (length of serialized key)
+- **key**: the attribute value serialized as bytes (variable size based on type)
+- **offsets count**: 8 bytes uint64 (number of feature offsets)
+- **offsets**: array of 8-byte uint64 values pointing to features
+
+the index is sorted by key value to enable efficient binary search operations.
 
 ### serialization by type
 
-different attribute types are serialized differently:
-- **numeric types**: stored in native binary format
-- **string**: length-prefixed utf-8 bytes
-- **boolean**: single byte (0 or 1)
-- **datetime**: iso 8601 string representation
-- **json**: length-prefixed json string
+different attribute types are serialized differently using the `ByteSerializable` trait:
+- **integers**: stored in little-endian binary format (i8, i16, i32, i64, u8, u16, u32, u64)
+- **floating point**: wrapped in `OrderedFloat` for proper ordering and stored in little-endian format (f32, f64)
+- **string**: utf-8 bytes without length prefix (length is stored separately)
+- **boolean**: single byte (1 for true, 0 for false)
+- **datetime**: 12 bytes (8 bytes for seconds since epoch + 4 bytes for nanoseconds)
+- **date**: 12 bytes (4 bytes for year, 4 bytes for month, 4 bytes for day)
 
 ### query algorithm
 
-to query the attribute index:
-1. locate the bst for the target attribute
-2. traverse the tree comparing the query value with node keys
-3. for range queries, collect all matching nodes
-4. return the feature offsets for direct access
+the index supports several query operations:
+
+1. **exact match**: binary search to find the exact key
+   ```rust
+   binary_search_by_key(&key, |kv| &kv.key)
+   ```
+
+2. **range queries**: find all keys in a given range
+   ```rust
+   // Find starting index using binary search
+   // Iterate through entries until upper bound is reached
+   ```
+
+3. **comparison operators**:
+   - **equals (=)**: exact match using binary search
+   - **not equals (!=)**: all offsets minus those matching the key
+   - **greater than (>)**: range query from key (exclusive) to end
+   - **greater than or equal (>=)**: range query from key (inclusive) to end
+   - **less than (<)**: range query from start to key (exclusive)
+   - **less than or equal (<=)**: range query from start to key (inclusive)
+
+4. **compound queries**:
+   - multiple conditions are combined using set intersection
+   - each condition produces a set of matching offsets
+   - the final result is the intersection of all sets
+
+### multi-index system
+
+flatcitybuf uses a `MultiIndex` that maps field names to their corresponding indices:
+
+```rust
+pub struct MultiIndex {
+    pub indices: HashMap<String, Box<dyn AnyIndex>>,
+}
+```
+
+this allows queries to reference fields by name and supports heterogeneous index types for different attribute types.
+
+### http optimization
+
+when used with http range requests, the attribute index enables efficient filtering:
+1. query the attribute index to find matching feature offsets
+2. batch nearby offsets to minimize http requests
+3. fetch only the features that match the query criteria
 
 ## boundaries, semantics, and appearances encoding
 
@@ -303,7 +343,7 @@ flatcitybuf is designed for efficient access over http using range requests, all
 
 ### range request workflow
 
-1. **header retrieval**: 
+1. **header retrieval**:
    - client first fetches the magic bytes (4 bytes)
    - then fetches the header size (4 bytes)
    - finally fetches the header (variable size)
@@ -329,7 +369,7 @@ flatcitybuf is designed for efficient access over http using range requests, all
 
 flatcitybuf implements several optimizations for http access:
 
-1. **request batching**: 
+1. **request batching**:
    - nearby features are grouped into batches to reduce the number of http requests
    - a configurable threshold determines when to combine requests vs. making separate requests
    - this balances between minimizing requests and avoiding excessive data transfer
