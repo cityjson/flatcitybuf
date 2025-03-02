@@ -90,27 +90,28 @@ the schema design follows several key principles:
 
 a flatcitybuf file consists of the following sections:
 
-```
-┌─────────────────┐
-│ magic bytes     │ 4 bytes identifier "fcb\0"
-├─────────────────┤
-│ header size     │ 4 bytes uint32 (size of header in bytes)
-├─────────────────┤
-│ header          │ flatbuffer-encoded header
-├─────────────────┤
-│ r-tree index    │ spatial index for city objects
-├─────────────────┤
-│ attribute index │ binary search trees for attribute queries
-├─────────────────┤
-│ features        │ flatbuffer-encoded city features
-└─────────────────┘
+```mermaid
+graph TD
+    A[FlatCityBuf File] --> B[Magic Bytes]
+    A --> C[Header Size]
+    A --> D[Header]
+    A --> E[R-tree Index]
+    A --> F[Attribute Index]
+    A --> G[Features]
+
+    B --> B1[4 bytes identifier]
+    C --> C1[4 bytes uint32]
+    D --> D1[FlatBuffers Header]
+    E --> E1[Packed R-tree]
+    F --> F1[Sorted Array Index]
+    G --> G1[FlatBuffers Features]
 ```
 
-1. **magic bytes**: a 4-byte identifier ("fcb\0") to identify the file format
-2. **header size**: a 4-byte unsigned integer indicating the size of the header section
-3. **header**: contains metadata, coordinate transformations, and schema information
-4. **r-tree index**: packed r-tree structure for spatial indexing
-5. **attribute index**: binary search trees for attribute-based queries
+1. **magic bytes**: 4 bytes identifier for the file format ('fcb\\0')
+2. **header size**: 4 bytes uint32 indicating the size of the header in bytes
+3. **header**: flatbuffers-encoded header containing metadata, schema, and index information
+4. **r-tree index**: packed r-tree for spatial indexing
+5. **attribute index**: sorted array-based index for attribute queries
 6. **features**: the actual city objects encoded as flatbuffers
 
 each section is aligned to facilitate efficient http range requests, allowing clients to fetch only the parts they need.
@@ -123,10 +124,17 @@ flatcitybuf implements a packed r-tree for spatial indexing, based on the hilber
 
 the r-tree is stored as a flat array of node items:
 
-```
-┌─────────────────┐
-│ nodes           │ array of node entries
-└─────────────────┘
+```mermaid
+graph TD
+    A[Nodes Array] --> B[Node Item 1]
+    A --> C[Node Item 2]
+    A --> D[Node Item 3]
+    A --> E[...]
+    A --> F[Node Item N]
+
+    B --> G[min_x, min_y]
+    B --> H[max_x, max_y]
+    B --> I[offset]
 ```
 
 each node entry contains:
@@ -230,87 +238,93 @@ these optimizations will significantly improve performance for attribute-based q
 
 ### boundaries encoding
 
-geometry boundaries in flatcitybuf use a hierarchical indexing approach:
+flatcitybuf uses a hierarchical indexing approach for geometry boundaries, following the dimensional hierarchy of cityjson:
 
-```
-┌─────────────┬─────────────┬─────────────┬─────────────┐
-│ solids      │ shells      │ surfaces    │ strings     │
-└─────────────┴─────────────┴─────────────┴─────────────┘
-      │              │             │             │
-      │              │             │             └─ indices into boundaries array
-      │              │             └─ indices into strings array
-      │              └─ indices into surfaces array
-      └─ indices into shells array
+```mermaid
+graph TD
+    A[Geometry] --> B[Solids]
+    A --> C[Shells]
+    A --> D[Surfaces]
+    A --> E[Strings]
+    A --> F[Boundaries/Indices]
 
-boundaries: [v1, v2, v3, v4, v5, v6, ...] // vertex indices
+    B --> B1[Number of shells in each solid]
+    C --> C1[Number of surfaces in each shell]
+    D --> D1[Number of strings in each surface]
+    E --> E1[Number of vertices in each string]
+    F --> F2[Vertex indices]
 ```
 
 the encoding strategy follows a dimensional hierarchy:
 
-- **indices/boundaries**: a flattened array of vertex indices. each element is an index pointing to a vertex in the vertices array.
+1. **indices/boundaries**: a flattened array of vertex indices
+2. **strings**: each element represents the number of vertices in a string, and the array length indicates the total number of strings
+3. **surfaces**: each element represents the number of strings in a surface
+4. **shells**: each element represents the number of surfaces in a shell
+5. **solids**: each element represents the number of shells in a solid
 
-- **strings**: an array where each element represents the number of vertices in a string (line segment). the length of this array indicates the total number of strings in the geometry. for example, `[3, 4]` means there are 2 strings, the first with 3 vertices and the second with 4 vertices.
-
-- **surfaces**: follows the same strategy as strings. each element represents the number of strings that form a surface. the length of the array indicates the total number of surfaces. for example, `[1, 2]` means there are 2 surfaces, the first consisting of 1 string and the second consisting of 2 strings.
-
-- **shells**: follows the same pattern. each element represents the number of surfaces in a shell. the length of the array indicates the total number of shells.
-
-- **solids**: each element represents the number of shells in a solid. the length of the array indicates the total number of solids.
-
-this hierarchical structure allows for efficient representation of complex 3d geometries:
-- **multipoint**: only boundaries array is used
-- **multilinestring**: strings and boundaries arrays are used
-- **multisurface/compositesurface**: surfaces, strings, and boundaries arrays are used
-- **solid**: shells, surfaces, strings, and boundaries arrays are used
-- **multisolid/compositesolid**: all arrays are used
-
-#### example encoding
-
-for a simple triangle:
+example encoding for a simple triangle:
 ```
-boundaries: [0, 1, 2]  // indices of 3 vertices
-strings: [3]           // 1 string with 3 vertices
-surfaces: [1]          // 1 surface with 1 string
+boundaries: [0, 1, 2]  // vertex indices
+strings: [3]           // 3 vertices in the string
+surfaces: [1]          // 1 string in the surface
 ```
 
-for a cube (6 faces, each a quadrilateral):
+example encoding for a cube:
 ```
-boundaries: [0, 1, 2, 3, 0, 4, 5, 1, ...]  // indices of vertices for each face
-strings: [4, 4, 4, 4, 4, 4]                // 6 strings, each with 4 vertices
-surfaces: [1, 1, 1, 1, 1, 1]               // 6 surfaces, each with 1 string
-shells: [6]                                // 1 shell with 6 surfaces
-solids: [1]                                // 1 solid with 1 shell
+boundaries: [0, 1, 2, 3, 0, 3, 7, 4, 1, 5, 6, 2, 4, 7, 6, 5, 0, 4, 5, 1, 2, 6, 7, 3]  // vertex indices
+strings: [4, 4, 4, 4, 4, 4]  // 6 strings with 4 vertices each
+surfaces: [1, 1, 1, 1, 1, 1]  // 6 surfaces with 1 string each
+shells: [6]                   // 1 shell with 6 surfaces
+solids: [1]                   // 1 solid with 1 shell
 ```
 
 ### semantics encoding
 
-semantic information is stored similarly to boundaries:
+semantic information is stored in a similar hierarchical structure:
 
-```
-semantics: [s1, s2, s3, ...] // indices into semantics_objects array
-semantics_objects: [SemanticObject1, SemanticObject2, ...]
+```mermaid
+graph TD
+    A[Semantics] --> B[Semantic Objects]
+    A --> C[Indices]
+
+    B --> B1[Type]
+    B --> B2[Attributes]
+    B --> B3[Parent/Children]
+
+    C --> C1[References to Semantic Objects]
 ```
 
 each semantic object contains:
-- **type**: the semantic surface type (e.g., wall, roof)
-- **attributes**: additional semantic attributes
-- **parent/children**: hierarchical relationships
+- type (e.g., wallsurface, roofsurface)
+- attributes (specific to the semantic type)
+- parent/children relationships (for hierarchical semantics)
 
 ### appearances encoding
 
-appearances (materials and textures) are encoded using:
+appearances (materials and textures) are encoded as follows:
 
+```mermaid
+graph TD
+    A[Appearance] --> B[Materials]
+    A --> C[Textures]
+    A --> D[Vertices Texture]
+
+    B --> B1[Material Properties]
+    C --> C1[Texture Properties]
+    D --> D1[UV Coordinates]
+
+    E[Material Mapping] --> E1[Theme]
+    E --> E2[Surface References]
+    E --> E3[Material Index]
+
+    F[Texture Mapping] --> F1[Theme]
+    F --> F2[Surface References]
+    F --> F3[Texture Index]
+    F --> F4[UV Coordinates]
 ```
-material: [MaterialMapping1, MaterialMapping2, ...]
-texture: [TextureMapping1, TextureMapping2, ...]
-```
 
-each mapping contains:
-- **theme**: the theme name
-- **indices**: hierarchical indices matching the boundaries structure
-- **values**: material or texture indices
-
-this approach allows for efficient mapping of materials and textures to specific geometry parts.
+material and texture mappings associate surfaces with specific materials and textures, allowing for detailed visual representation of city objects.
 
 ## attributes encoding
 
@@ -397,28 +411,29 @@ flatcitybuf implements several optimizations for http access:
 
 ## file dependencies graph
 
-the dependencies between components in flatcitybuf are:
+the following diagram illustrates the dependencies between components in flatcitybuf:
 
+```mermaid
+graph TD
+    A[FlatCityBuf] --> B[Header]
+    A --> C[Features]
+    A --> D[R-tree Index]
+    A --> E[Attribute Index]
+
+    B --> F[Schema]
+    B --> G[Metadata]
+    B --> H[Appearance]
+
+    C --> I[CityObjects]
+    I --> J[Geometry]
+    I --> K[Attributes]
+
+    D --> L[Spatial Queries]
+    E --> M[Attribute Queries]
+
+    J --> N[Boundaries]
+    J --> O[Semantics]
+    J --> P[Materials/Textures]
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ header.fbs  │────>│ feature.fbs │<────│ client app  │
-└─────────────┘     └─────────────┘     └─────────────┘
-       │                   │                   │
-       v                   v                   v
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ encoder     │────>│ fcb file    │<────│ decoder     │
-└─────────────┘     └─────────────┘     └─────────────┘
-       │                   │                   │
-       v                   v                   v
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ cityjson    │     │ http server │────>│ web viewer  │
-└─────────────┘     └─────────────┘     └─────────────┘
-```
 
-key dependencies:
-- **schema files**: define the structure of the format
-- **encoder/decoder**: convert between cityjson and flatcitybuf
-- **http server**: serves flatcitybuf files with range request support
-- **client applications**: web viewers, gis software, analysis tools
-
-the modular design allows for implementation in multiple languages (rust, javascript, python) while maintaining format compatibility.
+this structure allows for efficient querying and retrieval of city objects based on both spatial and attribute criteria.
