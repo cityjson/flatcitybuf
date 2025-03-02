@@ -174,80 +174,57 @@ flatcitybuf implements a sorted array-based index for efficient attribute querie
 
 ### encoding structure
 
-for each indexed attribute, a sorted index is stored:
+the attribute index is stored as a sorted array of key-value entries:
 
 ```
 ┌─────────────────┐
-│ entry count     │ 8 bytes uint64 (number of key-value entries)
+│ entry count     │ 8 bytes, number of entries
 ├─────────────────┤
-│ entries         │ array of key-value entries
+│ key-value entry │ variable length
+├─────────────────┤
+│ key-value entry │ variable length
+├─────────────────┤
+│ ...             │
 └─────────────────┘
 ```
 
 each key-value entry contains:
-- **key length**: 8 bytes uint64 (length of serialized key)
-- **key**: the attribute value serialized as bytes (variable size based on type)
-- **offsets count**: 8 bytes uint64 (number of feature offsets)
-- **offsets**: array of 8-byte uint64 values pointing to features
-
-the index is sorted by key value to enable efficient binary search operations.
+- **key length**: 8 bytes, length of the key in bytes
+- **key**: variable length, serialized key value
+- **offsets count**: 8 bytes, number of offsets
+- **offsets**: array of 8-byte offsets pointing to features
 
 ### serialization by type
 
-different attribute types are serialized differently using the `ByteSerializable` trait:
-- **integers**: stored in little-endian binary format (i8, i16, i32, i64, u8, u16, u32, u64)
-- **floating point**: wrapped in `OrderedFloat` for proper ordering and stored in little-endian format (f32, f64)
-- **string**: utf-8 bytes without length prefix (length is stored separately)
-- **boolean**: single byte (1 for true, 0 for false)
-- **datetime**: 12 bytes (8 bytes for seconds since epoch + 4 bytes for nanoseconds)
-- **date**: 12 bytes (4 bytes for year, 4 bytes for month, 4 bytes for day)
+different attribute types are serialized using the `byteserializable` trait:
+
+- **integers**: stored in little-endian format (i8, i16, i32, i64, u8, u16, u32, u64)
+- **floating point**: wrapped in `orderedfloat` to handle nan values properly
+- **strings**: utf-8 encoded byte arrays
+- **booleans**: single byte (0 for false, 1 for true)
+- **datetimes**: 12 bytes (8 for timestamp, 4 for nanoseconds)
+- **dates**: 12 bytes (4 for year, 4 for month, 4 for day)
 
 ### query algorithm
 
-the index supports several query operations:
+the attribute index supports various query operations:
 
-1. **exact match**: binary search to find the exact key
-   ```rust
-   binary_search_by_key(&key, |kv| &kv.key)
-   ```
+- **exact match**: binary search to find the exact key
+- **range queries**: find all keys within a specified range
+- **comparison operators**: =, !=, >, >=, <, <=
+- **compound queries**: multiple conditions combined with logical and
 
-2. **range queries**: find all keys in a given range
-   ```rust
-   // Find starting index using binary search
-   // Iterate through entries until upper bound is reached
-   ```
-
-3. **comparison operators**:
-   - **equals (=)**: exact match using binary search
-   - **not equals (!=)**: all offsets minus those matching the key
-   - **greater than (>)**: range query from key (exclusive) to end
-   - **greater than or equal (>=)**: range query from key (inclusive) to end
-   - **less than (<)**: range query from start to key (exclusive)
-   - **less than or equal (<=)**: range query from start to key (inclusive)
-
-4. **compound queries**:
-   - multiple conditions are combined using set intersection
-   - each condition produces a set of matching offsets
-   - the final result is the intersection of all sets
-
-### multi-index system
-
-flatcitybuf uses a `MultiIndex` that maps field names to their corresponding indices:
-
-```rust
-pub struct MultiIndex {
-    pub indices: HashMap<String, Box<dyn AnyIndex>>,
-}
-```
-
-this allows queries to reference fields by name and supports heterogeneous index types for different attribute types.
+the `multiindex` structure maps field names to their corresponding indices, allowing for heterogeneous index types.
 
 ### http optimization
 
-when used with http range requests, the attribute index enables efficient filtering:
-1. query the attribute index to find matching feature offsets
-2. batch nearby offsets to minimize http requests
-3. fetch only the features that match the query criteria
+currently, the attribute index can filter results when used with http range requests, but has limitations:
+
+1. **current implementation**: each matching feature is fetched individually, which can lead to many small http requests
+2. **future work**: batch processing of nearby offsets to reduce the number of http requests
+3. **optimization needed**: streaming processing for attribute indices to avoid loading all attributes at once
+
+these optimizations will significantly improve performance for attribute-based queries over http, especially for large datasets with many features.
 
 ## boundaries, semantics, and appearances encoding
 
