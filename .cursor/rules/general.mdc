@@ -1,7 +1,7 @@
 ---
 description: General rules about the project and coding guidelines
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 # Important Rules for LLM
 
