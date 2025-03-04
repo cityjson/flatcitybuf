@@ -69,11 +69,9 @@ impl HttpFcbReader {
         println!("open===: {:?}", url);
 
         // Only initialize the logger once
-        if !LOGGER_INITIALIZED.load(Ordering::SeqCst) {
-            if let Ok(_) = console_log::init_with_level(Level::Trace) {
-                LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
-                log::info!("Logger initialized successfully.");
-            }
+        if !LOGGER_INITIALIZED.load(Ordering::SeqCst) && console_log::init_with_level(Level::Trace).is_ok() {
+            LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
+            log::info!("Logger initialized successfully.");
         }
 
         trace!("starting: opening http reader, reading header");

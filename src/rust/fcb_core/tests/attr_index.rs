@@ -51,6 +51,7 @@ fn test_attr_index() -> Result<()> {
             feature_count: original_cj_seq.features.len() as u64,
             index_node_size: 16,
             attribute_indices: Some(attr_indices),
+            geographical_extent: None,
         }),
         Some(attr_schema),
     )?;
@@ -149,6 +150,7 @@ fn test_attr_index_seq() -> Result<()> {
             feature_count: original_cj_seq.features.len() as u64,
             index_node_size: 16,
             attribute_indices: Some(attr_indices),
+            geographical_extent: None,
         }),
         Some(attr_schema),
     )?;
@@ -246,6 +248,7 @@ fn test_attr_index_multiple_queries() -> Result<()> {
             feature_count: original_cj_seq.features.len() as u64,
             index_node_size: 16,
             attribute_indices: Some(attr_indices),
+            geographical_extent: None,
         }),
         Some(attr_schema),
     )?;

@@ -64,15 +64,24 @@ pub(super) fn to_fcb_header<'a>(
             None
         }
     };
+
+    // Use the geographical_extent from the HeaderWriterOptions if provided
+    let geographical_extent_from_options = header_options
+        .geographical_extent
+        .as_ref()
+        .map(to_geographical_extent);
+
     if let Some(meta) = cj.metadata.as_ref() {
         let reference_system = meta
             .reference_system
             .as_ref()
             .map(|ref_sys| to_reference_system(fbb, ref_sys));
-        let geographical_extent = meta
-            .geographical_extent
-            .as_ref()
-            .map(to_geographical_extent);
+        // Use the geographical_extent from the HeaderWriterOptions if provided, otherwise use the one from the metadata
+        let geographical_extent = geographical_extent_from_options.or_else(|| {
+            meta.geographical_extent
+                .as_ref()
+                .map(to_geographical_extent)
+        });
         let identifier = meta.identifier.as_ref().map(|i| fbb.create_string(i));
         let reference_date = meta.reference_date.as_ref().map(|r| fbb.create_string(r));
         let title = meta.title.as_ref().map(|t| fbb.create_string(t));
@@ -149,7 +158,9 @@ pub(super) fn to_fcb_header<'a>(
                 columns,
                 features_count,
                 index_node_size,
+                geographical_extent: geographical_extent_from_options.as_ref(),
                 version,
+                attribute_index,
                 ..Default::default()
             },
         )

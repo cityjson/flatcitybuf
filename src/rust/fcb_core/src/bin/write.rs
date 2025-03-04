@@ -30,6 +30,7 @@ fn write_file() -> Result<(), Box<dyn Error>> {
             feature_count: features.len() as u64,
             index_node_size: 16,
             attribute_indices: Some(attr_indices),
+            geographical_extent: None,
         });
         let mut attr_schema = AttributeSchema::new();
         for feature in features.iter() {
