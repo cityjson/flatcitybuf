@@ -327,13 +327,29 @@ fn show_info(input: PathBuf) -> Result<(), Error> {
     let reader = BufReader::new(File::open(input)?);
     let metadata = reader.get_ref().metadata()?.len() / 1024 / 1024; // show in megabytes
     let fcb_reader = FcbReader::open(reader)?.select_all()?;
-
+    let raw_attr_index = fcb_reader.header().attribute_index();
+    let attr_index = raw_attr_index.map(|ai_vec| {
+        ai_vec
+            .iter()
+            .map(|ai| {
+                fcb_reader
+                    .header()
+                    .columns()
+                    .iter()
+                    .flat_map(|c| c.iter())
+                    .find(|ci| ci.index() == ai.index())
+                    .map(|ci| ci.name())
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+    });
     let header = fcb_reader.header();
     println!("FCB File Info:");
     println!("    File size: {} MB", metadata);
     println!("  Version: {}", header.version());
     println!("  Features count: {}", header.features_count());
     println!("  bbox: {:?}", header.geographical_extent());
+    println!("  attr_index: {:?}", attr_index.unwrap_or_default());
 
     if let Some(title) = header.title() {
         println!("  Title: {}", title);
