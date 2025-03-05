@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["http"]
-http = ["packed_rtree"]
+http = ["packed_rtree", "http-range-client"]
 
 [dependencies]
 bincode = { workspace = true }
@@ -16,3 +16,4 @@ ordered-float = { workspace = true }
 once_cell = { workspace = true }
 packed_rtree = { path = "../packed_rtree", optional = true }
 thiserror = { workspace = true }
+http-range-client = { workspace = true, optional = true, default-features = false }
