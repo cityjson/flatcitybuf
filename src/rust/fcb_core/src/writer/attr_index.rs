@@ -18,7 +18,7 @@ fn build_index_generic<T, F>(
     extract: F,
 ) -> Option<(Vec<u8>, AttributeIndexInfo)>
 where
-    T: Ord + Clone + ByteSerializable,
+    T: Ord + Clone + ByteSerializable + 'static,
     F: Fn(&AttributeIndexEntry) -> Option<T>,
 {
     let mut entries: Vec<KeyValue<T>> = Vec::new();
