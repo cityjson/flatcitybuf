@@ -130,34 +130,6 @@ impl MultiIndex {
     }
 }
 
-/// Create a StreamableMultiIndex from a regular MultiIndex
-pub fn create_streamable_index(m_indices: &MultiIndex) -> StreamableMultiIndex {
-    // For now, we don't have a way to convert from AnyIndex to SortedIndexMeta
-    // This would need to be implemented in a real-world scenario
-
-    StreamableMultiIndex::new()
-}
-
-/// Convert a regular Query to use with StreamableMultiIndex
-#[cfg(feature = "http")]
-pub async fn stream_query_with_streamable(
-    s_indices: &StreamableMultiIndex,
-    query: Query,
-    client: &mut AsyncBufferedHttpRangeClient<impl AsyncHttpRangeClient>,
-    index_offset: usize,
-    feature_begin: usize,
-) -> Result<Vec<HttpSearchResultItem>, Error> {
-    s_indices
-        .http_stream_query(client, &query, index_offset, feature_begin)
-        .await
-        .map_err(|e| {
-            Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })
-}
-
 /// Legacy stream_query function that uses the in-memory MultiIndex
 #[cfg(feature = "http")]
 pub async fn stream_query(
@@ -224,27 +196,6 @@ pub async fn stream_query(
         .collect();
 
     Ok(http_ranges)
-}
-
-/// Stream query using the StreamableMultiIndex for better performance with HTTP range requests.
-/// This is the recommended approach for new code.
-#[cfg(feature = "http")]
-pub async fn stream_query_streamable<T: AsyncHttpRangeClient>(
-    s_indices: &StreamableMultiIndex,
-    query: Query,
-    client: &mut AsyncBufferedHttpRangeClient<T>,
-    index_offset: usize,
-    feature_begin: usize,
-) -> Result<Vec<HttpSearchResultItem>, Error> {
-    s_indices
-        .http_stream_query(client, &query, index_offset, feature_begin)
-        .await
-        .map_err(|e| {
-            Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })
 }
 
 /// A streamable version of MultiIndex that doesn't load the entire index into memory.
@@ -577,6 +528,35 @@ mod tests {
         buffer
     }
 
+    // Helper function to create a serialized index buffer for building types
+    fn create_serialized_type_index() -> Vec<u8> {
+        // Create a type index directly
+        let mut type_entries = Vec::new();
+
+        // Create sample data with building types
+        let types = [
+            ("residential".to_string(), vec![0, 1, 2, 6, 7, 13, 17]),
+            ("commercial".to_string(), vec![3, 4, 8, 9, 14, 18]),
+            ("industrial".to_string(), vec![5, 10, 11, 15, 19]),
+            ("mixed".to_string(), vec![12, 16]),
+        ];
+
+        for (building_type, offsets) in types.iter() {
+            type_entries.push(KeyValue {
+                key: building_type.clone(),
+                offsets: offsets.iter().map(|&i| i as u64).collect(),
+            });
+        }
+
+        let mut type_index = SortedIndex::new();
+        type_index.build_index(type_entries);
+
+        // Serialize the index
+        let mut buffer = Vec::new();
+        type_index.serialize(&mut buffer).unwrap();
+        buffer
+    }
+
     #[test]
     fn test_streamable_multi_index_from_reader() -> std::io::Result<()> {
         // Create a serialized index buffer
@@ -622,6 +602,116 @@ mod tests {
             stream_results,
             vec![6, 7, 8],
             "Expected buildings 6, 7, 8 to have height 30.0"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_streamable_multi_index_with_multiple_conditions() -> std::io::Result<()> {
+        // Create serialized index buffers
+        let height_buffer = create_serialized_height_index();
+        let type_buffer = create_serialized_type_index();
+
+        // Combine buffers with offsets
+        let mut combined_buffer = Vec::new();
+        let height_offset = 0;
+        let type_offset = height_buffer.len() as u64;
+
+        combined_buffer.extend_from_slice(&height_buffer);
+        combined_buffer.extend_from_slice(&type_buffer);
+
+        // Create a cursor for the combined buffer
+        let mut cursor = Cursor::new(combined_buffer);
+
+        // Create a map of field names to offsets
+        let mut index_offsets = HashMap::new();
+        index_offsets.insert("height".to_string(), height_offset);
+        index_offsets.insert("type".to_string(), type_offset);
+
+        // Create a StreamableMultiIndex from the reader
+        let streamable_index = StreamableMultiIndex::from_reader(
+            &mut cursor,
+            &["height".to_string(), "type".to_string()],
+            &index_offsets,
+        )?;
+
+        // Verify the indices were created correctly
+        assert!(streamable_index.indices.contains_key("height"));
+        assert!(streamable_index.indices.contains_key("type"));
+
+        // Test streaming query with multiple conditions
+        cursor.seek(SeekFrom::Start(0))?;
+
+        // Create a query for height >= 30.0 AND type = "residential"
+        let test_height = OrderedFloat(30.0f32);
+        let height_bytes = test_height.to_bytes();
+        let type_bytes = "residential".to_string().to_bytes();
+
+        let query = Query {
+            conditions: vec![
+                QueryCondition {
+                    field: "height".to_string(),
+                    operator: Operator::Ge,
+                    key: height_bytes,
+                },
+                QueryCondition {
+                    field: "type".to_string(),
+                    operator: Operator::Eq,
+                    key: type_bytes,
+                },
+            ],
+        };
+
+        // Execute the query
+        let stream_results = streamable_index.stream_query(&mut cursor, &query)?;
+
+        // Verify the actual values - buildings that are both residential and >= 30.0 in height
+        // Based on our test data, these should be buildings 6, 7, 13, 17
+        assert_eq!(
+            stream_results,
+            vec![6, 7, 13, 17],
+            "Expected buildings 6, 7, 13, 17 to be residential with height >= 30.0"
+        );
+
+        // Test another query: height between 25.0 and 40.0 AND type != "residential"
+        cursor.seek(SeekFrom::Start(0))?;
+
+        let lower_height = OrderedFloat(25.0f32);
+        let upper_height = OrderedFloat(40.0f32);
+        let lower_bytes = lower_height.to_bytes();
+        let upper_bytes = upper_height.to_bytes();
+        let type_bytes = "residential".to_string().to_bytes();
+
+        let query = Query {
+            conditions: vec![
+                QueryCondition {
+                    field: "height".to_string(),
+                    operator: Operator::Ge,
+                    key: lower_bytes,
+                },
+                QueryCondition {
+                    field: "height".to_string(),
+                    operator: Operator::Le,
+                    key: upper_bytes,
+                },
+                QueryCondition {
+                    field: "type".to_string(),
+                    operator: Operator::Ne,
+                    key: type_bytes,
+                },
+            ],
+        };
+
+        // Execute the query
+        let stream_results = streamable_index.stream_query(&mut cursor, &query)?;
+
+        // Verify the actual values - buildings with height between 25.0 and 40.0 that are not residential
+        // Based on our test data, these should be buildings 5, 8, 9, 10, 11
+        assert_eq!(
+            stream_results,
+            vec![5, 8, 9, 10, 11],
+            "Expected buildings 5, 8, 9, 10, 11 to have height between 25.0 and 40.0 and not be residential"
         );
 
         Ok(())
@@ -722,6 +812,312 @@ mod tests {
             sorted_offsets,
             vec![6, 7, 8],
             "Expected buildings 6, 7, 8 to have height 30.0"
+        );
+
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio_test]
+    async fn test_http_stream_query_with_multiple_conditions() -> std::io::Result<()> {
+        // Create serialized index buffers
+        let height_buffer = create_serialized_height_index();
+        let type_buffer = create_serialized_type_index();
+
+        // Combine buffers with offsets
+        let mut combined_buffer = Vec::new();
+        let height_offset = 0;
+        let type_offset = height_buffer.len();
+
+        combined_buffer.extend_from_slice(&height_buffer);
+        combined_buffer.extend_from_slice(&type_buffer);
+
+        // Create a mock HTTP client with the serialized data
+        let data = Arc::new(Mutex::new(combined_buffer));
+        let mock_client = MockHttpClient { data };
+        let mut buffered_client = AsyncBufferedHttpRangeClient::with(mock_client, "test-url");
+
+        // Create a map of field names to offsets
+        let mut index_offsets = HashMap::new();
+        index_offsets.insert("height".to_string(), height_offset);
+        index_offsets.insert("type".to_string(), type_offset);
+
+        // Create a StreamableMultiIndex from HTTP
+        let streamable_index = StreamableMultiIndex::from_http(
+            &mut buffered_client,
+            &["height".to_string(), "type".to_string()],
+            &index_offsets,
+        )
+        .await?;
+
+        // Verify the indices were created correctly
+        assert!(streamable_index.indices.contains_key("height"));
+        assert!(streamable_index.indices.contains_key("type"));
+
+        // Test HTTP streaming query with multiple conditions
+
+        // Create a query for height >= 30.0 AND type = "residential"
+        let test_height = OrderedFloat(30.0f32);
+        let height_bytes = test_height.to_bytes();
+        let type_bytes = "residential".to_string().to_bytes();
+
+        let query = Query {
+            conditions: vec![
+                QueryCondition {
+                    field: "height".to_string(),
+                    operator: Operator::Ge,
+                    key: height_bytes,
+                },
+                QueryCondition {
+                    field: "type".to_string(),
+                    operator: Operator::Eq,
+                    key: type_bytes,
+                },
+            ],
+        };
+
+        // Execute the HTTP query
+        let http_results = streamable_index
+            .http_stream_query(
+                &mut buffered_client,
+                &query,
+                0,
+                100, // Feature begin offset
+            )
+            .await?;
+
+        // Extract offsets from HTTP results
+        let http_offsets: Vec<ValueOffset> = http_results
+            .iter()
+            .map(|item| match &item.range {
+                HttpRange::Range(range) => (range.start - 100) as u64,
+                HttpRange::RangeFrom(range) => (range.start - 100) as u64,
+            })
+            .collect();
+
+        // Verify the actual values (after adjusting for the feature_begin offset)
+        let mut sorted_offsets = http_offsets.clone();
+        sorted_offsets.sort();
+        assert_eq!(
+            sorted_offsets,
+            vec![6, 7, 13, 17],
+            "Expected buildings 6, 7, 13, 17 to be residential with height >= 30.0"
+        );
+
+        // Test another query: height between 25.0 and 40.0 AND type != "residential"
+        let lower_height = OrderedFloat(25.0f32);
+        let upper_height = OrderedFloat(40.0f32);
+        let lower_bytes = lower_height.to_bytes();
+        let upper_bytes = upper_height.to_bytes();
+        let type_bytes = "residential".to_string().to_bytes();
+
+        let query = Query {
+            conditions: vec![
+                QueryCondition {
+                    field: "height".to_string(),
+                    operator: Operator::Ge,
+                    key: lower_bytes,
+                },
+                QueryCondition {
+                    field: "height".to_string(),
+                    operator: Operator::Le,
+                    key: upper_bytes,
+                },
+                QueryCondition {
+                    field: "type".to_string(),
+                    operator: Operator::Ne,
+                    key: type_bytes,
+                },
+            ],
+        };
+
+        // Execute the HTTP query
+        let http_results = streamable_index
+            .http_stream_query(
+                &mut buffered_client,
+                &query,
+                0,
+                100, // Feature begin offset
+            )
+            .await?;
+
+        // Extract offsets from HTTP results
+        let http_offsets: Vec<ValueOffset> = http_results
+            .iter()
+            .map(|item| match &item.range {
+                HttpRange::Range(range) => (range.start - 100) as u64,
+                HttpRange::RangeFrom(range) => (range.start - 100) as u64,
+            })
+            .collect();
+
+        // Verify the actual values (after adjusting for the feature_begin offset)
+        let mut sorted_offsets = http_offsets.clone();
+        sorted_offsets.sort();
+        assert_eq!(
+            sorted_offsets,
+            vec![5, 8, 9, 10, 11],
+            "Expected buildings 5, 8, 9, 10, 11 to have height between 25.0 and 40.0 and not be residential"
+        );
+
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio_test]
+    async fn test_stream_query_streamable_function() -> std::io::Result<()> {
+        // Create a serialized index buffer
+
+        use tokio::stream;
+        let buffer = create_serialized_height_index();
+
+        // Create a mock HTTP client with the serialized data
+        let data = Arc::new(Mutex::new(buffer.clone()));
+        let mock_client = MockHttpClient { data };
+        let mut buffered_client = AsyncBufferedHttpRangeClient::with(mock_client, "test-url");
+
+        // Create a map of field names to offsets
+        let mut index_offsets = HashMap::new();
+        index_offsets.insert("height".to_string(), 0);
+
+        // Create a StreamableMultiIndex from HTTP
+        let streamable_index = StreamableMultiIndex::from_http(
+            &mut buffered_client,
+            &["height".to_string()],
+            &index_offsets,
+        )
+        .await?;
+
+        // Create a query for height = 30.0
+        let test_height = OrderedFloat(30.0f32);
+        let height_bytes = test_height.to_bytes();
+
+        let query = Query {
+            conditions: vec![QueryCondition {
+                field: "height".to_string(),
+                operator: Operator::Eq,
+                key: height_bytes.clone(),
+            }],
+        };
+
+        // Execute the stream_query_streamable function
+        let results = streamable_index
+            .http_stream_query(
+                &mut buffered_client,
+                &query,
+                0,
+                100, // Feature begin offset
+            )
+            .await
+            .unwrap();
+
+        // Extract offsets from results
+        let result_offsets: Vec<ValueOffset> = results
+            .iter()
+            .map(|item| match &item.range {
+                HttpRange::Range(range) => (range.start - 100) as u64,
+                HttpRange::RangeFrom(range) => (range.start - 100) as u64,
+            })
+            .collect();
+
+        // Verify the actual values (after adjusting for the feature_begin offset)
+        let mut sorted_offsets = result_offsets.clone();
+        sorted_offsets.sort();
+        assert_eq!(
+            sorted_offsets,
+            vec![6, 7, 8],
+            "Expected buildings 6, 7, 8 to have height 30.0"
+        );
+
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio_test]
+    async fn test_stream_query_streamable_with_multiple_conditions() -> std::io::Result<()> {
+        // Create serialized index buffers
+        let height_buffer = create_serialized_height_index();
+        let type_buffer = create_serialized_type_index();
+
+        // Combine buffers with offsets
+        let mut combined_buffer = Vec::new();
+        let height_offset = 0;
+        let type_offset = height_buffer.len();
+
+        combined_buffer.extend_from_slice(&height_buffer);
+        combined_buffer.extend_from_slice(&type_buffer);
+
+        // Create a mock HTTP client with the serialized data
+        let data = Arc::new(Mutex::new(combined_buffer));
+        let mock_client = MockHttpClient { data };
+        let mut buffered_client = AsyncBufferedHttpRangeClient::with(mock_client, "test-url");
+
+        // Create a map of field names to offsets
+        let mut index_offsets = HashMap::new();
+        index_offsets.insert("height".to_string(), height_offset);
+        index_offsets.insert("type".to_string(), type_offset);
+
+        // Create a StreamableMultiIndex from HTTP
+        let streamable_index = StreamableMultiIndex::from_http(
+            &mut buffered_client,
+            &["height".to_string(), "type".to_string()],
+            &index_offsets,
+        )
+        .await?;
+
+        // Create a query for height > 20.0 AND height < 50.0 AND type = "commercial"
+        let lower_height = OrderedFloat(20.0f32);
+        let upper_height = OrderedFloat(50.0f32);
+        let lower_bytes = lower_height.to_bytes();
+        let upper_bytes = upper_height.to_bytes();
+        let type_bytes = "commercial".to_string().to_bytes();
+
+        let query = Query {
+            conditions: vec![
+                QueryCondition {
+                    field: "height".to_string(),
+                    operator: Operator::Gt,
+                    key: lower_bytes,
+                },
+                QueryCondition {
+                    field: "height".to_string(),
+                    operator: Operator::Lt,
+                    key: upper_bytes,
+                },
+                QueryCondition {
+                    field: "type".to_string(),
+                    operator: Operator::Eq,
+                    key: type_bytes,
+                },
+            ],
+        };
+
+        // Execute the stream_query_streamable function
+        let results = streamable_index
+            .http_stream_query(
+                &mut buffered_client,
+                &query,
+                0,
+                100, // Feature begin offset
+            )
+            .await
+            .unwrap();
+
+        // Extract offsets from results
+        let result_offsets: Vec<ValueOffset> = results
+            .iter()
+            .map(|item| match &item.range {
+                HttpRange::Range(range) => (range.start - 100) as u64,
+                HttpRange::RangeFrom(range) => (range.start - 100) as u64,
+            })
+            .collect();
+
+        // Verify the actual values (after adjusting for the feature_begin offset)
+        let mut sorted_offsets = result_offsets.clone();
+        sorted_offsets.sort();
+        assert_eq!(
+            sorted_offsets,
+            vec![3, 4, 8, 9],
+            "Expected buildings 3, 4, 8, 9 to be commercial with height between 20.0 and 50.0"
         );
 
         Ok(())
