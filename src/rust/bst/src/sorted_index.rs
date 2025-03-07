@@ -1202,6 +1202,17 @@ mod tests {
     use ordered_float::OrderedFloat;
     use std::io::{Cursor, Seek, SeekFrom};
 
+    #[cfg(feature = "http")]
+    use {
+        async_trait::async_trait,
+        bytes::Bytes,
+        http_range_client::{
+            AsyncBufferedHttpRangeClient, AsyncHttpRangeClient, Result as HttpResult,
+        },
+        std::sync::{Arc, Mutex},
+        tokio::test as tokio_test,
+    };
+
     // Helper function to create a sample height index
     fn create_sample_height_index() -> SortedIndex<OrderedFloat<f32>> {
         let mut entries = Vec::new();
@@ -1602,6 +1613,147 @@ mod tests {
                 test_values.len()
             );
         }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    struct MockHttpClient {
+        data: Arc<Mutex<Vec<u8>>>,
+    }
+
+    #[cfg(feature = "http")]
+    #[async_trait]
+    impl AsyncHttpRangeClient for MockHttpClient {
+        async fn get_range(&self, _url: &str, range: &str) -> HttpResult<Bytes> {
+            // Parse the range header
+            let range_str = range.strip_prefix("bytes=").unwrap();
+            let parts: Vec<&str> = range_str.split('-').collect();
+            let start: usize = parts[0].parse().unwrap();
+            let end: usize = parts[1].parse().unwrap();
+
+            // Get the data
+            let data = self.data.lock().unwrap();
+            let slice = data[start..=end].to_vec();
+
+            Ok(Bytes::from(slice))
+        }
+
+        async fn head_response_header(
+            &self,
+            _url: &str,
+            _header: &str,
+        ) -> HttpResult<Option<String>> {
+            Ok(None)
+        }
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio_test]
+    async fn test_http_stream_query_exact_height() -> std::io::Result<()> {
+        // Create a sample height index
+        let height_index = create_sample_height_index();
+
+        // Serialize the index to a buffer
+        let mut buffer = Vec::new();
+        height_index.serialize(&mut buffer)?;
+
+        // Create a mock HTTP client with the serialized data
+        let data = Arc::new(Mutex::new(buffer.clone()));
+        let mock_client = MockHttpClient { data };
+        let mut buffered_client = AsyncBufferedHttpRangeClient::with(mock_client, "test-url");
+
+        // Read the index metadata
+        let index_meta = SortedIndexMeta::from_reader(&mut Cursor::new(buffer.clone()))?;
+
+        // Test exact query for height 30.0
+        let test_height = OrderedFloat(30.0f32);
+        let height_bytes = test_height.to_bytes();
+
+        // Perform HTTP streaming query
+        let http_results = index_meta
+            .http_stream_query_exact(&mut buffered_client, 0, &height_bytes)
+            .await?;
+
+        // Get expected results from the original index
+        let expected_results = height_index.query_exact_bytes(&height_bytes);
+
+        // Compare results
+        assert_eq!(
+            http_results.len(),
+            expected_results.len(),
+            "Result count mismatch"
+        );
+        assert_eq!(http_results, expected_results, "Results don't match");
+
+        // Verify the actual values
+        assert_eq!(
+            http_results,
+            vec![6, 7, 8],
+            "Expected buildings 6, 7, 8 to have height 30.0"
+        );
+
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio_test]
+    async fn test_http_stream_query_range_height() -> std::io::Result<()> {
+        // Create a sample height index
+        let height_index = create_sample_height_index();
+
+        // Serialize the index to a buffer
+        let mut buffer = Vec::new();
+        height_index.serialize(&mut buffer)?;
+
+        // Create a mock HTTP client with the serialized data
+        let data = Arc::new(Mutex::new(buffer.clone()));
+        let mock_client = MockHttpClient { data };
+        let mut buffered_client = AsyncBufferedHttpRangeClient::with(mock_client, "test-url");
+
+        // Read the index metadata
+        let index_meta = SortedIndexMeta::from_reader(&mut Cursor::new(buffer.clone()))?;
+
+        // Test range query for heights between 25.0 and 40.0
+        let lower_bound = 25.0f32;
+        let upper_bound = 40.0f32;
+        let lower_bytes = lower_bound.to_bytes();
+        let upper_bytes = upper_bound.to_bytes();
+
+        // Perform HTTP streaming range query
+        let http_results = index_meta
+            .http_stream_query_range(
+                &mut buffered_client,
+                0,
+                Some(&lower_bytes),
+                Some(&upper_bytes),
+            )
+            .await?;
+
+        // Get expected results from the original index
+        let expected_results =
+            height_index.query_range_bytes(Some(&lower_bytes), Some(&upper_bytes));
+
+        // Sort both result sets for comparison
+        let mut http_sorted = http_results.clone();
+        http_sorted.sort();
+        let mut expected_sorted = expected_results.clone();
+        expected_sorted.sort();
+
+        // Compare results
+        assert_eq!(
+            http_sorted.len(),
+            expected_sorted.len(),
+            "Result count mismatch"
+        );
+        assert_eq!(http_sorted, expected_sorted, "Results don't match");
+
+        // Verify the actual values
+        let expected_buildings = vec![5, 6, 7, 8, 9, 10];
+        assert_eq!(
+            http_sorted, expected_buildings,
+            "Expected buildings with heights between 25.0 and 40.0"
+        );
 
         Ok(())
     }
