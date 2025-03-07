@@ -1,6 +1,4 @@
-use crate::sorted_index::{
-    AnyIndex, SortedIndexMeta, StreamableIndex, ValueOffset,
-};
+use crate::sorted_index::{AnyIndex, SortedIndexMeta, StreamableIndex, ValueOffset};
 use crate::Error;
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek};
@@ -134,8 +132,6 @@ impl MultiIndex {
 
 /// Create a StreamableMultiIndex from a regular MultiIndex
 pub fn create_streamable_index(m_indices: &MultiIndex) -> StreamableMultiIndex {
-    
-
     // For now, we don't have a way to convert from AnyIndex to SortedIndexMeta
     // This would need to be implemented in a real-world scenario
 
@@ -257,7 +253,6 @@ pub struct StreamableMultiIndex {
     /// A mapping from field names to their corresponding index metadata.
     pub indices: HashMap<String, SortedIndexMeta>,
 }
-
 
 impl StreamableMultiIndex {
     /// Create a new empty StreamableMultiIndex.
@@ -420,8 +415,6 @@ impl StreamableMultiIndex {
         index_offset: usize,
         feature_begin: usize,
     ) -> std::io::Result<Vec<HttpSearchResultItem>> {
-        
-
         // Compute candidate offset set for each query condition.
         let mut candidate_sets: Vec<HashSet<ValueOffset>> = Vec::new();
 
@@ -523,5 +516,214 @@ impl StreamableMultiIndex {
             .collect();
 
         Ok(http_ranges)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::byte_serializable::ByteSerializable;
+    use crate::sorted_index::{IndexSerializable, KeyValue, SortedIndex};
+    use ordered_float::OrderedFloat;
+    use std::io::{Cursor, Seek, SeekFrom};
+
+    #[cfg(feature = "http")]
+    use {
+        async_trait::async_trait,
+        bytes::Bytes,
+        http_range_client::{
+            AsyncBufferedHttpRangeClient, AsyncHttpRangeClient, Result as HttpResult,
+        },
+        std::sync::{Arc, Mutex},
+        tokio::test as tokio_test,
+    };
+
+    // Helper function to create a serialized index buffer
+    fn create_serialized_height_index() -> Vec<u8> {
+        // Create a height index directly
+        let mut height_entries = Vec::new();
+
+        // Create sample data with heights
+        let heights = [
+            (10.5f32, vec![0]),    // Building 0 has height 10.5
+            (15.2f32, vec![1]),    // Building 1 has height 15.2
+            (20.0f32, vec![2, 3]), // Buildings 2 and 3 have height 20.0
+            (22.7f32, vec![4]),
+            (25.3f32, vec![5]),
+            (30.0f32, vec![6, 7, 8]), // Buildings 6, 7, 8 have height 30.0
+            (32.1f32, vec![9]),
+            (35.5f32, vec![10]),
+            (40.0f32, vec![11, 12]),
+            (45.2f32, vec![13]),
+            (50.0f32, vec![14, 15, 16]), // Buildings 14, 15, 16 have height 50.0
+            (55.7f32, vec![17]),
+            (60.3f32, vec![18]),
+            (65.0f32, vec![19]),
+        ];
+
+        for (height, offsets) in heights.iter() {
+            height_entries.push(KeyValue {
+                key: OrderedFloat(*height),
+                offsets: offsets.iter().map(|&i| i as u64).collect(),
+            });
+        }
+
+        let mut height_index = SortedIndex::new();
+        height_index.build_index(height_entries);
+
+        // Serialize the index
+        let mut buffer = Vec::new();
+        height_index.serialize(&mut buffer).unwrap();
+        buffer
+    }
+
+    #[test]
+    fn test_streamable_multi_index_from_reader() -> std::io::Result<()> {
+        // Create a serialized index buffer
+        let buffer = create_serialized_height_index();
+
+        // Create a cursor for the buffer
+        let mut cursor = Cursor::new(buffer.clone());
+
+        // Create a map of field names to offsets
+        let mut index_offsets = HashMap::new();
+        index_offsets.insert("height".to_string(), 0);
+
+        // Create a StreamableMultiIndex from the reader
+        let streamable_index = StreamableMultiIndex::from_reader(
+            &mut cursor,
+            &["height".to_string()],
+            &index_offsets,
+        )?;
+
+        // Verify the index was created correctly
+        assert!(streamable_index.indices.contains_key("height"));
+
+        // Test streaming query
+        cursor.seek(SeekFrom::Start(0))?;
+
+        // Create a query for height = 30.0
+        let test_height = OrderedFloat(30.0f32);
+        let height_bytes = test_height.to_bytes();
+
+        let query = Query {
+            conditions: vec![QueryCondition {
+                field: "height".to_string(),
+                operator: Operator::Eq,
+                key: height_bytes.clone(),
+            }],
+        };
+
+        // Execute the query
+        let stream_results = streamable_index.stream_query(&mut cursor, &query)?;
+
+        // Verify the actual values
+        assert_eq!(
+            stream_results,
+            vec![6, 7, 8],
+            "Expected buildings 6, 7, 8 to have height 30.0"
+        );
+
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    struct MockHttpClient {
+        data: Arc<Mutex<Vec<u8>>>,
+    }
+
+    #[cfg(feature = "http")]
+    #[async_trait]
+    impl AsyncHttpRangeClient for MockHttpClient {
+        async fn get_range(&self, _url: &str, range: &str) -> HttpResult<Bytes> {
+            // Parse the range header
+            let range_str = range.strip_prefix("bytes=").unwrap();
+            let parts: Vec<&str> = range_str.split('-').collect();
+            let start: usize = parts[0].parse().unwrap();
+            let end: usize = parts[1].parse().unwrap();
+
+            // Get the data
+            let data = self.data.lock().unwrap();
+            let slice = data[start..=end].to_vec();
+
+            Ok(Bytes::from(slice))
+        }
+
+        async fn head_response_header(
+            &self,
+            _url: &str,
+            _header: &str,
+        ) -> HttpResult<Option<String>> {
+            Ok(None)
+        }
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio_test]
+    async fn test_streamable_multi_index_http_query() -> std::io::Result<()> {
+        // Create a serialized index buffer
+        let buffer = create_serialized_height_index();
+
+        // Create a mock HTTP client with the serialized data
+        let data = Arc::new(Mutex::new(buffer.clone()));
+        let mock_client = MockHttpClient { data };
+        let mut buffered_client = AsyncBufferedHttpRangeClient::with(mock_client, "test-url");
+
+        // Create a map of field names to offsets
+        let mut index_offsets = HashMap::new();
+        index_offsets.insert("height".to_string(), 0);
+
+        // Create a StreamableMultiIndex from HTTP
+        let streamable_index = StreamableMultiIndex::from_http(
+            &mut buffered_client,
+            &["height".to_string()],
+            &index_offsets,
+        )
+        .await?;
+
+        // Verify the index was created correctly
+        assert!(streamable_index.indices.contains_key("height"));
+
+        // Create a query for height = 30.0
+        let test_height = OrderedFloat(30.0f32);
+        let height_bytes = test_height.to_bytes();
+
+        let query = Query {
+            conditions: vec![QueryCondition {
+                field: "height".to_string(),
+                operator: Operator::Eq,
+                key: height_bytes.clone(),
+            }],
+        };
+
+        // Execute the HTTP query
+        let http_results = streamable_index
+            .http_stream_query(
+                &mut buffered_client,
+                &query,
+                0,
+                100, // Feature begin offset
+            )
+            .await?;
+
+        // Extract offsets from HTTP results
+        let http_offsets: Vec<ValueOffset> = http_results
+            .iter()
+            .map(|item| match &item.range {
+                HttpRange::Range(range) => (range.start - 100) as u64,
+                HttpRange::RangeFrom(range) => (range.start - 100) as u64,
+            })
+            .collect();
+
+        // Verify the actual values (after adjusting for the feature_begin offset)
+        let mut sorted_offsets = http_offsets.clone();
+        sorted_offsets.sort();
+        assert_eq!(
+            sorted_offsets,
+            vec![6, 7, 8],
+            "Expected buildings 6, 7, 8 to have height 30.0"
+        );
+
+        Ok(())
     }
 }
