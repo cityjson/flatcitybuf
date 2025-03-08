@@ -1,8 +1,4 @@
-use crate::byte_serializable::ByteSerializable;
-use crate::error::Error;
-use crate::sorted_index::{
-    AnyIndex, SearchableIndex, SortedIndexMeta, StreamableIndex, ValueOffset,
-};
+use crate::sorted_index::{AnyIndex, SortedIndexMeta, StreamableIndex, ValueOffset};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::{Read, Seek};
@@ -70,72 +66,67 @@ impl MultiIndex {
     ///
     /// Returns a vector of offsets for records that match all conditions in the query.
     pub fn query(&self, query: Query) -> Vec<ValueOffset> {
-        // If there are no conditions, return an empty result.
-        if query.conditions.is_empty() {
-            return Vec::new();
-        }
+        let mut candidate_sets: Vec<HashSet<ValueOffset>> = Vec::new();
 
-        // Process the first condition.
-        let first_condition = &query.conditions[0];
-        let mut result = if let Some(index) = self.indices.get(&first_condition.field) {
-            match first_condition.operator {
-                Operator::Eq => index.query_exact_bytes(&first_condition.key),
-                Operator::Ne => {
-                    // For "not equals", we need to get all offsets from all indices.
-                    // This is inefficient but correct.
-                    let all_offsets: HashSet<ValueOffset> = self
-                        .indices
-                        .values()
-                        .flat_map(|idx| idx.query_range_bytes(None, None))
-                        .collect();
-                    let matching = index.query_exact_bytes(&first_condition.key);
-                    all_offsets
-                        .into_iter()
-                        .filter(|offset| !matching.contains(offset))
-                        .collect()
-                }
-                Operator::Gt => index.query_range_bytes(Some(&first_condition.key), None),
-                Operator::Lt => index.query_range_bytes(None, Some(&first_condition.key)),
-                Operator::Ge => index.query_range_bytes(Some(&first_condition.key), None),
-                Operator::Le => index.query_range_bytes(None, Some(&first_condition.key)),
-            }
-        } else {
-            // If the field doesn't exist, the result is empty.
-            return Vec::new();
-        };
-
-        // Process the remaining conditions.
-        for condition in &query.conditions[1..] {
+        for condition in query.conditions {
             if let Some(index) = self.indices.get(&condition.field) {
-                let matching = match condition.operator {
-                    Operator::Eq => index.query_exact_bytes(&condition.key),
-                    Operator::Ne => {
-                        // For "not equals", we need to get all offsets and then filter out the ones that match.
-                        let matching = index.query_exact_bytes(&condition.key);
-                        result
-                            .clone()
-                            .into_iter()
-                            .filter(|offset| !matching.contains(offset))
-                            .collect()
+                let offsets: Vec<ValueOffset> = match condition.operator {
+                    Operator::Eq => {
+                        // Exactly equal.
+                        index.query_exact_bytes(&condition.key)
                     }
-                    Operator::Gt => index.query_range_bytes(Some(&condition.key), None),
-                    Operator::Lt => index.query_range_bytes(None, Some(&condition.key)),
-                    Operator::Ge => index.query_range_bytes(Some(&condition.key), None),
-                    Operator::Le => index.query_range_bytes(None, Some(&condition.key)),
+                    Operator::Gt => {
+                        // Keys strictly greater than the boundary:
+                        // Use query_range_bytes(Some(key), None) and remove those equal to key.
+                        let offsets = index.query_range_bytes(Some(&condition.key), None);
+                        let eq = index.query_exact_bytes(&condition.key);
+                        offsets.into_iter().filter(|o| !eq.contains(o)).collect()
+                    }
+                    Operator::Ge => {
+                        // Keys greater than or equal.
+                        index.query_range_bytes(Some(&condition.key), None)
+                    }
+                    Operator::Lt => {
+                        // Keys strictly less than the boundary.
+                        index.query_range_bytes(None, Some(&condition.key))
+                    }
+                    Operator::Le => {
+                        // Keys less than or equal to the boundary:
+                        // Union the keys that are strictly less and those equal to the boundary.
+                        let mut offsets = index.query_range_bytes(None, Some(&condition.key));
+                        let eq = index.query_exact_bytes(&condition.key);
+                        offsets.extend(eq);
+                        // Remove duplicates by collecting into a set.
+                        let set: HashSet<ValueOffset> = offsets.into_iter().collect();
+                        set.into_iter().collect()
+                    }
+                    Operator::Ne => {
+                        // All offsets minus those equal to the boundary.
+                        let all: HashSet<ValueOffset> =
+                            index.query_range_bytes(None, None).into_iter().collect();
+                        let eq: HashSet<ValueOffset> = index
+                            .query_exact_bytes(&condition.key)
+                            .into_iter()
+                            .collect();
+                        all.difference(&eq).cloned().collect::<Vec<_>>()
+                    }
                 };
-
-                // Intersect the current result with the matching offsets.
-                result = result
-                    .clone()
-                    .into_iter()
-                    .filter(|offset| matching.contains(offset))
-                    .collect();
-            } else {
-                // If the field doesn't exist, the result is empty.
-                return Vec::new();
+                candidate_sets.push(offsets.into_iter().collect());
             }
         }
 
+        if candidate_sets.is_empty() {
+            return vec![];
+        }
+
+        // Intersect candidate sets.
+        let mut intersection: HashSet<ValueOffset> = candidate_sets.first().unwrap().clone();
+        for set in candidate_sets.iter().skip(1) {
+            intersection = intersection.intersection(set).cloned().collect();
+        }
+
+        let mut result: Vec<ValueOffset> = intersection.into_iter().collect();
+        result.sort();
         result
     }
 
@@ -266,6 +257,12 @@ pub struct StreamableMultiIndex {
     pub indices: HashMap<String, SortedIndexMeta>,
 }
 
+impl Default for StreamableMultiIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StreamableMultiIndex {
     /// Create a new, empty streamable multi-index.
     pub fn new() -> Self {
@@ -312,7 +309,7 @@ impl StreamableMultiIndex {
                 // Read the index metadata from the HTTP client.
                 let meta_size = std::mem::size_of::<u64>() * 2 + std::mem::size_of::<u32>();
                 let meta_bytes = client
-                    .get_range(offset as usize, meta_size as usize)
+                    .get_range(offset, meta_size)
                     .await
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
@@ -377,7 +374,7 @@ impl StreamableMultiIndex {
                     // For "not equals", we need to get all offsets and then filter out the ones that match.
                     // This is inefficient but correct.
                     let mut all_offsets = HashSet::new();
-                    for (_, index_meta) in &self.indices {
+                    for index_meta in self.indices.values() {
                         all_offsets.extend(index_meta.stream_query_range(reader, None, None)?);
                         if !all_offsets.is_empty() {
                             break;
@@ -480,7 +477,7 @@ impl StreamableMultiIndex {
                     // For "not equals", we need to get all offsets and then filter out the ones that match.
                     // This is inefficient but correct.
                     let mut all_offsets = HashSet::new();
-                    for (_, index_meta) in &self.indices {
+                    for index_meta in self.indices.values() {
                         all_offsets.extend(
                             index_meta
                                 .http_stream_query_range(client, index_offset, None, None)
@@ -619,12 +616,27 @@ impl StreamableMultiIndex {
                 return Ok(Vec::new());
             }
         }
+
+        // Convert the matching offsets to HttpSearchResultItem
+        // The issue was here - we were creating ranges that were only 1 byte wide
+        // Now we'll create proper ranges based on the feature data
         let matching_items: Vec<HttpSearchResultItem> = result_offsets
             .into_iter()
-            .map(|offset| HttpSearchResultItem {
-                range: HttpRange::Range(
-                    feature_begin + offset as usize..feature_begin + offset as usize + 1,
-                ),
+            .map(|offset| {
+                // Create a range that represents the entire feature at this offset
+                // This assumes each feature has a variable size that needs to be determined
+                // For now, we'll use a reasonable size (e.g., 100 bytes) or implement proper size calculation
+                let start = feature_begin + offset as usize;
+
+                // Option 1: Fixed size features (simple but might not be accurate)
+                // let end = start + 100; // Assuming each feature is 100 bytes
+
+                // Option 2: Open-ended range (more flexible)
+                // Return a RangeFrom instead of a Range to indicate "from this offset to the end"
+                // This is more appropriate when we don't know the exact size of each feature
+                HttpSearchResultItem {
+                    range: HttpRange::RangeFrom(start..),
+                }
             })
             .collect();
 
@@ -1092,7 +1104,21 @@ mod tests {
 
         // Verify the results
         assert_eq!(results.len(), 4);
+
+        // Check that the range starts at the expected offset
         assert_eq!(results[0].range.start(), 0);
+
+        // Verify that we're using RangeFrom instead of Range
+        match results[0].range {
+            HttpRange::RangeFrom(_) => {
+                // This is what we expect now
+                assert!(true);
+            }
+            HttpRange::Range(_) => {
+                // This should not happen with our updated implementation
+                assert!(false, "Expected RangeFrom but got Range");
+            }
+        }
 
         Ok(())
     }
@@ -1128,6 +1154,18 @@ mod tests {
 
         // Verify the results (buildings with height > 30)
         assert_eq!(results.len(), 5);
+
+        // Verify that we're using RangeFrom instead of Range for all results
+        for result in &results {
+            match result.range {
+                HttpRange::RangeFrom(_) => {
+                    // This is what we expect now
+                }
+                HttpRange::Range(_) => {
+                    assert!(false, "Expected RangeFrom but got Range");
+                }
+            }
+        }
 
         Ok(())
     }

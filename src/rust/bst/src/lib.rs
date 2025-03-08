@@ -285,6 +285,26 @@ mod tests {
         let result9 = multi_index.query(query9);
         assert_eq!(result9, vec![1, 2, 4, 6, 7]);
 
+        let query10 = Query {
+            conditions: vec![QueryCondition {
+                field: "height".to_string(),
+                operator: Operator::Lt,
+                key: (30.6f64).to_bytes(),
+            }],
+        };
+        let result10 = multi_index.query(query10);
+        assert_eq!(result10, vec![0, 2, 6]);
+
+        let query11 = Query {
+            conditions: vec![QueryCondition {
+                field: "height".to_string(),
+                operator: Operator::Le,
+                key: (30.6f64).to_bytes(),
+            }],
+        };
+        let result11 = multi_index.query(query11);
+        assert_eq!(result11, vec![0, 2, 3, 6]);
+
         Ok(())
     }
 
