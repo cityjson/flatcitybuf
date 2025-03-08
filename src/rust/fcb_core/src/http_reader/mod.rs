@@ -7,7 +7,7 @@ use crate::{
     check_magic_bytes, size_prefixed_root_as_city_feature, HEADER_MAX_BUFFER_SIZE,
     HEADER_SIZE_SIZE, MAGIC_BYTES_SIZE,
 };
-use bst::{ByteSerializable, MultiIndex};
+use bst::{ByteSerializable, HttpRange as BstHttpRange, MultiIndex};
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
 use cjseq::CityJSONFeature;
@@ -297,7 +297,13 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
 
         let count = result.len();
 
-        let http_ranges: Vec<HttpRange> = result.into_iter().map(|item| item.range).collect();
+        let http_ranges: Vec<HttpRange> = result
+            .into_iter()
+            .map(|item| match item.range {
+                BstHttpRange::Range(range) => HttpRange::Range(range.start..range.end),
+                BstHttpRange::RangeFrom(range) => HttpRange::RangeFrom(range.start..),
+            })
+            .collect();
 
         trace!(
             "completed: select_attr_query via http reader, matched features: {}",

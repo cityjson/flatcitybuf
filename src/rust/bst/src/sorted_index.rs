@@ -13,7 +13,7 @@ pub struct KeyValue<T: Ord + ByteSerializable + 'static> {
 }
 
 /// A sorted index implemented as an array of key–offset pairs.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SortedIndex<T: Ord + ByteSerializable + 'static> {
     pub entries: Vec<KeyValue<T>>,
 }
