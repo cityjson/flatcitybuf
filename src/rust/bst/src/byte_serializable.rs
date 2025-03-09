@@ -4,7 +4,7 @@ pub use ordered_float::OrderedFloat;
 pub type Float<T> = OrderedFloat<T>;
 
 /// A trait for converting types to and from bytes.
-pub trait ByteSerializable {
+pub trait ByteSerializable: Send + Sync {
     /// Convert self into a vector of bytes.
     fn to_bytes(&self) -> Vec<u8>;
 

@@ -7,7 +7,7 @@ pub type ValueOffset = u64;
 
 /// A key–offset pair. The key must be orderable and serializable.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct KeyValue<T: Ord + ByteSerializable + 'static> {
+pub struct KeyValue<T: Ord + ByteSerializable + Send + Sync + 'static> {
     pub key: T,
     pub offsets: Vec<ValueOffset>,
 }
@@ -17,17 +17,17 @@ pub struct KeyValue<T: Ord + ByteSerializable + 'static> {
 /// This index is fully loaded into memory for fast access, making it suitable
 /// for smaller datasets or when memory usage is not a concern.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BufferedIndex<T: Ord + ByteSerializable + 'static> {
+pub struct BufferedIndex<T: Ord + ByteSerializable + Send + Sync + 'static> {
     pub entries: Vec<KeyValue<T>>,
 }
 
-impl<T: Ord + ByteSerializable + 'static> Default for BufferedIndex<T> {
+impl<T: Ord + ByteSerializable + Send + Sync + 'static> Default for BufferedIndex<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Ord + ByteSerializable + 'static> BufferedIndex<T> {
+impl<T: Ord + ByteSerializable + Send + Sync + 'static> BufferedIndex<T> {
     /// Create an empty index.
     pub fn new() -> Self {
         Self {
@@ -73,7 +73,9 @@ pub trait TypedSearchableIndex<T: Ord + ByteSerializable> {
         F: Fn(&T) -> bool;
 }
 
-impl<T: Ord + ByteSerializable + 'static> TypedSearchableIndex<T> for BufferedIndex<T> {
+impl<T: Ord + ByteSerializable + 'static + Send + Sync> TypedSearchableIndex<T>
+    for BufferedIndex<T>
+{
     fn query_exact(&self, key: &T) -> Option<&[ValueOffset]> {
         self.entries
             .binary_search_by_key(&key, |kv| &kv.key)
@@ -118,7 +120,7 @@ impl<T: Ord + ByteSerializable + 'static> TypedSearchableIndex<T> for BufferedIn
     }
 }
 
-impl<T: Ord + ByteSerializable + 'static> SearchableIndex for BufferedIndex<T> {
+impl<T: Ord + ByteSerializable + 'static + Send + Sync> SearchableIndex for BufferedIndex<T> {
     fn query_exact_bytes(&self, key: &[u8]) -> Vec<ValueOffset> {
         let key_t = T::from_bytes(key);
         self.query_exact(&key_t).unwrap_or(&[]).to_vec()
@@ -147,7 +149,7 @@ pub trait IndexSerializable {
         Self: Sized;
 }
 
-impl<T: Ord + ByteSerializable + 'static> IndexSerializable for BufferedIndex<T> {
+impl<T: Ord + ByteSerializable + Send + Sync + 'static> IndexSerializable for BufferedIndex<T> {
     fn serialize<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         // Write the type identifier for T
         let type_id = get_type_id::<T>();
@@ -480,254 +482,8 @@ impl IndexMeta {
                     key_bytes.cmp(query_key)
                 }
             }
-            3 => {
-                // String
-                // For strings, we can directly compare the byte slices
-                key_bytes.cmp(query_key)
-            }
-            4 => {
-                // i32
-                if key_bytes.len() == 4 && query_key.len() == 4 {
-                    let key_val = i32::from_le_bytes([
-                        key_bytes[0],
-                        key_bytes[1],
-                        key_bytes[2],
-                        key_bytes[3],
-                    ]);
-                    let query_val = i32::from_le_bytes([
-                        query_key[0],
-                        query_key[1],
-                        query_key[2],
-                        query_key[3],
-                    ]);
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            5 => {
-                // i64
-                if key_bytes.len() == 8 && query_key.len() == 8 {
-                    let key_val = i64::from_le_bytes([
-                        key_bytes[0],
-                        key_bytes[1],
-                        key_bytes[2],
-                        key_bytes[3],
-                        key_bytes[4],
-                        key_bytes[5],
-                        key_bytes[6],
-                        key_bytes[7],
-                    ]);
-                    let query_val = i64::from_le_bytes([
-                        query_key[0],
-                        query_key[1],
-                        query_key[2],
-                        query_key[3],
-                        query_key[4],
-                        query_key[5],
-                        query_key[6],
-                        query_key[7],
-                    ]);
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            6 => {
-                // u32
-                if key_bytes.len() == 4 && query_key.len() == 4 {
-                    let key_val = u32::from_le_bytes([
-                        key_bytes[0],
-                        key_bytes[1],
-                        key_bytes[2],
-                        key_bytes[3],
-                    ]);
-                    let query_val = u32::from_le_bytes([
-                        query_key[0],
-                        query_key[1],
-                        query_key[2],
-                        query_key[3],
-                    ]);
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            7 => {
-                // u64
-                if key_bytes.len() == 8 && query_key.len() == 8 {
-                    let key_val = u64::from_le_bytes([
-                        key_bytes[0],
-                        key_bytes[1],
-                        key_bytes[2],
-                        key_bytes[3],
-                        key_bytes[4],
-                        key_bytes[5],
-                        key_bytes[6],
-                        key_bytes[7],
-                    ]);
-                    let query_val = u64::from_le_bytes([
-                        query_key[0],
-                        query_key[1],
-                        query_key[2],
-                        query_key[3],
-                        query_key[4],
-                        query_key[5],
-                        query_key[6],
-                        query_key[7],
-                    ]);
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            8 => {
-                // bool
-                if key_bytes.len() == 1 && query_key.len() == 1 {
-                    let key_val = key_bytes[0] != 0;
-                    let query_val = query_key[0] != 0;
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            9 => {
-                // i16
-                if key_bytes.len() == 2 && query_key.len() == 2 {
-                    let key_val = i16::from_le_bytes([key_bytes[0], key_bytes[1]]);
-                    let query_val = i16::from_le_bytes([query_key[0], query_key[1]]);
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            10 => {
-                // i8
-                if key_bytes.len() == 1 && query_key.len() == 1 {
-                    let key_val = key_bytes[0] as i8;
-                    let query_val = query_key[0] as i8;
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            11 => {
-                // u16
-                if key_bytes.len() == 2 && query_key.len() == 2 {
-                    let key_val = u16::from_le_bytes([key_bytes[0], key_bytes[1]]);
-                    let query_val = u16::from_le_bytes([query_key[0], query_key[1]]);
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            12 => {
-                // u8
-                if key_bytes.len() == 1 && query_key.len() == 1 {
-                    let key_val = key_bytes[0];
-                    let query_val = query_key[0];
-                    key_val.cmp(&query_val)
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            13 => {
-                // NaiveDateTime
-                if key_bytes.len() >= 12 && query_key.len() >= 12 {
-                    // Extract timestamp
-                    let mut ts_key_bytes = [0u8; 8];
-                    let mut ts_query_bytes = [0u8; 8];
-                    ts_key_bytes.copy_from_slice(&key_bytes[0..8]);
-                    ts_query_bytes.copy_from_slice(&query_key[0..8]);
-                    let key_ts = i64::from_le_bytes(ts_key_bytes);
-                    let query_ts = i64::from_le_bytes(ts_query_bytes);
-
-                    // Extract nanoseconds
-                    let mut ns_key_bytes = [0u8; 4];
-                    let mut ns_query_bytes = [0u8; 4];
-                    ns_key_bytes.copy_from_slice(&key_bytes[8..12]);
-                    ns_query_bytes.copy_from_slice(&query_key[8..12]);
-                    let key_ns = u32::from_le_bytes(ns_key_bytes);
-                    let query_ns = u32::from_le_bytes(ns_query_bytes);
-
-                    // Compare timestamps first, then nanoseconds
-                    match key_ts.cmp(&query_ts) {
-                        std::cmp::Ordering::Equal => key_ns.cmp(&query_ns),
-                        other => other,
-                    }
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            14 => {
-                // NaiveDate
-                if key_bytes.len() >= 12 && query_key.len() >= 12 {
-                    // Extract year
-                    let mut year_key_bytes = [0u8; 4];
-                    let mut year_query_bytes = [0u8; 4];
-                    year_key_bytes.copy_from_slice(&key_bytes[0..4]);
-                    year_query_bytes.copy_from_slice(&query_key[0..4]);
-                    let key_year = i32::from_le_bytes(year_key_bytes);
-                    let query_year = i32::from_le_bytes(year_query_bytes);
-
-                    // Extract month
-                    let mut month_key_bytes = [0u8; 4];
-                    let mut month_query_bytes = [0u8; 4];
-                    month_key_bytes.copy_from_slice(&key_bytes[4..8]);
-                    month_query_bytes.copy_from_slice(&query_key[4..8]);
-                    let key_month = u32::from_le_bytes(month_key_bytes);
-                    let query_month = u32::from_le_bytes(month_query_bytes);
-
-                    // Extract day
-                    let mut day_key_bytes = [0u8; 4];
-                    let mut day_query_bytes = [0u8; 4];
-                    day_key_bytes.copy_from_slice(&key_bytes[8..12]);
-                    day_query_bytes.copy_from_slice(&query_key[8..12]);
-                    let key_day = u32::from_le_bytes(day_key_bytes);
-                    let query_day = u32::from_le_bytes(day_query_bytes);
-
-                    // Compare year, month, day in order
-                    match key_year.cmp(&query_year) {
-                        std::cmp::Ordering::Equal => match key_month.cmp(&query_month) {
-                            std::cmp::Ordering::Equal => key_day.cmp(&query_day),
-                            other => other,
-                        },
-                        other => other,
-                    }
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            15 => {
-                // DateTime<Utc>
-                // DateTime<Utc> is serialized the same as NaiveDateTime
-                if key_bytes.len() >= 12 && query_key.len() >= 12 {
-                    // Extract timestamp
-                    let mut ts_key_bytes = [0u8; 8];
-                    let mut ts_query_bytes = [0u8; 8];
-                    ts_key_bytes.copy_from_slice(&key_bytes[0..8]);
-                    ts_query_bytes.copy_from_slice(&query_key[0..8]);
-                    let key_ts = i64::from_le_bytes(ts_key_bytes);
-                    let query_ts = i64::from_le_bytes(ts_query_bytes);
-
-                    // Extract nanoseconds
-                    let mut ns_key_bytes = [0u8; 4];
-                    let mut ns_query_bytes = [0u8; 4];
-                    ns_key_bytes.copy_from_slice(&key_bytes[8..12]);
-                    ns_query_bytes.copy_from_slice(&query_key[8..12]);
-                    let key_ns = u32::from_le_bytes(ns_key_bytes);
-                    let query_ns = u32::from_le_bytes(ns_query_bytes);
-
-                    // Compare timestamps first, then nanoseconds
-                    match key_ts.cmp(&query_ts) {
-                        std::cmp::Ordering::Equal => key_ns.cmp(&query_ns),
-                        other => other,
-                    }
-                } else {
-                    key_bytes.cmp(query_key)
-                }
-            }
-            _ => key_bytes.cmp(query_key), // Default to byte comparison for other types
+            // For all other types, we can directly compare the byte slices
+            _ => key_bytes.cmp(query_key),
         }
     }
 

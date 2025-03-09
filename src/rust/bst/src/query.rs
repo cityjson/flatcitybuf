@@ -283,7 +283,7 @@ impl StreamableMultiIndex {
     ) -> std::io::Result<Self> {
         let mut indices = HashMap::new();
 
-        todo!()
+        todo!();
         Ok(Self { indices })
     }
 
