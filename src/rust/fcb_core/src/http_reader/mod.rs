@@ -280,7 +280,7 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
 
         // Create a StreamableMultiIndex from HTTP range requests
         let streamable_index =
-            StreamableMultiIndex::from_http(&mut self.client, &field_names, &index_offsets).await?;
+            StreamableMultiIndex::from_http(&mut self.client, &index_offsets).await?;
 
         // Build the query
         let bst_query = build_query(&query);
