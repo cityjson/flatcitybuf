@@ -208,14 +208,12 @@ impl MultiIndex {
         let streamable_index =
             StreamableMultiIndex::from_http(client, &field_names, &filtered_offsets).await?;
 
+        // Get the minimum index offset to use as the base
+        let min_offset = index_offsets.values().min().copied().unwrap_or(0);
+
         // Execute the query using the streamable index
         streamable_index
-            .http_stream_query(
-                client,
-                query,
-                index_offsets.values().min().copied().unwrap_or(0),
-                feature_begin,
-            )
+            .http_stream_query(client, query, min_offset, feature_begin)
             .await
     }
 }
@@ -365,84 +363,78 @@ impl StreamableMultiIndex {
             return Ok(Vec::new());
         }
 
-        // Process the first condition.
-        let first_condition = &query.conditions[0];
-        let mut result = if let Some(index_meta) = self.indices.get(&first_condition.field) {
-            match first_condition.operator {
-                Operator::Eq => index_meta.stream_query_exact(reader, &first_condition.key)?,
-                Operator::Ne => {
-                    // For "not equals", we need to get all offsets and then filter out the ones that match.
-                    // This is inefficient but correct.
-                    let mut all_offsets = HashSet::new();
-                    for index_meta in self.indices.values() {
-                        all_offsets.extend(index_meta.stream_query_range(reader, None, None)?);
-                        if !all_offsets.is_empty() {
-                            break;
-                        }
-                    }
-                    let matching = index_meta.stream_query_exact(reader, &first_condition.key)?;
-                    all_offsets
-                        .into_iter()
-                        .filter(|offset| !matching.contains(offset))
-                        .collect()
-                }
-                Operator::Gt => {
-                    index_meta.stream_query_range(reader, Some(&first_condition.key), None)?
-                }
-                Operator::Lt => {
-                    index_meta.stream_query_range(reader, None, Some(&first_condition.key))?
-                }
-                Operator::Ge => {
-                    index_meta.stream_query_range(reader, Some(&first_condition.key), None)?
-                }
-                Operator::Le => {
-                    index_meta.stream_query_range(reader, None, Some(&first_condition.key))?
-                }
-            }
-        } else {
-            // If the field doesn't exist, the result is empty.
-            return Ok(Vec::new());
-        };
+        let mut candidate_sets: Vec<HashSet<ValueOffset>> = Vec::new();
 
-        // Process the remaining conditions.
-        for condition in &query.conditions[1..] {
+        // Process all conditions and collect candidate sets
+        for condition in &query.conditions {
             if let Some(index_meta) = self.indices.get(&condition.field) {
-                let matching = match condition.operator {
-                    Operator::Eq => index_meta.stream_query_exact(reader, &condition.key)?,
+                let offsets: Vec<ValueOffset> = match condition.operator {
+                    Operator::Eq => {
+                        // Exactly equal
+                        index_meta.stream_query_exact(reader, &condition.key)?
+                    }
                     Operator::Ne => {
-                        // For "not equals", we need to get all offsets and then filter out the ones that match.
-                        let matching = index_meta.stream_query_exact(reader, &condition.key)?;
-                        result
-                            .clone()
+                        // All offsets minus those equal to the key
+                        let all_offsets = index_meta.stream_query_range(reader, None, None)?;
+                        let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
+                        let eq_set: HashSet<ValueOffset> = eq_offsets.into_iter().collect();
+                        all_offsets
                             .into_iter()
-                            .filter(|offset| !matching.contains(offset))
+                            .filter(|o| !eq_set.contains(o))
                             .collect()
                     }
                     Operator::Gt => {
+                        // Keys strictly greater than the boundary (exclude equality)
+                        let range_offsets =
+                            index_meta.stream_query_range(reader, Some(&condition.key), None)?;
+                        let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
+                        let eq_set: HashSet<ValueOffset> = eq_offsets.into_iter().collect();
+                        range_offsets
+                            .into_iter()
+                            .filter(|o| !eq_set.contains(o))
+                            .collect()
+                    }
+                    Operator::Ge => {
+                        // Keys greater than or equal to the boundary
                         index_meta.stream_query_range(reader, Some(&condition.key), None)?
                     }
                     Operator::Lt => {
+                        // Keys strictly less than the boundary
                         index_meta.stream_query_range(reader, None, Some(&condition.key))?
-                    }
-                    Operator::Ge => {
-                        index_meta.stream_query_range(reader, Some(&condition.key), None)?
                     }
                     Operator::Le => {
-                        index_meta.stream_query_range(reader, None, Some(&condition.key))?
+                        // Keys less than or equal to the boundary
+                        // We need to include both the range and exact matches
+                        let mut range_offsets =
+                            index_meta.stream_query_range(reader, None, Some(&condition.key))?;
+                        let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
+
+                        // Combine both sets (may contain duplicates)
+                        range_offsets.extend(eq_offsets);
+
+                        // Remove duplicates by collecting into a set and back to a vector
+                        let set: HashSet<ValueOffset> = range_offsets.into_iter().collect();
+                        set.into_iter().collect()
                     }
                 };
 
-                // Intersect the current result with the matching offsets.
-                result = result
-                    .clone()
-                    .into_iter()
-                    .filter(|offset| matching.contains(offset))
-                    .collect();
-            } else {
-                // If the field doesn't exist, the result is empty.
-                return Ok(Vec::new());
+                candidate_sets.push(offsets.into_iter().collect());
             }
         }
+
+        if candidate_sets.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Intersect all candidate sets to get the final result
+        let mut intersection: HashSet<ValueOffset> = candidate_sets.remove(0);
+        for set in candidate_sets {
+            intersection = intersection.intersection(&set).cloned().collect();
+        }
+
+        // Sort the results for consistent output
+        let mut result: Vec<ValueOffset> = intersection.into_iter().collect();
+        result.sort();
 
         Ok(result)
     }
@@ -463,107 +455,53 @@ impl StreamableMultiIndex {
             return Ok(Vec::new());
         }
 
-        // Process the first condition.
-        let first_condition = &query.conditions[0];
-        let mut result_offsets: Vec<u64> = Vec::new();
-        if let Some(index_meta) = self.indices.get(&first_condition.field) {
-            let offsets = match first_condition.operator {
-                Operator::Eq => {
-                    index_meta
-                        .http_stream_query_exact(client, index_offset, &first_condition.key)
-                        .await?
-                }
-                Operator::Ne => {
-                    // For "not equals", we need to get all offsets and then filter out the ones that match.
-                    // This is inefficient but correct.
-                    let mut all_offsets = HashSet::new();
-                    for index_meta in self.indices.values() {
-                        all_offsets.extend(
-                            index_meta
-                                .http_stream_query_range(client, index_offset, None, None)
-                                .await?,
-                        );
-                        if !all_offsets.is_empty() {
-                            break;
-                        }
-                    }
-                    let matching = index_meta
-                        .http_stream_query_exact(client, index_offset, &first_condition.key)
-                        .await?;
-                    all_offsets
-                        .into_iter()
-                        .filter(|offset| !matching.contains(offset))
-                        .collect()
-                }
-                Operator::Gt => {
-                    index_meta
-                        .http_stream_query_range(
-                            client,
-                            index_offset,
-                            Some(&first_condition.key),
-                            None,
-                        )
-                        .await?
-                }
-                Operator::Lt => {
-                    index_meta
-                        .http_stream_query_range(
-                            client,
-                            index_offset,
-                            None,
-                            Some(&first_condition.key),
-                        )
-                        .await?
-                }
-                Operator::Ge => {
-                    index_meta
-                        .http_stream_query_range(
-                            client,
-                            index_offset,
-                            Some(&first_condition.key),
-                            None,
-                        )
-                        .await?
-                }
-                Operator::Le => {
-                    index_meta
-                        .http_stream_query_range(
-                            client,
-                            index_offset,
-                            None,
-                            Some(&first_condition.key),
-                        )
-                        .await?
-                }
-            };
+        let mut candidate_sets: Vec<HashSet<u64>> = Vec::new();
 
-            result_offsets = offsets;
-        } else {
-            // If the field doesn't exist, the result is empty.
-            return Ok(Vec::new());
-        };
-
-        // Process the remaining conditions.
-        for condition in &query.conditions[1..] {
+        // Process all conditions and collect candidate sets
+        for condition in &query.conditions {
             if let Some(index_meta) = self.indices.get(&condition.field) {
-                let offsets = match condition.operator {
+                let offsets: Vec<u64> = match condition.operator {
                     Operator::Eq => {
+                        // Exactly equal
                         index_meta
                             .http_stream_query_exact(client, index_offset, &condition.key)
                             .await?
                     }
                     Operator::Ne => {
-                        // For "not equals", we need to get all offsets and then filter out the ones that match.
-                        let matching = index_meta
+                        // All offsets minus those equal to the key
+                        let all_offsets = index_meta
+                            .http_stream_query_range(client, index_offset, None, None)
+                            .await?;
+                        let eq_offsets = index_meta
                             .http_stream_query_exact(client, index_offset, &condition.key)
                             .await?;
-                        result_offsets
-                            .clone()
+                        let eq_set: HashSet<u64> = eq_offsets.into_iter().collect();
+                        all_offsets
                             .into_iter()
-                            .filter(|offset| !matching.contains(offset))
+                            .filter(|o| !eq_set.contains(o))
                             .collect()
                     }
                     Operator::Gt => {
+                        // Keys strictly greater than the boundary (exclude equality)
+                        let range_offsets = index_meta
+                            .http_stream_query_range(
+                                client,
+                                index_offset,
+                                Some(&condition.key),
+                                None,
+                            )
+                            .await?;
+                        let eq_offsets = index_meta
+                            .http_stream_query_exact(client, index_offset, &condition.key)
+                            .await?;
+                        let eq_set: HashSet<u64> = eq_offsets.into_iter().collect();
+                        range_offsets
+                            .into_iter()
+                            .filter(|o| !eq_set.contains(o))
+                            .collect()
+                    }
+                    Operator::Ge => {
+                        // Keys greater than or equal to the boundary
                         index_meta
                             .http_stream_query_range(
                                 client,
@@ -574,66 +512,66 @@ impl StreamableMultiIndex {
                             .await?
                     }
                     Operator::Lt => {
+                        // Keys strictly less than the boundary
                         index_meta
                             .http_stream_query_range(
                                 client,
                                 index_offset,
                                 None,
                                 Some(&condition.key),
-                            )
-                            .await?
-                    }
-                    Operator::Ge => {
-                        index_meta
-                            .http_stream_query_range(
-                                client,
-                                index_offset,
-                                Some(&condition.key),
-                                None,
                             )
                             .await?
                     }
                     Operator::Le => {
-                        index_meta
+                        // Keys less than or equal to the boundary
+                        // We need to include both the range and exact matches
+                        let mut range_offsets = index_meta
                             .http_stream_query_range(
                                 client,
                                 index_offset,
                                 None,
                                 Some(&condition.key),
                             )
-                            .await?
+                            .await?;
+                        let eq_offsets = index_meta
+                            .http_stream_query_exact(client, index_offset, &condition.key)
+                            .await?;
+
+                        // Combine both sets (may contain duplicates)
+                        range_offsets.extend(eq_offsets);
+
+                        // Remove duplicates by collecting into a set and back to a vector
+                        let set: HashSet<u64> = range_offsets.into_iter().collect();
+                        set.into_iter().collect()
                     }
                 };
 
-                // Intersect the current result with the matching offsets.
-                result_offsets = result_offsets
-                    .clone()
-                    .into_iter()
-                    .filter(|offset| offsets.contains(offset))
-                    .collect();
-            } else {
-                // If the field doesn't exist, the result is empty.
-                return Ok(Vec::new());
+                candidate_sets.push(offsets.into_iter().collect());
             }
         }
 
+        if candidate_sets.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Intersect all candidate sets to get the final result
+        let mut intersection: HashSet<u64> = candidate_sets.remove(0);
+        for set in candidate_sets {
+            intersection = intersection.intersection(&set).cloned().collect();
+        }
+
+        // Sort the results for consistent output
+        let mut result_offsets: Vec<u64> = intersection.into_iter().collect();
+        result_offsets.sort();
+
         // Convert the matching offsets to HttpSearchResultItem
-        // The issue was here - we were creating ranges that were only 1 byte wide
-        // Now we'll create proper ranges based on the feature data
         let matching_items: Vec<HttpSearchResultItem> = result_offsets
             .into_iter()
             .map(|offset| {
                 // Create a range that represents the entire feature at this offset
-                // This assumes each feature has a variable size that needs to be determined
-                // For now, we'll use a reasonable size (e.g., 100 bytes) or implement proper size calculation
                 let start = feature_begin + offset as usize;
 
-                // Option 1: Fixed size features (simple but might not be accurate)
-                // let end = start + 100; // Assuming each feature is 100 bytes
-
-                // Option 2: Open-ended range (more flexible)
-                // Return a RangeFrom instead of a Range to indicate "from this offset to the end"
-                // This is more appropriate when we don't know the exact size of each feature
+                // Use an open-ended range since we don't know the exact size of each feature
                 HttpSearchResultItem {
                     range: HttpRange::RangeFrom(start..),
                 }
@@ -878,8 +816,8 @@ mod tests {
                         key: OrderedFloat(30.0f32).to_bytes(),
                     }],
                 },
-                // Buildings 6-19 have heights >= 30.0 (stream_query_range includes lower bound)
-                expected: (6..=19).collect(),
+                // Buildings 9-19 have heights > 30.0 (excluding 6, 7, 8 which have height exactly 30.0)
+                expected: (9..=19).collect(),
             },
             // Test case 2: Single condition - height >= 30.0 (Ge)
             TestCase {
