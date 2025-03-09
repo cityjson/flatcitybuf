@@ -460,9 +460,18 @@ impl SortedIndexMeta {
                         query_key[2],
                         query_key[3],
                     ]);
-                    key_val
-                        .partial_cmp(&query_val)
-                        .unwrap_or(std::cmp::Ordering::Equal)
+
+                    // Use epsilon-based comparison for floating-point equality
+                    const EPSILON: f32 = 1e-6;
+                    let diff = (key_val - query_val).abs();
+
+                    if diff < EPSILON {
+                        std::cmp::Ordering::Equal
+                    } else {
+                        key_val
+                            .partial_cmp(&query_val)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    }
                 } else {
                     key_bytes.cmp(query_key)
                 }
@@ -490,9 +499,18 @@ impl SortedIndexMeta {
                         query_key[6],
                         query_key[7],
                     ]);
-                    key_val
-                        .partial_cmp(&query_val)
-                        .unwrap_or(std::cmp::Ordering::Equal)
+
+                    // Use epsilon-based comparison for floating-point equality
+                    const EPSILON: f64 = 1e-12;
+                    let diff = (key_val - query_val).abs();
+
+                    if diff < EPSILON {
+                        std::cmp::Ordering::Equal
+                    } else {
+                        key_val
+                            .partial_cmp(&query_val)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    }
                 } else {
                     key_bytes.cmp(query_key)
                 }
@@ -1359,8 +1377,8 @@ mod tests {
         let index_meta = SortedIndexMeta::from_reader(&mut cursor)?;
 
         // Test range query for heights between 25.0 and 40.0
-        let lower_bound = 25.0f32;
-        let upper_bound = 40.0f32;
+        let lower_bound = OrderedFloat(25.0f32);
+        let upper_bound = OrderedFloat(40.0f32);
         let lower_bytes = lower_bound.to_bytes();
         let upper_bytes = upper_bound.to_bytes();
 
