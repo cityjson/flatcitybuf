@@ -1,5 +1,7 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 
+use ordered_float::OrderedFloat;
+
 use crate::byte_serializable::{get_type_id, ByteSerializable};
 
 /// The offset type used to point to actual record data.
@@ -415,30 +417,22 @@ impl IndexMeta {
             1 => {
                 // OrderedFloat<f32>
                 if key_bytes.len() == 4 && query_key.len() == 4 {
-                    let key_val = f32::from_le_bytes([
+                    let key_val = OrderedFloat(f32::from_le_bytes([
                         key_bytes[0],
                         key_bytes[1],
                         key_bytes[2],
                         key_bytes[3],
-                    ]);
-                    let query_val = f32::from_le_bytes([
+                    ]));
+                    let query_val = OrderedFloat(f32::from_le_bytes([
                         query_key[0],
                         query_key[1],
                         query_key[2],
                         query_key[3],
-                    ]);
+                    ]));
 
-                    // Use epsilon-based comparison for floating-point equality
-                    const EPSILON: f32 = 1e-6;
-                    let diff = (key_val - query_val).abs();
-
-                    if diff < EPSILON {
-                        std::cmp::Ordering::Equal
-                    } else {
-                        key_val
-                            .partial_cmp(&query_val)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    }
+                    key_val
+                        .partial_cmp(&query_val)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 } else {
                     key_bytes.cmp(query_key)
                 }
@@ -446,7 +440,7 @@ impl IndexMeta {
             2 => {
                 // OrderedFloat<f64>
                 if key_bytes.len() == 8 && query_key.len() == 8 {
-                    let key_val = f64::from_le_bytes([
+                    let key_val = OrderedFloat(f64::from_le_bytes([
                         key_bytes[0],
                         key_bytes[1],
                         key_bytes[2],
@@ -455,8 +449,8 @@ impl IndexMeta {
                         key_bytes[5],
                         key_bytes[6],
                         key_bytes[7],
-                    ]);
-                    let query_val = f64::from_le_bytes([
+                    ]));
+                    let query_val = OrderedFloat(f64::from_le_bytes([
                         query_key[0],
                         query_key[1],
                         query_key[2],
@@ -465,19 +459,11 @@ impl IndexMeta {
                         query_key[5],
                         query_key[6],
                         query_key[7],
-                    ]);
+                    ]));
 
-                    // Use epsilon-based comparison for floating-point equality
-                    const EPSILON: f64 = 1e-12;
-                    let diff = (key_val - query_val).abs();
-
-                    if diff < EPSILON {
-                        std::cmp::Ordering::Equal
-                    } else {
-                        key_val
-                            .partial_cmp(&query_val)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    }
+                    key_val
+                        .partial_cmp(&query_val)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 } else {
                     key_bytes.cmp(query_key)
                 }
