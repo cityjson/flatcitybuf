@@ -195,27 +195,7 @@ impl MultiIndex {
         if query.conditions.is_empty() {
             return Ok(Vec::new());
         }
-
-        // Create a StreamableMultiIndex from the HTTP client
-        let field_names: Vec<String> = query.conditions.iter().map(|c| c.field.clone()).collect();
-
-        // Only load the indices needed for this query
-        let filtered_offsets: HashMap<String, usize> = index_offsets
-            .iter()
-            .filter(|(k, _)| field_names.contains(k))
-            .map(|(k, v)| (k.clone(), *v))
-            .collect();
-
-        let streamable_index =
-            StreamableMultiIndex::from_http(client, &field_names, &filtered_offsets).await?;
-
-        // Get the minimum index offset to use as the base
-        let min_offset = index_offsets.values().min().copied().unwrap_or(0);
-
-        // Execute the query using the streamable index
-        streamable_index
-            .http_stream_query(client, query, min_offset, feature_begin)
-            .await
+        todo!()
     }
 }
 
@@ -303,45 +283,7 @@ impl StreamableMultiIndex {
     ) -> std::io::Result<Self> {
         let mut indices = HashMap::new();
 
-        for field_name in field_names {
-            if let Some(&offset) = index_offsets.get(field_name) {
-                // Read the index metadata from the HTTP client.
-                let meta_size = std::mem::size_of::<u64>() * 2 + std::mem::size_of::<u32>();
-                let meta_bytes = client
-                    .get_range(offset, meta_size)
-                    .await
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-
-                let entry_count = u64::from_le_bytes([
-                    meta_bytes[0],
-                    meta_bytes[1],
-                    meta_bytes[2],
-                    meta_bytes[3],
-                    meta_bytes[4],
-                    meta_bytes[5],
-                    meta_bytes[6],
-                    meta_bytes[7],
-                ]);
-                let size = u64::from_le_bytes([
-                    meta_bytes[8],
-                    meta_bytes[9],
-                    meta_bytes[10],
-                    meta_bytes[11],
-                    meta_bytes[12],
-                    meta_bytes[13],
-                    meta_bytes[14],
-                    meta_bytes[15],
-                ]);
-
-                let meta = IndexMeta {
-                    entry_count,
-                    size,
-                    type_id: 1, // TODO: get the type id from the index
-                };
-                indices.insert(field_name.clone(), meta);
-            }
-        }
-
+        todo!()
         Ok(Self { indices })
     }
 

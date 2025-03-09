@@ -1,6 +1,6 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use crate::byte_serializable::ByteSerializable;
+use crate::byte_serializable::{get_type_id, ByteSerializable};
 
 /// The offset type used to point to actual record data.
 pub type ValueOffset = u64;
@@ -40,41 +40,13 @@ impl<T: Ord + ByteSerializable + 'static> BufferedIndex<T> {
         data.sort_by(|a, b| a.key.cmp(&b.key));
         self.entries = data;
     }
-
-    /// Get the type identifier for this index.
-    fn get_type_id() -> u32 {
-        // Use the TypeId of T to generate a stable identifier
-        match std::any::type_name::<T>() {
-            "ordered_float::OrderedFloat<f32>" => 1,
-            "ordered_float::OrderedFloat<f64>" => 2,
-            "alloc::string::String" => 3,
-            "i32" => 4,
-            "i64" => 5,
-            "u32" => 6,
-            "u64" => 7,
-            "bool" => 8,
-            "i16" => 9,
-            "i8" => 10,
-            "u16" => 11,
-            "u8" => 12,
-            "chrono::naive::datetime::NaiveDateTime" => 13,
-            "chrono::naive::date::NaiveDate" => 14,
-            "chrono::DateTime<chrono::Utc>" => 15,
-            _ => {
-                // For unknown types, hash the type name to get a consistent ID
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                std::hash::Hash::hash(std::any::type_name::<T>(), &mut hasher);
-                (std::hash::Hasher::finish(&hasher) % 0xFFFFFFFF) as u32
-            }
-        }
-    }
 }
 
 /// A trait defining byte-based search operations on an index.
 ///
 /// This trait is object-safe and works with serialized byte representations
 /// of keys, making it suitable for use with trait objects and dynamic dispatch.
-pub trait SearchableIndex {
+pub trait SearchableIndex: Send + Sync {
     /// Return offsets for an exact key match given a serialized key.
     fn query_exact_bytes(&self, key: &[u8]) -> Vec<ValueOffset>;
 
@@ -178,7 +150,7 @@ pub trait IndexSerializable {
 impl<T: Ord + ByteSerializable + 'static> IndexSerializable for BufferedIndex<T> {
     fn serialize<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         // Write the type identifier for T
-        let type_id = Self::get_type_id();
+        let type_id = get_type_id::<T>();
         writer.write_all(&type_id.to_le_bytes())?;
 
         // Write the number of entries
@@ -206,12 +178,12 @@ impl<T: Ord + ByteSerializable + 'static> IndexSerializable for BufferedIndex<T>
         let type_id = u32::from_le_bytes(type_id_bytes);
 
         // Verify the type matches
-        if type_id != Self::get_type_id() {
+        if type_id != get_type_id::<T>() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
                     "Type mismatch: expected {}, got {}",
-                    Self::get_type_id(),
+                    get_type_id::<T>(),
                     type_id
                 ),
             ));
@@ -972,124 +944,15 @@ impl StreamableIndex for IndexMeta {
         Ok(result)
     }
 
-    #[cfg(feature = "http")]
     async fn http_stream_query_exact<T: http_range_client::AsyncHttpRangeClient>(
         &self,
         client: &mut http_range_client::AsyncBufferedHttpRangeClient<T>,
         index_offset: usize,
         key: &[u8],
     ) -> std::io::Result<Vec<ValueOffset>> {
-        use std::io::{Error, ErrorKind};
-
-        // Binary search through the index
-        let mut left = 0;
-        let mut right = self.entry_count as i64 - 1;
-        let mut result = Vec::new();
-
-        while left <= right {
-            let mid = left + (right - left) / 2;
-
-            // Calculate the position of the mid entry
-            let mut pos = index_offset + 12; // Skip type_id (4 bytes) and entry_count (8 bytes)
-
-            // We need to find the position of the mid entry by calculating offsets
-            // This is more complex with HTTP since we can't just seek
-            // First, get the size of each entry up to mid
-            for i in 0..mid {
-                // For each entry, we need to fetch its key length
-                let key_len_range = pos..(pos + 8);
-                let key_len_bytes = client
-                    .min_req_size(0)
-                    .get_range(key_len_range.start, key_len_range.len())
-                    .await
-                    .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-                let key_len =
-                    u64::from_le_bytes(key_len_bytes.as_ref().try_into().unwrap()) as usize;
-
-                // Skip key bytes
-                pos += 8 + key_len;
-
-                // Get offsets length
-                let offsets_len_range = pos..(pos + 8);
-                let offsets_len_bytes = client
-                    .min_req_size(0)
-                    .get_range(offsets_len_range.start, offsets_len_range.len())
-                    .await
-                    .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-                let offsets_len =
-                    u64::from_le_bytes(offsets_len_bytes.as_ref().try_into().unwrap()) as usize;
-
-                // Skip offset bytes
-                pos += 8 + (offsets_len * 8);
-            }
-
-            // Now pos is at the mid entry
-            // Read key length
-            let key_len_range = pos..(pos + 8);
-            let key_len_bytes = client
-                .min_req_size(0)
-                .get_range(key_len_range.start, key_len_range.len())
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-            let key_len = u64::from_le_bytes(key_len_bytes.as_ref().try_into().unwrap()) as usize;
-
-            // Read key bytes
-            let key_bytes_range = (pos + 8)..(pos + 8 + key_len);
-            let key_buf = client
-                .min_req_size(0)
-                .get_range(key_bytes_range.start, key_bytes_range.len())
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-            // Compare keys using type-specific comparison
-            match self.compare_keys(key_buf, key) {
-                std::cmp::Ordering::Equal => {
-                    // Found a match, read offsets
-                    let offsets_len_range = (pos + 8 + key_len)..(pos + 8 + key_len + 8);
-                    let offsets_len_bytes = client
-                        .min_req_size(0)
-                        .get_range(offsets_len_range.start, offsets_len_range.len())
-                        .await
-                        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-                    let offsets_len =
-                        u64::from_le_bytes(offsets_len_bytes.as_ref().try_into().unwrap()) as usize;
-
-                    // Read all offsets in one request
-                    let offsets_range =
-                        (pos + 8 + key_len + 8)..(pos + 8 + key_len + 8 + (offsets_len * 8));
-                    let offsets_bytes = client
-                        .min_req_size(0)
-                        .get_range(offsets_range.start, offsets_range.len())
-                        .await
-                        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-                    // Process all offsets
-                    for i in 0..offsets_len {
-                        let offset_start = i * 8;
-                        let offset_end = offset_start + 8;
-                        let offset_bytes = &offsets_bytes[offset_start..offset_end];
-                        let offset = u64::from_le_bytes(offset_bytes.try_into().unwrap());
-                        result.push(offset);
-                    }
-                    break;
-                }
-                std::cmp::Ordering::Less => {
-                    left = mid + 1;
-                }
-                std::cmp::Ordering::Greater => {
-                    right = mid - 1;
-                }
-            }
-        }
-
-        Ok(result)
+        todo!()
     }
 
-    #[cfg(feature = "http")]
     async fn http_stream_query_range<T: http_range_client::AsyncHttpRangeClient>(
         &self,
         client: &mut http_range_client::AsyncBufferedHttpRangeClient<T>,
@@ -1097,113 +960,7 @@ impl StreamableIndex for IndexMeta {
         lower: Option<&[u8]>,
         upper: Option<&[u8]>,
     ) -> std::io::Result<Vec<ValueOffset>> {
-        use std::io::{Error, ErrorKind};
-
-        let mut result = Vec::new();
-
-        // Find the starting position based on lower bound
-        let start_index = if let Some(lower_bound) = lower {
-            self.http_find_lower_bound(client, index_offset, lower_bound)
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?
-        } else {
-            0
-        };
-
-        // Calculate the position of the start_index entry
-        let mut pos = index_offset + 12; // Skip type_id (4 bytes) and entry_count (8 bytes)
-
-        // Find the position of the start_index entry
-        for i in 0..start_index {
-            // For each entry, we need to fetch its key length
-            let key_len_range = pos..(pos + 8);
-            let key_len_bytes = client
-                .min_req_size(0)
-                .get_range(key_len_range.start, key_len_range.len())
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-            let key_len = u64::from_le_bytes(key_len_bytes.as_ref().try_into().unwrap()) as usize;
-
-            // Skip key bytes
-            pos += 8 + key_len;
-
-            // Get offsets length
-            let offsets_len_range = pos..(pos + 8);
-            let offsets_len_bytes = client
-                .min_req_size(0)
-                .get_range(offsets_len_range.start, offsets_len_range.len())
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-            let offsets_len =
-                u64::from_le_bytes(offsets_len_bytes.as_ref().try_into().unwrap()) as usize;
-
-            // Skip offset bytes
-            pos += 8 + (offsets_len * 8);
-        }
-
-        // Iterate through entries until we hit the upper bound
-        for i in start_index..self.entry_count {
-            // Read key length
-            let key_len_range = pos..(pos + 8);
-            let key_len_bytes = client
-                .min_req_size(0)
-                .get_range(key_len_range.start, key_len_range.len())
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-            let key_len = u64::from_le_bytes(key_len_bytes.as_ref().try_into().unwrap()) as usize;
-
-            // Read key bytes
-            let key_bytes_range = (pos + 8)..(pos + 8 + key_len);
-            let key_buf = client
-                .min_req_size(0)
-                .get_range(key_bytes_range.start, key_bytes_range.len())
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-            // Check upper bound
-            if let Some(upper_bound) = upper {
-                if self.compare_keys(key_buf, upper_bound) != std::cmp::Ordering::Less {
-                    break;
-                }
-            }
-
-            // Read offsets
-            let offsets_len_range = (pos + 8 + key_len)..(pos + 8 + key_len + 8);
-            let offsets_len_bytes = client
-                .min_req_size(0)
-                .get_range(offsets_len_range.start, offsets_len_range.len())
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-            let offsets_len =
-                u64::from_le_bytes(offsets_len_bytes.as_ref().try_into().unwrap()) as usize;
-
-            // Read all offsets in one request
-            let offsets_range =
-                (pos + 8 + key_len + 8)..(pos + 8 + key_len + 8 + (offsets_len * 8));
-            let offsets_bytes = client
-                .min_req_size(0)
-                .get_range(offsets_range.start, offsets_range.len())
-                .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-            // Process all offsets
-            for j in 0..offsets_len {
-                let offset_start = j * 8;
-                let offset_end = offset_start + 8;
-                let offset_bytes = &offsets_bytes[offset_start..offset_end];
-                let offset = u64::from_le_bytes(offset_bytes.try_into().unwrap());
-                result.push(offset);
-            }
-
-            // Move to the next entry
-            pos += 8 + key_len + 8 + (offsets_len * 8);
-        }
-
-        Ok(result)
+        todo!()
     }
 }
 

@@ -34,6 +34,37 @@ pub enum ByteSerializableValue {
     DateTime(DateTime<Utc>),
 }
 
+/// Get the type identifier for a ByteSerializable type.
+///
+/// This function returns a stable numeric identifier for each supported type,
+/// which is used for type checking during serialization and deserialization.
+pub fn get_type_id<T: ByteSerializable + 'static>() -> u32 {
+    // Use the TypeId of T to generate a stable identifier
+    match std::any::type_name::<T>() {
+        "ordered_float::OrderedFloat<f32>" => 1,
+        "ordered_float::OrderedFloat<f64>" => 2,
+        "alloc::string::String" => 3,
+        "i32" => 4,
+        "i64" => 5,
+        "u32" => 6,
+        "u64" => 7,
+        "bool" => 8,
+        "i16" => 9,
+        "i8" => 10,
+        "u16" => 11,
+        "u8" => 12,
+        "chrono::naive::datetime::NaiveDateTime" => 13,
+        "chrono::naive::date::NaiveDate" => 14,
+        "chrono::DateTime<chrono::Utc>" => 15,
+        _ => {
+            // For unknown types, hash the type name to get a consistent ID
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(std::any::type_name::<T>(), &mut hasher);
+            (std::hash::Hasher::finish(&hasher) % 0xFFFFFFFF) as u32
+        }
+    }
+}
+
 impl ByteSerializable for i64 {
     fn to_bytes(&self) -> Vec<u8> {
         self.to_le_bytes().to_vec()
