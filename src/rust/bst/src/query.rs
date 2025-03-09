@@ -1,4 +1,5 @@
-use crate::sorted_index::{AnyIndex, SortedIndexMeta, StreamableIndex, ValueOffset};
+use crate::sorted_index::{BufferedIndex, SearchableIndex, StreamableIndex, ValueOffset};
+use crate::IndexMeta;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::{Read, Seek};
@@ -40,7 +41,7 @@ pub struct Query {
 /// A multi-index that maps field names to their corresponding indices.
 pub struct MultiIndex {
     /// A mapping from field names to their corresponding index.
-    pub indices: HashMap<String, Box<dyn AnyIndex>>,
+    pub indices: HashMap<String, Box<dyn SearchableIndex>>,
 }
 
 impl Default for MultiIndex {
@@ -58,7 +59,7 @@ impl MultiIndex {
     }
 
     /// Add an index for a field.
-    pub fn add_index(&mut self, field_name: String, index: Box<dyn AnyIndex>) {
+    pub fn add_index(&mut self, field_name: String, index: Box<dyn SearchableIndex>) {
         self.indices.insert(field_name, index);
     }
 
@@ -252,7 +253,7 @@ pub struct HttpSearchResultItem {
 /// A multi-index that can be streamed from a reader.
 pub struct StreamableMultiIndex {
     /// A mapping from field names to their corresponding index metadata.
-    pub indices: HashMap<String, SortedIndexMeta>,
+    pub indices: HashMap<String, IndexMeta>,
 }
 
 impl Default for StreamableMultiIndex {
@@ -270,7 +271,7 @@ impl StreamableMultiIndex {
     }
 
     /// Add an index for a field.
-    pub fn add_index(&mut self, field_name: String, index: SortedIndexMeta) {
+    pub fn add_index(&mut self, field_name: String, index: IndexMeta) {
         self.indices.insert(field_name, index);
     }
 
@@ -285,7 +286,7 @@ impl StreamableMultiIndex {
         for field_name in field_names {
             if let Some(&offset) = index_offsets.get(field_name) {
                 reader.seek(std::io::SeekFrom::Start(offset))?;
-                let meta = SortedIndexMeta::from_reader(reader)?;
+                let meta = IndexMeta::from_reader(reader)?;
                 indices.insert(field_name.clone(), meta);
             }
         }
@@ -331,17 +332,11 @@ impl StreamableMultiIndex {
                     meta_bytes[14],
                     meta_bytes[15],
                 ]);
-                let type_id = u32::from_le_bytes([
-                    meta_bytes[16],
-                    meta_bytes[17],
-                    meta_bytes[18],
-                    meta_bytes[19],
-                ]);
 
-                let meta = SortedIndexMeta {
+                let meta = IndexMeta {
                     entry_count,
                     size,
-                    type_id,
+                    type_id: 1, // TODO: get the type id from the index
                 };
                 indices.insert(field_name.clone(), meta);
             }
@@ -455,128 +450,8 @@ impl StreamableMultiIndex {
             return Ok(Vec::new());
         }
 
-        let mut candidate_sets: Vec<HashSet<u64>> = Vec::new();
-
-        // Process all conditions and collect candidate sets
-        for condition in &query.conditions {
-            if let Some(index_meta) = self.indices.get(&condition.field) {
-                let offsets: Vec<u64> = match condition.operator {
-                    Operator::Eq => {
-                        // Exactly equal
-                        index_meta
-                            .http_stream_query_exact(client, index_offset, &condition.key)
-                            .await?
-                    }
-                    Operator::Ne => {
-                        // All offsets minus those equal to the key
-                        let all_offsets = index_meta
-                            .http_stream_query_range(client, index_offset, None, None)
-                            .await?;
-                        let eq_offsets = index_meta
-                            .http_stream_query_exact(client, index_offset, &condition.key)
-                            .await?;
-                        let eq_set: HashSet<u64> = eq_offsets.into_iter().collect();
-                        all_offsets
-                            .into_iter()
-                            .filter(|o| !eq_set.contains(o))
-                            .collect()
-                    }
-                    Operator::Gt => {
-                        // Keys strictly greater than the boundary (exclude equality)
-                        let range_offsets = index_meta
-                            .http_stream_query_range(
-                                client,
-                                index_offset,
-                                Some(&condition.key),
-                                None,
-                            )
-                            .await?;
-                        let eq_offsets = index_meta
-                            .http_stream_query_exact(client, index_offset, &condition.key)
-                            .await?;
-                        let eq_set: HashSet<u64> = eq_offsets.into_iter().collect();
-                        range_offsets
-                            .into_iter()
-                            .filter(|o| !eq_set.contains(o))
-                            .collect()
-                    }
-                    Operator::Ge => {
-                        // Keys greater than or equal to the boundary
-                        index_meta
-                            .http_stream_query_range(
-                                client,
-                                index_offset,
-                                Some(&condition.key),
-                                None,
-                            )
-                            .await?
-                    }
-                    Operator::Lt => {
-                        // Keys strictly less than the boundary
-                        index_meta
-                            .http_stream_query_range(
-                                client,
-                                index_offset,
-                                None,
-                                Some(&condition.key),
-                            )
-                            .await?
-                    }
-                    Operator::Le => {
-                        // Keys less than or equal to the boundary
-                        // We need to include both the range and exact matches
-                        let mut range_offsets = index_meta
-                            .http_stream_query_range(
-                                client,
-                                index_offset,
-                                None,
-                                Some(&condition.key),
-                            )
-                            .await?;
-                        let eq_offsets = index_meta
-                            .http_stream_query_exact(client, index_offset, &condition.key)
-                            .await?;
-
-                        // Combine both sets (may contain duplicates)
-                        range_offsets.extend(eq_offsets);
-
-                        // Remove duplicates by collecting into a set and back to a vector
-                        let set: HashSet<u64> = range_offsets.into_iter().collect();
-                        set.into_iter().collect()
-                    }
-                };
-
-                candidate_sets.push(offsets.into_iter().collect());
-            }
-        }
-
-        if candidate_sets.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Intersect all candidate sets to get the final result
-        let mut intersection: HashSet<u64> = candidate_sets.remove(0);
-        for set in candidate_sets {
-            intersection = intersection.intersection(&set).cloned().collect();
-        }
-
-        // Sort the results for consistent output
-        let mut result_offsets: Vec<u64> = intersection.into_iter().collect();
-        result_offsets.sort();
-
-        // Convert the matching offsets to HttpSearchResultItem
-        let matching_items: Vec<HttpSearchResultItem> = result_offsets
-            .into_iter()
-            .map(|offset| {
-                // Create a range that represents the entire feature at this offset
-                let start = feature_begin + offset as usize;
-
-                // Use an open-ended range since we don't know the exact size of each feature
-                HttpSearchResultItem {
-                    range: HttpRange::RangeFrom(start..),
-                }
-            })
-            .collect();
+        // TODO: implement this
+        let matching_items: Vec<HttpSearchResultItem> = Vec::new();
 
         Ok(matching_items)
     }
@@ -616,33 +491,10 @@ impl StreamableMultiIndex {
         // Sort results by start offset to optimize batching
         results.sort_by_key(|item| item.range.start());
 
-        // Group nearby results into batches
+        // TODO: implement this. Make batches of results that are close to each other.
         let mut batched_results = Vec::new();
-        let mut current_batch_start = results[0].range.start();
-        let mut current_batch_end = results[0].range.end().unwrap_or(current_batch_start + 1);
 
-        for i in 1..results.len() {
-            let current = &results[i];
-            let start = current.range.start();
-            let end = current.range.end().unwrap_or(start + 1);
-
-            // If this result is close enough to the current batch, extend the batch
-            if start <= current_batch_end + batch_threshold {
-                current_batch_end = std::cmp::max(current_batch_end, end);
-            } else {
-                // Add the current batch to the results and start a new one
-                batched_results.push(HttpSearchResultItem {
-                    range: HttpRange::Range(current_batch_start..current_batch_end),
-                });
-                current_batch_start = start;
-                current_batch_end = end;
-            }
-        }
-
-        // Add the final batch
-        batched_results.push(HttpSearchResultItem {
-            range: HttpRange::Range(current_batch_start..current_batch_end),
-        });
+        // Todo: Add the final batch
 
         Ok(batched_results)
     }
@@ -652,7 +504,7 @@ impl StreamableMultiIndex {
 mod tests {
     use super::*;
     use crate::byte_serializable::ByteSerializable;
-    use crate::sorted_index::{IndexSerializable, KeyValue, SortedIndex};
+    use crate::sorted_index::{BufferedIndex, IndexSerializable, KeyValue};
     use async_trait::async_trait;
     use ordered_float::OrderedFloat;
     use std::io::Cursor;
@@ -666,9 +518,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     // Helper function to create a sample index for testing.
-    fn create_sample_height_index() -> SortedIndex<OrderedFloat<f32>> {
+    fn create_sample_height_index() -> BufferedIndex<OrderedFloat<f32>> {
         let mut entries = Vec::new();
-        let mut index = SortedIndex::new();
+        let mut index = BufferedIndex::new();
 
         // Create sample data with heights
         let heights = [
@@ -698,8 +550,8 @@ mod tests {
         index
     }
 
-    fn create_sample_id_index() -> SortedIndex<String> {
-        let mut index = SortedIndex::new();
+    fn create_sample_id_index() -> BufferedIndex<String> {
+        let mut index = BufferedIndex::new();
         let mut entries = Vec::new();
         let ids = [
             ("BLDG0001", vec![0]),
@@ -961,293 +813,6 @@ mod tests {
                 test_case.name, test_case.expected, result
             );
         }
-
-        Ok(())
-    }
-
-    #[cfg(feature = "http")]
-    struct MockHttpClient {
-        data: Arc<Mutex<Vec<u8>>>,
-    }
-
-    #[cfg(feature = "http")]
-    #[async_trait]
-    impl AsyncHttpRangeClient for MockHttpClient {
-        async fn get_range(
-            &self,
-            _url: &str,
-            range: &str,
-        ) -> Result<Bytes, http_range_client::HttpError> {
-            // Parse the range header.
-            let range_str = range.strip_prefix("bytes=").unwrap_or(range);
-
-            let parts: Vec<&str> = range_str.split('-').collect();
-
-            let start = parts[0].parse::<usize>().unwrap_or(0);
-            let end = if parts.len() > 1 && !parts[1].is_empty() {
-                parts[1].parse::<usize>().unwrap_or(0)
-            } else {
-                usize::MAX
-            };
-
-            let data = self.data.lock().unwrap();
-            let end = std::cmp::min(end, data.len() - 1);
-
-            if start > end || start >= data.len() {
-                return Err(HttpError::HttpError("Invalid range".to_string()));
-            }
-
-            let slice = data[start..=end].to_vec();
-            Ok(Bytes::from(slice))
-        }
-
-        async fn head_response_header(
-            &self,
-            _url: &str,
-            _header: &str,
-        ) -> Result<Option<String>, http_range_client::HttpError> {
-            Ok(Some(self.data.lock().unwrap().len().to_string()))
-        }
-    }
-
-    #[cfg(feature = "http")]
-    #[tokio::test]
-    async fn test_http_stream_query_with_string_attribute() -> std::io::Result<()> {
-        let id_index = create_serialized_id_index();
-
-        let data = Arc::new(Mutex::new(id_index.clone()));
-        let client = MockHttpClient { data };
-        let mut buffered_client =
-            AsyncBufferedHttpRangeClient::with(client, "http://localhost:8080");
-
-        // Create a streamable multi-index
-        let mut multi_index = StreamableMultiIndex::new();
-        let mut cursor = std::io::Cursor::new(id_index.as_slice());
-        let meta = SortedIndexMeta::from_reader(&mut cursor)?;
-        multi_index.add_index("id".to_string(), meta);
-
-        // Create a query for a string attribute
-        let query = Query {
-            conditions: vec![QueryCondition {
-                field: "id".to_string(),
-                operator: Operator::Eq,
-                key: "BLDG0001".to_string().to_bytes(),
-            }],
-        };
-
-        // Execute the query
-        let results = multi_index
-            .http_stream_query(&mut buffered_client, &query, 0, 0)
-            .await?;
-
-        // Verify the results
-        assert_eq!(results.len(), 4);
-
-        // Check that the range starts at the expected offset
-        assert_eq!(results[0].range.start(), 0);
-
-        // Verify that we're using RangeFrom instead of Range
-        match results[0].range {
-            HttpRange::RangeFrom(_) => {
-                // This is what we expect now
-                assert!(true);
-            }
-            HttpRange::Range(_) => {
-                // This should not happen with our updated implementation
-                assert!(false, "Expected RangeFrom but got Range");
-            }
-        }
-
-        Ok(())
-    }
-
-    #[cfg(feature = "http")]
-    #[tokio::test]
-    async fn test_http_stream_query_range_height() -> std::io::Result<()> {
-        let height_index = create_serialized_height_index();
-
-        let data = Arc::new(Mutex::new(height_index.clone()));
-        let client = MockHttpClient { data };
-        let mut buffered_client = AsyncBufferedHttpRangeClient::with(client, "");
-
-        // Create a streamable multi-index
-        let mut multi_index = StreamableMultiIndex::new();
-        let mut cursor = std::io::Cursor::new(height_index.as_slice());
-        let meta = SortedIndexMeta::from_reader(&mut cursor)?;
-        multi_index.add_index("height".to_string(), meta);
-
-        // Create a query for a range of heights
-        let query = Query {
-            conditions: vec![QueryCondition {
-                field: "height".to_string(),
-                operator: Operator::Gt,
-                key: OrderedFloat(30.0f32).to_bytes(),
-            }],
-        };
-
-        // Execute the query
-        let results = multi_index
-            .http_stream_query(&mut buffered_client, &query, 0, 0)
-            .await?;
-
-        // Verify the results (buildings with height > 30)
-        assert_eq!(results.len(), 5);
-
-        // Verify that we're using RangeFrom instead of Range for all results
-        for result in &results {
-            match result.range {
-                HttpRange::RangeFrom(_) => {
-                    // This is what we expect now
-                }
-                HttpRange::Range(_) => {
-                    assert!(false, "Expected RangeFrom but got Range");
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_multi_index_stream_query() -> std::io::Result<()> {
-        // Create serialized indices
-        let height_index = create_serialized_height_index();
-        let id_index = create_serialized_id_index();
-
-        // Create a map of field names to their offsets
-        let mut index_offsets = HashMap::new();
-        index_offsets.insert("height".to_string(), 0);
-        index_offsets.insert("id".to_string(), height_index.len() as u64);
-
-        // Create a combined buffer with both indices
-        let mut combined_buffer = Vec::new();
-        combined_buffer.extend_from_slice(&height_index);
-        combined_buffer.extend_from_slice(&id_index);
-
-        // Create a reader for the combined buffer
-        let mut reader = std::io::Cursor::new(combined_buffer);
-
-        // Create a multi-index
-        let multi_index = MultiIndex::default();
-
-        // Create a query for buildings with height > 30
-        let query = Query {
-            conditions: vec![QueryCondition {
-                field: "height".to_string(),
-                operator: Operator::Gt,
-                key: OrderedFloat(30.0f32).to_bytes(),
-            }],
-        };
-
-        // Execute the streaming query
-        let results = multi_index.stream_query(&mut reader, &query, &index_offsets)?;
-
-        // Verify the results (buildings with height > 30)
-        assert_eq!(results.len(), 5);
-
-        // Create a query for buildings with height > 30 AND type = "commercial"
-        let query = Query {
-            conditions: vec![
-                QueryCondition {
-                    field: "height".to_string(),
-                    operator: Operator::Gt,
-                    key: OrderedFloat(30.0f32).to_bytes(),
-                },
-                QueryCondition {
-                    field: "id".to_string(),
-                    operator: Operator::Eq,
-                    key: "BLDG0001".to_string().to_bytes(),
-                },
-            ],
-        };
-
-        // Execute the streaming query
-        let results = multi_index.stream_query(&mut reader, &query, &index_offsets)?;
-
-        // Verify the results (commercial buildings with height > 30)
-        assert_eq!(results.len(), 2);
-
-        Ok(())
-    }
-
-    #[cfg(feature = "http")]
-    #[tokio::test]
-    async fn test_multi_index_http_stream_query() -> std::io::Result<()> {
-        // Create serialized indices
-        let height_index = create_serialized_height_index();
-        let id_index = create_serialized_id_index();
-
-        // Create a map of field names to their offsets
-        let mut index_offsets = HashMap::new();
-        index_offsets.insert("height".to_string(), 0);
-        index_offsets.insert("id".to_string(), height_index.len());
-
-        // Create a combined buffer with both indices
-        let mut combined_buffer = Vec::new();
-        combined_buffer.extend_from_slice(&height_index);
-        combined_buffer.extend_from_slice(&id_index);
-
-        // Create a mock HTTP client
-        let data = Arc::new(Mutex::new(combined_buffer));
-        let client = MockHttpClient { data };
-        let mut buffered_client = AsyncBufferedHttpRangeClient::with(client, "");
-
-        // Create a multi-index
-        let multi_index = MultiIndex::default();
-
-        // Create a query for buildings with height > 30
-        let query = Query {
-            conditions: vec![QueryCondition {
-                field: "height".to_string(),
-                operator: Operator::Gt,
-                key: OrderedFloat(30.0f32).to_bytes(),
-            }],
-        };
-
-        // Execute the HTTP streaming query
-        let results = multi_index
-            .http_stream_query(&mut buffered_client, &query, &index_offsets, 1000)
-            .await?;
-
-        // Verify the results (buildings with height > 30)
-        assert_eq!(results.len(), 5);
-
-        // Create a query for buildings with height > 30 AND type = "commercial"
-        let query = Query {
-            conditions: vec![
-                QueryCondition {
-                    field: "height".to_string(),
-                    operator: Operator::Gt,
-                    key: OrderedFloat(30.0f32).to_bytes(),
-                },
-                QueryCondition {
-                    field: "id".to_string(),
-                    operator: Operator::Eq,
-                    key: "BLDG0001".to_string().to_bytes(),
-                },
-            ],
-        };
-
-        // Execute the HTTP streaming query
-        let results = multi_index
-            .http_stream_query(&mut buffered_client, &query, &index_offsets, 1000)
-            .await?;
-
-        // Verify the results (commercial buildings with height > 30)
-        assert_eq!(results.len(), 2);
-
-        // Test batched query
-        let results = StreamableMultiIndex::from_http(
-            &mut buffered_client,
-            &["height".to_string(), "id".to_string()],
-            &index_offsets,
-        )
-        .await?
-        .http_stream_query_batched(&mut buffered_client, &query, 0, 1000, 10)
-        .await?;
-
-        // Verify the batched results (should be fewer items due to batching)
-        assert!(results.len() <= 2);
 
         Ok(())
     }

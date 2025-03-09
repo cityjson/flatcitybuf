@@ -12,19 +12,22 @@ pub struct KeyValue<T: Ord + ByteSerializable + 'static> {
     pub offsets: Vec<ValueOffset>,
 }
 
-/// A sorted index implemented as an array of key–offset pairs.
+/// A buffered index implemented as an in-memory array of key–offset pairs.
+///
+/// This index is fully loaded into memory for fast access, making it suitable
+/// for smaller datasets or when memory usage is not a concern.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SortedIndex<T: Ord + ByteSerializable + 'static> {
+pub struct BufferedIndex<T: Ord + ByteSerializable + 'static> {
     pub entries: Vec<KeyValue<T>>,
 }
 
-impl<T: Ord + ByteSerializable + 'static> Default for SortedIndex<T> {
+impl<T: Ord + ByteSerializable + 'static> Default for BufferedIndex<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Ord + ByteSerializable + 'static> SortedIndex<T> {
+impl<T: Ord + ByteSerializable + 'static> BufferedIndex<T> {
     /// Create an empty index.
     pub fn new() -> Self {
         Self {
@@ -38,53 +41,53 @@ impl<T: Ord + ByteSerializable + 'static> SortedIndex<T> {
         self.entries = data;
     }
 
-    // Helper method to get a type identifier for T
+    /// Get the type identifier for this index.
     fn get_type_id() -> u32 {
-        // This is a simple way to identify types
-        // In a real implementation, you might want a more robust approach
-        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<ordered_float::OrderedFloat<f32>>()
-        {
-            1
-        } else if std::any::TypeId::of::<T>()
-            == std::any::TypeId::of::<ordered_float::OrderedFloat<f64>>()
-        {
-            2
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<String>() {
-            3
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<i32>() {
-            4
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<i64>() {
-            5
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<u32>() {
-            6
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<u64>() {
-            7
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<bool>() {
-            8
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<i16>() {
-            9
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<i8>() {
-            10
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<u16>() {
-            11
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<u8>() {
-            12
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<chrono::NaiveDateTime>() {
-            13
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<chrono::NaiveDate>() {
-            14
-        } else if std::any::TypeId::of::<T>()
-            == std::any::TypeId::of::<chrono::DateTime<chrono::Utc>>()
-        {
-            15
-        } else {
-            0 // Unknown type
+        // Use the TypeId of T to generate a stable identifier
+        match std::any::type_name::<T>() {
+            "ordered_float::OrderedFloat<f32>" => 1,
+            "ordered_float::OrderedFloat<f64>" => 2,
+            "alloc::string::String" => 3,
+            "i32" => 4,
+            "i64" => 5,
+            "u32" => 6,
+            "u64" => 7,
+            "bool" => 8,
+            "i16" => 9,
+            "i8" => 10,
+            "u16" => 11,
+            "u8" => 12,
+            "chrono::naive::datetime::NaiveDateTime" => 13,
+            "chrono::naive::date::NaiveDate" => 14,
+            "chrono::DateTime<chrono::Utc>" => 15,
+            _ => {
+                // For unknown types, hash the type name to get a consistent ID
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                std::hash::Hash::hash(std::any::type_name::<T>(), &mut hasher);
+                (std::hash::Hasher::finish(&hasher) % 0xFFFFFFFF) as u32
+            }
         }
     }
 }
 
-/// A trait defining flexible search operations on an index.
-pub trait SearchableIndex<T: Ord + ByteSerializable> {
+/// A trait defining byte-based search operations on an index.
+///
+/// This trait is object-safe and works with serialized byte representations
+/// of keys, making it suitable for use with trait objects and dynamic dispatch.
+pub trait SearchableIndex {
+    /// Return offsets for an exact key match given a serialized key.
+    fn query_exact_bytes(&self, key: &[u8]) -> Vec<ValueOffset>;
+
+    /// Return offsets for keys in the half-open interval [lower, upper) given serialized keys.
+    /// (A `None` for either bound means unbounded.)
+    fn query_range_bytes(&self, lower: Option<&[u8]>, upper: Option<&[u8]>) -> Vec<ValueOffset>;
+}
+
+/// A trait defining type-specific search operations on an index.
+///
+/// This trait provides strongly-typed search methods that work with the actual
+/// key type rather than byte representations.
+pub trait TypedSearchableIndex<T: Ord + ByteSerializable> {
     /// Return offsets for an exact key match.
     fn query_exact(&self, key: &T) -> Option<&[ValueOffset]>;
 
@@ -98,7 +101,7 @@ pub trait SearchableIndex<T: Ord + ByteSerializable> {
         F: Fn(&T) -> bool;
 }
 
-impl<T: Ord + ByteSerializable + 'static> SearchableIndex<T> for SortedIndex<T> {
+impl<T: Ord + ByteSerializable + 'static> TypedSearchableIndex<T> for BufferedIndex<T> {
     fn query_exact(&self, key: &T) -> Option<&[ValueOffset]> {
         self.entries
             .binary_search_by_key(&key, |kv| &kv.key)
@@ -143,6 +146,24 @@ impl<T: Ord + ByteSerializable + 'static> SearchableIndex<T> for SortedIndex<T> 
     }
 }
 
+impl<T: Ord + ByteSerializable + 'static> SearchableIndex for BufferedIndex<T> {
+    fn query_exact_bytes(&self, key: &[u8]) -> Vec<ValueOffset> {
+        let key_t = T::from_bytes(key);
+        self.query_exact(&key_t).unwrap_or(&[]).to_vec()
+    }
+
+    fn query_range_bytes(&self, lower: Option<&[u8]>, upper: Option<&[u8]>) -> Vec<ValueOffset> {
+        // Convert the optional byte slices into T
+        let lower_t = lower.map(|b| T::from_bytes(b));
+        let upper_t = upper.map(|b| T::from_bytes(b));
+        // We need to pass references.
+        let lower_ref = lower_t.as_ref();
+        let upper_ref = upper_t.as_ref();
+        let results = self.query_range(lower_ref, upper_ref);
+        results.into_iter().flatten().cloned().collect()
+    }
+}
+
 /// A trait for serializing and deserializing an index.
 pub trait IndexSerializable {
     /// Write the index to a writer.
@@ -154,7 +175,7 @@ pub trait IndexSerializable {
         Self: Sized;
 }
 
-impl<T: Ord + ByteSerializable + 'static> IndexSerializable for SortedIndex<T> {
+impl<T: Ord + ByteSerializable + 'static> IndexSerializable for BufferedIndex<T> {
     fn serialize<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         // Write the type identifier for T
         let type_id = Self::get_type_id();
@@ -225,35 +246,7 @@ impl<T: Ord + ByteSerializable + 'static> IndexSerializable for SortedIndex<T> {
             }
             entries.push(KeyValue { key, offsets });
         }
-        Ok(SortedIndex { entries })
-    }
-}
-
-pub trait AnyIndex {
-    /// Returns the offsets for an exact match given a serialized key.
-    fn query_exact_bytes(&self, key: &[u8]) -> Vec<ValueOffset>;
-    /// Returns the offsets for a range query given optional lower and upper serialized keys.
-    fn query_range_bytes(&self, lower: Option<&[u8]>, upper: Option<&[u8]>) -> Vec<ValueOffset>;
-}
-
-impl<T: Ord + ByteSerializable + 'static> AnyIndex for SortedIndex<T>
-where
-    T: 'static,
-{
-    fn query_exact_bytes(&self, key: &[u8]) -> Vec<ValueOffset> {
-        let key_t = T::from_bytes(key);
-        self.query_exact(&key_t).unwrap_or(&[]).to_vec()
-    }
-
-    fn query_range_bytes(&self, lower: Option<&[u8]>, upper: Option<&[u8]>) -> Vec<ValueOffset> {
-        // Convert the optional byte slices into T
-        let lower_t = lower.map(|b| T::from_bytes(b));
-        let upper_t = upper.map(|b| T::from_bytes(b));
-        // We need to pass references.
-        let lower_ref = lower_t.as_ref();
-        let upper_ref = upper_t.as_ref();
-        let results = self.query_range(lower_ref, upper_ref);
-        results.into_iter().flatten().cloned().collect()
+        Ok(BufferedIndex { entries })
     }
 }
 
@@ -301,8 +294,8 @@ pub trait StreamableIndex {
     ) -> std::io::Result<Vec<ValueOffset>>;
 }
 
-/// Metadata for a serialized SortedIndex, used for streaming access.
-pub struct SortedIndexMeta {
+/// Metadata for a serialized BufferedIndex, used for streaming access.
+pub struct IndexMeta {
     /// Number of entries in the index.
     pub entry_count: u64,
     /// Total size of the index in bytes.
@@ -311,8 +304,8 @@ pub struct SortedIndexMeta {
     pub type_id: u32,
 }
 
-impl SortedIndexMeta {
-    /// Read metadata from a reader positioned at the start of a serialized SortedIndex.
+impl IndexMeta {
+    /// Read metadata from a reader positioned at the start of a serialized BufferedIndex.
     pub fn from_reader<R: Read + Seek>(reader: &mut R) -> std::io::Result<Self> {
         let start_pos = reader.stream_position()?;
 
@@ -354,7 +347,7 @@ impl SortedIndexMeta {
         // Reset position
         reader.seek(SeekFrom::Start(start_pos))?;
 
-        Ok(SortedIndexMeta {
+        Ok(IndexMeta {
             entry_count,
             size: total_size,
             type_id,
@@ -851,7 +844,7 @@ impl SortedIndexMeta {
     }
 }
 
-impl StreamableIndex for SortedIndexMeta {
+impl StreamableIndex for IndexMeta {
     fn index_size(&self) -> u64 {
         self.size
     }
@@ -1232,7 +1225,7 @@ mod tests {
     };
 
     // Helper function to create a sample height index
-    fn create_sample_height_index() -> SortedIndex<OrderedFloat<f32>> {
+    fn create_sample_height_index() -> BufferedIndex<OrderedFloat<f32>> {
         let mut entries = Vec::new();
 
         // Create sample data with heights
@@ -1260,13 +1253,13 @@ mod tests {
             });
         }
 
-        let mut index = SortedIndex::new();
+        let mut index = BufferedIndex::new();
         index.build_index(entries);
         index
     }
 
     // Helper function to create a sample building ID index
-    fn create_sample_id_index() -> SortedIndex<String> {
+    fn create_sample_id_index() -> BufferedIndex<String> {
         let mut entries = Vec::new();
 
         // Create sample data with building IDs
@@ -1296,7 +1289,7 @@ mod tests {
             });
         }
 
-        let mut index = SortedIndex::new();
+        let mut index = BufferedIndex::new();
         index.build_index(entries);
         index
     }
@@ -1314,7 +1307,7 @@ mod tests {
         let mut cursor = Cursor::new(buffer);
 
         // Read the index metadata
-        let index_meta = SortedIndexMeta::from_reader(&mut cursor)?;
+        let index_meta = IndexMeta::from_reader(&mut cursor)?;
         println!(
             "Height index metadata: {} entries, {} bytes",
             index_meta.entry_count, index_meta.size
@@ -1374,7 +1367,7 @@ mod tests {
         let mut cursor = Cursor::new(buffer);
 
         // Read the index metadata
-        let index_meta = SortedIndexMeta::from_reader(&mut cursor)?;
+        let index_meta = IndexMeta::from_reader(&mut cursor)?;
 
         // Test range query for heights between 25.0 and 40.0
         let lower_bound = OrderedFloat(25.0f32);
@@ -1441,7 +1434,7 @@ mod tests {
         let mut cursor = Cursor::new(buffer);
 
         // Read the index metadata
-        let index_meta = SortedIndexMeta::from_reader(&mut cursor)?;
+        let index_meta = IndexMeta::from_reader(&mut cursor)?;
         println!(
             "ID index metadata: {} entries, {} bytes",
             index_meta.entry_count, index_meta.size
@@ -1501,7 +1494,7 @@ mod tests {
         let mut cursor = Cursor::new(buffer);
 
         // Read the index metadata
-        let index_meta = SortedIndexMeta::from_reader(&mut cursor)?;
+        let index_meta = IndexMeta::from_reader(&mut cursor)?;
 
         // Test range query for IDs between "BLDG0020" and "BLDG0050"
         let lower_bound = "BLDG0020";
@@ -1569,7 +1562,7 @@ mod tests {
             });
         }
 
-        let mut large_index = SortedIndex::new();
+        let mut large_index = BufferedIndex::new();
         large_index.build_index(entries);
 
         // Serialize the index to a buffer
@@ -1582,7 +1575,7 @@ mod tests {
 
         // Measure streaming query performance
         let mut cursor = Cursor::new(buffer.clone());
-        let index_meta = SortedIndexMeta::from_reader(&mut cursor)?;
+        let index_meta = IndexMeta::from_reader(&mut cursor)?;
 
         let stream_start = std::time::Instant::now();
         for &value in &test_values {
@@ -1600,7 +1593,7 @@ mod tests {
         // Measure in-memory query performance (including deserialization)
         let in_memory_start = std::time::Instant::now();
         let mut cursor = Cursor::new(buffer);
-        let in_memory_index = SortedIndex::<OrderedFloat<f32>>::deserialize(&mut cursor)?;
+        let in_memory_index = BufferedIndex::<OrderedFloat<f32>>::deserialize(&mut cursor)?;
         let deserialize_duration = in_memory_start.elapsed();
         println!("Deserializing index took {:?}", deserialize_duration);
 
@@ -1682,7 +1675,7 @@ mod tests {
         let mut buffered_client = AsyncBufferedHttpRangeClient::with(mock_client, "test-url");
 
         // Read the index metadata
-        let index_meta = SortedIndexMeta::from_reader(&mut Cursor::new(buffer.clone()))?;
+        let index_meta = IndexMeta::from_reader(&mut Cursor::new(buffer.clone()))?;
 
         // Test exact query for height 30.0
         let test_height = OrderedFloat(30.0f32);
@@ -1730,7 +1723,7 @@ mod tests {
         let mut buffered_client = AsyncBufferedHttpRangeClient::with(mock_client, "test-url");
 
         // Read the index metadata
-        let index_meta = SortedIndexMeta::from_reader(&mut Cursor::new(buffer.clone()))?;
+        let index_meta = IndexMeta::from_reader(&mut Cursor::new(buffer.clone()))?;
 
         // Test range query for heights between 25.0 and 40.0
         let lower_bound = 25.0f32;

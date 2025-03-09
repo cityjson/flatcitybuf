@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use bst::{ByteSerializable, IndexSerializable, KeyValue, SortedIndex};
+use bst::{BufferedIndex, ByteSerializable, IndexSerializable, KeyValue};
 use chrono::NaiveDateTime;
 use ordered_float::OrderedFloat;
 
@@ -38,7 +38,7 @@ where
         }
     }
 
-    let mut sorted_index = SortedIndex::new();
+    let mut sorted_index = BufferedIndex::new();
     sorted_index.build_index(entries);
     let mut buf = Vec::new();
     sorted_index.serialize(&mut buf).ok()?;

@@ -1,7 +1,7 @@
 use std::io::{self, Read, Seek, SeekFrom};
 
 use crate::error::Error;
-use bst::{ByteSerializable, IndexSerializable, OrderedFloat, SortedIndex};
+use bst::{BufferedIndex, ByteSerializable, IndexSerializable, OrderedFloat};
 pub use bst::{ByteSerializableValue, MultiIndex, Operator, Query, QueryCondition};
 
 use chrono::{DateTime, Utc};
@@ -30,33 +30,34 @@ pub fn process_attr_index_entry<R: Read>(
         if query.iter().any(|(name, _, _)| col.name() == name) {
             match col.type_() {
                 ColumnType::Int => {
-                    let index = SortedIndex::<i32>::deserialize(&mut buffer.as_slice())?;
+                    let index = BufferedIndex::<i32>::deserialize(&mut buffer.as_slice())?;
                     multi_index.add_index(col.name().to_string(), Box::new(index));
                 }
                 ColumnType::Long => {
-                    let index = SortedIndex::<i64>::deserialize(&mut buffer.as_slice())?;
+                    let index = BufferedIndex::<i64>::deserialize(&mut buffer.as_slice())?;
                     multi_index.add_index(col.name().to_string(), Box::new(index));
                 }
                 ColumnType::Float => {
                     let index =
-                        SortedIndex::<OrderedFloat<f32>>::deserialize(&mut buffer.as_slice())?;
+                        BufferedIndex::<OrderedFloat<f32>>::deserialize(&mut buffer.as_slice())?;
                     multi_index.add_index(col.name().to_string(), Box::new(index));
                 }
                 ColumnType::Double => {
                     let index =
-                        SortedIndex::<OrderedFloat<f64>>::deserialize(&mut buffer.as_slice())?;
+                        BufferedIndex::<OrderedFloat<f64>>::deserialize(&mut buffer.as_slice())?;
                     multi_index.add_index(col.name().to_string(), Box::new(index));
                 }
                 ColumnType::String => {
-                    let index = SortedIndex::<String>::deserialize(&mut buffer.as_slice())?;
+                    let index = BufferedIndex::<String>::deserialize(&mut buffer.as_slice())?;
                     multi_index.add_index(col.name().to_string(), Box::new(index));
                 }
                 ColumnType::Bool => {
-                    let index = SortedIndex::<bool>::deserialize(&mut buffer.as_slice())?;
+                    let index = BufferedIndex::<bool>::deserialize(&mut buffer.as_slice())?;
                     multi_index.add_index(col.name().to_string(), Box::new(index));
                 }
                 ColumnType::DateTime => {
-                    let index = SortedIndex::<DateTime<Utc>>::deserialize(&mut buffer.as_slice())?;
+                    let index =
+                        BufferedIndex::<DateTime<Utc>>::deserialize(&mut buffer.as_slice())?;
                     multi_index.add_index(col.name().to_string(), Box::new(index));
                 }
                 _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),

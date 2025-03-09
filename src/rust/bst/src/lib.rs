@@ -10,7 +10,10 @@ pub use sorted_index::*;
 mod tests {
     use crate::byte_serializable::ByteSerializable;
     use crate::query::{MultiIndex, Operator, Query, QueryCondition};
-    use crate::sorted_index::{IndexSerializable, KeyValue, SortedIndex, ValueOffset};
+    use crate::sorted_index::{
+        BufferedIndex, IndexSerializable, KeyValue, SearchableIndex, TypedSearchableIndex,
+        ValueOffset,
+    };
     use crate::Float;
     use chrono::NaiveDate;
     use ordered_float::OrderedFloat;
@@ -125,13 +128,13 @@ mod tests {
         }
 
         // Create SortedIndices and build each index.
-        let mut id_index = SortedIndex::new();
+        let mut id_index = BufferedIndex::new();
         id_index.build_index(id_entries);
-        let mut city_index = SortedIndex::new();
+        let mut city_index = BufferedIndex::new();
         city_index.build_index(city_entries);
-        let mut height_index = SortedIndex::new();
+        let mut height_index = BufferedIndex::new();
         height_index.build_index(height_entries);
-        let mut year_index = SortedIndex::new();
+        let mut year_index = BufferedIndex::new();
         year_index.build_index(year_entries);
 
         // Create a MultiIndex and register each index by field name.
@@ -352,9 +355,9 @@ mod tests {
         }
 
         // Create SortedIndices and build each index.
-        let mut id_index = SortedIndex::new();
+        let mut id_index = BufferedIndex::new();
         id_index.build_index(id_entries);
-        let mut city_index = SortedIndex::new();
+        let mut city_index = BufferedIndex::new();
         city_index.build_index(city_entries);
 
         let mut id_index_bytes = Vec::new();
@@ -362,9 +365,9 @@ mod tests {
         let mut city_index_bytes = Vec::new();
         city_index.serialize(&mut city_index_bytes)?;
 
-        let id_index_deserialized = SortedIndex::<u64>::deserialize(&mut &id_index_bytes[..])?;
+        let id_index_deserialized = BufferedIndex::<u64>::deserialize(&mut &id_index_bytes[..])?;
         let city_index_deserialized =
-            SortedIndex::<String>::deserialize(&mut &city_index_bytes[..])?;
+            BufferedIndex::<String>::deserialize(&mut &city_index_bytes[..])?;
 
         assert_eq!(id_index.entries, id_index_deserialized.entries);
         assert_eq!(city_index.entries, city_index_deserialized.entries);
