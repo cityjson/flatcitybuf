@@ -10,6 +10,9 @@ pub trait ByteSerializable {
 
     /// Construct an instance from the given bytes.
     fn from_bytes(bytes: &[u8]) -> Self;
+
+    /// Return the type of the value.
+    fn value_type(&self) -> ByteSerializableValue;
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +43,9 @@ impl ByteSerializable for i64 {
         array.copy_from_slice(&bytes[0..8]);
         i64::from_le_bytes(array)
     }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::I64(*self)
+    }
 }
 
 impl ByteSerializable for i32 {
@@ -50,6 +56,9 @@ impl ByteSerializable for i32 {
         let mut array = [0u8; 4];
         array.copy_from_slice(&bytes[0..4]);
         i32::from_le_bytes(array)
+    }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::I32(*self)
     }
 }
 
@@ -62,6 +71,9 @@ impl ByteSerializable for i16 {
         array.copy_from_slice(&bytes[0..2]);
         i16::from_le_bytes(array)
     }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::I16(*self)
+    }
 }
 
 impl ByteSerializable for i8 {
@@ -70,6 +82,9 @@ impl ByteSerializable for i8 {
     }
     fn from_bytes(bytes: &[u8]) -> Self {
         bytes[0] as i8
+    }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::I8(*self)
     }
 }
 impl ByteSerializable for u64 {
@@ -81,6 +96,9 @@ impl ByteSerializable for u64 {
         array.copy_from_slice(&bytes[0..8]);
         u64::from_le_bytes(array)
     }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::U64(*self)
+    }
 }
 impl ByteSerializable for u32 {
     fn to_bytes(&self) -> Vec<u8> {
@@ -90,6 +108,9 @@ impl ByteSerializable for u32 {
         let mut array = [0u8; 4];
         array.copy_from_slice(&bytes[0..4]);
         u32::from_le_bytes(array)
+    }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::U32(*self)
     }
 }
 
@@ -102,6 +123,9 @@ impl ByteSerializable for u16 {
         array.copy_from_slice(&bytes[0..2]);
         u16::from_le_bytes(array)
     }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::U16(*self)
+    }
 }
 
 impl ByteSerializable for u8 {
@@ -111,6 +135,9 @@ impl ByteSerializable for u8 {
     fn from_bytes(bytes: &[u8]) -> Self {
         bytes[0]
     }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::U8(*self)
+    }
 }
 
 impl ByteSerializable for String {
@@ -119,6 +146,9 @@ impl ByteSerializable for String {
     }
     fn from_bytes(bytes: &[u8]) -> Self {
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::String(self.clone())
     }
 }
 
@@ -131,6 +161,9 @@ impl ByteSerializable for f64 {
         array.copy_from_slice(&bytes[0..8]);
         f64::from_le_bytes(array)
     }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::F64(OrderedFloat(*self))
+    }
 }
 
 impl ByteSerializable for f32 {
@@ -141,6 +174,9 @@ impl ByteSerializable for f32 {
         let mut array = [0u8; 4];
         array.copy_from_slice(&bytes[0..4]);
         f32::from_le_bytes(array)
+    }
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::F32(OrderedFloat(*self))
     }
 }
 
@@ -155,6 +191,10 @@ impl ByteSerializable for Float<f64> {
         array.copy_from_slice(&bytes[0..8]);
         OrderedFloat(f64::from_le_bytes(array))
     }
+
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::F64(*self)
+    }
 }
 
 // Implement ByteSerializable for Float<f32> because f32 doesn't implement Ord trait because of NaN values.
@@ -167,6 +207,10 @@ impl ByteSerializable for Float<f32> {
         array.copy_from_slice(&bytes[0..4]);
         OrderedFloat(f32::from_le_bytes(array))
     }
+
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::F32(*self)
+    }
 }
 
 impl ByteSerializable for bool {
@@ -176,6 +220,10 @@ impl ByteSerializable for bool {
     }
     fn from_bytes(bytes: &[u8]) -> Self {
         bytes.first().is_some_and(|&b| b != 0)
+    }
+
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::Bool(*self)
     }
 }
 
@@ -201,6 +249,10 @@ impl ByteSerializable for NaiveDateTime {
         let nanosecond = u32::from_le_bytes(nano_bytes);
 
         NaiveDateTime::from_timestamp(timestamp, nanosecond)
+    }
+
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::NaiveDateTime(*self)
     }
 }
 
@@ -233,6 +285,10 @@ impl ByteSerializable for NaiveDate {
         )
         .unwrap()
     }
+
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::NaiveDate(*self)
+    }
 }
 
 /// Since DateTime<Utc> is essentially a NaiveDateTime with an offset,
@@ -245,5 +301,9 @@ impl ByteSerializable for DateTime<Utc> {
     fn from_bytes(bytes: &[u8]) -> Self {
         let naive = <NaiveDateTime as ByteSerializable>::from_bytes(bytes);
         DateTime::<Utc>::from_utc(naive, Utc)
+    }
+
+    fn value_type(&self) -> ByteSerializableValue {
+        ByteSerializableValue::DateTime(*self)
     }
 }
