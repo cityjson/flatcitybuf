@@ -67,26 +67,6 @@ pub fn process_attr_index_entry<R: Read>(
     Ok(())
 }
 
-fn byte_serializable_to_bytes(value: &ByteSerializableValue) -> Vec<u8> {
-    match value {
-        ByteSerializableValue::I64(i) => i.to_bytes(),
-        ByteSerializableValue::I32(i) => i.to_bytes(),
-        ByteSerializableValue::I16(i) => i.to_bytes(),
-        ByteSerializableValue::I8(i) => i.to_bytes(),
-        ByteSerializableValue::U64(i) => i.to_bytes(),
-        ByteSerializableValue::U32(i) => i.to_bytes(),
-        ByteSerializableValue::U16(i) => i.to_bytes(),
-        ByteSerializableValue::U8(i) => i.to_bytes(),
-        ByteSerializableValue::F64(i) => i.to_bytes(),
-        ByteSerializableValue::F32(i) => i.to_bytes(),
-        ByteSerializableValue::Bool(i) => i.to_bytes(),
-        ByteSerializableValue::String(s) => s.to_bytes(),
-        ByteSerializableValue::NaiveDateTime(dt) => dt.to_bytes(),
-        ByteSerializableValue::NaiveDate(d) => d.to_bytes(),
-        ByteSerializableValue::DateTime(dt) => dt.to_bytes(),
-    }
-}
-
 pub fn build_query(query: &AttrQuery) -> Query {
     Query {
         conditions: query
@@ -94,7 +74,7 @@ pub fn build_query(query: &AttrQuery) -> Query {
             .map(|(name, operator, value)| QueryCondition {
                 field: name.to_string(),
                 operator: *operator,
-                key: byte_serializable_to_bytes(value),
+                key: value.to_bytes(),
             })
             .collect(),
     }

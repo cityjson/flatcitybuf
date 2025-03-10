@@ -36,6 +36,27 @@ pub enum ByteSerializableValue {
     DateTime(DateTime<Utc>),
 }
 
+impl ByteSerializableValue {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            ByteSerializableValue::I64(i) => i.to_bytes(),
+            ByteSerializableValue::I32(i) => i.to_bytes(),
+            ByteSerializableValue::I16(i) => i.to_bytes(),
+            ByteSerializableValue::I8(i) => i.to_bytes(),
+            ByteSerializableValue::U64(i) => i.to_bytes(),
+            ByteSerializableValue::U32(i) => i.to_bytes(),
+            ByteSerializableValue::U16(i) => i.to_bytes(),
+            ByteSerializableValue::U8(i) => i.to_bytes(),
+            ByteSerializableValue::F64(i) => i.to_bytes(),
+            ByteSerializableValue::F32(i) => i.to_bytes(),
+            ByteSerializableValue::Bool(i) => i.to_bytes(),
+            ByteSerializableValue::String(s) => s.to_bytes(),
+            ByteSerializableValue::NaiveDateTime(dt) => dt.to_bytes(),
+            ByteSerializableValue::NaiveDate(d) => d.to_bytes(),
+            ByteSerializableValue::DateTime(dt) => dt.to_bytes(),
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ByteSerializableType {
     I64,
