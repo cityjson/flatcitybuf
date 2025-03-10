@@ -11,7 +11,7 @@ mod tests {
     use crate::byte_serializable::ByteSerializable;
     use crate::query::{MultiIndex, Operator, Query, QueryCondition};
     use crate::sorted_index::{
-        BufferedIndex, IndexSerializable, KeyValue, SearchableIndex, TypedSearchableIndex,
+        BufferedIndex, IndexSerializable, KeyValue,
         ValueOffset,
     };
     use crate::Float;

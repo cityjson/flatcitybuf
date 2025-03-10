@@ -1,8 +1,8 @@
-use crate::sorted_index::{BufferedIndex, SearchableIndex, StreamableIndex, ValueOffset};
+use crate::sorted_index::{SearchableIndex, StreamableIndex, ValueOffset};
 use crate::{error, IndexMeta};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
 use std::ops::Range;
 
 #[cfg(feature = "http")]
@@ -230,22 +230,21 @@ pub struct HttpSearchResultItem {
 }
 
 /// A multi-index that can be streamed from a reader.
+#[derive(Default)]
 pub struct StreamableMultiIndex {
     /// A mapping from field names to their corresponding index metadata.
     pub indices: HashMap<String, IndexMeta>,
+    /// A mapping from field names to their offsets in the file.
+    pub index_offsets: HashMap<String, u64>,
 }
 
-impl Default for StreamableMultiIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl StreamableMultiIndex {
     /// Create a new, empty streamable multi-index.
     pub fn new() -> Self {
         Self {
             indices: HashMap::new(),
+            index_offsets: HashMap::new(),
         }
     }
 
@@ -260,6 +259,7 @@ impl StreamableMultiIndex {
         index_offsets: &HashMap<String, u64>,
     ) -> Result<Self, error::Error> {
         let mut indices = HashMap::new();
+        let mut stored_offsets = HashMap::new();
 
         // Sort field names by their offset values
         let mut field_offsets: Vec<(String, u64)> = index_offsets
@@ -271,27 +271,34 @@ impl StreamableMultiIndex {
         for i in 0..field_offsets.len() {
             let (field_name, offset) = &field_offsets[i];
 
-            // Calculate the size of the index
-            let size = if i == field_offsets.len() - 1 {
-                // For the last index, get the end position of the file
-                let current_pos = reader.stream_position()?;
-                reader.seek(std::io::SeekFrom::End(0))?;
-                let end_pos = reader.stream_position()?;
-                // Restore the original position
-                reader.seek(std::io::SeekFrom::Start(current_pos))?;
-                end_pos - offset
-            } else {
-                // Use the next index's offset to calculate size
-                let next_offset = field_offsets[i + 1].1;
-                next_offset - offset
-            };
+            // Store the offset for later use in queries
+            stored_offsets.insert(field_name.clone(), *offset);
 
-            reader.seek(std::io::SeekFrom::Start(*offset))?;
-            let meta = IndexMeta::from_reader(reader, size)?;
-            indices.insert(field_name.clone(), meta);
+            // Seek to the start of this index
+            reader.seek(SeekFrom::Start(*offset))?;
+
+            // Calculate the size of this index
+            let next_offset = if i < field_offsets.len() - 1 {
+                field_offsets[i + 1].1
+            } else {
+                // For the last index, read to the end of the file
+                reader.seek(SeekFrom::End(0))?;
+                reader.stream_position()?
+            };
+            let size = next_offset - offset;
+
+            // Seek back to the start of this index
+            reader.seek(SeekFrom::Start(*offset))?;
+
+            // Load the index metadata
+            let index_meta = IndexMeta::from_reader(reader, size)?;
+            indices.insert(field_name.clone(), index_meta);
         }
 
-        Ok(Self { indices })
+        Ok(Self {
+            indices,
+            index_offsets: stored_offsets,
+        })
     }
 
     /// Create a streamable multi-index from an HTTP client.
@@ -300,10 +307,19 @@ impl StreamableMultiIndex {
         client: &mut AsyncBufferedHttpRangeClient<T>,
         index_offsets: &HashMap<String, usize>,
     ) -> std::io::Result<Self> {
-        let mut indices = HashMap::new();
+        let indices = HashMap::new();
+        let stored_offsets: HashMap<String, usize> = HashMap::new();
 
+        // TODO: Implement this method
         todo!();
-        Ok(Self { indices })
+
+        Ok(Self {
+            indices,
+            index_offsets: stored_offsets
+                .into_iter()
+                .map(|(k, v)| (k, v as u64))
+                .collect(),
+        })
     }
 
     /// Execute a query against the streamable multi-index.
@@ -319,79 +335,175 @@ impl StreamableMultiIndex {
             return Ok(Vec::new());
         }
 
+        println!(
+            "Processing query with {} conditions",
+            query.conditions.len()
+        );
         let mut candidate_sets: Vec<HashSet<ValueOffset>> = Vec::new();
 
+        // Store the initial position to restore it later
+        let initial_position = reader.stream_position()?;
+        println!("Initial cursor position: {}", initial_position);
+
         // Process all conditions and collect candidate sets
-        for condition in &query.conditions {
+        for (i, condition) in query.conditions.iter().enumerate() {
+            println!(
+                "Processing condition {}: field={}, operator={:?}",
+                i, condition.field, condition.operator
+            );
             if let Some(index_meta) = self.indices.get(&condition.field) {
+                println!("Found index for field: {}", condition.field);
+
+                // Get the index offset from the field name
+                // We need to find the offset of this index in the file
+                // This is a critical fix - we need to seek to the correct position for each index
+                let index_offset = match self.index_offsets.get(&condition.field) {
+                    Some(&offset) => {
+                        println!("Index offset for {}: {}", condition.field, offset);
+                        offset
+                    }
+                    None => {
+                        println!("No offset found for field: {}, using 0", condition.field);
+                        0 // Default to 0 if not found, though this shouldn't happen
+                    }
+                };
+
+                // Seek to the start of this index
+                reader.seek(SeekFrom::Start(index_offset))?;
+                println!("Set cursor position to index offset: {}", index_offset);
+
                 let offsets: Vec<ValueOffset> = match condition.operator {
                     Operator::Eq => {
                         // Exactly equal
-                        index_meta.stream_query_exact(reader, &condition.key)?
+                        println!("Operator::Eq - Calling stream_query_exact");
+                        let result = index_meta.stream_query_exact(reader, &condition.key)?;
+                        println!("Eq result: {:?}", result);
+                        result
                     }
                     Operator::Ne => {
                         // All offsets minus those equal to the key
+                        println!("Operator::Ne - Getting all offsets and removing exact matches");
+
+                        // Seek to the start of this index for the first query
+                        reader.seek(SeekFrom::Start(index_offset))?;
                         let all_offsets = index_meta.stream_query_range(reader, None, None)?;
+                        println!("All offsets: {:?}", all_offsets);
+
+                        // Seek to the start of this index again for the second query
+                        reader.seek(SeekFrom::Start(index_offset))?;
                         let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
+                        println!("Eq offsets to exclude: {:?}", eq_offsets);
+
                         let eq_set: HashSet<ValueOffset> = eq_offsets.into_iter().collect();
-                        all_offsets
+                        let result = all_offsets
                             .into_iter()
                             .filter(|o| !eq_set.contains(o))
-                            .collect()
+                            .collect();
+                        println!("Ne result: {:?}", result);
+                        result
                     }
                     Operator::Gt => {
                         // Keys strictly greater than the boundary (exclude equality)
+                        println!("Operator::Gt - Getting range and removing exact matches");
+
+                        // Seek to the start of this index for the first query
+                        reader.seek(SeekFrom::Start(index_offset))?;
                         let range_offsets =
                             index_meta.stream_query_range(reader, Some(&condition.key), None)?;
+                        println!("Range offsets: {:?}", range_offsets);
+
+                        // Seek to the start of this index again for the second query
+                        reader.seek(SeekFrom::Start(index_offset))?;
                         let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
+                        println!("Eq offsets to exclude: {:?}", eq_offsets);
+
                         let eq_set: HashSet<ValueOffset> = eq_offsets.into_iter().collect();
-                        range_offsets
+                        let result = range_offsets
                             .into_iter()
                             .filter(|o| !eq_set.contains(o))
-                            .collect()
+                            .collect();
+                        println!("Gt result: {:?}", result);
+                        result
                     }
                     Operator::Ge => {
                         // Keys greater than or equal to the boundary
-                        index_meta.stream_query_range(reader, Some(&condition.key), None)?
+                        println!("Operator::Ge - Getting range");
+
+                        // Seek to the start of this index
+                        reader.seek(SeekFrom::Start(index_offset))?;
+                        let result =
+                            index_meta.stream_query_range(reader, Some(&condition.key), None)?;
+                        println!("Ge result: {:?}", result);
+                        result
                     }
                     Operator::Lt => {
                         // Keys strictly less than the boundary
-                        index_meta.stream_query_range(reader, None, Some(&condition.key))?
+                        println!("Operator::Lt - Getting range");
+
+                        // Seek to the start of this index
+                        reader.seek(SeekFrom::Start(index_offset))?;
+                        let result =
+                            index_meta.stream_query_range(reader, None, Some(&condition.key))?;
+                        println!("Lt result: {:?}", result);
+                        result
                     }
                     Operator::Le => {
                         // Keys less than or equal to the boundary
                         // We need to include both the range and exact matches
+                        println!("Operator::Le - Getting range and exact matches");
+
+                        // Seek to the start of this index for the first query
+                        reader.seek(SeekFrom::Start(index_offset))?;
                         let mut range_offsets =
                             index_meta.stream_query_range(reader, None, Some(&condition.key))?;
+                        println!("Range offsets: {:?}", range_offsets);
+
+                        // Seek to the start of this index again for the second query
+                        reader.seek(SeekFrom::Start(index_offset))?;
                         let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
+                        println!("Eq offsets: {:?}", eq_offsets);
 
                         // Combine both sets (may contain duplicates)
                         range_offsets.extend(eq_offsets);
 
                         // Remove duplicates by collecting into a set and back to a vector
                         let set: HashSet<ValueOffset> = range_offsets.into_iter().collect();
-                        set.into_iter().collect()
+                        let result = set.into_iter().collect();
+                        println!("Le result: {:?}", result);
+                        result
                     }
                 };
 
+                println!("Adding candidate set for condition {}: {:?}", i, offsets);
                 candidate_sets.push(offsets.into_iter().collect());
+            } else {
+                println!("No index found for field: {}", condition.field);
             }
         }
 
+        // Restore the initial position
+        reader.seek(SeekFrom::Start(initial_position))?;
+        println!("Restored cursor to initial position: {}", initial_position);
+
         if candidate_sets.is_empty() {
+            println!("No candidate sets found");
             return Ok(Vec::new());
         }
 
         // Intersect all candidate sets to get the final result
         let mut intersection: HashSet<ValueOffset> = candidate_sets.remove(0);
-        for set in candidate_sets {
-            intersection = intersection.intersection(&set).cloned().collect();
+        println!("Initial intersection set: {:?}", intersection);
+        for (i, set) in candidate_sets.iter().enumerate() {
+            println!("Intersecting with set {}: {:?}", i, set);
+            intersection = intersection.intersection(set).cloned().collect();
+            println!("Intersection after set {}: {:?}", i, intersection);
         }
 
         // Sort the results for consistent output
         let mut result: Vec<ValueOffset> = intersection.into_iter().collect();
         result.sort();
 
+        println!("Final result: {:?}", result);
         Ok(result)
     }
 
@@ -453,7 +565,7 @@ impl StreamableMultiIndex {
         results.sort_by_key(|item| item.range.start());
 
         // TODO: implement this. Make batches of results that are close to each other.
-        let mut batched_results = Vec::new();
+        let batched_results = Vec::new();
 
         // Todo: Add the final batch
 
@@ -466,17 +578,14 @@ mod tests {
     use super::*;
     use crate::byte_serializable::ByteSerializable;
     use crate::sorted_index::{BufferedIndex, IndexSerializable, KeyValue};
-    use async_trait::async_trait;
+    
     use ordered_float::OrderedFloat;
     use std::io::Cursor;
     use std::vec;
 
-    #[cfg(feature = "http")]
-    use bytes::Bytes;
-    #[cfg(feature = "http")]
-    use http_range_client::{AsyncHttpRangeClient, HttpError};
-    #[cfg(feature = "http")]
-    use std::sync::{Arc, Mutex};
+    
+    
+    
 
     // Helper function to create a sample index for testing.
     fn create_sample_height_index() -> BufferedIndex<OrderedFloat<f32>> {
@@ -581,7 +690,6 @@ mod tests {
         index_offsets.insert("id".to_string(), height_index.len() as u64);
 
         // Create a streamable multi-index from the reader.
-        let field_names = vec!["height".to_string(), "id".to_string()];
         let multi_index = StreamableMultiIndex::from_reader(&mut reader, &index_offsets)?;
 
         // Check that the indices were loaded correctly.
@@ -740,7 +848,8 @@ mod tests {
                     ],
                 },
                 // Buildings with height <= 30.0 (0-8) except building 0 (which has id "BLDG0001")
-                expected: vec![1],
+                // So buildings 1-8 should match
+                expected: vec![1, 2, 3, 4, 5, 6, 7, 8],
             },
         ];
 

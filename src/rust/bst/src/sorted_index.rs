@@ -3,8 +3,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use ordered_float::OrderedFloat;
 
 use crate::{
-    byte_serializable::{get_type_id, ByteSerializable},
-    error, ByteSerializableType, ByteSerializableValue,
+    byte_serializable::ByteSerializable,
+    error, ByteSerializableType,
 };
 
 /// The offset type used to point to actual record data.
@@ -382,9 +382,14 @@ impl IndexMeta {
 
     /// Helper method to compare keys based on the type identifier.
     pub fn compare_keys(&self, key_bytes: &[u8], query_key: &[u8]) -> std::cmp::Ordering {
+        println!("compare_keys: type_id={:?}", self.type_id);
+        println!("key_bytes: {:?}", key_bytes);
+        println!("query_key: {:?}", query_key);
+
         match self.type_id {
             ByteSerializableType::F32 => {
                 // OrderedFloat<f32>
+                println!("Comparing as F32");
                 if key_bytes.len() == 4 && query_key.len() == 4 {
                     let key_val = OrderedFloat(f32::from_le_bytes([
                         key_bytes[0],
@@ -401,15 +406,21 @@ impl IndexMeta {
 
                     println!("key_val: {}", key_val);
                     println!("query_val: {}", query_val);
-                    key_val
+                    let result = key_val
                         .partial_cmp(&query_val)
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .unwrap_or(std::cmp::Ordering::Equal);
+                    println!("F32 comparison result: {:?}", result);
+                    result
                 } else {
-                    key_bytes.cmp(query_key)
+                    println!("F32 byte length mismatch, falling back to byte comparison");
+                    let result = key_bytes.cmp(query_key);
+                    println!("Byte comparison result: {:?}", result);
+                    result
                 }
             }
             ByteSerializableType::F64 => {
                 // OrderedFloat<f64>
+                println!("Comparing as F64");
                 if key_bytes.len() == 8 && query_key.len() == 8 {
                     let key_val = OrderedFloat(f64::from_le_bytes([
                         key_bytes[0],
@@ -434,15 +445,47 @@ impl IndexMeta {
 
                     println!("key_val: {}", key_val);
                     println!("query_val: {}", query_val);
-                    key_val
+                    let result = key_val
                         .partial_cmp(&query_val)
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .unwrap_or(std::cmp::Ordering::Equal);
+                    println!("F64 comparison result: {:?}", result);
+                    result
                 } else {
-                    key_bytes.cmp(query_key)
+                    println!("F64 byte length mismatch, falling back to byte comparison");
+                    let result = key_bytes.cmp(query_key);
+                    println!("Byte comparison result: {:?}", result);
+                    result
+                }
+            }
+            ByteSerializableType::String => {
+                // Try to convert to strings for comparison
+                println!("Comparing as String");
+                match (
+                    std::str::from_utf8(key_bytes),
+                    std::str::from_utf8(query_key),
+                ) {
+                    (Ok(key_str), Ok(query_str)) => {
+                        println!("key_str: {}", key_str);
+                        println!("query_str: {}", query_str);
+                        let result = key_str.cmp(query_str);
+                        println!("String comparison result: {:?}", result);
+                        result
+                    }
+                    _ => {
+                        println!("String conversion failed, falling back to byte comparison");
+                        let result = key_bytes.cmp(query_key);
+                        println!("Byte comparison result: {:?}", result);
+                        result
+                    }
                 }
             }
             // For all other types, we can directly compare the byte slices
-            _ => key_bytes.cmp(query_key),
+            _ => {
+                println!("Comparing as raw bytes");
+                let result = key_bytes.cmp(query_key);
+                println!("Byte comparison result: {:?}", result);
+                result
+            }
         }
     }
 }
@@ -457,8 +500,17 @@ impl StreamableIndex for IndexMeta {
         reader: &mut R,
         key: &[u8],
     ) -> std::io::Result<Vec<ValueOffset>> {
+        println!(
+            "Cursor position in stream_query_exact: {:?}",
+            reader.stream_position()?
+        );
+
         // Save the current position
         let start_pos = reader.stream_position()?;
+        println!(
+            "stream_query_exact: type_id={:?}, start_pos={}",
+            self.type_id, start_pos
+        );
 
         // Skip the type identifier and entry count
         reader.seek(SeekFrom::Current(12))?;
@@ -468,8 +520,12 @@ impl StreamableIndex for IndexMeta {
         let mut right = self.entry_count as i64 - 1;
         let mut result = Vec::new();
 
+        println!("Binary search range: left={}, right={}", left, right);
+        println!("Looking for key bytes: {:?}", key);
+
         while left <= right {
             let mid = left + (right - left) / 2;
+            println!("Checking mid={}", mid);
 
             // Seek to the mid entry
             self.seek_to_entry(reader, mid as u64, start_pos)?;
@@ -478,31 +534,58 @@ impl StreamableIndex for IndexMeta {
             let mut key_len_bytes = [0u8; 8];
             reader.read_exact(&mut key_len_bytes)?;
             let key_len = u64::from_le_bytes(key_len_bytes) as usize;
+            println!("Key length: {}", key_len);
 
             // Read key bytes
             let mut key_buf = vec![0u8; key_len];
             reader.read_exact(&mut key_buf)?;
+            println!("Read key bytes: {:?}", key_buf);
+
+            // For debugging, try to convert keys to strings if possible
+            let key_str = match std::str::from_utf8(&key_buf) {
+                Ok(s) => s.to_string(),
+                Err(_) => format!("{:?}", key_buf),
+            };
+
+            let query_str = match std::str::from_utf8(key) {
+                Ok(s) => s.to_string(),
+                Err(_) => format!("{:?}", key),
+            };
+
+            println!("Key as string: {}", key_str);
+            println!("Query as string: {}", query_str);
 
             // Compare keys
-            match self.compare_keys(&key_buf, key) {
+            let comparison = self.compare_keys(&key_buf, key);
+            println!("Comparison result: {:?}", comparison);
+
+            match comparison {
                 std::cmp::Ordering::Equal => {
                     // Found a match, read offsets
+                    println!("Found exact match!");
                     let mut offsets_len_bytes = [0u8; 8];
                     reader.read_exact(&mut offsets_len_bytes)?;
                     let offsets_len = u64::from_le_bytes(offsets_len_bytes) as usize;
+                    println!("Number of offsets: {}", offsets_len);
 
-                    for _ in 0..offsets_len {
+                    for i in 0..offsets_len {
                         let mut offset_bytes = [0u8; 8];
                         reader.read_exact(&mut offset_bytes)?;
                         let offset = u64::from_le_bytes(offset_bytes);
+                        println!("Offset {}: {}", i, offset);
                         result.push(offset);
                     }
                     break;
                 }
                 std::cmp::Ordering::Less => {
+                    println!("Key is less than query, moving left bound to {}", mid + 1);
                     left = mid + 1;
                 }
                 std::cmp::Ordering::Greater => {
+                    println!(
+                        "Key is greater than query, moving right bound to {}",
+                        mid - 1
+                    );
                     right = mid - 1;
                 }
             }
@@ -510,6 +593,7 @@ impl StreamableIndex for IndexMeta {
 
         // Reset position
         reader.seek(SeekFrom::Start(start_pos))?;
+        println!("Final result: {:?}", result);
 
         Ok(result)
     }
@@ -601,16 +685,7 @@ mod tests {
     use ordered_float::OrderedFloat;
     use std::io::{Cursor, Seek, SeekFrom};
 
-    #[cfg(feature = "http")]
-    use {
-        async_trait::async_trait,
-        bytes::Bytes,
-        http_range_client::{
-            AsyncBufferedHttpRangeClient, AsyncHttpRangeClient, Result as HttpResult,
-        },
-        std::sync::{Arc, Mutex},
-        tokio::test as tokio_test,
-    };
+    
 
     // Helper function to create a sample height index
     fn create_sample_height_index() -> BufferedIndex<OrderedFloat<f32>> {
