@@ -10,10 +10,7 @@ pub use sorted_index::*;
 mod tests {
     use crate::byte_serializable::ByteSerializable;
     use crate::query::{MultiIndex, Operator, Query, QueryCondition};
-    use crate::sorted_index::{
-        BufferedIndex, IndexSerializable, KeyValue,
-        ValueOffset,
-    };
+    use crate::sorted_index::{BufferedIndex, IndexSerializable, KeyValue, ValueOffset};
     use crate::Float;
     use chrono::NaiveDate;
     use ordered_float::OrderedFloat;

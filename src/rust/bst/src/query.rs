@@ -238,7 +238,6 @@ pub struct StreamableMultiIndex {
     pub index_offsets: HashMap<String, u64>,
 }
 
-
 impl StreamableMultiIndex {
     /// Create a new, empty streamable multi-index.
     pub fn new() -> Self {
@@ -335,146 +334,100 @@ impl StreamableMultiIndex {
             return Ok(Vec::new());
         }
 
-        println!(
-            "Processing query with {} conditions",
-            query.conditions.len()
-        );
         let mut candidate_sets: Vec<HashSet<ValueOffset>> = Vec::new();
 
         // Store the initial position to restore it later
         let initial_position = reader.stream_position()?;
-        println!("Initial cursor position: {}", initial_position);
 
         // Process all conditions and collect candidate sets
-        for (i, condition) in query.conditions.iter().enumerate() {
-            println!(
-                "Processing condition {}: field={}, operator={:?}",
-                i, condition.field, condition.operator
-            );
+        for condition in query.conditions.iter() {
             if let Some(index_meta) = self.indices.get(&condition.field) {
-                println!("Found index for field: {}", condition.field);
-
                 // Get the index offset from the field name
                 // We need to find the offset of this index in the file
                 // This is a critical fix - we need to seek to the correct position for each index
                 let index_offset = match self.index_offsets.get(&condition.field) {
-                    Some(&offset) => {
-                        println!("Index offset for {}: {}", condition.field, offset);
-                        offset
-                    }
+                    Some(&offset) => offset,
                     None => {
-                        println!("No offset found for field: {}, using 0", condition.field);
                         0 // Default to 0 if not found, though this shouldn't happen
                     }
                 };
 
                 // Seek to the start of this index
                 reader.seek(SeekFrom::Start(index_offset))?;
-                println!("Set cursor position to index offset: {}", index_offset);
 
                 let offsets: Vec<ValueOffset> = match condition.operator {
                     Operator::Eq => {
                         // Exactly equal
-                        println!("Operator::Eq - Calling stream_query_exact");
-                        let result = index_meta.stream_query_exact(reader, &condition.key)?;
-                        println!("Eq result: {:?}", result);
-                        result
+                        index_meta.stream_query_exact(reader, &condition.key)?
                     }
                     Operator::Ne => {
                         // All offsets minus those equal to the key
-                        println!("Operator::Ne - Getting all offsets and removing exact matches");
 
                         // Seek to the start of this index for the first query
                         reader.seek(SeekFrom::Start(index_offset))?;
                         let all_offsets = index_meta.stream_query_range(reader, None, None)?;
-                        println!("All offsets: {:?}", all_offsets);
 
                         // Seek to the start of this index again for the second query
                         reader.seek(SeekFrom::Start(index_offset))?;
                         let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
-                        println!("Eq offsets to exclude: {:?}", eq_offsets);
 
                         let eq_set: HashSet<ValueOffset> = eq_offsets.into_iter().collect();
-                        let result = all_offsets
+                        all_offsets
                             .into_iter()
                             .filter(|o| !eq_set.contains(o))
-                            .collect();
-                        println!("Ne result: {:?}", result);
-                        result
+                            .collect()
                     }
                     Operator::Gt => {
                         // Keys strictly greater than the boundary (exclude equality)
-                        println!("Operator::Gt - Getting range and removing exact matches");
-
                         // Seek to the start of this index for the first query
                         reader.seek(SeekFrom::Start(index_offset))?;
                         let range_offsets =
                             index_meta.stream_query_range(reader, Some(&condition.key), None)?;
-                        println!("Range offsets: {:?}", range_offsets);
 
                         // Seek to the start of this index again for the second query
                         reader.seek(SeekFrom::Start(index_offset))?;
                         let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
-                        println!("Eq offsets to exclude: {:?}", eq_offsets);
 
                         let eq_set: HashSet<ValueOffset> = eq_offsets.into_iter().collect();
-                        let result = range_offsets
+                        range_offsets
                             .into_iter()
                             .filter(|o| !eq_set.contains(o))
-                            .collect();
-                        println!("Gt result: {:?}", result);
-                        result
+                            .collect()
                     }
                     Operator::Ge => {
                         // Keys greater than or equal to the boundary
-                        println!("Operator::Ge - Getting range");
 
                         // Seek to the start of this index
                         reader.seek(SeekFrom::Start(index_offset))?;
-                        let result =
-                            index_meta.stream_query_range(reader, Some(&condition.key), None)?;
-                        println!("Ge result: {:?}", result);
-                        result
+                        index_meta.stream_query_range(reader, Some(&condition.key), None)?
                     }
                     Operator::Lt => {
                         // Keys strictly less than the boundary
-                        println!("Operator::Lt - Getting range");
-
                         // Seek to the start of this index
                         reader.seek(SeekFrom::Start(index_offset))?;
-                        let result =
-                            index_meta.stream_query_range(reader, None, Some(&condition.key))?;
-                        println!("Lt result: {:?}", result);
-                        result
+                        index_meta.stream_query_range(reader, None, Some(&condition.key))?
                     }
                     Operator::Le => {
                         // Keys less than or equal to the boundary
                         // We need to include both the range and exact matches
-                        println!("Operator::Le - Getting range and exact matches");
-
                         // Seek to the start of this index for the first query
                         reader.seek(SeekFrom::Start(index_offset))?;
                         let mut range_offsets =
                             index_meta.stream_query_range(reader, None, Some(&condition.key))?;
-                        println!("Range offsets: {:?}", range_offsets);
 
                         // Seek to the start of this index again for the second query
                         reader.seek(SeekFrom::Start(index_offset))?;
                         let eq_offsets = index_meta.stream_query_exact(reader, &condition.key)?;
-                        println!("Eq offsets: {:?}", eq_offsets);
 
                         // Combine both sets (may contain duplicates)
                         range_offsets.extend(eq_offsets);
 
                         // Remove duplicates by collecting into a set and back to a vector
                         let set: HashSet<ValueOffset> = range_offsets.into_iter().collect();
-                        let result = set.into_iter().collect();
-                        println!("Le result: {:?}", result);
-                        result
+                        set.into_iter().collect()
                     }
                 };
 
-                println!("Adding candidate set for condition {}: {:?}", i, offsets);
                 candidate_sets.push(offsets.into_iter().collect());
             } else {
                 println!("No index found for field: {}", condition.field);
@@ -483,7 +436,6 @@ impl StreamableMultiIndex {
 
         // Restore the initial position
         reader.seek(SeekFrom::Start(initial_position))?;
-        println!("Restored cursor to initial position: {}", initial_position);
 
         if candidate_sets.is_empty() {
             println!("No candidate sets found");
@@ -492,18 +444,14 @@ impl StreamableMultiIndex {
 
         // Intersect all candidate sets to get the final result
         let mut intersection: HashSet<ValueOffset> = candidate_sets.remove(0);
-        println!("Initial intersection set: {:?}", intersection);
-        for (i, set) in candidate_sets.iter().enumerate() {
-            println!("Intersecting with set {}: {:?}", i, set);
+        for set in candidate_sets.iter() {
             intersection = intersection.intersection(set).cloned().collect();
-            println!("Intersection after set {}: {:?}", i, intersection);
         }
 
         // Sort the results for consistent output
         let mut result: Vec<ValueOffset> = intersection.into_iter().collect();
         result.sort();
 
-        println!("Final result: {:?}", result);
         Ok(result)
     }
 
@@ -578,14 +526,10 @@ mod tests {
     use super::*;
     use crate::byte_serializable::ByteSerializable;
     use crate::sorted_index::{BufferedIndex, IndexSerializable, KeyValue};
-    
+
     use ordered_float::OrderedFloat;
     use std::io::Cursor;
     use std::vec;
-
-    
-    
-    
 
     // Helper function to create a sample index for testing.
     fn create_sample_height_index() -> BufferedIndex<OrderedFloat<f32>> {
@@ -727,57 +671,57 @@ mod tests {
 
         let test_cases = vec![
             // Test case 1: Single condition - height > 30.0 (Gt)
-            // TestCase {
-            //     name: "single_gt_height",
-            //     query: Query {
-            //         conditions: vec![QueryCondition {
-            //             field: "height".to_string(),
-            //             operator: Operator::Gt,
-            //             key: OrderedFloat(30.0f32).to_bytes(),
-            //         }],
-            //     },
-            //     // Buildings 9-19 have heights > 30.0 (excluding 6, 7, 8 which have height exactly 30.0)
-            //     expected: (9..=19).collect(),
-            // },
-            // // Test case 2: Single condition - height >= 30.0 (Ge)
-            // TestCase {
-            //     name: "single_ge_height",
-            //     query: Query {
-            //         conditions: vec![QueryCondition {
-            //             field: "height".to_string(),
-            //             operator: Operator::Ge,
-            //             key: OrderedFloat(30.0f32).to_bytes(),
-            //         }],
-            //     },
-            //     // Buildings 6-19 have heights >= 30.0
-            //     expected: (6..=19).collect(),
-            // },
-            // // Test case 3: Single condition - height < 15.0 (Lt)
-            // TestCase {
-            //     name: "single_lt_height",
-            //     query: Query {
-            //         conditions: vec![QueryCondition {
-            //             field: "height".to_string(),
-            //             operator: Operator::Lt,
-            //             key: OrderedFloat(15.0f32).to_bytes(),
-            //         }],
-            //     },
-            //     // Only building 0 has height < 15.0
-            //     expected: vec![0],
-            // },
-            // // Test case 4: Single condition - height <= 15.2 (Le)
-            // TestCase {
-            //     name: "single_le_height",
-            //     query: Query {
-            //         conditions: vec![QueryCondition {
-            //             field: "height".to_string(),
-            //             operator: Operator::Le,
-            //             key: OrderedFloat(15.2f32).to_bytes(),
-            //         }],
-            //     },
-            //     // Buildings 0 and 1 have heights <= 15.2
-            //     expected: vec![0, 1],
-            // },
+            TestCase {
+                name: "single_gt_height",
+                query: Query {
+                    conditions: vec![QueryCondition {
+                        field: "height".to_string(),
+                        operator: Operator::Gt,
+                        key: OrderedFloat(30.0f32).to_bytes(),
+                    }],
+                },
+                // Buildings 9-19 have heights > 30.0 (excluding 6, 7, 8 which have height exactly 30.0)
+                expected: (9..=19).collect(),
+            },
+            // Test case 2: Single condition - height >= 30.0 (Ge)
+            TestCase {
+                name: "single_ge_height",
+                query: Query {
+                    conditions: vec![QueryCondition {
+                        field: "height".to_string(),
+                        operator: Operator::Ge,
+                        key: OrderedFloat(30.0f32).to_bytes(),
+                    }],
+                },
+                // Buildings 6-19 have heights >= 30.0
+                expected: (6..=19).collect(),
+            },
+            // Test case 3: Single condition - height < 15.0 (Lt)
+            TestCase {
+                name: "single_lt_height",
+                query: Query {
+                    conditions: vec![QueryCondition {
+                        field: "height".to_string(),
+                        operator: Operator::Lt,
+                        key: OrderedFloat(15.0f32).to_bytes(),
+                    }],
+                },
+                // Only building 0 has height < 15.0
+                expected: vec![0],
+            },
+            // Test case 4: Single condition - height <= 15.2 (Le)
+            TestCase {
+                name: "single_le_height",
+                query: Query {
+                    conditions: vec![QueryCondition {
+                        field: "height".to_string(),
+                        operator: Operator::Le,
+                        key: OrderedFloat(15.2f32).to_bytes(),
+                    }],
+                },
+                // Buildings 0 and 1 have heights <= 15.2
+                expected: vec![0, 1],
+            },
             // Test case 5: Single condition - id = "BLDG0020" (Eq)
             TestCase {
                 name: "single_eq_id",
