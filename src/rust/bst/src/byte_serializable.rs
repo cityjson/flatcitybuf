@@ -132,6 +132,32 @@ impl ByteSerializableType {
             ))),
         }
     }
+
+    /// Convert a type ID to the corresponding ByteSerializableType
+    pub fn from_type_id(type_id: u32) -> Result<Self, error::Error> {
+        println!("from_type_id - type_id: {}", type_id);
+        match type_id {
+            0 => Ok(ByteSerializableType::I64),
+            1 => Ok(ByteSerializableType::I32),
+            2 => Ok(ByteSerializableType::I16),
+            3 => Ok(ByteSerializableType::I8),
+            4 => Ok(ByteSerializableType::U64),
+            5 => Ok(ByteSerializableType::U32),
+            6 => Ok(ByteSerializableType::U16),
+            7 => Ok(ByteSerializableType::U8),
+            8 => Ok(ByteSerializableType::F64),
+            9 => Ok(ByteSerializableType::F32),
+            10 => Ok(ByteSerializableType::Bool),
+            11 => Ok(ByteSerializableType::String),
+            12 => Ok(ByteSerializableType::NaiveDateTime),
+            13 => Ok(ByteSerializableType::NaiveDate),
+            14 => Ok(ByteSerializableType::DateTime),
+            _ => Err(error::Error::InvalidType(format!(
+                "invalid type id: {}",
+                type_id
+            ))),
+        }
+    }
 }
 
 /// Get the type identifier for a ByteSerializable type.

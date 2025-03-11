@@ -257,46 +257,75 @@ impl StreamableMultiIndex {
         reader: &mut R,
         index_offsets: &HashMap<String, u64>,
     ) -> Result<Self, error::Error> {
-        let mut indices = HashMap::new();
-        let mut stored_offsets = HashMap::new();
+        println!("StreamableMultiIndex::from_reader - Starting");
+        println!("Index offsets: {:?}", index_offsets);
+
+        // Get the current position - this is the base position for all offsets
+        let base_position = reader.stream_position()?;
+        println!("Base position for attribute indices: {}", base_position);
 
         // Sort field names by their offset values
-        let mut field_offsets: Vec<(String, u64)> = index_offsets
-            .iter()
-            .map(|(field, &offset)| (field.clone(), offset))
-            .collect();
-        field_offsets.sort_by_key(|&(_, offset)| offset);
+        let mut field_names: Vec<String> = index_offsets.keys().cloned().collect();
+        field_names.sort_by_key(|field| index_offsets.get(field).unwrap());
 
-        for i in 0..field_offsets.len() {
-            let (field_name, offset) = &field_offsets[i];
+        println!("Sorted field names: {:?}", field_names);
 
-            // Store the offset for later use in queries
-            stored_offsets.insert(field_name.clone(), *offset);
+        let mut indices = HashMap::new();
+        let field_names_copy = field_names.clone(); // Create a copy for later use
 
-            // Seek to the start of this index
-            reader.seek(SeekFrom::Start(*offset))?;
+        for field_name in field_names {
+            let offset = *index_offsets.get(&field_name).unwrap();
+            println!("Processing field: {}, offset: {}", field_name, offset);
 
-            // Calculate the size of this index
-            let next_offset = if i < field_offsets.len() - 1 {
-                field_offsets[i + 1].1
+            // Seek to the offset for this field, relative to the base position
+            reader.seek(SeekFrom::Start(offset))?;
+            println!("Seeked to position: {}", reader.stream_position()?);
+
+            // Read the first 8 bytes to debug
+            let mut header_bytes = [0u8; 8];
+            let original_pos = reader.stream_position()?;
+            reader.read_exact(&mut header_bytes)?;
+            println!("First 8 bytes: {:?}", header_bytes);
+
+            // Reset position
+            reader.seek(SeekFrom::Start(original_pos))?;
+
+            // Try to read the index metadata
+            println!("Attempting to read IndexMeta");
+            let next_offset = if let Some(next_field) = field_names_copy
+                .iter()
+                .find(|&f| index_offsets.get(f).unwrap() > &offset)
+            {
+                *index_offsets.get(next_field).unwrap()
             } else {
-                // For the last index, read to the end of the file
+                // If this is the last field, we need to calculate the size differently
+                let current_pos = reader.stream_position()?;
                 reader.seek(SeekFrom::End(0))?;
-                reader.stream_position()?
+                let end_pos = reader.stream_position()?;
+                reader.seek(SeekFrom::Start(current_pos))?;
+                end_pos - base_position
             };
+
             let size = next_offset - offset;
+            println!("Calculated size: {}", size);
 
-            // Seek back to the start of this index
-            reader.seek(SeekFrom::Start(*offset))?;
-
-            // Load the index metadata
-            let index_meta = IndexMeta::from_reader(reader, size)?;
-            indices.insert(field_name.clone(), index_meta);
+            match IndexMeta::from_reader(reader, size) {
+                Ok(index_meta) => {
+                    println!("Successfully read IndexMeta: {:?}", index_meta);
+                    indices.insert(field_name, index_meta);
+                }
+                Err(e) => {
+                    println!("Error reading IndexMeta: {:?}", e);
+                    println!("Error details: {}", e);
+                    return Err(e);
+                }
+            }
         }
 
+        println!("StreamableMultiIndex::from_reader - Completed successfully");
         Ok(Self {
             indices,
-            index_offsets: stored_offsets,
+            index_offsets: index_offsets.clone(),
         })
     }
 
