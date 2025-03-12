@@ -245,79 +245,79 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
         query: &AttrQuery,
     ) -> Result<AsyncFeatureIter<T>, Error> {
         trace!("starting: select_attr_query via http reader");
+        unimplemented!()
+        // let header = self.fbs.header();
+        // let header_len = self.header_len();
+        // // Assume the header provides rtree and attribute index sizes.
+        // let rtree_index_size = self.rtree_index_size() as usize;
+        // let attr_index_size = self.attr_index_size() as usize;
+        // let attr_index_offset = header_len + rtree_index_size;
+        // let feature_begin = header_len + rtree_index_size + attr_index_size;
 
-        let header = self.fbs.header();
-        let header_len = self.header_len();
-        // Assume the header provides rtree and attribute index sizes.
-        let rtree_index_size = self.rtree_index_size() as usize;
-        let attr_index_size = self.attr_index_size() as usize;
-        let attr_index_offset = header_len + rtree_index_size;
-        let feature_begin = header_len + rtree_index_size + attr_index_size;
+        // let attr_index_entries = header
+        //     .attribute_index()
+        //     .ok_or_else(|| Error::AttributeIndexNotFound)?;
+        // let columns: Vec<Column> = header
+        //     .columns()
+        //     .ok_or_else(|| Error::NoColumnsInHeader)?
+        //     .iter()
+        //     .collect();
 
-        let attr_index_entries = header
-            .attribute_index()
-            .ok_or_else(|| Error::AttributeIndexNotFound)?;
-        let columns: Vec<Column> = header
-            .columns()
-            .ok_or_else(|| Error::NoColumnsInHeader)?
-            .iter()
-            .collect();
+        // // Create a map of field names to index offsets
+        // let mut index_offsets = HashMap::new();
+        // let mut field_names = Vec::new();
 
-        // Create a map of field names to index offsets
-        let mut index_offsets = HashMap::new();
-        let mut field_names = Vec::new();
+        // for attr_info in attr_index_entries.iter() {
+        //     let field_name = columns
+        //         .iter()
+        //         .find(|c| c.index() == attr_info.index())
+        //         .map(|c| c.name().to_string())
+        //         .ok_or_else(|| Error::AttributeIndexNotFound)?;
+        //     let offset = attr_index_offset + attr_info.length() as usize;
+        //     index_offsets.insert(field_name.clone(), offset);
+        //     field_names.push(field_name);
+        // }
 
-        for attr_info in attr_index_entries.iter() {
-            let field_name = columns
-                .iter()
-                .find(|c| c.index() == attr_info.index())
-                .map(|c| c.name().to_string())
-                .ok_or_else(|| Error::AttributeIndexNotFound)?;
-            let offset = attr_index_offset + attr_info.length() as usize;
-            index_offsets.insert(field_name.clone(), offset);
-            field_names.push(field_name);
-        }
+        // // Create a StreamableMultiIndex from HTTP range requests
+        // let streamable_index =
+        //     StreamableMultiIndex::from_http(&mut self.client, &index_offsets).await?;
 
-        // Create a StreamableMultiIndex from HTTP range requests
-        let streamable_index =
-            StreamableMultiIndex::from_http(&mut self.client, &index_offsets).await?;
+        // // Build the query
+        // let bst_query = build_query(&query);
 
-        // Build the query
-        let bst_query = build_query(&query);
+        // // Execute the query using HTTP streaming
+        // let result = streamable_index
+        //     .http_stream_query(
+        //         &mut self.client,
+        //         &bst_query,
+        //         attr_index_offset,
+        //         feature_begin,
+        //     )
+        //     .await?;
 
-        // Execute the query using HTTP streaming
-        let result = streamable_index
-            .http_stream_query(
-                &mut self.client,
-                &bst_query,
-                attr_index_offset,
-                feature_begin,
-            )
-            .await?;
+        // let count = result.len();
 
-        let count = result.len();
+        // let http_ranges: Vec<HttpRange> = result
+        //     .into_iter()
+        //     .map(|item| match item.range {
+        //         BstHttpRange::Range(range) => HttpRange::Range(range.start..range.end),
+        //         BstHttpRange::RangeFrom(range) => HttpRange::RangeFrom(range.start..),
+        //     })
+        //     .collect();
 
-        let http_ranges: Vec<HttpRange> = result
-            .into_iter()
-            .map(|item| match item.range {
-                BstHttpRange::Range(range) => HttpRange::Range(range.start..range.end),
-                BstHttpRange::RangeFrom(range) => HttpRange::RangeFrom(range.start..),
-            })
-            .collect();
-
-        trace!(
-            "completed: select_attr_query via http reader, matched features: {}",
-            count
-        );
-        Ok(AsyncFeatureIter {
-            client: self.client,
-            fbs: self.fbs,
-            selection: FeatureSelection::SelectAttr(SelectAttr {
-                ranges: http_ranges,
-                range_pos: 0,
-            }),
-            count,
-        })
+        // trace!(
+        //     "completed: select_attr_query via http reader, matched features: {}",
+        //     count
+        // );
+        // Ok(AsyncFeatureIter {
+        //     client: self.client,
+        //     fbs: self.fbs,
+        //     selection: FeatureSelection::SelectAttr(SelectAttr {
+        //         ranges: http_ranges,
+        //         range_pos: 0,
+        //     }),
+        //     count,
+        // })
     }
 }
 

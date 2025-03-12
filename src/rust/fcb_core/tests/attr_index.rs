@@ -339,9 +339,13 @@ mod tests {
                 query: vec![(
                     "tijdstipregistratie".to_string(),
                     Operator::Lt,
-                    ByteSerializableValue::NaiveDateTime(
-                        chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0),
-                    ),
+                    ByteSerializableValue::DateTime(chrono::DateTime::<chrono::Utc>::from_utc(
+                        chrono::NaiveDate::from_ymd_opt(2008, 1, 1)
+                            .unwrap()
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap(),
+                        chrono::Utc,
+                    )),
                 )],
                 expected_count: 0,
                 validator: |feature: &CityJSONFeature| {
@@ -365,7 +369,7 @@ mod tests {
                 },
             },
             // Test case: Expect zero features where tijdstipregistratie is after 2008-01-01.
-                QueryTestCase {
+            QueryTestCase {
                 test_name: "test_attr_index_multiple_queries: tijdstipregistratie > 2008-01-01",
                 query: vec![(
                     "tijdstipregistratie".to_string(),

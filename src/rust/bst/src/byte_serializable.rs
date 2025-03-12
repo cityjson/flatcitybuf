@@ -160,37 +160,6 @@ impl ByteSerializableType {
     }
 }
 
-/// Get the type identifier for a ByteSerializable type.
-///
-/// This function returns a stable numeric identifier for each supported type,
-/// which is used for type checking during serialization and deserialization.
-pub fn get_type_id<T: ByteSerializable + 'static>() -> u32 {
-    // Use the TypeId of T to generate a stable identifier
-    match std::any::type_name::<T>() {
-        "ordered_float::OrderedFloat<f32>" => 1,
-        "ordered_float::OrderedFloat<f64>" => 2,
-        "alloc::string::String" => 3,
-        "i32" => 4,
-        "i64" => 5,
-        "u32" => 6,
-        "u64" => 7,
-        "bool" => 8,
-        "i16" => 9,
-        "i8" => 10,
-        "u16" => 11,
-        "u8" => 12,
-        "chrono::naive::datetime::NaiveDateTime" => 13,
-        "chrono::naive::date::NaiveDate" => 14,
-        "chrono::DateTime<chrono::Utc>" => 15,
-        _ => {
-            // For unknown types, hash the type name to get a consistent ID
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            std::hash::Hash::hash(std::any::type_name::<T>(), &mut hasher);
-            (std::hash::Hasher::finish(&hasher) % 0xFFFFFFFF) as u32
-        }
-    }
-}
-
 impl ByteSerializable for i64 {
     fn to_bytes(&self) -> Vec<u8> {
         self.to_le_bytes().to_vec()
@@ -327,11 +296,19 @@ impl ByteSerializable for f32 {
     fn to_bytes(&self) -> Vec<u8> {
         self.to_le_bytes().to_vec()
     }
+
     fn from_bytes(bytes: &[u8]) -> Self {
+        // If the byte slice is empty, return a default value
+        if bytes.is_empty() {
+            return 0.0;
+        }
+
+        // Otherwise, convert the bytes to an f32
         let mut array = [0u8; 4];
         array.copy_from_slice(&bytes[0..4]);
         f32::from_le_bytes(array)
     }
+
     fn value_type(&self) -> ByteSerializableType {
         ByteSerializableType::F32
     }
@@ -359,7 +336,14 @@ impl ByteSerializable for Float<f32> {
     fn to_bytes(&self) -> Vec<u8> {
         self.0.to_le_bytes().to_vec()
     }
+
     fn from_bytes(bytes: &[u8]) -> Self {
+        // If the byte slice is empty, return a default value
+        if bytes.is_empty() {
+            return OrderedFloat(0.0);
+        }
+
+        // Otherwise, convert the bytes to an f32
         let mut array = [0u8; 4];
         array.copy_from_slice(&bytes[0..4]);
         OrderedFloat(f32::from_le_bytes(array))
@@ -396,6 +380,7 @@ impl ByteSerializable for NaiveDateTime {
 
     fn from_bytes(bytes: &[u8]) -> Self {
         // Ensure there are at least 12 bytes.
+        println!("from_bytes - bytes.len(): {}", bytes.len());
         assert!(bytes.len() >= 12, "Not enough bytes for NaiveDateTime");
         let mut ts_bytes = [0u8; 8];
         ts_bytes.copy_from_slice(&bytes[0..8]);

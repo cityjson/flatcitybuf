@@ -1,11 +1,8 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
 use std::io::{self, Read, Seek, SeekFrom};
 
 use crate::error::Error;
-use crate::{attribute, Header};
 use bst::{BufferedIndex, ByteSerializableType, IndexSerializable, OrderedFloat};
 pub use bst::{
     ByteSerializableValue, MultiIndex, Operator, Query, Query as AttributeQuery, QueryCondition,
@@ -83,7 +80,7 @@ pub fn build_query(query: &AttrQuery) -> Query {
         .iter()
         .map(|(field, operator, value)| QueryCondition {
             field: field.clone(),
-            operator: operator.clone(),
+            operator: *operator,
             key: value.to_bytes(),
         })
         .collect();
@@ -172,11 +169,6 @@ impl<R: Read + Seek> FcbReader<R> {
         if !index_offsets.is_empty() {
             let first_field = index_offsets.keys().next().unwrap().clone();
             let first_offset = *index_offsets.get(&first_field).unwrap();
-            // let column_type = columns
-            //     .iter()
-            //     .find(|col| col.name() == first_field)
-            //     .ok_or(Error::AttributeIndexNotFound)?
-            //     .type_();
 
             // Seek to the first index
             self.reader.seek(SeekFrom::Start(first_offset))?;
@@ -243,7 +235,7 @@ impl<R: Read + Seek> FcbReader<R> {
                         );
 
                         let mut header_bytes = vec![0u8; 12]; // Read type ID (4 bytes) and entry count (8 bytes)
-                        if let Ok(_) = self.reader.read_exact(&mut header_bytes) {
+                        if self.reader.read_exact(&mut header_bytes).is_ok() {
                             let type_id = u32::from_le_bytes([
                                 header_bytes[0],
                                 header_bytes[1],
