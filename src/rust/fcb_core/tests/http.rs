@@ -6,10 +6,11 @@ use fcb_core::{deserializer::to_cj_metadata, HttpFcbReader};
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
-    let minx = 84227.77;
-    let miny = 445377.33;
-    let maxx = 85323.23;
-    let maxy = 446334.69;
+    let minx = 68989.19384501831;
+    let miny = 444614.3991728433;
+    let maxx = 70685.16687543111;
+    let maxy = 446023.6031208569;
+
     let mut iter = http_reader.select_bbox(minx, miny, maxx, maxy).await?;
     let header = iter.header();
     let cj = to_cj_metadata(&header)?;
@@ -35,6 +36,37 @@ async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     // TODO: add more tests
     Ok(())
 }
+// async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
+//     let http_reader = HttpFcbReader::open(path).await?;
+//     let minx = 84227.77;
+//     let miny = 445377.33;
+//     let maxx = 85323.23;
+//     let maxy = 446334.69;
+//     let mut iter = http_reader.select_bbox(minx, miny, maxx, maxy).await?;
+//     let header = iter.header();
+//     let cj = to_cj_metadata(&header)?;
+
+//     // let mut writer = BufWriter::new(File::create("delft_http.city.jsonl")?);
+//     // writeln!(writer, "{}", serde_json::to_string(&cj)?)?;
+
+//     let mut feat_num = 0;
+//     let feat_count = header.features_count();
+//     let mut features = Vec::new();
+//     while let Some(feature) = iter.next().await? {
+//         let cj_feature = feature.cj_feature()?;
+//         features.push(cj_feature);
+//         // writeln!(writer, "{}", serde_json::to_string(&cj_feature)?)?;
+
+//         feat_num += 1;
+//         if feat_num >= feat_count {
+//             break;
+//         }
+//     }
+//     println!("cj: {:?}", cj);
+//     println!("features count: {:?}", features.len());
+//     // TODO: add more tests
+//     Ok(())
+// }
 
 async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
@@ -103,7 +135,8 @@ mod http {
     #[tokio::test]
     async fn test_read_http_file() -> Result<()> {
         let res =
-            read_http_file_bbox("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
+            read_http_file_bbox("https://storage.googleapis.com/flatcitybuf/3dbag_100k.fcb").await;
+        // read_http_file_bbox("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
 
         assert!(res.is_ok());
         Ok(())

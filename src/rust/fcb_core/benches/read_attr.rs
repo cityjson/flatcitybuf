@@ -1,4 +1,5 @@
 use anyhow::Result;
+use bst::OrderedFloat;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::{AttrQuery, ByteSerializableValue, FcbReader, Operator};
 use std::{fs::File, io::BufReader};
@@ -55,21 +56,21 @@ fn read_fcb_with_attr_index_seekable(path: &str) -> Result<()> {
     let input_reader = BufReader::new(input_file);
 
     let query: AttrQuery = vec![
-        // (
-        //     "b3_h_dak_50p".to_string(),
-        //     Operator::Gt,
-        //     ByteSerializableValue::F64(OrderedFloat(2.0)),
-        // ),
-        // (
-        //     "b3_h_dak_50p".to_string(),
-        //     Operator::Lt,
-        //     ByteSerializableValue::F64(OrderedFloat(50.0)),
-        // ),
         (
-            "identificatie".to_string(),
-            Operator::Eq,
-            ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+            "b3_h_dak_50p".to_string(),
+            Operator::Gt,
+            ByteSerializableValue::F64(OrderedFloat(2.0)),
         ),
+        (
+            "b3_h_dak_50p".to_string(),
+            Operator::Lt,
+            ByteSerializableValue::F64(OrderedFloat(50.0)),
+        ),
+        // (
+        //     "identificatie".to_string(),
+        //     Operator::Eq,
+        //     ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+        // ),
     ];
 
     // Use the seekable version with StreamableMultiIndex
@@ -83,12 +84,20 @@ fn read_fcb_with_attr_index_seekable(path: &str) -> Result<()> {
         let feature = feat_buf.cur_cj_feature()?;
         for (_, co) in feature.city_objects.iter() {
             if let Some(attributes) = &co.attributes {
-                if let Some(identificatie) = attributes.get("identificatie") {
-                    if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
+                if let Some(b3_h_dak_50p) = attributes.get("b3_h_dak_50p") {
+                    if b3_h_dak_50p.as_f64().unwrap() > 2.0 && b3_h_dak_50p.as_f64().unwrap() < 50.0
+                    {
+                        println!("b3_h_dak_50p: {:?}", b3_h_dak_50p);
                         target_feat_num += 1;
-                        break;
+                        continue;
                     }
                 }
+                // if let Some(identificatie) = attributes.get("identificatie") {
+                //     if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
+                //         target_feat_num += 1;
+                //         break;
+                //     }
+                // }
             }
         }
         feat_total += 1;
@@ -108,21 +117,21 @@ fn read_fcb_with_attr_index_non_seekable(path: &str) -> Result<()> {
     let input_reader = BufReader::new(input_file);
 
     let query: AttrQuery = vec![
-        // (
-        //     "b3_h_dak_50p".to_string(),
-        //     Operator::Gt,
-        //     ByteSerializableValue::F64(OrderedFloat(2.0)),
-        // ),
-        // (
-        //     "b3_h_dak_50p".to_string(),
-        //     Operator::Lt,
-        //     ByteSerializableValue::F64(OrderedFloat(50.0)),
-        // ),
         (
-            "identificatie".to_string(),
-            Operator::Eq,
-            ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+            "b3_h_dak_50p".to_string(),
+            Operator::Gt,
+            ByteSerializableValue::F64(OrderedFloat(2.0)),
         ),
+        (
+            "b3_h_dak_50p".to_string(),
+            Operator::Lt,
+            ByteSerializableValue::F64(OrderedFloat(50.0)),
+        ),
+        // (
+        //     "identificatie".to_string(),
+        //     Operator::Eq,
+        //     ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+        // ),
     ];
 
     // Use the non-seekable version with optimized MultiIndex
@@ -136,12 +145,20 @@ fn read_fcb_with_attr_index_non_seekable(path: &str) -> Result<()> {
         let feature = feat_buf.cur_cj_feature()?;
         for (_, co) in feature.city_objects.iter() {
             if let Some(attributes) = &co.attributes {
-                if let Some(identificatie) = attributes.get("identificatie") {
-                    if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
+                if let Some(b3_h_dak_50p) = attributes.get("b3_h_dak_50p") {
+                    if b3_h_dak_50p.as_f64().unwrap() > 2.0 && b3_h_dak_50p.as_f64().unwrap() < 50.0
+                    {
+                        println!("b3_h_dak_50p: {:?}", b3_h_dak_50p);
                         target_feat_num += 1;
-                        break;
+                        continue;
                     }
                 }
+                // if let Some(identificatie) = attributes.get("identificatie") {
+                //     if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
+                //         target_feat_num += 1;
+                //         break;
+                //     }
+                // }
             }
         }
         feat_total += 1;
@@ -158,8 +175,9 @@ fn read_fcb_with_attr_index_non_seekable(path: &str) -> Result<()> {
 const DATASETS: &[(&str, (&str, &str))] = &[(
     "delft",
     (
-        "benchmark_data/attribute/delft.fcb",
-        "benchmark_data/attribute/delft_attr.fcb",
+        // "benchmark_data/attribute/delft.fcb",
+        "benchmark_data/attribute/3dbag_partial.fcb",
+        "benchmark_data/attribute/3dbag_partial.fcb",
     ),
 )];
 
@@ -168,19 +186,19 @@ pub fn read_benchmark(c: &mut Criterion) {
 
     for &(dataset, (file_without, file_with)) in DATASETS.iter() {
         // Benchmark the file without attribute index.
-        group.bench_with_input(
-            BenchmarkId::new(format!("{} without", dataset), file_without),
-            &file_without,
-            |b, &path| {
-                b.iter(|| {
-                    read_fcb_without_attr_index(path).unwrap();
-                })
-            },
-        );
+        // group.bench_with_input(
+        //     BenchmarkId::new(format!("{} without", dataset), file_without),
+        //     &file_without,
+        //     |b, &path| {
+        //         b.iter(|| {
+        //             read_fcb_without_attr_index(path).unwrap();
+        //         })
+        //     },
+        // );
 
         // Benchmark the file with attribute index using seekable reader.
         group.bench_with_input(
-            BenchmarkId::new(format!("{} with seekable", dataset), file_with),
+            BenchmarkId::new(format!("{} with seekable (streamable)", dataset), file_with),
             &file_with,
             |b, &path| {
                 b.iter(|| {
@@ -191,7 +209,10 @@ pub fn read_benchmark(c: &mut Criterion) {
 
         // Benchmark the file with attribute index using non-seekable reader.
         group.bench_with_input(
-            BenchmarkId::new(format!("{} with non-seekable", dataset), file_with),
+            BenchmarkId::new(
+                format!("{} with non-seekable (sequential)", dataset),
+                file_with,
+            ),
             &file_with,
             |b, &path| {
                 b.iter(|| {
