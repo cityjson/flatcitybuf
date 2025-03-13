@@ -1,11 +1,11 @@
 mod byte_serializable;
 mod error;
-mod query;
 mod sorted_index;
 pub use byte_serializable::*;
 pub use error::*;
-pub use query::*;
 pub use sorted_index::*;
+mod query;
+pub use query::*;
 #[cfg(test)]
 mod tests {
     use crate::byte_serializable::ByteSerializable;
