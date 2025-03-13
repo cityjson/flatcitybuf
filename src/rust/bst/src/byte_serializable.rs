@@ -135,7 +135,6 @@ impl ByteSerializableType {
 
     /// Convert a type ID to the corresponding ByteSerializableType
     pub fn from_type_id(type_id: u32) -> Result<Self, error::Error> {
-        println!("from_type_id - type_id: {}", type_id);
         match type_id {
             0 => Ok(ByteSerializableType::I64),
             1 => Ok(ByteSerializableType::I32),
@@ -379,9 +378,6 @@ impl ByteSerializable for NaiveDateTime {
     }
 
     fn from_bytes(bytes: &[u8]) -> Self {
-        // Ensure there are at least 12 bytes.
-        println!("from_bytes - bytes.len(): {}", bytes.len());
-        assert!(bytes.len() >= 12, "Not enough bytes for NaiveDateTime");
         let mut ts_bytes = [0u8; 8];
         ts_bytes.copy_from_slice(&bytes[0..8]);
         let timestamp = i64::from_le_bytes(ts_bytes);

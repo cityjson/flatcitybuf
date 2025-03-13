@@ -45,8 +45,6 @@ fn read_fcb_without_attr_index(path: &str) -> Result<()> {
             break;
         }
     }
-    println!("target_feat_num: {:?}", target_feat_num);
-    println!("feat_total: {:?}", feat_total);
     Ok(())
 }
 
@@ -105,8 +103,6 @@ fn read_fcb_with_attr_index_seekable(path: &str) -> Result<()> {
             break;
         }
     }
-    println!("target_feat_num (seekable): {:?}", target_feat_num);
-    println!("feat_total (seekable): {:?}", feat_total);
 
     Ok(())
 }
@@ -166,8 +162,6 @@ fn read_fcb_with_attr_index_non_seekable(path: &str) -> Result<()> {
             break;
         }
     }
-    println!("target_feat_num (non-seekable): {:?}", target_feat_num);
-    println!("feat_total (non-seekable): {:?}", feat_total);
 
     Ok(())
 }

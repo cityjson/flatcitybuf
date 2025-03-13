@@ -580,7 +580,6 @@ impl StreamableMultiIndex {
         reader: &mut R,
         index_offsets: &HashMap<String, u64>,
     ) -> Result<Self, error::Error> {
-        println!("StreamableMultiIndex::from_reader - Starting");
         let mut multi_index = Self::new();
 
         // Copy the index offsets
@@ -651,8 +650,6 @@ impl StreamableMultiIndex {
         reader: &mut R,
         query: &Query,
     ) -> Result<Vec<ValueOffset>, error::Error> {
-        println!("StreamableMultiIndex::stream_query - Starting");
-
         // Save the current position to restore later
         let start_pos = reader.stream_position()?;
 
@@ -660,13 +657,10 @@ impl StreamableMultiIndex {
         let mut all_results: Option<HashSet<ValueOffset>> = None;
 
         for condition in &query.conditions {
-            println!("Processing condition: {:?}", condition);
-
             // Get the index for this field
             let index_meta = match self.indices.get(&condition.field) {
                 Some(index) => index,
                 None => {
-                    println!("No index found for field: {}", condition.field);
                     continue;
                 }
             };
@@ -675,7 +669,6 @@ impl StreamableMultiIndex {
             let offset = match self.index_offsets.get(&condition.field) {
                 Some(offset) => *offset,
                 None => {
-                    println!("No offset found for field: {}", condition.field);
                     continue;
                 }
             };
@@ -717,8 +710,6 @@ impl StreamableMultiIndex {
                 }
             };
 
-            println!("Condition results: {} matches", results.len());
-
             // Intersect with previous results
             match all_results {
                 None => {
@@ -741,11 +732,6 @@ impl StreamableMultiIndex {
         };
 
         result_vec.sort();
-
-        println!(
-            "StreamableMultiIndex::stream_query - Completed with {} results",
-            result_vec.len()
-        );
 
         Ok(result_vec)
     }

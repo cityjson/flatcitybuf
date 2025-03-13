@@ -286,13 +286,11 @@ impl<T: Ord + ByteSerializable + Send + Sync + 'static + std::fmt::Debug> IndexM
         // Read the type identifier.
         let mut type_id_bytes = [0u8; 4];
         reader.read_exact(&mut type_id_bytes)?;
-        let type_id_result = ByteSerializableType::from_type_id(u32::from_le_bytes(type_id_bytes));
 
         // Read the number of entries.
         let mut entry_count_bytes = [0u8; 8];
         reader.read_exact(&mut entry_count_bytes)?;
         let entry_count = u64::from_le_bytes(entry_count_bytes);
-        println!("IndexMeta::from_reader - entry_count: {}", entry_count);
 
         // Seek back to the start position.
         reader.seek(SeekFrom::Start(start_pos))?;
@@ -367,7 +365,6 @@ impl<T: Ord + ByteSerializable + Send + Sync + 'static + std::fmt::Debug> IndexM
             let mut key_len_bytes = [0u8; 8];
             reader.read_exact(&mut key_len_bytes)?;
             let key_len = u64::from_le_bytes(key_len_bytes);
-            println!("find_lower_bound - key_len: {}", key_len);
 
             // Read the key.
             let mut key_bytes = vec![0u8; key_len as usize];
@@ -375,7 +372,6 @@ impl<T: Ord + ByteSerializable + Send + Sync + 'static + std::fmt::Debug> IndexM
 
             // Deserialize the key and compare.
             let entry_key = T::from_bytes(&key_bytes);
-            println!("find_lower_bound - entry_key: {:?}", entry_key);
             let ordering = entry_key.cmp(key);
 
             match ordering {
@@ -499,16 +495,12 @@ impl<T: Ord + ByteSerializable + Send + Sync + 'static + std::fmt::Debug> TypedS
         reader.read_exact(&mut key_len_bytes)?;
         let key_len = u64::from_le_bytes(key_len_bytes);
 
-        println!("stream_query_exact - key_len: {}", key_len);
-
         // Read the key.
         let mut key_bytes = vec![0u8; key_len as usize];
         reader.read_exact(&mut key_bytes)?;
 
         // Deserialize the key and check for exact match.
         let entry_key = T::from_bytes(&key_bytes);
-
-        println!("stream_query_exact - entry_key: {:?}", entry_key);
 
         if &entry_key == key {
             // Read the offsets count.
@@ -537,7 +529,6 @@ impl<T: Ord + ByteSerializable + Send + Sync + 'static + std::fmt::Debug> TypedS
         upper: Option<&T>,
     ) -> std::io::Result<Vec<ValueOffset>> {
         let start_pos = reader.stream_position()?;
-        println!("stream_query_range - start_pos: {}", start_pos);
         // Find lower bound.
         let start_index = if let Some(lower_key) = lower {
             self.find_lower_bound(reader, lower_key, start_pos)?
@@ -730,11 +721,6 @@ mod tests {
         // Perform streaming query
         let test_height = OrderedFloat(74.5);
         let stream_results = index_meta.stream_query_exact(&mut file, &test_height)?;
-        println!(
-            "Stream query found {} results for height {}",
-            stream_results.len(),
-            test_height
-        );
 
         // Also test with in-memory cursor
         let mut serialized = Vec::new();
@@ -789,12 +775,6 @@ mod tests {
         // Perform streaming query
         let stream_results =
             index_meta.stream_query_range(&mut file, Some(&lower), Some(&upper))?;
-        println!(
-            "Stream query found {} results for height range {} to {}",
-            stream_results.len(),
-            lower,
-            upper
-        );
 
         // Also test with in-memory cursor
         let mut serialized = Vec::new();
@@ -844,10 +824,11 @@ mod tests {
         // Perform streaming query
         let test_id = "c3".to_string();
         let stream_results = index_meta.stream_query_exact(&mut file, &test_id)?;
-        println!(
-            "Stream query found {} results for id {}",
-            stream_results.len(),
-            test_id
+
+        let typed_results = index.query_exact(&test_id);
+        assert_eq!(
+            stream_results,
+            typed_results.map(|v| v.to_vec()).unwrap_or_default()
         );
 
         // Also test with in-memory cursor
@@ -864,7 +845,6 @@ mod tests {
         let stream_results = index_meta.stream_query_exact(&mut cursor, &test_id)?;
 
         // Verify results
-        let typed_results = index.query_exact(&test_id);
         assert_eq!(
             stream_results,
             typed_results.map(|v| v.to_vec()).unwrap_or_default()
@@ -902,12 +882,10 @@ mod tests {
         // Perform streaming query
         let stream_results =
             index_meta.stream_query_range(&mut file, Some(&lower), Some(&upper))?;
-        println!(
-            "Stream query found {} results for id range {} to {}",
-            stream_results.len(),
-            lower,
-            upper
-        );
+        let typed_results = index.query_range(Some(&lower), Some(&upper));
+        let typed_flat: Vec<ValueOffset> = typed_results.into_iter().flatten().cloned().collect();
+
+        assert_eq!(stream_results, typed_flat);
 
         // Also test with in-memory cursor
         let mut serialized = Vec::new();
@@ -943,8 +921,6 @@ mod tests {
         // Get the size of the serialized index
         let size = tmp_file.as_file().metadata()?.len();
 
-        println!("stream_query_range_date - size: {}", size);
-
         // Prepare for reading
         let mut file = tmp_file.reopen()?;
         file.seek(SeekFrom::Start(0))?;
@@ -968,12 +944,10 @@ mod tests {
         // Perform streaming query
         let stream_results =
             index_meta.stream_query_range(&mut file, Some(&lower), Some(&upper))?;
-        println!(
-            "Stream query found {} results for date range {} to {}",
-            stream_results.len(),
-            lower,
-            upper
-        );
+        let typed_results = index.query_range(Some(&lower), Some(&upper));
+        let typed_flat: Vec<ValueOffset> = typed_results.into_iter().flatten().cloned().collect();
+
+        assert_eq!(stream_results, typed_flat);
 
         // Also test with in-memory cursor
         let mut serialized = Vec::new();
