@@ -335,14 +335,18 @@ impl HttpFcbReader {
 
         let query = build_query(&query.inner);
 
-        let result = bst::stream_query(&multi_index, query, feature_begin)
-            .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        // let result = bst::stream_query(&multi_index, query, feature_begin)
+        //     .await
+        //     .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        // TODO: remove this
+        let result: Vec<HttpSearchResultItem> = vec![];
 
         let count = result.len();
         let combine_request_threshold = 256 * 1024;
 
-        let http_ranges: Vec<HttpRange> = result.into_iter().map(|item| item.range).collect();
+        // let http_ranges: Vec<HttpRange> = result.into_iter().map(|item| item.range).collect();
+        // TODO: remove this
+        let http_ranges: Vec<HttpRange> = vec![];
 
         trace!(
             "completed: select_attr_query via http reader, matched features: {}",
