@@ -39,6 +39,7 @@ fn read_bbox() -> Result<()> {
             feature_count: original_cj_seq.features.len() as u64,
             index_node_size: 16,
             attribute_indices: Some(attr_indices),
+            geographical_extent: None,
         }),
         Some(attr_schema),
     )?;
@@ -143,6 +144,7 @@ fn read_bbox_nonseekable() -> anyhow::Result<()> {
             feature_count: original_cj_seq.features.len() as u64,
             index_node_size: 16,
             attribute_indices: Some(attr_indices),
+            geographical_extent: None,
         }),
         Some(attr_schema),
     )?;

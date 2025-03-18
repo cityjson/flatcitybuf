@@ -29,6 +29,8 @@ pub struct HeaderWriterOptions {
     pub index_node_size: u16,
     /// Attribute indices
     pub attribute_indices: Option<Vec<String>>,
+    /// Geographical extent
+    pub geographical_extent: Option<[f64; 6]>,
 }
 
 impl Default for HeaderWriterOptions {
@@ -38,6 +40,7 @@ impl Default for HeaderWriterOptions {
             index_node_size: PackedRTree::DEFAULT_NODE_SIZE,
             feature_count: 0,
             attribute_indices: None,
+            geographical_extent: None,
         }
     }
 }

@@ -920,7 +920,6 @@ mod tests {
         assert_eq!(encoded.len(), 1);
         match &encoded[0] {
             MaterialMapping::Values(values) => {
-                println!("values: {:?}", values);
                 assert_eq!(values.theme, "theme6");
                 assert_eq!(values.solids, vec![2, 1]); // Two solids, the first solid has 2 shells, the second solid has 1 shell
                 assert_eq!(values.shells, vec![3, 3, 3]); // Each shell has 3 surfaces

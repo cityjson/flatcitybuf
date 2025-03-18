@@ -52,6 +52,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                 feature_count: original_cj_seq.features.len() as u64,
                 index_node_size: 16,
                 attribute_indices: None,
+                geographical_extent: None,
             }),
             Some(attr_schema),
         )?;

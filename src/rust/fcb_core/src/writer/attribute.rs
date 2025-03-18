@@ -1,6 +1,6 @@
 use crate::fb::ColumnType;
 use byteorder::{ByteOrder, LittleEndian};
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use cjseq::CityJSONFeature;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -203,7 +203,13 @@ pub enum AttributeIndexEntry {
     Float { index: u16, val: f32 },
     Double { index: u16, val: f64 },
     String { index: u16, val: String },
-    DateTime { index: u16, val: NaiveDateTime },
+    DateTime { index: u16, val: DateTime<Utc> },
+    Short { index: u16, val: i16 },
+    UShort { index: u16, val: u16 },
+    Byte { index: u16, val: u8 },
+    UByte { index: u16, val: u8 },
+    Json { index: u16, val: String },
+    Binary { index: u16, val: String },
 }
 
 pub fn cityfeature_to_index_entries(
@@ -307,12 +313,12 @@ pub fn attribute_to_index_entries(
                         index: *index,
                         val: match chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap_or(""))
                         {
-                            Ok(dt) => dt.naive_utc(),
+                            Ok(dt) => dt.to_utc(),
                             Err(e) => {
                                 eprintln!("Failed to parse DateTime: {}", e);
                                 // Choose whether to skip, default, or handle differently
                                 // For example, default to 1970-01-01:
-                                NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
+                                DateTime::<Utc>::from_timestamp(0, 0).unwrap()
                             }
                         },
                     });

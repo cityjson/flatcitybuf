@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use bst::{ByteSerializable, IndexSerializable, KeyValue, SortedIndex};
-use chrono::NaiveDateTime;
+use bst::{BufferedIndex, ByteSerializable, IndexSerializable, KeyValue};
+use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
 
 use crate::ColumnType;
@@ -18,7 +18,7 @@ fn build_index_generic<T, F>(
     extract: F,
 ) -> Option<(Vec<u8>, AttributeIndexInfo)>
 where
-    T: Ord + Clone + ByteSerializable,
+    T: Ord + Clone + ByteSerializable + 'static,
     F: Fn(&AttributeIndexEntry) -> Option<T>,
 {
     let mut entries: Vec<KeyValue<T>> = Vec::new();
@@ -38,7 +38,7 @@ where
         }
     }
 
-    let mut sorted_index = SortedIndex::new();
+    let mut sorted_index = BufferedIndex::new();
     sorted_index.build_index(entries);
     let mut buf = Vec::new();
     sorted_index.serialize(&mut buf).ok()?;
@@ -166,10 +166,88 @@ pub(super) fn build_attribute_index_for_attr(
             })
         }
         ColumnType::DateTime => {
-            build_index_generic::<NaiveDateTime, _>(*schema_index, attribute_entries, |entry| {
+            build_index_generic::<DateTime<Utc>, _>(*schema_index, attribute_entries, |entry| {
                 if let AttributeIndexEntry::DateTime { index, val } = entry {
                     if *index == *schema_index {
                         Some(*val)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        }
+        ColumnType::Short => {
+            build_index_generic::<i16, _>(*schema_index, attribute_entries, |entry| {
+                if let AttributeIndexEntry::Short { index, val } = entry {
+                    if *index == *schema_index {
+                        Some(*val)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        }
+        ColumnType::UShort => {
+            build_index_generic::<u16, _>(*schema_index, attribute_entries, |entry| {
+                if let AttributeIndexEntry::UShort { index, val } = entry {
+                    if *index == *schema_index {
+                        Some(*val)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        }
+        ColumnType::Byte => {
+            build_index_generic::<u8, _>(*schema_index, attribute_entries, |entry| {
+                if let AttributeIndexEntry::Byte { index, val } = entry {
+                    if *index == *schema_index {
+                        Some(*val)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        }
+        ColumnType::UByte => {
+            build_index_generic::<u8, _>(*schema_index, attribute_entries, |entry| {
+                if let AttributeIndexEntry::UByte { index, val } = entry {
+                    if *index == *schema_index {
+                        Some(*val)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        }
+        ColumnType::Json => {
+            build_index_generic::<String, _>(*schema_index, attribute_entries, |entry| {
+                if let AttributeIndexEntry::Json { index, val } = entry {
+                    if *index == *schema_index {
+                        Some(val.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        }
+        ColumnType::Binary => {
+            build_index_generic::<String, _>(*schema_index, attribute_entries, |entry| {
+                if let AttributeIndexEntry::Binary { index, val } = entry {
+                    if *index == *schema_index {
+                        Some(val.clone())
                     } else {
                         None
                     }

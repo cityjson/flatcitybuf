@@ -1,7 +1,7 @@
 ---
 description: General rules about the project and coding guidelines
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 # Important Rules for LLM
 
@@ -11,6 +11,7 @@ alwaysApply: false
 - If a test fails more than twice in a row, analyze the current situation and collaborate with the user to determine a solution. Avoid trial-and-error testing without a hypothesis.
 - The user has extensive knowledge gained from GitHub and can implement individual algorithms and libraries faster than Cline and Cursor. Code should be written while explaining to the user, using test cases to verify correctness.
 - However, Cline and Cursor is not good at handling processing logic based on the current context. If the context is unclear, confirm with the user.
+- Once I ask you to do "memory it", you should update [general.mdc](mdc:.cursor/rules/general.mdc) or other corresponding document files such as [productContext.md](mdc:.cursor/rules/memory/productContext.md), [specification.md](mdc:.cursor/rules/memory/specification.md), [progress.md](mdc:.cursor/rules/memory/progress.md) so they are kept update to date. Even I don't ask, you should ask me to save memory or not when you think it's needed.
 
 ---
 
@@ -23,23 +24,26 @@ I am a specialized software engineer with a distinct characteristic: my memory r
 All files are stored under [productContext.md](mdc:.cursor/rules/memory/productContext.md), [progress.md](mdc:.cursor/rules/memory/progress.md), [specification.md](mdc:.cursor/rules/memory/specification.md) and `.cursor/memory/*`. The memory bank consists of mandatory core files and optional context files, all formatted in Markdown. 
 
 ### Core Files (Mandatory)
-1. **`productContext.md`**
+1. **`productContext.md`** [productContext.md](mdc:.cursor/rules/memory/productContext.md)
    - Explains the purpose of the project.
    - Identifies the problem it solves.
    - Describes expected functionality and user experience goals.
 
-2. **`specification.md`**
+2. **`specification.md`** [specification.md](mdc:.cursor/rules/memory/specification.md)
    - Explains the detail of FlatCityBuf specification
    - Describes its encoding strategy and decisions made
 
-2. **`progress.md`**
+3. **`progress.md`** [progress.md](mdc:.cursor/rules/memory/progress.md)
    - Completed features and pending tasks.
    - Current status.
    - Known issues.
 
+4. **`tdd-guideline`** [tdd-rust-guidelines.md](mdc:.cursor/rules/memory/tdd-rust-guidelines.md)
+   - Explains the guidline about Test Driven Development
+
 ### Additional Context Files
 
-Additional files and folders can be created inside `memory-bank/` if they aid in organization:
+Additional files and folders can be created inside `memory/rules/memory*` if they aid in organization:
 - Documentation for complex features.
 - Integration specifications.
 - API documentation.

@@ -69,11 +69,11 @@ impl HttpFcbReader {
         println!("open===: {:?}", url);
 
         // Only initialize the logger once
-        if !LOGGER_INITIALIZED.load(Ordering::SeqCst) {
-            if let Ok(_) = console_log::init_with_level(Level::Trace) {
-                LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
-                log::info!("Logger initialized successfully.");
-            }
+        if !LOGGER_INITIALIZED.load(Ordering::SeqCst)
+            && console_log::init_with_level(Level::Trace).is_ok()
+        {
+            LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
+            log::info!("Logger initialized successfully.");
         }
 
         trace!("starting: opening http reader, reading header");
@@ -335,14 +335,18 @@ impl HttpFcbReader {
 
         let query = build_query(&query.inner);
 
-        let result = bst::stream_query(&multi_index, query, feature_begin)
-            .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        // let result = bst::stream_query(&multi_index, query, feature_begin)
+        //     .await
+        //     .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        // TODO: remove this
+        let result: Vec<HttpSearchResultItem> = vec![];
 
         let count = result.len();
         let combine_request_threshold = 256 * 1024;
 
-        let http_ranges: Vec<HttpRange> = result.into_iter().map(|item| item.range).collect();
+        // let http_ranges: Vec<HttpRange> = result.into_iter().map(|item| item.range).collect();
+        // TODO: remove this
+        let http_ranges: Vec<HttpRange> = vec![];
 
         trace!(
             "completed: select_attr_query via http reader, matched features: {}",

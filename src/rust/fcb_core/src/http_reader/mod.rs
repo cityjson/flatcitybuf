@@ -1,13 +1,13 @@
 use crate::deserializer::to_cj_feature;
 use crate::{build_query, fb::*, process_attr_index_entry, AttrQuery};
 
+use crate::error::Error;
 use crate::reader::city_buffer::FcbBuffer;
 use crate::{
     check_magic_bytes, size_prefixed_root_as_city_feature, HEADER_MAX_BUFFER_SIZE,
     HEADER_SIZE_SIZE, MAGIC_BYTES_SIZE,
 };
-use anyhow::{anyhow, Result};
-use bst::{ByteSerializable, MultiIndex};
+use bst::{ByteSerializable, HttpRange as BstHttpRange, MultiIndex};
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
 use cjseq::CityJSONFeature;
@@ -18,7 +18,9 @@ use reqwest;
 #[cfg(feature = "http")]
 use http_range_client::BufferedHttpRangeClient;
 
+use bst::StreamableMultiIndex;
 use packed_rtree::{http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree};
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Range;
 use tracing::debug;
@@ -55,7 +57,7 @@ pub struct AsyncFeatureIter<T: AsyncHttpRangeClient> {
 
 #[cfg(feature = "http")]
 impl HttpFcbReader<reqwest::Client> {
-    pub async fn open(url: &str) -> Result<HttpFcbReader<reqwest::Client>> {
+    pub async fn open(url: &str) -> Result<HttpFcbReader<reqwest::Client>, Error> {
         trace!("starting: opening http reader, reading header");
         let client = BufferedHttpRangeClient::new(url);
         Self::_open(client).await
@@ -63,11 +65,11 @@ impl HttpFcbReader<reqwest::Client> {
 }
 
 impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
-    pub async fn new(client: AsyncBufferedHttpRangeClient<T>) -> Result<HttpFcbReader<T>> {
+    pub async fn new(client: AsyncBufferedHttpRangeClient<T>) -> Result<HttpFcbReader<T>, Error> {
         Self::_open(client).await
     }
 
-    async fn _open(mut client: AsyncBufferedHttpRangeClient<T>) -> Result<HttpFcbReader<T>> {
+    async fn _open(mut client: AsyncBufferedHttpRangeClient<T>) -> Result<HttpFcbReader<T>, Error> {
         // Because we use a buffered HTTP reader, anything extra we fetch here can
         // be utilized to skip subsequent fetches.
         // Immediately following the header is the optional spatial index, we deliberately fetch
@@ -95,7 +97,7 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
         let mut read_bytes = 0;
         let bytes = client.get_range(read_bytes, MAGIC_BYTES_SIZE).await?; // to get magic bytes
         if !check_magic_bytes(bytes) {
-            return Err(anyhow!("MissingMagicBytes"));
+            return Err(Error::MissingMagicBytes);
         }
 
         read_bytes += MAGIC_BYTES_SIZE;
@@ -105,7 +107,7 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
         let header_size = LittleEndian::read_u32(&bytes) as usize;
         if header_size > HEADER_MAX_BUFFER_SIZE || header_size < 8 {
             // minimum size check avoids panic in FlatBuffers header decoding
-            return Err(anyhow!("IllegalHeaderSize: {header_size}"));
+            return Err(Error::IllegalHeaderSize(header_size));
         }
 
         bytes.put(client.get_range(read_bytes, header_size).await?);
@@ -153,7 +155,7 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
                     .try_fold(0u32, |acc, ai| {
                         let len = ai.length();
                         if len > u32::MAX - acc {
-                            Err(anyhow!("Attribute index size overflow"))
+                            Err(Error::AttributeIndexSizeOverflow)
                         } else {
                             Ok(acc + len)
                         }
@@ -164,7 +166,7 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
     }
 
     /// Select all features.
-    pub async fn select_all(self) -> Result<AsyncFeatureIter<T>> {
+    pub async fn select_all(self) -> Result<AsyncFeatureIter<T>, Error> {
         let header = self.fbs.header();
         let count = header.features_count();
         // TODO: support reading with unknown feature count
@@ -192,12 +194,12 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
         min_y: f64,
         max_x: f64,
         max_y: f64,
-    ) -> Result<AsyncFeatureIter<T>> {
+    ) -> Result<AsyncFeatureIter<T>, Error> {
         trace!("starting: select_bbox, traversing index");
         // Read R-Tree index and build filter for features within bbox
         let header = self.fbs.header();
         if header.index_node_size() == 0 || header.features_count() == 0 {
-            return Err(anyhow!("NoIndex"));
+            return Err(Error::NoIndex);
         }
         let count = header.features_count() as usize;
         let header_len = self.header_len();
@@ -238,66 +240,84 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
 
     /// This method uses the attribute index section to find matching feature offsets.
     /// It then groups (batches) the remote feature ranges in order to reduce IO overhead.
-    pub async fn select_attr_query(mut self, query: &AttrQuery) -> Result<AsyncFeatureIter<T>> {
+    pub async fn select_attr_query(
+        mut self,
+        query: &AttrQuery,
+    ) -> Result<AsyncFeatureIter<T>, Error> {
         trace!("starting: select_attr_query via http reader");
+        unimplemented!()
+        // let header = self.fbs.header();
+        // let header_len = self.header_len();
+        // // Assume the header provides rtree and attribute index sizes.
+        // let rtree_index_size = self.rtree_index_size() as usize;
+        // let attr_index_size = self.attr_index_size() as usize;
+        // let attr_index_offset = header_len + rtree_index_size;
+        // let feature_begin = header_len + rtree_index_size + attr_index_size;
 
-        let header = self.fbs.header();
-        let header_len = self.header_len();
-        // Assume the header provides rtree and attribute index sizes.
-        let rtree_index_size = self.rtree_index_size() as usize;
-        let attr_index_size = self.attr_index_size() as usize;
-        let attr_index_offset = header_len + rtree_index_size;
-        let feature_begin = header_len + rtree_index_size + attr_index_size;
+        // let attr_index_entries = header
+        //     .attribute_index()
+        //     .ok_or_else(|| Error::AttributeIndexNotFound)?;
+        // let columns: Vec<Column> = header
+        //     .columns()
+        //     .ok_or_else(|| Error::NoColumnsInHeader)?
+        //     .iter()
+        //     .collect();
 
-        // Fetch the attribute index block via HTTP range request.
-        let mut attr_index_bytes = self
-            .client
-            .get_range(attr_index_offset, attr_index_size)
-            .await?;
+        // // Create a map of field names to index offsets
+        // let mut index_offsets = HashMap::new();
+        // let mut field_names = Vec::new();
 
-        let attr_index_entries = header
-            .attribute_index()
-            .ok_or_else(|| anyhow!("attribute index not found"))?;
-        let columns: Vec<Column> = header
-            .columns()
-            .ok_or_else(|| anyhow!("no columns found in header"))?
-            .iter()
-            .collect();
+        // for attr_info in attr_index_entries.iter() {
+        //     let field_name = columns
+        //         .iter()
+        //         .find(|c| c.index() == attr_info.index())
+        //         .map(|c| c.name().to_string())
+        //         .ok_or_else(|| Error::AttributeIndexNotFound)?;
+        //     let offset = attr_index_offset + attr_info.length() as usize;
+        //     index_offsets.insert(field_name.clone(), offset);
+        //     field_names.push(field_name);
+        // }
 
-        let mut multi_index = MultiIndex::new();
+        // // Create a StreamableMultiIndex from HTTP range requests
+        // let streamable_index =
+        //     StreamableMultiIndex::from_http(&mut self.client, &index_offsets).await?;
 
-        for attr_info in attr_index_entries.iter() {
-            process_attr_index_entry(
-                &mut attr_index_bytes,
-                &mut multi_index,
-                &columns,
-                &query,
-                attr_info,
-            )?;
-        }
+        // // Build the query
+        // let bst_query = build_query(&query);
 
-        let query = build_query(&query);
+        // // Execute the query using HTTP streaming
+        // let result = streamable_index
+        //     .http_stream_query(
+        //         &mut self.client,
+        //         &bst_query,
+        //         attr_index_offset,
+        //         feature_begin,
+        //     )
+        //     .await?;
 
-        let result = bst::stream_query(&multi_index, query, feature_begin).await?;
+        // let count = result.len();
 
-        let count = result.len();
-        let combine_request_threshold = 256 * 1024;
+        // let http_ranges: Vec<HttpRange> = result
+        //     .into_iter()
+        //     .map(|item| match item.range {
+        //         BstHttpRange::Range(range) => HttpRange::Range(range.start..range.end),
+        //         BstHttpRange::RangeFrom(range) => HttpRange::RangeFrom(range.start..),
+        //     })
+        //     .collect();
 
-        let http_ranges: Vec<HttpRange> = result.into_iter().map(|item| item.range).collect();
-
-        trace!(
-            "completed: select_attr_query via http reader, matched features: {}",
-            count
-        );
-        Ok(AsyncFeatureIter {
-            client: self.client,
-            fbs: self.fbs,
-            selection: FeatureSelection::SelectAttr(SelectAttr {
-                ranges: http_ranges,
-                range_pos: 0,
-            }),
-            count,
-        })
+        // trace!(
+        //     "completed: select_attr_query via http reader, matched features: {}",
+        //     count
+        // );
+        // Ok(AsyncFeatureIter {
+        //     client: self.client,
+        //     fbs: self.fbs,
+        //     selection: FeatureSelection::SelectAttr(SelectAttr {
+        //         ranges: http_ranges,
+        //         range_pos: 0,
+        //     }),
+        //     count,
+        // })
     }
 }
 
@@ -314,7 +334,7 @@ impl<T: AsyncHttpRangeClient> AsyncFeatureIter<T> {
         }
     }
     /// Read next feature
-    pub async fn next(&mut self) -> Result<Option<&FcbBuffer>> {
+    pub async fn next(&mut self) -> Result<Option<&FcbBuffer>, Error> {
         let Some(buffer) = self.selection.next_feature_buffer(&mut self.client).await? else {
             return Ok(None);
         };
@@ -330,7 +350,7 @@ impl<T: AsyncHttpRangeClient> AsyncFeatureIter<T> {
         &self.fbs
     }
 
-    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature> {
+    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature, Error> {
         let cj_feature = to_cj_feature(self.cur_feature().feature(), self.header().columns())?;
         Ok(cj_feature)
     }
@@ -346,7 +366,7 @@ impl FeatureSelection {
     async fn next_feature_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>> {
+    ) -> Result<Option<Bytes>, Error> {
         match self {
             FeatureSelection::SelectAll(select_all) => select_all.next_buffer(client).await,
             FeatureSelection::SelectBbox(select_bbox) => select_bbox.next_buffer(client).await,
@@ -367,7 +387,7 @@ impl SelectAll {
     async fn next_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>> {
+    ) -> Result<Option<Bytes>, Error> {
         client.min_req_size(DEFAULT_HTTP_FETCH_SIZE);
 
         if self.features_left == 0 {
@@ -394,7 +414,7 @@ impl SelectBbox {
     async fn next_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>> {
+    ) -> Result<Option<Bytes>, Error> {
         let mut next_buffer = None;
         while next_buffer.is_none() {
             let Some(feature_batch) = self.feature_batches.last_mut() else {
@@ -423,7 +443,7 @@ impl FeatureBatch {
     async fn make_batches(
         feature_ranges: Vec<HttpSearchResultItem>,
         combine_request_threshold: usize,
-    ) -> Result<Vec<Self>> {
+    ) -> Result<Vec<Self>, Error> {
         let mut batched_ranges = vec![];
 
         for search_result_item in feature_ranges.into_iter() {
@@ -498,7 +518,7 @@ impl FeatureBatch {
     async fn next_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>> {
+    ) -> Result<Option<Bytes>, Error> {
         let request_size = self.request_size();
         client.set_min_req_size(request_size);
         let Some(feature_range) = self.feature_ranges.pop_front() else {
@@ -525,7 +545,7 @@ impl SelectAttr {
     async fn next_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>> {
+    ) -> Result<Option<Bytes>, Error> {
         let Some(range) = self.ranges.get(self.range_pos) else {
             return Ok(None);
         };

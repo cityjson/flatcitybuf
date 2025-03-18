@@ -52,6 +52,13 @@ pub enum Error {
     #[error("Invalid attribute value: {msg}")]
     InvalidAttributeValue { msg: String },
 
+    // Index and query errors
+    #[error("Failed to create index: {0}")]
+    IndexCreationError(String),
+
+    #[error("Failed to execute query: {0}")]
+    QueryExecutionError(String),
+
     // HTTP errors (when http feature is enabled)
     #[cfg(feature = "http")]
     #[error("HTTP client error: {0}")]
@@ -84,6 +91,14 @@ impl Error {
         matches!(
             self,
             Error::UnsupportedColumnType(_) | Error::InvalidAttributeValue { .. }
+        )
+    }
+
+    /// Returns true if the error is related to index or query operations
+    pub fn is_index_error(&self) -> bool {
+        matches!(
+            self,
+            Error::IndexCreationError(_) | Error::QueryExecutionError(_) | Error::BstError(_)
         )
     }
 }
