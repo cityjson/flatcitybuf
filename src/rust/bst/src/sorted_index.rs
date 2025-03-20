@@ -215,11 +215,8 @@ impl<T: Ord + ByteSerializable + Send + Sync + 'static> IndexSerializable for Bu
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
+
     use ordered_float::OrderedFloat;
-    
-    
 
     // Helper function to create a sample height index
     fn create_sample_height_index() -> BufferedIndex<OrderedFloat<f32>> {

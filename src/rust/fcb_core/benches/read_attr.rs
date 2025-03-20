@@ -178,6 +178,9 @@ const DATASETS: &[(&str, (&str, &str))] = &[(
 pub fn read_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("read");
 
+    // Set sample size to 10 to limit the number of iterations
+    group.sample_size(10);
+
     for &(dataset, (file_without, file_with)) in DATASETS.iter() {
         // Benchmark the file without attribute index.
         // group.bench_with_input(

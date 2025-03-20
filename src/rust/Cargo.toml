@@ -45,3 +45,7 @@ console_error_panic_hook = "0.1.7"
 console_log = "0.2"
 
 [dependencies]
+
+[profile.release]
+debug = 1
+strip = "debuginfo"
