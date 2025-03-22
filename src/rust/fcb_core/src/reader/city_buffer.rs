@@ -1,6 +1,6 @@
 use crate::deserializer::to_cj_feature;
+use crate::error::Error;
 use crate::fb::*;
-use anyhow::Result;
 use cjseq::CityJSONFeature;
 
 pub struct FcbBuffer {
@@ -18,7 +18,7 @@ impl FcbBuffer {
     }
 
     // TODO: think well if needed
-    pub fn cj_feature(&self) -> Result<CityJSONFeature> {
+    pub fn cj_feature(&self) -> Result<CityJSONFeature, Error> {
         let fcb_feature = self.feature();
         let root_attr_schema = self.header().columns();
         to_cj_feature(fcb_feature, root_attr_schema)

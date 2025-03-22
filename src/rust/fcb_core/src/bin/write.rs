@@ -24,10 +24,13 @@ fn write_file() -> Result<(), Box<dyn Error>> {
         let output_file = File::create(output_file)?;
         let outputwriter = BufWriter::new(output_file);
 
+        let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
         let header_options = Some(HeaderWriterOptions {
             write_index: false,
             feature_count: features.len() as u64,
             index_node_size: 16,
+            attribute_indices: Some(attr_indices),
+            geographical_extent: None,
         });
         let mut attr_schema = AttributeSchema::new();
         for feature in features.iter() {

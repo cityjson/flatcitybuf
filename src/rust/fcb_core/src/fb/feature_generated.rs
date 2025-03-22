@@ -502,8 +502,7 @@ impl<'a> flatbuffers::Verifiable for GeometryType {
 impl flatbuffers::SimpleToVerifyInSlice for GeometryType {}
 // struct Vertex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vertex(pub [u8; 12]);
 impl core::fmt::Debug for Vertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -545,7 +544,6 @@ impl<'a> flatbuffers::Verifiable for Vertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -648,6 +646,478 @@ impl<'a> Vertex {
     }
 }
 
+pub enum MaterialMappingOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct MaterialMapping<'a> {
+    pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for MaterialMapping<'a> {
+    type Inner = MaterialMapping<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: flatbuffers::Table::new(buf, loc),
+        }
+    }
+}
+
+impl<'a> MaterialMapping<'a> {
+    pub const VT_THEME: flatbuffers::VOffsetT = 4;
+    pub const VT_SOLIDS: flatbuffers::VOffsetT = 6;
+    pub const VT_SHELLS: flatbuffers::VOffsetT = 8;
+    pub const VT_VERTICES: flatbuffers::VOffsetT = 10;
+    pub const VT_VALUE: flatbuffers::VOffsetT = 12;
+
+    #[inline]
+    pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+        MaterialMapping { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+        _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args MaterialMappingArgs<'args>,
+    ) -> flatbuffers::WIPOffset<MaterialMapping<'bldr>> {
+        let mut builder = MaterialMappingBuilder::new(_fbb);
+        if let Some(x) = args.value {
+            builder.add_value(x);
+        }
+        if let Some(x) = args.vertices {
+            builder.add_vertices(x);
+        }
+        if let Some(x) = args.shells {
+            builder.add_shells(x);
+        }
+        if let Some(x) = args.solids {
+            builder.add_solids(x);
+        }
+        if let Some(x) = args.theme {
+            builder.add_theme(x);
+        }
+        builder.finish()
+    }
+
+    #[inline]
+    pub fn theme(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<&str>>(MaterialMapping::VT_THEME, None)
+        }
+    }
+    #[inline]
+    pub fn solids(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(
+                    MaterialMapping::VT_SOLIDS,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn shells(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(
+                    MaterialMapping::VT_SHELLS,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn vertices(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(
+                    MaterialMapping::VT_VERTICES,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn value(&self) -> Option<u32> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<u32>(MaterialMapping::VT_VALUE, None) }
+    }
+}
+
+impl flatbuffers::Verifiable for MaterialMapping<'_> {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
+                "solids",
+                Self::VT_SOLIDS,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
+                "shells",
+                Self::VT_SHELLS,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
+                "vertices",
+                Self::VT_VERTICES,
+                false,
+            )?
+            .visit_field::<u32>("value", Self::VT_VALUE, false)?
+            .finish();
+        Ok(())
+    }
+}
+pub struct MaterialMappingArgs<'a> {
+    pub theme: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub solids: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+    pub shells: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+    pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+    pub value: Option<u32>,
+}
+impl Default for MaterialMappingArgs<'_> {
+    #[inline]
+    fn default() -> Self {
+        MaterialMappingArgs {
+            theme: None,
+            solids: None,
+            shells: None,
+            vertices: None,
+            value: None,
+        }
+    }
+}
+
+pub struct MaterialMappingBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+    fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> MaterialMappingBuilder<'a, 'b, A> {
+    #[inline]
+    pub fn add_theme(&mut self, theme: flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(MaterialMapping::VT_THEME, theme);
+    }
+    #[inline]
+    pub fn add_solids(&mut self, solids: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u32>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(MaterialMapping::VT_SOLIDS, solids);
+    }
+    #[inline]
+    pub fn add_shells(&mut self, shells: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u32>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(MaterialMapping::VT_SHELLS, shells);
+    }
+    #[inline]
+    pub fn add_vertices(&mut self, vertices: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u32>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(MaterialMapping::VT_VERTICES, vertices);
+    }
+    #[inline]
+    pub fn add_value(&mut self, value: u32) {
+        self.fbb_
+            .push_slot_always::<u32>(MaterialMapping::VT_VALUE, value);
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> MaterialMappingBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        MaterialMappingBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> flatbuffers::WIPOffset<MaterialMapping<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        flatbuffers::WIPOffset::new(o.value())
+    }
+}
+
+impl core::fmt::Debug for MaterialMapping<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut ds = f.debug_struct("MaterialMapping");
+        ds.field("theme", &self.theme());
+        ds.field("solids", &self.solids());
+        ds.field("shells", &self.shells());
+        ds.field("vertices", &self.vertices());
+        ds.field("value", &self.value());
+        ds.finish()
+    }
+}
+pub enum TextureMappingOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct TextureMapping<'a> {
+    pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for TextureMapping<'a> {
+    type Inner = TextureMapping<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: flatbuffers::Table::new(buf, loc),
+        }
+    }
+}
+
+impl<'a> TextureMapping<'a> {
+    pub const VT_THEME: flatbuffers::VOffsetT = 4;
+    pub const VT_SOLIDS: flatbuffers::VOffsetT = 6;
+    pub const VT_SHELLS: flatbuffers::VOffsetT = 8;
+    pub const VT_SURFACES: flatbuffers::VOffsetT = 10;
+    pub const VT_STRINGS: flatbuffers::VOffsetT = 12;
+    pub const VT_VERTICES: flatbuffers::VOffsetT = 14;
+
+    #[inline]
+    pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+        TextureMapping { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+        _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args TextureMappingArgs<'args>,
+    ) -> flatbuffers::WIPOffset<TextureMapping<'bldr>> {
+        let mut builder = TextureMappingBuilder::new(_fbb);
+        if let Some(x) = args.vertices {
+            builder.add_vertices(x);
+        }
+        if let Some(x) = args.strings {
+            builder.add_strings(x);
+        }
+        if let Some(x) = args.surfaces {
+            builder.add_surfaces(x);
+        }
+        if let Some(x) = args.shells {
+            builder.add_shells(x);
+        }
+        if let Some(x) = args.solids {
+            builder.add_solids(x);
+        }
+        if let Some(x) = args.theme {
+            builder.add_theme(x);
+        }
+        builder.finish()
+    }
+
+    #[inline]
+    pub fn theme(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<&str>>(TextureMapping::VT_THEME, None)
+        }
+    }
+    #[inline]
+    pub fn solids(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(
+                    TextureMapping::VT_SOLIDS,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn shells(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(
+                    TextureMapping::VT_SHELLS,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn surfaces(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(
+                    TextureMapping::VT_SURFACES,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn strings(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(
+                    TextureMapping::VT_STRINGS,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn vertices(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(
+                    TextureMapping::VT_VERTICES,
+                    None,
+                )
+        }
+    }
+}
+
+impl flatbuffers::Verifiable for TextureMapping<'_> {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
+                "solids",
+                Self::VT_SOLIDS,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
+                "shells",
+                Self::VT_SHELLS,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
+                "surfaces",
+                Self::VT_SURFACES,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
+                "strings",
+                Self::VT_STRINGS,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
+                "vertices",
+                Self::VT_VERTICES,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
+}
+pub struct TextureMappingArgs<'a> {
+    pub theme: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub solids: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+    pub shells: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+    pub surfaces: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+    pub strings: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+    pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+}
+impl Default for TextureMappingArgs<'_> {
+    #[inline]
+    fn default() -> Self {
+        TextureMappingArgs {
+            theme: None,
+            solids: None,
+            shells: None,
+            surfaces: None,
+            strings: None,
+            vertices: None,
+        }
+    }
+}
+
+pub struct TextureMappingBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+    fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> TextureMappingBuilder<'a, 'b, A> {
+    #[inline]
+    pub fn add_theme(&mut self, theme: flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(TextureMapping::VT_THEME, theme);
+    }
+    #[inline]
+    pub fn add_solids(&mut self, solids: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u32>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(TextureMapping::VT_SOLIDS, solids);
+    }
+    #[inline]
+    pub fn add_shells(&mut self, shells: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u32>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(TextureMapping::VT_SHELLS, shells);
+    }
+    #[inline]
+    pub fn add_surfaces(&mut self, surfaces: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u32>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(TextureMapping::VT_SURFACES, surfaces);
+    }
+    #[inline]
+    pub fn add_strings(&mut self, strings: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u32>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(TextureMapping::VT_STRINGS, strings);
+    }
+    #[inline]
+    pub fn add_vertices(&mut self, vertices: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u32>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(TextureMapping::VT_VERTICES, vertices);
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> TextureMappingBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        TextureMappingBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> flatbuffers::WIPOffset<TextureMapping<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        flatbuffers::WIPOffset::new(o.value())
+    }
+}
+
+impl core::fmt::Debug for TextureMapping<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut ds = f.debug_struct("TextureMapping");
+        ds.field("theme", &self.theme());
+        ds.field("solids", &self.solids());
+        ds.field("shells", &self.shells());
+        ds.field("surfaces", &self.surfaces());
+        ds.field("strings", &self.strings());
+        ds.field("vertices", &self.vertices());
+        ds.finish()
+    }
+}
 pub enum CityFeatureOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -669,6 +1139,7 @@ impl<'a> CityFeature<'a> {
     pub const VT_ID: flatbuffers::VOffsetT = 4;
     pub const VT_OBJECTS: flatbuffers::VOffsetT = 6;
     pub const VT_VERTICES: flatbuffers::VOffsetT = 8;
+    pub const VT_APPEARANCE: flatbuffers::VOffsetT = 10;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -680,6 +1151,9 @@ impl<'a> CityFeature<'a> {
         args: &'args CityFeatureArgs<'args>,
     ) -> flatbuffers::WIPOffset<CityFeature<'bldr>> {
         let mut builder = CityFeatureBuilder::new(_fbb);
+        if let Some(x) = args.appearance {
+            builder.add_appearance(x);
+        }
         if let Some(x) = args.vertices {
             builder.add_vertices(x);
         }
@@ -739,6 +1213,16 @@ impl<'a> CityFeature<'a> {
                 )
         }
     }
+    #[inline]
+    pub fn appearance(&self) -> Option<Appearance<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<Appearance>>(CityFeature::VT_APPEARANCE, None)
+        }
+    }
 }
 
 impl flatbuffers::Verifiable for CityFeature<'_> {
@@ -747,7 +1231,6 @@ impl flatbuffers::Verifiable for CityFeature<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
             .visit_field::<flatbuffers::ForwardsUOffset<
@@ -756,6 +1239,11 @@ impl flatbuffers::Verifiable for CityFeature<'_> {
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Vertex>>>(
                 "vertices",
                 Self::VT_VERTICES,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<Appearance>>(
+                "appearance",
+                Self::VT_APPEARANCE,
                 false,
             )?
             .finish();
@@ -770,6 +1258,7 @@ pub struct CityFeatureArgs<'a> {
         >,
     >,
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Vertex>>>,
+    pub appearance: Option<flatbuffers::WIPOffset<Appearance<'a>>>,
 }
 impl Default for CityFeatureArgs<'_> {
     #[inline]
@@ -778,6 +1267,7 @@ impl Default for CityFeatureArgs<'_> {
             id: None, // required field
             objects: None,
             vertices: None,
+            appearance: None,
         }
     }
 }
@@ -811,6 +1301,14 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> CityFeatureBuilder<'a, 'b, A> {
             .push_slot_always::<flatbuffers::WIPOffset<_>>(CityFeature::VT_VERTICES, vertices);
     }
     #[inline]
+    pub fn add_appearance(&mut self, appearance: flatbuffers::WIPOffset<Appearance<'b>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<Appearance>>(
+                CityFeature::VT_APPEARANCE,
+                appearance,
+            );
+    }
+    #[inline]
     pub fn new(
         _fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
     ) -> CityFeatureBuilder<'a, 'b, A> {
@@ -834,6 +1332,7 @@ impl core::fmt::Debug for CityFeature<'_> {
         ds.field("id", &self.id());
         ds.field("objects", &self.objects());
         ds.field("vertices", &self.vertices());
+        ds.field("appearance", &self.appearance());
         ds.finish()
     }
 }
@@ -1031,7 +1530,6 @@ impl flatbuffers::Verifiable for CityObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<CityObjectType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
@@ -1244,6 +1742,8 @@ impl<'a> Geometry<'a> {
     pub const VT_BOUNDARIES: flatbuffers::VOffsetT = 16;
     pub const VT_SEMANTICS: flatbuffers::VOffsetT = 18;
     pub const VT_SEMANTICS_OBJECTS: flatbuffers::VOffsetT = 20;
+    pub const VT_MATERIAL: flatbuffers::VOffsetT = 22;
+    pub const VT_TEXTURE: flatbuffers::VOffsetT = 24;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -1255,6 +1755,12 @@ impl<'a> Geometry<'a> {
         args: &'args GeometryArgs<'args>,
     ) -> flatbuffers::WIPOffset<Geometry<'bldr>> {
         let mut builder = GeometryBuilder::new(_fbb);
+        if let Some(x) = args.texture {
+            builder.add_texture(x);
+        }
+        if let Some(x) = args.material {
+            builder.add_material(x);
+        }
         if let Some(x) = args.semantics_objects {
             builder.add_semantics_objects(x);
         }
@@ -1395,6 +1901,32 @@ impl<'a> Geometry<'a> {
             >>(Geometry::VT_SEMANTICS_OBJECTS, None)
         }
     }
+    #[inline]
+    pub fn material(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<MaterialMapping<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<MaterialMapping>>,
+            >>(Geometry::VT_MATERIAL, None)
+        }
+    }
+    #[inline]
+    pub fn texture(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<TextureMapping<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<TextureMapping>>,
+            >>(Geometry::VT_TEXTURE, None)
+        }
+    }
 }
 
 impl flatbuffers::Verifiable for Geometry<'_> {
@@ -1403,7 +1935,6 @@ impl flatbuffers::Verifiable for Geometry<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<GeometryType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("lod", Self::VT_LOD, false)?
@@ -1440,6 +1971,12 @@ impl flatbuffers::Verifiable for Geometry<'_> {
             .visit_field::<flatbuffers::ForwardsUOffset<
                 flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<SemanticObject>>,
             >>("semantics_objects", Self::VT_SEMANTICS_OBJECTS, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<MaterialMapping>>,
+            >>("material", Self::VT_MATERIAL, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<TextureMapping>>,
+            >>("texture", Self::VT_TEXTURE, false)?
             .finish();
         Ok(())
     }
@@ -1458,6 +1995,16 @@ pub struct GeometryArgs<'a> {
             flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SemanticObject<'a>>>,
         >,
     >,
+    pub material: Option<
+        flatbuffers::WIPOffset<
+            flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<MaterialMapping<'a>>>,
+        >,
+    >,
+    pub texture: Option<
+        flatbuffers::WIPOffset<
+            flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<TextureMapping<'a>>>,
+        >,
+    >,
 }
 impl Default for GeometryArgs<'_> {
     #[inline]
@@ -1472,6 +2019,8 @@ impl Default for GeometryArgs<'_> {
             boundaries: None,
             semantics: None,
             semantics_objects: None,
+            material: None,
+            texture: None,
         }
     }
 }
@@ -1540,6 +2089,26 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> GeometryBuilder<'a, 'b, A> {
         );
     }
     #[inline]
+    pub fn add_material(
+        &mut self,
+        material: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<MaterialMapping<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Geometry::VT_MATERIAL, material);
+    }
+    #[inline]
+    pub fn add_texture(
+        &mut self,
+        texture: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<TextureMapping<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Geometry::VT_TEXTURE, texture);
+    }
+    #[inline]
     pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> GeometryBuilder<'a, 'b, A> {
         let start = _fbb.start_table();
         GeometryBuilder {
@@ -1566,6 +2135,8 @@ impl core::fmt::Debug for Geometry<'_> {
         ds.field("boundaries", &self.boundaries());
         ds.field("semantics", &self.semantics());
         ds.field("semantics_objects", &self.semantics_objects());
+        ds.field("material", &self.material());
+        ds.field("texture", &self.texture());
         ds.finish()
     }
 }
@@ -1670,7 +2241,6 @@ impl flatbuffers::Verifiable for SemanticObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<SemanticSurfaceType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(

@@ -3,11 +3,13 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>WASM Module Test</title>
+  <title>WASM Module Query Test</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: monospace;
       margin: 20px;
+      color: #000;
+      background-color: #fff;
     }
 
     #output {
@@ -17,36 +19,149 @@
       border: 1px solid #ccc;
       height: 400px;
       overflow-y: scroll;
+      font-family: monospace;
     }
 
-    #test-btn {
-      padding: 10px 20px;
-      font-size: 16px;
-    }
-
-    #url-input {
+    input,
+    textarea {
       width: 100%;
       padding: 8px;
       margin-bottom: 10px;
       font-size: 16px;
+      font-family: monospace;
+      border: 1px solid #000;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin-top: 10px;
+      margin-right: 10px;
+      background-color: #fff;
+      border: 2px solid #000;
+      font-family: monospace;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #f0f0f0;
+    }
+
+    h1,
+    h2 {
+      font-family: monospace;
+    }
+
+    .query-section {
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+      padding: 15px;
+    }
+
+    .query-mode {
+      display: flex;
+      margin-bottom: 15px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 10px;
+      text-align: center;
+      cursor: pointer;
+      background-color: #f0f0f0;
+      border: 1px solid #000;
+    }
+
+    .mode-btn.active {
+      background-color: #000;
+      color: #fff;
+    }
+
+    .query-inputs {
+      display: none;
+    }
+
+    .query-inputs.active {
+      display: block;
+    }
+
+    .bbox-input-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .bbox-input-group label {
+      margin-bottom: 5px;
+      display: block;
     }
   </style>
 </head>
 
 <body>
-  <h1>WASM Module Test</h1>
+  <h1>WASM Module Query Test</h1>
 
-  <label for="url-input">Enter URL for HttpFcbReader:</label>
+  <!-- URL input for the FCB data -->
+  <label for="url-input">enter url for httpfcbreader:</label>
   <input type="text" id="url-input" placeholder="https://example.com/data"
-    value="http://127.0.0.1:5501/src/ts/delft_attr.fcb" />
+    value="https://storage.googleapis.com/flatcitybuf/3dbag_100k.fcb" />
+  <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
+    value="https://storage.googleapis.com/flatcitybuf/delft_attr.fcb" /> -->
 
-  <button id="test-btn">Run Test</button>
+  <!-- Query mode selection -->
+  <div class="query-section">
+    <div class="query-mode">
+      <div id="attr-mode-btn" class="mode-btn active">attribute query</div>
+      <div id="bbox-mode-btn" class="mode-btn">bbox query</div>
+    </div>
 
-  <h2>Output:</h2>
+    <!-- Attribute query inputs -->
+    <div id="attr-query-inputs" class="query-inputs active">
+      <label for="query-input">enter query (as json array):</label>
+      <textarea id="query-input" rows="3">
+[["b3_h_dak_50p", "Gt", 2.0], ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"]]
+      </textarea>
+    </div>
+
+    <!-- BBox query inputs -->
+    <div id="bbox-query-inputs" class="query-inputs">
+      <div class="bbox-input-group">
+        <div>
+          <label for="min-x-input">min x:</label>
+          <input type="number" id="min-x-input" value="68989.19384501831" step="0.000001" />
+        </div>
+        <div>
+          <label for="min-y-input">min y:</label>
+          <input type="number" id="min-y-input" value="444614.3991728433" step="0.000001" />
+        </div>
+        <div>
+          <label for="max-x-input">max x:</label>
+          <input type="number" id="max-x-input" value="70685.16687543111" step="0.000001" />
+        </div>
+        <div>
+          <label for="max-y-input">max y:</label>
+          <input type="number" id="max-y-input" value="446023.6031208569" step="0.000001" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Button to trigger query test -->
+  <button id="query-test-btn">run query test</button>
+  <button id="clear-output-btn">clear output</button>
+
+  <h2>output:</h2>
   <pre id="output"></pre>
 
   <script type="module">
-    import init, { HttpFcbReader } from './fcb_wasm.js';
+    import init, { HttpFcbReader, WasmAttrQuery } from './fcb_wasm.js';
+
+    // Initialize the WASM module once at the beginning
+    let wasmInitialized = false;
+    let currentReader = null;
+    let currentIter = null;
+    let currentQuery = null;
+    let currentQueryMode = 'attr'; // 'attr' or 'bbox'
 
     /**
      * Appends a message to the output area.
@@ -55,91 +170,238 @@
     function log(message) {
       const output = document.getElementById('output');
       output.textContent += message + '\n';
-      output.scrollTop = output.scrollHeight; // Auto-scroll
+      output.scrollTop = output.scrollHeight; // Auto-scroll to bottom
     }
 
     /**
-     * Initializes the WASM module and runs the test.
+     * Clears the output area.
      */
-    async function runTest() {
+    function clearOutput() {
+      const output = document.getElementById('output');
+      output.textContent = '';
+    }
+
+    /**
+     * Safely frees a WASM resource if it exists and has a free method
+     * @param {Object} resource - The WASM resource to free
+     * @param {string} name - Name for logging
+     */
+    function safelyFreeResource(resource, name) {
+      if (resource && typeof resource.free === 'function') {
+        try {
+          log(`freeing ${name}...`);
+          resource.free();
+          log(`${name} freed successfully`);
+        } catch (err) {
+          log(`warning: error freeing ${name}: ${err}`);
+          console.warn(`error freeing ${name}:`, err);
+        }
+      }
+    }
+
+    /**
+     * Iterates through an AsyncFeatureIter, logging up to 10 features.
+     * @param {AsyncFeatureIter} iter - The async feature iterator.
+     */
+    async function iterateFeatures(iter) {
+      let count = 0;
+      try {
+        while (true) {
+          log(`fetching feature ${count + 1}...`);
+          const feature = await iter.next();
+          if (feature === undefined || feature === null) {
+            log('no more features.');
+            break;
+          }
+          log(`feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
+          count++;
+          // Limit iteration to avoid excessive logs
+          if (count >= 10) {
+            log('reached feature iteration limit (10).');
+            break;
+          }
+        }
+        log(`total features fetched: ${count}`);
+      } catch (err) {
+        log(`error during iteration: ${err}`);
+        console.error('iteration error:', err);
+      }
+    }
+
+    /**
+     * Initializes the WASM module if not already initialized.
+     */
+    async function initializeWasm() {
+      if (!wasmInitialized) {
+        log('initializing wasm module...');
+        try {
+          await init();
+          wasmInitialized = true;
+          log('wasm module initialized successfully.');
+        } catch (err) {
+          log(`error initializing wasm module: ${err}`);
+          console.error(`error initializing wasm module:`, err);
+          throw err;
+        }
+      }
+    }
+
+    /**
+     * Cleans up all WASM resources to prevent memory leaks
+     */
+    function cleanupResources() {
+      // Clean up in reverse order of creation
+      safelyFreeResource(currentIter, 'iterator');
+      currentIter = null;
+
+      safelyFreeResource(currentQuery, 'query');
+      currentQuery = null;
+
+      safelyFreeResource(currentReader, 'reader');
+      currentReader = null;
+    }
+
+    /**
+     * Runs the attribute query test
+     * @param {string} url - The URL to the FCB data
+     */
+    async function runAttributeQuery(url) {
+      const queryInput = document.getElementById('query-input');
+      const queryStr = queryInput.value.trim();
+
+      let queryArray;
+      try {
+        queryArray = JSON.parse(queryStr);
+      } catch (e) {
+        log(`error: invalid json for query: ${e.message}`);
+        return;
+      }
+
+      log(`constructing attribute query: ${JSON.stringify(queryArray)}`);
+      currentQuery = new WasmAttrQuery(queryArray);
+      log('calling select_attr_query()...');
+
+      // The select_attr_query method consumes the reader in Rust
+      // After this call, currentReader is no longer valid
+      currentIter = await currentReader.select_attr_query(currentQuery);
+      currentReader = null; // Reader is consumed by select_attr_query
+
+      await iterateFeatures(currentIter);
+    }
+
+    /**
+     * Runs the bbox query test
+     * @param {string} url - The URL to the FCB data
+     */
+    async function runBboxQuery(url) {
+      const minX = parseFloat(document.getElementById('min-x-input').value);
+      const minY = parseFloat(document.getElementById('min-y-input').value);
+      const maxX = parseFloat(document.getElementById('max-x-input').value);
+      const maxY = parseFloat(document.getElementById('max-y-input').value);
+
+      if (isNaN(minX) || isNaN(minY) || isNaN(maxX) || isNaN(maxY)) {
+        log('error: invalid bbox coordinates. please enter valid numbers.');
+        return;
+      }
+
+      log(`running bbox query with: [${minX}, ${minY}, ${maxX}, ${maxY}]`);
+
+      // Call the select_bbox method
+      currentIter = await currentReader.select_bbox(minX, minY, maxX, maxY);
+      currentReader = null; // Reader is consumed by select_bbox
+
+      await iterateFeatures(currentIter);
+    }
+
+    /**
+     * Runs the query test by:
+     * 1. Initializing the WASM module if needed.
+     * 2. Creating a HttpFcbReader from the given URL.
+     * 3. Based on the query mode, either:
+     *    a. Parsing the query JSON and constructing a WasmAttrQuery.
+     *    b. Getting the bbox coordinates and calling select_bbox.
+     * 4. Iterating over the results.
+     */
+    async function runQueryTest() {
+      log('running query test...');
       const urlInput = document.getElementById('url-input');
       const url = urlInput.value.trim();
 
       if (!url) {
-        alert('Please enter a valid URL.');
-        return;
-      }
-
-      log('Initializing WASM module...');
-      try {
-        await init();
-        log('WASM module initialized successfully.');
-      } catch (err) {
-        log(`Error initializing WASM module: ${err}`);
-        console.error(err);
+        log('error: please enter a valid url.');
         return;
       }
 
       try {
-        log(`Creating HttpFcbReader with URL: ${url}`);
-        const reader = await new HttpFcbReader(url);
-        console.log('HttpFcbReader instance created.');
+        // Clean up any existing resources before starting a new query
+        cleanupResources();
 
-        console.log('Calling header()...');
-        const header = await reader.header();
-        console.log("header===", header);
+        // Initialize WASM if needed
+        await initializeWasm();
 
+        log(`creating httpfcbreader with url: ${url}`);
+        currentReader = await new HttpFcbReader(url);
+        log('httpfcbreader instance created.');
 
+        log('fetching header...');
+        const header = await currentReader.header();
+        log(`header: ${JSON.stringify(header, null, 2)}`);
 
-
-        log('Calling select_all()...');
-
-        // const featureIter = await reader.select_all();
-        // // Function to iterate through AsyncFeatureIter
-        const features = [];
-        async function iterateFeatures(iter) {
-          let count = 0;
-          while (true) {
-            log(`Fetching feature ${count + 1}...`);
-            const feature = await iter.next();
-            if (feature === undefined) {
-              log('No more features.');
-              break;
-            }
-            log(`Feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
-            features.push(feature);
-            count++;
-            // Optional: Limit the number of features to prevent excessive logs
-            if (count >= 10) {
-              log('Reached feature iteration limit (10).');
-              break;
-            }
-          }
-          log(`Total features fetched: ${count}`);
+        // Run the appropriate query based on the current mode
+        if (currentQueryMode === 'attr') {
+          await runAttributeQuery(url);
+        } else if (currentQueryMode === 'bbox') {
+          await runBboxQuery(url);
         }
-        // await iterateFeatures(featureIter);
-        // log('Test completed successfully.');
-        // console.log("features", features);
 
-        let min_x = -200000.0;
-        let min_y = -200000.0;
-        let max_x = 200000.0;
-        let max_y = 200000.0;
-        const bboxIter = await reader.select_bbox(min_x, min_y, max_x, max_y);
-        await iterateFeatures(bboxIter);
-        log('Test completed successfully.');
-        console.log("features", features);
-
-
-
+        log('query test completed successfully.');
       } catch (err) {
-        log(`Error during test: ${err}`);
-        console.error(err);
+        log(`error during query test: ${err}`);
+        console.error('query test error:', err);
+        // Clean up resources even if there was an error
+        cleanupResources();
       }
     }
 
-    // Attach event listener to the button
-    document.getElementById('test-btn').addEventListener('click', runTest);
+    /**
+     * Switches between attribute and bbox query modes
+     * @param {string} mode - The mode to switch to ('attr' or 'bbox')
+     */
+    function switchQueryMode(mode) {
+      currentQueryMode = mode;
+
+      // Update UI
+      const attrModeBtn = document.getElementById('attr-mode-btn');
+      const bboxModeBtn = document.getElementById('bbox-mode-btn');
+      const attrInputs = document.getElementById('attr-query-inputs');
+      const bboxInputs = document.getElementById('bbox-query-inputs');
+
+      if (mode === 'attr') {
+        attrModeBtn.classList.add('active');
+        bboxModeBtn.classList.remove('active');
+        attrInputs.classList.add('active');
+        bboxInputs.classList.remove('active');
+      } else {
+        attrModeBtn.classList.remove('active');
+        bboxModeBtn.classList.add('active');
+        attrInputs.classList.remove('active');
+        bboxInputs.classList.add('active');
+      }
+    }
+
+    // Attach the event listeners
+    document.getElementById('query-test-btn').addEventListener('click', runQueryTest);
+    document.getElementById('clear-output-btn').addEventListener('click', clearOutput);
+    document.getElementById('attr-mode-btn').addEventListener('click', () => switchQueryMode('attr'));
+    document.getElementById('bbox-mode-btn').addEventListener('click', () => switchQueryMode('bbox'));
+
+    // Initialize WASM on page load
+    initializeWasm().catch(err => {
+      console.error('Failed to initialize WASM:', err);
+    });
+
+    // Clean up resources when the page is unloaded
+    window.addEventListener('beforeunload', cleanupResources);
   </script>
 </body>
 

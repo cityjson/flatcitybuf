@@ -2,7 +2,6 @@
 
 // @generated
 
-
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
@@ -153,10 +152,300 @@ impl<'a> flatbuffers::Verifiable for ColumnType {
 }
 
 impl flatbuffers::SimpleToVerifyInSlice for ColumnType {}
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+pub const ENUM_MIN_TEXTURE_FORMAT: u8 = 0;
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+pub const ENUM_MAX_TEXTURE_FORMAT: u8 = 1;
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+#[allow(non_camel_case_types)]
+pub const ENUM_VALUES_TEXTURE_FORMAT: [TextureFormat; 2] = [TextureFormat::PNG, TextureFormat::JPG];
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct TextureFormat(pub u8);
+#[allow(non_upper_case_globals)]
+impl TextureFormat {
+    pub const PNG: Self = Self(0);
+    pub const JPG: Self = Self(1);
+
+    pub const ENUM_MIN: u8 = 0;
+    pub const ENUM_MAX: u8 = 1;
+    pub const ENUM_VALUES: &'static [Self] = &[Self::PNG, Self::JPG];
+    /// Returns the variant's name or "" if unknown.
+    pub fn variant_name(self) -> Option<&'static str> {
+        match self {
+            Self::PNG => Some("PNG"),
+            Self::JPG => Some("JPG"),
+            _ => None,
+        }
+    }
+}
+impl core::fmt::Debug for TextureFormat {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        if let Some(name) = self.variant_name() {
+            f.write_str(name)
+        } else {
+            f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+        }
+    }
+}
+impl<'a> flatbuffers::Follow<'a> for TextureFormat {
+    type Inner = Self;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        Self(b)
+    }
+}
+
+impl flatbuffers::Push for TextureFormat {
+    type Output = TextureFormat;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+    }
+}
+
+impl flatbuffers::EndianScalar for TextureFormat {
+    type Scalar = u8;
+    #[inline]
+    fn to_little_endian(self) -> u8 {
+        self.0.to_le()
+    }
+    #[inline]
+    #[allow(clippy::wrong_self_convention)]
+    fn from_little_endian(v: u8) -> Self {
+        let b = u8::from_le(v);
+        Self(b)
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for TextureFormat {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
+        u8::run_verifier(v, pos)
+    }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for TextureFormat {}
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+pub const ENUM_MIN_WRAP_MODE: u8 = 0;
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+pub const ENUM_MAX_WRAP_MODE: u8 = 4;
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+#[allow(non_camel_case_types)]
+pub const ENUM_VALUES_WRAP_MODE: [WrapMode; 5] = [
+    WrapMode::None,
+    WrapMode::Wrap,
+    WrapMode::Mirror,
+    WrapMode::Clamp,
+    WrapMode::Border,
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct WrapMode(pub u8);
+#[allow(non_upper_case_globals)]
+impl WrapMode {
+    pub const None: Self = Self(0);
+    pub const Wrap: Self = Self(1);
+    pub const Mirror: Self = Self(2);
+    pub const Clamp: Self = Self(3);
+    pub const Border: Self = Self(4);
+
+    pub const ENUM_MIN: u8 = 0;
+    pub const ENUM_MAX: u8 = 4;
+    pub const ENUM_VALUES: &'static [Self] = &[
+        Self::None,
+        Self::Wrap,
+        Self::Mirror,
+        Self::Clamp,
+        Self::Border,
+    ];
+    /// Returns the variant's name or "" if unknown.
+    pub fn variant_name(self) -> Option<&'static str> {
+        match self {
+            Self::None => Some("None"),
+            Self::Wrap => Some("Wrap"),
+            Self::Mirror => Some("Mirror"),
+            Self::Clamp => Some("Clamp"),
+            Self::Border => Some("Border"),
+            _ => None,
+        }
+    }
+}
+impl core::fmt::Debug for WrapMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        if let Some(name) = self.variant_name() {
+            f.write_str(name)
+        } else {
+            f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+        }
+    }
+}
+impl<'a> flatbuffers::Follow<'a> for WrapMode {
+    type Inner = Self;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        Self(b)
+    }
+}
+
+impl flatbuffers::Push for WrapMode {
+    type Output = WrapMode;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+    }
+}
+
+impl flatbuffers::EndianScalar for WrapMode {
+    type Scalar = u8;
+    #[inline]
+    fn to_little_endian(self) -> u8 {
+        self.0.to_le()
+    }
+    #[inline]
+    #[allow(clippy::wrong_self_convention)]
+    fn from_little_endian(v: u8) -> Self {
+        let b = u8::from_le(v);
+        Self(b)
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for WrapMode {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
+        u8::run_verifier(v, pos)
+    }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for WrapMode {}
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+pub const ENUM_MIN_TEXTURE_TYPE: u8 = 0;
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+pub const ENUM_MAX_TEXTURE_TYPE: u8 = 2;
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
+#[allow(non_camel_case_types)]
+pub const ENUM_VALUES_TEXTURE_TYPE: [TextureType; 3] = [
+    TextureType::Unknown,
+    TextureType::Specific,
+    TextureType::Typical,
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct TextureType(pub u8);
+#[allow(non_upper_case_globals)]
+impl TextureType {
+    pub const Unknown: Self = Self(0);
+    pub const Specific: Self = Self(1);
+    pub const Typical: Self = Self(2);
+
+    pub const ENUM_MIN: u8 = 0;
+    pub const ENUM_MAX: u8 = 2;
+    pub const ENUM_VALUES: &'static [Self] = &[Self::Unknown, Self::Specific, Self::Typical];
+    /// Returns the variant's name or "" if unknown.
+    pub fn variant_name(self) -> Option<&'static str> {
+        match self {
+            Self::Unknown => Some("Unknown"),
+            Self::Specific => Some("Specific"),
+            Self::Typical => Some("Typical"),
+            _ => None,
+        }
+    }
+}
+impl core::fmt::Debug for TextureType {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        if let Some(name) = self.variant_name() {
+            f.write_str(name)
+        } else {
+            f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+        }
+    }
+}
+impl<'a> flatbuffers::Follow<'a> for TextureType {
+    type Inner = Self;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        Self(b)
+    }
+}
+
+impl flatbuffers::Push for TextureType {
+    type Output = TextureType;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+    }
+}
+
+impl flatbuffers::EndianScalar for TextureType {
+    type Scalar = u8;
+    #[inline]
+    fn to_little_endian(self) -> u8 {
+        self.0.to_le()
+    }
+    #[inline]
+    #[allow(clippy::wrong_self_convention)]
+    fn from_little_endian(v: u8) -> Self {
+        let b = u8::from_le(v);
+        Self(b)
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for TextureType {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
+        u8::run_verifier(v, pos)
+    }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for TextureType {}
 // struct Vector, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vector(pub [u8; 24]);
 impl core::fmt::Debug for Vector {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -198,7 +487,6 @@ impl<'a> flatbuffers::Verifiable for Vector {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -350,7 +638,6 @@ impl<'a> flatbuffers::Verifiable for Transform {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -440,7 +727,6 @@ impl<'a> flatbuffers::Verifiable for GeographicalExtent {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -476,6 +762,237 @@ impl<'a> GeographicalExtent {
     #[allow(clippy::identity_op)]
     pub fn set_max(&mut self, x: &Vector) {
         self.0[24..24 + 24].copy_from_slice(&x.0)
+    }
+}
+
+// struct AttributeIndex, aligned to 4
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct AttributeIndex(pub [u8; 8]);
+impl core::fmt::Debug for AttributeIndex {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.debug_struct("AttributeIndex")
+            .field("index", &self.index())
+            .field("length", &self.length())
+            .finish()
+    }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for AttributeIndex {}
+impl<'a> flatbuffers::Follow<'a> for AttributeIndex {
+    type Inner = &'a AttributeIndex;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        <&'a AttributeIndex>::follow(buf, loc)
+    }
+}
+impl<'a> flatbuffers::Follow<'a> for &'a AttributeIndex {
+    type Inner = &'a AttributeIndex;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        flatbuffers::follow_cast_ref::<AttributeIndex>(buf, loc)
+    }
+}
+impl<'b> flatbuffers::Push for AttributeIndex {
+    type Output = AttributeIndex;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        let src =
+            ::core::slice::from_raw_parts(self as *const AttributeIndex as *const u8, Self::size());
+        dst.copy_from_slice(src);
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for AttributeIndex {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.in_buffer::<Self>(pos)
+    }
+}
+
+impl<'a> AttributeIndex {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(index: u16, length: u32) -> Self {
+        let mut s = Self([0; 8]);
+        s.set_index(index);
+        s.set_length(length);
+        s
+    }
+
+    pub fn index(&self) -> u16 {
+        let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[0..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_index(&mut self, x: u16) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[0..].as_mut_ptr(),
+                core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+
+    pub fn length(&self) -> u32 {
+        let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[4..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_length(&mut self, x: u32) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[4..].as_mut_ptr(),
+                core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+}
+
+// struct Vec2, aligned to 8
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct Vec2(pub [u8; 16]);
+impl core::fmt::Debug for Vec2 {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.debug_struct("Vec2")
+            .field("u", &self.u())
+            .field("v", &self.v())
+            .finish()
+    }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for Vec2 {}
+impl<'a> flatbuffers::Follow<'a> for Vec2 {
+    type Inner = &'a Vec2;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        <&'a Vec2>::follow(buf, loc)
+    }
+}
+impl<'a> flatbuffers::Follow<'a> for &'a Vec2 {
+    type Inner = &'a Vec2;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        flatbuffers::follow_cast_ref::<Vec2>(buf, loc)
+    }
+}
+impl<'b> flatbuffers::Push for Vec2 {
+    type Output = Vec2;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        let src = ::core::slice::from_raw_parts(self as *const Vec2 as *const u8, Self::size());
+        dst.copy_from_slice(src);
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for Vec2 {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.in_buffer::<Self>(pos)
+    }
+}
+
+impl<'a> Vec2 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(u: f64, v: f64) -> Self {
+        let mut s = Self([0; 16]);
+        s.set_u(u);
+        s.set_v(v);
+        s
+    }
+
+    pub fn u(&self) -> f64 {
+        let mut mem = core::mem::MaybeUninit::<<f64 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[0..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_u(&mut self, x: f64) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[0..].as_mut_ptr(),
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+
+    pub fn v(&self) -> f64 {
+        let mut mem = core::mem::MaybeUninit::<<f64 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[8..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_v(&mut self, x: f64) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[8..].as_mut_ptr(),
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+        }
     }
 }
 
@@ -659,7 +1176,6 @@ impl flatbuffers::Verifiable for Column<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<u16>("index", Self::VT_INDEX, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
@@ -901,7 +1417,6 @@ impl flatbuffers::Verifiable for ReferenceSystem<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "authority",
@@ -993,6 +1508,754 @@ impl core::fmt::Debug for ReferenceSystem<'_> {
         ds.finish()
     }
 }
+pub enum MaterialOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct Material<'a> {
+    pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for Material<'a> {
+    type Inner = Material<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: flatbuffers::Table::new(buf, loc),
+        }
+    }
+}
+
+impl<'a> Material<'a> {
+    pub const VT_NAME: flatbuffers::VOffsetT = 4;
+    pub const VT_AMBIENT_INTENSITY: flatbuffers::VOffsetT = 6;
+    pub const VT_DIFFUSE_COLOR: flatbuffers::VOffsetT = 8;
+    pub const VT_EMISSIVE_COLOR: flatbuffers::VOffsetT = 10;
+    pub const VT_SPECULAR_COLOR: flatbuffers::VOffsetT = 12;
+    pub const VT_SHININESS: flatbuffers::VOffsetT = 14;
+    pub const VT_TRANSPARENCY: flatbuffers::VOffsetT = 16;
+    pub const VT_IS_SMOOTH: flatbuffers::VOffsetT = 18;
+
+    #[inline]
+    pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+        Material { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+        _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args MaterialArgs<'args>,
+    ) -> flatbuffers::WIPOffset<Material<'bldr>> {
+        let mut builder = MaterialBuilder::new(_fbb);
+        if let Some(x) = args.transparency {
+            builder.add_transparency(x);
+        }
+        if let Some(x) = args.shininess {
+            builder.add_shininess(x);
+        }
+        if let Some(x) = args.ambient_intensity {
+            builder.add_ambient_intensity(x);
+        }
+        if let Some(x) = args.specular_color {
+            builder.add_specular_color(x);
+        }
+        if let Some(x) = args.emissive_color {
+            builder.add_emissive_color(x);
+        }
+        if let Some(x) = args.diffuse_color {
+            builder.add_diffuse_color(x);
+        }
+        if let Some(x) = args.name {
+            builder.add_name(x);
+        }
+        if let Some(x) = args.is_smooth {
+            builder.add_is_smooth(x);
+        }
+        builder.finish()
+    }
+
+    #[inline]
+    pub fn name(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<&str>>(Material::VT_NAME, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn ambient_intensity(&self) -> Option<f64> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<f64>(Material::VT_AMBIENT_INTENSITY, None) }
+    }
+    #[inline]
+    pub fn diffuse_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(
+                    Material::VT_DIFFUSE_COLOR,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn emissive_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(
+                    Material::VT_EMISSIVE_COLOR,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn specular_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(
+                    Material::VT_SPECULAR_COLOR,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn shininess(&self) -> Option<f64> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<f64>(Material::VT_SHININESS, None) }
+    }
+    #[inline]
+    pub fn transparency(&self) -> Option<f64> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<f64>(Material::VT_TRANSPARENCY, None) }
+    }
+    #[inline]
+    pub fn is_smooth(&self) -> Option<bool> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<bool>(Material::VT_IS_SMOOTH, None) }
+    }
+}
+
+impl flatbuffers::Verifiable for Material<'_> {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
+            .visit_field::<f64>("ambient_intensity", Self::VT_AMBIENT_INTENSITY, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f64>>>(
+                "diffuse_color",
+                Self::VT_DIFFUSE_COLOR,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f64>>>(
+                "emissive_color",
+                Self::VT_EMISSIVE_COLOR,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f64>>>(
+                "specular_color",
+                Self::VT_SPECULAR_COLOR,
+                false,
+            )?
+            .visit_field::<f64>("shininess", Self::VT_SHININESS, false)?
+            .visit_field::<f64>("transparency", Self::VT_TRANSPARENCY, false)?
+            .visit_field::<bool>("is_smooth", Self::VT_IS_SMOOTH, false)?
+            .finish();
+        Ok(())
+    }
+}
+pub struct MaterialArgs<'a> {
+    pub name: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub ambient_intensity: Option<f64>,
+    pub diffuse_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
+    pub emissive_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
+    pub specular_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
+    pub shininess: Option<f64>,
+    pub transparency: Option<f64>,
+    pub is_smooth: Option<bool>,
+}
+impl Default for MaterialArgs<'_> {
+    #[inline]
+    fn default() -> Self {
+        MaterialArgs {
+            name: None, // required field
+            ambient_intensity: None,
+            diffuse_color: None,
+            emissive_color: None,
+            specular_color: None,
+            shininess: None,
+            transparency: None,
+            is_smooth: None,
+        }
+    }
+}
+
+pub struct MaterialBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+    fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> MaterialBuilder<'a, 'b, A> {
+    #[inline]
+    pub fn add_name(&mut self, name: flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Material::VT_NAME, name);
+    }
+    #[inline]
+    pub fn add_ambient_intensity(&mut self, ambient_intensity: f64) {
+        self.fbb_
+            .push_slot_always::<f64>(Material::VT_AMBIENT_INTENSITY, ambient_intensity);
+    }
+    #[inline]
+    pub fn add_diffuse_color(
+        &mut self,
+        diffuse_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b, f64>>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Material::VT_DIFFUSE_COLOR,
+            diffuse_color,
+        );
+    }
+    #[inline]
+    pub fn add_emissive_color(
+        &mut self,
+        emissive_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b, f64>>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Material::VT_EMISSIVE_COLOR,
+            emissive_color,
+        );
+    }
+    #[inline]
+    pub fn add_specular_color(
+        &mut self,
+        specular_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b, f64>>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Material::VT_SPECULAR_COLOR,
+            specular_color,
+        );
+    }
+    #[inline]
+    pub fn add_shininess(&mut self, shininess: f64) {
+        self.fbb_
+            .push_slot_always::<f64>(Material::VT_SHININESS, shininess);
+    }
+    #[inline]
+    pub fn add_transparency(&mut self, transparency: f64) {
+        self.fbb_
+            .push_slot_always::<f64>(Material::VT_TRANSPARENCY, transparency);
+    }
+    #[inline]
+    pub fn add_is_smooth(&mut self, is_smooth: bool) {
+        self.fbb_
+            .push_slot_always::<bool>(Material::VT_IS_SMOOTH, is_smooth);
+    }
+    #[inline]
+    pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> MaterialBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        MaterialBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> flatbuffers::WIPOffset<Material<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, Material::VT_NAME, "name");
+        flatbuffers::WIPOffset::new(o.value())
+    }
+}
+
+impl core::fmt::Debug for Material<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut ds = f.debug_struct("Material");
+        ds.field("name", &self.name());
+        ds.field("ambient_intensity", &self.ambient_intensity());
+        ds.field("diffuse_color", &self.diffuse_color());
+        ds.field("emissive_color", &self.emissive_color());
+        ds.field("specular_color", &self.specular_color());
+        ds.field("shininess", &self.shininess());
+        ds.field("transparency", &self.transparency());
+        ds.field("is_smooth", &self.is_smooth());
+        ds.finish()
+    }
+}
+pub enum TextureOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct Texture<'a> {
+    pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for Texture<'a> {
+    type Inner = Texture<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: flatbuffers::Table::new(buf, loc),
+        }
+    }
+}
+
+impl<'a> Texture<'a> {
+    pub const VT_TYPE_: flatbuffers::VOffsetT = 4;
+    pub const VT_IMAGE: flatbuffers::VOffsetT = 6;
+    pub const VT_WRAP_MODE: flatbuffers::VOffsetT = 8;
+    pub const VT_TEXTURE_TYPE: flatbuffers::VOffsetT = 10;
+    pub const VT_BORDER_COLOR: flatbuffers::VOffsetT = 12;
+
+    #[inline]
+    pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+        Texture { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+        _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args TextureArgs<'args>,
+    ) -> flatbuffers::WIPOffset<Texture<'bldr>> {
+        let mut builder = TextureBuilder::new(_fbb);
+        if let Some(x) = args.border_color {
+            builder.add_border_color(x);
+        }
+        if let Some(x) = args.image {
+            builder.add_image(x);
+        }
+        if let Some(x) = args.texture_type {
+            builder.add_texture_type(x);
+        }
+        if let Some(x) = args.wrap_mode {
+            builder.add_wrap_mode(x);
+        }
+        builder.add_type_(args.type_);
+        builder.finish()
+    }
+
+    #[inline]
+    pub fn type_(&self) -> TextureFormat {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<TextureFormat>(Texture::VT_TYPE_, Some(TextureFormat::PNG))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn image(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<&str>>(Texture::VT_IMAGE, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn wrap_mode(&self) -> Option<WrapMode> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<WrapMode>(Texture::VT_WRAP_MODE, None) }
+    }
+    #[inline]
+    pub fn texture_type(&self) -> Option<TextureType> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<TextureType>(Texture::VT_TEXTURE_TYPE, None) }
+    }
+    #[inline]
+    pub fn border_color(&self) -> Option<flatbuffers::Vector<'a, f64>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f64>>>(
+                    Texture::VT_BORDER_COLOR,
+                    None,
+                )
+        }
+    }
+}
+
+impl flatbuffers::Verifiable for Texture<'_> {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<TextureFormat>("type_", Self::VT_TYPE_, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>("image", Self::VT_IMAGE, true)?
+            .visit_field::<WrapMode>("wrap_mode", Self::VT_WRAP_MODE, false)?
+            .visit_field::<TextureType>("texture_type", Self::VT_TEXTURE_TYPE, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f64>>>(
+                "border_color",
+                Self::VT_BORDER_COLOR,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
+}
+pub struct TextureArgs<'a> {
+    pub type_: TextureFormat,
+    pub image: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub wrap_mode: Option<WrapMode>,
+    pub texture_type: Option<TextureType>,
+    pub border_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
+}
+impl Default for TextureArgs<'_> {
+    #[inline]
+    fn default() -> Self {
+        TextureArgs {
+            type_: TextureFormat::PNG,
+            image: None, // required field
+            wrap_mode: None,
+            texture_type: None,
+            border_color: None,
+        }
+    }
+}
+
+pub struct TextureBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+    fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> TextureBuilder<'a, 'b, A> {
+    #[inline]
+    pub fn add_type_(&mut self, type_: TextureFormat) {
+        self.fbb_
+            .push_slot::<TextureFormat>(Texture::VT_TYPE_, type_, TextureFormat::PNG);
+    }
+    #[inline]
+    pub fn add_image(&mut self, image: flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Texture::VT_IMAGE, image);
+    }
+    #[inline]
+    pub fn add_wrap_mode(&mut self, wrap_mode: WrapMode) {
+        self.fbb_
+            .push_slot_always::<WrapMode>(Texture::VT_WRAP_MODE, wrap_mode);
+    }
+    #[inline]
+    pub fn add_texture_type(&mut self, texture_type: TextureType) {
+        self.fbb_
+            .push_slot_always::<TextureType>(Texture::VT_TEXTURE_TYPE, texture_type);
+    }
+    #[inline]
+    pub fn add_border_color(
+        &mut self,
+        border_color: flatbuffers::WIPOffset<flatbuffers::Vector<'b, f64>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Texture::VT_BORDER_COLOR, border_color);
+    }
+    #[inline]
+    pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> TextureBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        TextureBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> flatbuffers::WIPOffset<Texture<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, Texture::VT_IMAGE, "image");
+        flatbuffers::WIPOffset::new(o.value())
+    }
+}
+
+impl core::fmt::Debug for Texture<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut ds = f.debug_struct("Texture");
+        ds.field("type_", &self.type_());
+        ds.field("image", &self.image());
+        ds.field("wrap_mode", &self.wrap_mode());
+        ds.field("texture_type", &self.texture_type());
+        ds.field("border_color", &self.border_color());
+        ds.finish()
+    }
+}
+pub enum AppearanceOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct Appearance<'a> {
+    pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for Appearance<'a> {
+    type Inner = Appearance<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: flatbuffers::Table::new(buf, loc),
+        }
+    }
+}
+
+impl<'a> Appearance<'a> {
+    pub const VT_MATERIALS: flatbuffers::VOffsetT = 4;
+    pub const VT_TEXTURES: flatbuffers::VOffsetT = 6;
+    pub const VT_VERTICES_TEXTURE: flatbuffers::VOffsetT = 8;
+    pub const VT_DEFAULT_THEME_TEXTURE: flatbuffers::VOffsetT = 10;
+    pub const VT_DEFAULT_THEME_MATERIAL: flatbuffers::VOffsetT = 12;
+
+    #[inline]
+    pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+        Appearance { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+        _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args AppearanceArgs<'args>,
+    ) -> flatbuffers::WIPOffset<Appearance<'bldr>> {
+        let mut builder = AppearanceBuilder::new(_fbb);
+        if let Some(x) = args.default_theme_material {
+            builder.add_default_theme_material(x);
+        }
+        if let Some(x) = args.default_theme_texture {
+            builder.add_default_theme_texture(x);
+        }
+        if let Some(x) = args.vertices_texture {
+            builder.add_vertices_texture(x);
+        }
+        if let Some(x) = args.textures {
+            builder.add_textures(x);
+        }
+        if let Some(x) = args.materials {
+            builder.add_materials(x);
+        }
+        builder.finish()
+    }
+
+    #[inline]
+    pub fn materials(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Material<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Material>>,
+            >>(Appearance::VT_MATERIALS, None)
+        }
+    }
+    #[inline]
+    pub fn textures(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Texture<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Texture>>,
+            >>(Appearance::VT_TEXTURES, None)
+        }
+    }
+    #[inline]
+    pub fn vertices_texture(&self) -> Option<flatbuffers::Vector<'a, Vec2>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, Vec2>>>(
+                    Appearance::VT_VERTICES_TEXTURE,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn default_theme_texture(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(
+                Appearance::VT_DEFAULT_THEME_TEXTURE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn default_theme_material(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(
+                Appearance::VT_DEFAULT_THEME_MATERIAL,
+                None,
+            )
+        }
+    }
+}
+
+impl flatbuffers::Verifiable for Appearance<'_> {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Material>>,
+            >>("materials", Self::VT_MATERIALS, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Texture>>,
+            >>("textures", Self::VT_TEXTURES, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Vec2>>>(
+                "vertices_texture",
+                Self::VT_VERTICES_TEXTURE,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
+                "default_theme_texture",
+                Self::VT_DEFAULT_THEME_TEXTURE,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
+                "default_theme_material",
+                Self::VT_DEFAULT_THEME_MATERIAL,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
+}
+pub struct AppearanceArgs<'a> {
+    pub materials: Option<
+        flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Material<'a>>>>,
+    >,
+    pub textures: Option<
+        flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Texture<'a>>>>,
+    >,
+    pub vertices_texture: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Vec2>>>,
+    pub default_theme_texture: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub default_theme_material: Option<flatbuffers::WIPOffset<&'a str>>,
+}
+impl Default for AppearanceArgs<'_> {
+    #[inline]
+    fn default() -> Self {
+        AppearanceArgs {
+            materials: None,
+            textures: None,
+            vertices_texture: None,
+            default_theme_texture: None,
+            default_theme_material: None,
+        }
+    }
+}
+
+pub struct AppearanceBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+    fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> AppearanceBuilder<'a, 'b, A> {
+    #[inline]
+    pub fn add_materials(
+        &mut self,
+        materials: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Material<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Appearance::VT_MATERIALS, materials);
+    }
+    #[inline]
+    pub fn add_textures(
+        &mut self,
+        textures: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Texture<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Appearance::VT_TEXTURES, textures);
+    }
+    #[inline]
+    pub fn add_vertices_texture(
+        &mut self,
+        vertices_texture: flatbuffers::WIPOffset<flatbuffers::Vector<'b, Vec2>>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Appearance::VT_VERTICES_TEXTURE,
+            vertices_texture,
+        );
+    }
+    #[inline]
+    pub fn add_default_theme_texture(
+        &mut self,
+        default_theme_texture: flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Appearance::VT_DEFAULT_THEME_TEXTURE,
+            default_theme_texture,
+        );
+    }
+    #[inline]
+    pub fn add_default_theme_material(
+        &mut self,
+        default_theme_material: flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Appearance::VT_DEFAULT_THEME_MATERIAL,
+            default_theme_material,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> AppearanceBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        AppearanceBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> flatbuffers::WIPOffset<Appearance<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        flatbuffers::WIPOffset::new(o.value())
+    }
+}
+
+impl core::fmt::Debug for Appearance<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut ds = f.debug_struct("Appearance");
+        ds.field("materials", &self.materials());
+        ds.field("textures", &self.textures());
+        ds.field("vertices_texture", &self.vertices_texture());
+        ds.field("default_theme_texture", &self.default_theme_texture());
+        ds.field("default_theme_material", &self.default_theme_material());
+        ds.finish()
+    }
+}
 pub enum HeaderOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -1012,27 +2275,29 @@ impl<'a> flatbuffers::Follow<'a> for Header<'a> {
 
 impl<'a> Header<'a> {
     pub const VT_TRANSFORM: flatbuffers::VOffsetT = 4;
-    pub const VT_COLUMNS: flatbuffers::VOffsetT = 6;
-    pub const VT_FEATURES_COUNT: flatbuffers::VOffsetT = 8;
-    pub const VT_INDEX_NODE_SIZE: flatbuffers::VOffsetT = 10;
-    pub const VT_GEOGRAPHICAL_EXTENT: flatbuffers::VOffsetT = 12;
-    pub const VT_REFERENCE_SYSTEM: flatbuffers::VOffsetT = 14;
-    pub const VT_IDENTIFIER: flatbuffers::VOffsetT = 16;
-    pub const VT_REFERENCE_DATE: flatbuffers::VOffsetT = 18;
-    pub const VT_TITLE: flatbuffers::VOffsetT = 20;
-    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 22;
-    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 24;
-    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 26;
-    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 28;
-    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 30;
-    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 32;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 34;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 36;
-    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 38;
-    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 40;
-    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 42;
-    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 44;
-    pub const VT_VERSION: flatbuffers::VOffsetT = 46;
+    pub const VT_APPEARANCE: flatbuffers::VOffsetT = 6;
+    pub const VT_COLUMNS: flatbuffers::VOffsetT = 8;
+    pub const VT_FEATURES_COUNT: flatbuffers::VOffsetT = 10;
+    pub const VT_INDEX_NODE_SIZE: flatbuffers::VOffsetT = 12;
+    pub const VT_ATTRIBUTE_INDEX: flatbuffers::VOffsetT = 14;
+    pub const VT_GEOGRAPHICAL_EXTENT: flatbuffers::VOffsetT = 16;
+    pub const VT_REFERENCE_SYSTEM: flatbuffers::VOffsetT = 18;
+    pub const VT_IDENTIFIER: flatbuffers::VOffsetT = 20;
+    pub const VT_REFERENCE_DATE: flatbuffers::VOffsetT = 22;
+    pub const VT_TITLE: flatbuffers::VOffsetT = 24;
+    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 26;
+    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 28;
+    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 30;
+    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 32;
+    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 34;
+    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 36;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 38;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 40;
+    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 42;
+    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 44;
+    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 46;
+    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 48;
+    pub const VT_VERSION: flatbuffers::VOffsetT = 50;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -1099,8 +2364,14 @@ impl<'a> Header<'a> {
         if let Some(x) = args.geographical_extent {
             builder.add_geographical_extent(x);
         }
+        if let Some(x) = args.attribute_index {
+            builder.add_attribute_index(x);
+        }
         if let Some(x) = args.columns {
             builder.add_columns(x);
+        }
+        if let Some(x) = args.appearance {
+            builder.add_appearance(x);
         }
         if let Some(x) = args.transform {
             builder.add_transform(x);
@@ -1115,6 +2386,16 @@ impl<'a> Header<'a> {
         // Created from valid Table for this object
         // which contains a valid value in this slot
         unsafe { self._tab.get::<Transform>(Header::VT_TRANSFORM, None) }
+    }
+    #[inline]
+    pub fn appearance(&self) -> Option<Appearance<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<Appearance>>(Header::VT_APPEARANCE, None)
+        }
     }
     #[inline]
     pub fn columns(
@@ -1149,6 +2430,19 @@ impl<'a> Header<'a> {
             self._tab
                 .get::<u16>(Header::VT_INDEX_NODE_SIZE, Some(16))
                 .unwrap()
+        }
+    }
+    #[inline]
+    pub fn attribute_index(&self) -> Option<flatbuffers::Vector<'a, AttributeIndex>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, AttributeIndex>>>(
+                    Header::VT_ATTRIBUTE_INDEX,
+                    None,
+                )
         }
     }
     #[inline]
@@ -1350,14 +2644,23 @@ impl flatbuffers::Verifiable for Header<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<Transform>("transform", Self::VT_TRANSFORM, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<Appearance>>(
+                "appearance",
+                Self::VT_APPEARANCE,
+                false,
+            )?
             .visit_field::<flatbuffers::ForwardsUOffset<
                 flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column>>,
             >>("columns", Self::VT_COLUMNS, false)?
             .visit_field::<u64>("features_count", Self::VT_FEATURES_COUNT, false)?
             .visit_field::<u16>("index_node_size", Self::VT_INDEX_NODE_SIZE, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, AttributeIndex>>>(
+                "attribute_index",
+                Self::VT_ATTRIBUTE_INDEX,
+                false,
+            )?
             .visit_field::<GeographicalExtent>(
                 "geographical_extent",
                 Self::VT_GEOGRAPHICAL_EXTENT,
@@ -1446,11 +2749,13 @@ impl flatbuffers::Verifiable for Header<'_> {
 }
 pub struct HeaderArgs<'a> {
     pub transform: Option<&'a Transform>,
+    pub appearance: Option<flatbuffers::WIPOffset<Appearance<'a>>>,
     pub columns: Option<
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>>,
     >,
     pub features_count: u64,
     pub index_node_size: u16,
+    pub attribute_index: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, AttributeIndex>>>,
     pub geographical_extent: Option<&'a GeographicalExtent>,
     pub reference_system: Option<flatbuffers::WIPOffset<ReferenceSystem<'a>>>,
     pub identifier: Option<flatbuffers::WIPOffset<&'a str>>,
@@ -1475,9 +2780,11 @@ impl Default for HeaderArgs<'_> {
     fn default() -> Self {
         HeaderArgs {
             transform: None,
+            appearance: None,
             columns: None,
             features_count: 0,
             index_node_size: 16,
+            attribute_index: None,
             geographical_extent: None,
             reference_system: None,
             identifier: None,
@@ -1511,6 +2818,14 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
             .push_slot_always::<&Transform>(Header::VT_TRANSFORM, transform);
     }
     #[inline]
+    pub fn add_appearance(&mut self, appearance: flatbuffers::WIPOffset<Appearance<'b>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<Appearance>>(
+                Header::VT_APPEARANCE,
+                appearance,
+            );
+    }
+    #[inline]
     pub fn add_columns(
         &mut self,
         columns: flatbuffers::WIPOffset<
@@ -1529,6 +2844,16 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
     pub fn add_index_node_size(&mut self, index_node_size: u16) {
         self.fbb_
             .push_slot::<u16>(Header::VT_INDEX_NODE_SIZE, index_node_size, 16);
+    }
+    #[inline]
+    pub fn add_attribute_index(
+        &mut self,
+        attribute_index: flatbuffers::WIPOffset<flatbuffers::Vector<'b, AttributeIndex>>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Header::VT_ATTRIBUTE_INDEX,
+            attribute_index,
+        );
     }
     #[inline]
     pub fn add_geographical_extent(&mut self, geographical_extent: &GeographicalExtent) {
@@ -1682,9 +3007,11 @@ impl core::fmt::Debug for Header<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut ds = f.debug_struct("Header");
         ds.field("transform", &self.transform());
+        ds.field("appearance", &self.appearance());
         ds.field("columns", &self.columns());
         ds.field("features_count", &self.features_count());
         ds.field("index_node_size", &self.index_node_size());
+        ds.field("attribute_index", &self.attribute_index());
         ds.field("geographical_extent", &self.geographical_extent());
         ds.field("reference_system", &self.reference_system());
         ds.field("identifier", &self.identifier());

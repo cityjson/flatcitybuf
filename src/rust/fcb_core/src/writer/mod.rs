@@ -1,20 +1,23 @@
 use crate::MAGIC_BYTES;
-use anyhow::Result;
+use attr_index::build_attribute_index_for_attr;
 use attribute::AttributeSchema;
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
-use feature_writer::FeatureWriter;
+use error::Error;
+use feature_writer::{AttributeFeatureOffset, FeatureWriter};
 use header_writer::{HeaderWriter, HeaderWriterOptions};
 use packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
+use serializer::AttributeIndexInfo;
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-
+mod attr_index;
 pub mod attribute;
+pub mod error;
 pub mod feature_writer;
 pub mod geom_encoder;
 pub mod header_writer;
 pub mod serializer;
-
 /// Main writer for FlatCityBuf (FCB) format
 ///
 /// FcbWriter handles the serialization of CityJSON data into the FCB binary format.
@@ -27,17 +30,20 @@ pub struct FcbWriter<'a> {
     header_writer: HeaderWriter<'a>,
     /// Optional writer for features
     feat_writer: Option<FeatureWriter<'a>>,
-    /// Offset of the feature in the feature data section
-    ///
-    /// transform: CjTransform
+
     transform: CjTransform,
+    /// Offset of the feature in the feature data section
     feat_offsets: Vec<FeatureOffset>,
     feat_nodes: Vec<NodeItem>,
     attr_schema: AttributeSchema,
+
+    // temporary storage for attribute index entries
+    attribute_index_entries: HashMap<usize, AttributeFeatureOffset>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 struct FeatureOffset {
+    temp_feature_id: usize,
     offset: usize,
     size: usize,
 }
@@ -58,7 +64,7 @@ impl<'a> FcbWriter<'a> {
         cj: CityJSON,
         header_option: Option<HeaderWriterOptions>,
         attr_schema: Option<AttributeSchema>,
-    ) -> Result<Self> {
+    ) -> Result<Self, Error> {
         let attr_schema = attr_schema.unwrap_or_default();
         let transform = cj.transform.clone();
         let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone());
@@ -70,6 +76,7 @@ impl<'a> FcbWriter<'a> {
             attr_schema,
             feat_offsets: Vec::new(),
             feat_nodes: Vec::new(),
+            attribute_index_entries: HashMap::new(),
         })
     }
 
@@ -78,13 +85,15 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the write operation
-    fn write_feature(&mut self) -> Result<()> {
+    fn write_feature(&mut self) -> Result<(), Error> {
         let transform = &self.transform;
 
         if let Some(feat_writer) = &mut self.feat_writer {
             let feat_buf = feat_writer.finish_to_feature();
-            let mut node = Self::actual_bbox(transform, &feat_writer.bbox);
 
+            let mut attr_feature_offset = feat_writer.attribute_feature_offsets.clone();
+
+            let mut node = Self::actual_bbox(transform, &feat_writer.bbox);
             node.offset = self.feat_offsets.len() as u64;
             self.feat_nodes.push(node);
 
@@ -93,7 +102,13 @@ impl<'a> FcbWriter<'a> {
                 .last()
                 .map(|it| it.offset + it.size)
                 .unwrap_or(0);
+
+            attr_feature_offset.offset = tempoffset;
+            self.attribute_index_entries
+                .insert(self.feat_offsets.len(), attr_feature_offset);
+
             self.feat_offsets.push(FeatureOffset {
+                temp_feature_id: self.feat_offsets.len(),
                 offset: tempoffset,
                 size: feat_buf.len(),
             });
@@ -125,9 +140,13 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the operation
-    pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<()> {
+    pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<(), Error> {
         if self.feat_writer.is_none() {
-            self.feat_writer = Some(FeatureWriter::new(feature, self.attr_schema.clone()));
+            self.feat_writer = Some(FeatureWriter::new(
+                feature,
+                self.attr_schema.clone(),
+                self.header_writer.header_options.attribute_indices.clone(),
+            ));
         }
 
         if let Some(feat_writer) = &mut self.feat_writer {
@@ -152,15 +171,15 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the write operation
-    pub fn write(mut self, mut out: impl Write) -> Result<()> {
+    pub fn write(mut self, mut out: impl Write) -> Result<(), Error> {
+        let attr_indices = self.header_writer.header_options.attribute_indices.clone();
+
         out.write_all(&MAGIC_BYTES)?;
         let index_node_size = self.header_writer.header_options.index_node_size;
-        let header_buf = self.header_writer.finish_to_header();
-        out.write_all(&header_buf)?;
 
+        let mut rtree_buf = Vec::new();
         if index_node_size > 0 && !self.feat_nodes.is_empty() {
             let extent = calc_extent(&self.feat_nodes);
-            println!("extent: {:?}", extent);
             hilbert_sort(&mut self.feat_nodes, &extent);
             let mut offset = 0;
             let index_nodes = self
@@ -175,22 +194,56 @@ impl<'a> FcbWriter<'a> {
                 })
                 .collect::<Vec<_>>();
             let tree = PackedRTree::build(&index_nodes, &extent, index_node_size)?;
-            tree.stream_write(&mut out)?;
+            tree.stream_write(&mut rtree_buf)?;
         }
 
         self.tmpout.rewind()?;
         let unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
         let mut unsorted_feature_reader = BufReader::new(unsorted_feature_output);
-        {
-            let mut buf = Vec::with_capacity(2038);
-            for node in &self.feat_nodes {
-                let feat = &self.feat_offsets[node.offset as usize];
-                unsorted_feature_reader.seek(SeekFrom::Start(feat.offset as u64))?;
-                buf.resize(feat.size, 0);
-                unsorted_feature_reader.read_exact(&mut buf)?;
-                out.write_all(&buf)?;
+
+        let mut sorted_feature_buf = Vec::with_capacity(2048);
+
+        for node in &self.feat_nodes {
+            let feat = &self.feat_offsets[node.offset as usize];
+            unsorted_feature_reader.seek(SeekFrom::Start(feat.offset as u64))?;
+
+            if let Some(attr_index_entry) =
+                self.attribute_index_entries.get_mut(&feat.temp_feature_id)
+            {
+                attr_index_entry.offset = sorted_feature_buf.len();
+                attr_index_entry.size = feat.size;
+            }
+
+            let cur_len = sorted_feature_buf.len();
+            sorted_feature_buf.resize(cur_len + feat.size, 0);
+            unsorted_feature_reader.read_exact(&mut sorted_feature_buf[cur_len..])?;
+        }
+
+        let mut attr_index_buf: Vec<u8> = Vec::new();
+        let mut attr_index_info: Vec<AttributeIndexInfo> = Vec::new();
+        if let Some(attr_indices) = attr_indices {
+            for attr in attr_indices {
+                if let Some((ai_buf, attr_info)) = build_attribute_index_for_attr(
+                    &attr,
+                    &self.attr_schema,
+                    &self.attribute_index_entries,
+                ) {
+                    attr_index_info.push(attr_info);
+                    // Write the sorted index block.
+                    attr_index_buf.extend(&ai_buf);
+                } else {
+                    // Write zero length if no index was built.
+                }
             }
         }
+        //write attribute index buf to out
+        self.header_writer.attribute_indices_info = Some(attr_index_info);
+        let header_buf = self.header_writer.finish_to_header();
+        out.write_all(&header_buf)?;
+
+        out.write_all(&rtree_buf)?;
+        out.write_all(&attr_index_buf)?;
+        out.write_all(&sorted_feature_buf)?;
 
         Ok(())
     }

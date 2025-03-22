@@ -60,12 +60,71 @@ struct GeographicalExtent {
   max: Vector;
 }
 
+struct AttributeIndex {
+  index: ushort;
+  length: uint;
+}
+
+struct Vec2 {
+  u: double;
+  v: double;
+}
+
+table Material {
+  name: string (required);
+  ambient_intensity: double = null; // from 0.0 to 1.0
+  // Expected to contain 3 items from 0.0 to 1.0 for (RGB); implementations MUST check length.
+  diffuse_color: [double];
+  emissive_color: [double];
+  specular_color: [double];
+  shininess: double = null; // from 0.0 to 1.0
+  transparency: double = null; // from 0.0 to 1.0
+  is_smooth: bool = null;
+}
+
+enum TextureFormat:ubyte {
+  PNG,
+  JPG
+}
+
+enum WrapMode:ubyte {
+  None,
+  Wrap,
+  Mirror,
+  Clamp,
+  Border
+}
+
+enum TextureType:ubyte {
+  Unknown,
+  Specific,
+  Typical
+}
+
+table Texture {
+  type: TextureFormat; // NOTICE: "type" fields refers to TextureFormat while "textureType" refers to TextureType.
+  image: string (required);        // Image file name / URL
+  wrap_mode: WrapMode = null;
+  texture_type: TextureType = null;  // e.g., "unknown", "specific", or "typical"
+  // Expected to contain 4 items (RGBA)
+  border_color: [double]; // from 0.0 to 1.0 for (RGBA)
+}
+
+table Appearance {
+  materials: [Material];
+  textures: [Texture];
+  vertices_texture: [Vec2];  // List of UV coordinates, each coordinate must be between 0.0 and 1.0
+  default_theme_texture: string;  // Default theme name for textures when multiple themes exist
+  default_theme_material: string; // Default theme name for materials when multiple themes exist
+}
+
 table Header {
   transform: Transform;                     // Transformation vectors
+  appearance: Appearance;                   // Appearance object for materials and textures
   columns: [Column];                        // Attribute columns schema (can be omitted if per feature schema)
   features_count: ulong;                    // Number of features in the dataset (0 = unknown)
   index_node_size: ushort = 16;          // Index node size (0 = no index)
-
+  attribute_index: [AttributeIndex];
   // metadata
   geographical_extent: GeographicalExtent;  // Bounds
   reference_system: ReferenceSystem;        // Spatial Reference System

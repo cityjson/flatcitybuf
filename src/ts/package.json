@@ -1,8 +1,5 @@
 {
   "name": "fcb_wasm",
-  "author": "hideba",
-  "license": "ISC",
-  "description": "",
   "type": "module",
   "version": "0.1.0",
   "files": [
@@ -14,12 +11,5 @@
   "types": "fcb_wasm.d.ts",
   "sideEffects": [
     "./snippets/*"
-  ],
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "minify": "terser fcb_wasm.js -o fcb_wasm.min.js --compress --mangle --output"
-  },
-  "dependencies": {
-    "terser": "^5.37.0"
-  }
+  ]
 }

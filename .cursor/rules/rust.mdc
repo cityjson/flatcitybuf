@@ -1,0 +1,130 @@
+---
+description: Coding rules for Rust implementation in FlatCityBuf
+globs: src/rust/**
+---
+# Rust Coding Guidelines for Library Development
+
+## General Principles
+- Write **idiomatic Rust** code that is clear, efficient, and maintainable.
+- Prioritize **safety, performance, and modularity**.
+- Follow **Rust’s naming conventions**:
+  - Use `snake_case` for variables, functions, and module names.
+  - Use `PascalCase` for structs, enums, and traits.
+  - Use `SCREAMING_SNAKE_CASE` for constants and static variables.
+- Keep code **DRY (Don't Repeat Yourself)** by using functions, modules, and generics.
+- Use **explicit, descriptive names** for variables, functions, and types.
+- **Avoid `unwrap()` except in test cases**, ensuring proper error handling.
+- **Use generics, traits, and interface programming** where applicable.
+- **If any grammar mistakes are found in comments, suggestions for improvement should be provided.**
+
+---
+
+## Project Structure
+- The Rust codebase consists of **multiple crates** and their modules.
+- Organize the library using Rust’s standard `src/lib.rs` format.
+- Place implementation details inside separate modules within `src/`.
+- Keep `lib.rs` minimal, exposing only the public API.
+- Use `mod.rs` for submodules when necessary.
+- Follow **Cargo best practices** for managing dependencies and features.
+
+### Example Folder Structure
+```
+flatcitybuf/
+├── Cargo.lock
+├── Cargo.toml
+├── bst/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── byte_serializable.rs
+│       ├── error.rs
+│       ├── lib.rs
+│       ├── query.rs
+│       └── sorted_index.rs
+├── cli/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── error.rs
+│       └── main.rs
+├── fcb_core/
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs
+│   │   ├── reader/
+│   │   ├── writer/
+│   │   ├── http_reader/
+│   │   ├── fb/
+│   │   ├── error.rs
+│   │   ├── const_vars.rs
+│   │   ├── cj_utils.rs
+│   │   └── cjerror.rs
+├── packed_rtree/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── error.rs
+│       └── lib.rs
+├── wasm/
+│   ├── Cargo.toml
+│   ├── pkg/
+│   └── src/
+│       ├── gloo_client.rs
+│       └── lib.rs
+```
+
+---
+
+## Error Handling
+- Use `anyhow` for application code and `thiserror` for package-level errors.
+- Avoid panics in library code; return errors instead.
+- Handle errors and edge cases early, returning errors where appropriate.
+
+---
+
+## Performance Optimization
+- Use **iterators instead of loops** for better performance and readability.
+- Minimize memory allocations by using **borrowed references (`&str`, `&[u8]`)** where possible.
+- Optimize for **human readability** while maintaining machine efficiency.
+- Use `criterion` for benchmarking.
+
+---
+
+## Async Programming
+- Use `tokio` as the async runtime.
+- Prefer **channels over mutexes** where applicable.
+- Implement **structured concurrency** using `tokio::select!`.
+- Use `tokio::sync::mpsc` for multi-producer, single-consumer communication.
+- Use `tokio::sync::broadcast` for broadcasting messages.
+
+---
+
+## API Design
+- Follow **Rust’s API guidelines** for public interfaces.
+- Use **builder patterns** for complex configurations.
+
+---
+
+## Testing
+- Write **unit tests** with `#[cfg(test)]`.
+- Use **integration tests** for public APIs in the `tests/` directory.
+- Mock external dependencies where necessary.
+- Use `tokio::test` for as
+mentation
+- Write **Rustdoc** comments for public functions and structs.
+- Include examples in   preview document
+---
+
+## Dependency Management
+- Use `cargo-audit` to che**minimal and up-to-date**.
+
+---
+
+## Logging and Debugging
+- Use `tracing` for structured logging.
+- Enable debug assertions wit_assert!()`.
+
+---
+
+## Final Notes
+- Follow **Rust's idiomatic coding practices**.
+- Endut e, safety, and maintainability**.
+- Maintain a **black-and-white, pixelated/nerdy ltao  will remain robust, efficient, and maintainable across its m crates and modules. 🚀
+

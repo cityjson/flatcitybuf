@@ -5,10 +5,11 @@ edition = "2021"
 
 [dependencies]
 fcb_core = { path = "../fcb_core" }
+cjseq = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 bson = { workspace = true }
 serde_cbor = { workspace = true }
-cjseq = { workspace = true }
+thiserror = { workspace = true }

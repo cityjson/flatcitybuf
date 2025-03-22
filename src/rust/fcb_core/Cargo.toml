@@ -28,10 +28,14 @@ fallible-streaming-iterator = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 packed_rtree = { path = "../packed_rtree" }
+bst = { path = "../bst" }
+ordered-float = { workspace = true }
+chrono = { workspace = true }
 http-range-client = { workspace = true, default-features = false, optional = true, features = [
   "reqwest-async",
 ] }
 reqwest = { workspace = true, optional = true }
+thiserror = { workspace = true }
 
 [target.'cfg(feature = "http")'.dependencies]
 tokio = { workspace = true }
@@ -66,8 +70,16 @@ name = "read_benches"
 path = "benches/read_profile.rs"
 
 
+[[bin]]
+name = "read_cj"
+path = "src/bin/read_cj.rs"
+
 [[bench]]
 name = "read"
+harness = false
+
+[[bench]]
+name = "read_attr"
 harness = false
 
 [dev-dependencies]

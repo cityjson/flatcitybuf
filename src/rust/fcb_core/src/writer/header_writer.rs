@@ -3,7 +3,7 @@ use cjseq::CityJSON;
 use flatbuffers::FlatBufferBuilder;
 use packed_rtree::PackedRTree;
 
-use super::attribute::AttributeSchema;
+use super::{attribute::AttributeSchema, serializer::AttributeIndexInfo};
 
 /// Writer for converting CityJSON header information to FlatBuffers format
 pub struct HeaderWriter<'a> {
@@ -16,6 +16,8 @@ pub struct HeaderWriter<'a> {
     pub header_options: HeaderWriterOptions,
     /// Attribute schema
     pub attr_schema: AttributeSchema,
+    /// Attribute indices
+    pub(super) attribute_indices_info: Option<Vec<AttributeIndexInfo>>,
 }
 
 /// Configuration options for header writing process
@@ -25,6 +27,10 @@ pub struct HeaderWriterOptions {
     pub feature_count: u64,
     /// Size of the index node
     pub index_node_size: u16,
+    /// Attribute indices
+    pub attribute_indices: Option<Vec<String>>,
+    /// Geographical extent
+    pub geographical_extent: Option<[f64; 6]>,
 }
 
 impl Default for HeaderWriterOptions {
@@ -33,6 +39,8 @@ impl Default for HeaderWriterOptions {
             write_index: true,
             index_node_size: PackedRTree::DEFAULT_NODE_SIZE,
             feature_count: 0,
+            attribute_indices: None,
+            geographical_extent: None,
         }
     }
 }
@@ -75,6 +83,7 @@ impl<'a> HeaderWriter<'a> {
             cj,
             header_options: options,
             attr_schema,
+            attribute_indices_info: None,
         }
     }
 
@@ -89,6 +98,10 @@ impl<'a> HeaderWriter<'a> {
             &self.cj,
             self.header_options,
             &self.attr_schema,
+            self.attribute_indices_info
+                .as_ref()
+                .filter(|info| !info.is_empty())
+                .map(|info| info.as_slice()),
         );
         self.fbb.finish_size_prefixed(header, None);
         self.fbb.finished_data().to_vec()

@@ -64,3 +64,8 @@ src/rust/fcb_core/tests/data/
 .cursorrules
 
 *.fcb
+
+.cursor/mcp.json
+
+*.plist
+flamegraph*

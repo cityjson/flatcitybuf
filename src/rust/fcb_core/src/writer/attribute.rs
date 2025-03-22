@@ -1,8 +1,11 @@
 use crate::fb::ColumnType;
 use byteorder::{ByteOrder, LittleEndian};
+use chrono::{DateTime, Utc};
+use cjseq::CityJSONFeature;
 use serde_json::Value;
 use std::collections::HashMap;
 
+// Schema for attributes. The key is the attribute name, the value is a tuple of the column index and the column type.
 pub type AttributeSchema = HashMap<String, (u16, ColumnType)>;
 
 pub trait AttributeSchemaMethods {
@@ -39,10 +42,17 @@ fn guess_type(value: &Value) -> Option<ColumnType> {
             } else if n.is_i64() {
                 Some(ColumnType::Long)
             } else {
-                Some(ColumnType::ULong) //TODO: check if this is correct. To accurately guess the type, we need to know the range of the value. But, to do that, we need to read all the data.
+                Some(ColumnType::ULong) // Fallback for unknown number type.
             }
         }
-        Value::String(_) => Some(ColumnType::String),
+        Value::String(s) => {
+            // Attempt to parse the string as an RFC3339 date.
+            if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+                Some(ColumnType::DateTime)
+            } else {
+                Some(ColumnType::String)
+            }
+        }
         Value::Array(_) => Some(ColumnType::Json),
         Value::Object(_) => Some(ColumnType::Json),
         _ => None,
@@ -181,6 +191,147 @@ pub(crate) fn encode_attributes_with_schema(attr: &Value, schema: &AttributeSche
         }
     }
     out
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum AttributeIndexEntry {
+    Bool { index: u16, val: bool },
+    Int { index: u16, val: i32 },
+    UInt { index: u16, val: u32 },
+    Long { index: u16, val: i64 },
+    ULong { index: u16, val: u64 },
+    Float { index: u16, val: f32 },
+    Double { index: u16, val: f64 },
+    String { index: u16, val: String },
+    DateTime { index: u16, val: DateTime<Utc> },
+    Short { index: u16, val: i16 },
+    UShort { index: u16, val: u16 },
+    Byte { index: u16, val: u8 },
+    UByte { index: u16, val: u8 },
+    Json { index: u16, val: String },
+    Binary { index: u16, val: String },
+}
+
+pub fn cityfeature_to_index_entries(
+    cityfeature: &CityJSONFeature,
+    schema: &AttributeSchema,
+    indexing_attr: &[String],
+) -> Vec<AttributeIndexEntry> {
+    let mut index_entries = Vec::new();
+    for object in cityfeature.city_objects.values() {
+        if let Some(attr) = &object.attributes {
+            let attr_index_entries = attribute_to_index_entries(attr, schema, indexing_attr);
+            index_entries.extend(attr_index_entries);
+        }
+    }
+
+    index_entries
+}
+
+// this attr should be a json object with attribute name as key and attribute value as value
+pub fn attribute_to_index_entries(
+    attr: &Value,
+    schema: &AttributeSchema,
+    indexing_attr: &[String],
+) -> Vec<AttributeIndexEntry> {
+    if !attr.is_object() || attr.is_null() || attr.as_object().unwrap().is_empty() {
+        return Vec::new();
+    }
+
+    let mut index_entries = Vec::new();
+
+    let map = attr.as_object().unwrap();
+    for attr in indexing_attr {
+        let val: &Value = match map.get(attr) {
+            Some(val) => val,
+            None => {
+                println!("Attribute {} not found in schema", attr);
+                continue;
+            }
+        };
+
+        let index_coltype = schema.get(attr);
+        if let Some((index, coltype)) = index_coltype {
+            match *coltype {
+                ColumnType::Bool => {
+                    let b = val.as_bool().unwrap_or(false);
+                    index_entries.push(AttributeIndexEntry::Bool {
+                        index: *index,
+                        val: b,
+                    });
+                }
+                ColumnType::Int => {
+                    let i = val.as_i64().unwrap_or(0);
+                    index_entries.push(AttributeIndexEntry::Int {
+                        index: *index,
+                        val: i as i32,
+                    });
+                }
+                ColumnType::UInt => {
+                    let i = val.as_u64().unwrap_or(0);
+                    index_entries.push(AttributeIndexEntry::UInt {
+                        index: *index,
+                        val: i as u32,
+                    });
+                }
+                ColumnType::Long => {
+                    let i = val.as_i64().unwrap_or(0);
+                    index_entries.push(AttributeIndexEntry::Long {
+                        index: *index,
+                        val: i as i64,
+                    });
+                }
+                ColumnType::ULong => {
+                    let i = val.as_u64().unwrap_or(0);
+                    index_entries.push(AttributeIndexEntry::ULong {
+                        index: *index,
+                        val: i as u64,
+                    });
+                }
+                ColumnType::Float => {
+                    let f = val.as_f64().unwrap_or(0.0);
+                    index_entries.push(AttributeIndexEntry::Float {
+                        index: *index,
+                        val: f as f32,
+                    });
+                }
+                ColumnType::Double => {
+                    let f = val.as_f64().unwrap_or(0.0);
+                    index_entries.push(AttributeIndexEntry::Double {
+                        index: *index,
+                        val: f,
+                    });
+                }
+                ColumnType::String => {
+                    index_entries.push(AttributeIndexEntry::String {
+                        index: *index,
+                        val: val.as_str().unwrap_or("").to_string(),
+                    });
+                }
+                ColumnType::DateTime => {
+                    index_entries.push(AttributeIndexEntry::DateTime {
+                        index: *index,
+                        val: match chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap_or(""))
+                        {
+                            Ok(dt) => dt.to_utc(),
+                            Err(e) => {
+                                eprintln!("Failed to parse DateTime: {}", e);
+                                // Choose whether to skip, default, or handle differently
+                                // For example, default to 1970-01-01:
+                                DateTime::<Utc>::from_timestamp(0, 0).unwrap()
+                            }
+                        },
+                    });
+                }
+                _ => {
+                    //Byte, Ubyte,
+                    println!("Attribute {} is not supported for indexing", attr);
+                }
+            }
+        }
+    }
+
+    index_entries
 }
 
 #[cfg(test)]

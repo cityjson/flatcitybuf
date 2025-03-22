@@ -1,67 +1,104 @@
-// use flatbuffers::InvalidFlatbuffer;
-// use std::fmt::{Display, Formatter};
+use flatbuffers::InvalidFlatbuffer;
+use serde_json;
+use thiserror::Error;
 
-// #[derive(Debug)]
-// pub enum Error {
-//     MissingMagicBytes,
-//     NoIndex,
-//     // #[cfg(feature = "http")]
-//     // HttpClient(http_range_client::HttpError),
-//     IllegalHeaderSize(usize),
-//     InvalidFlatbuffer(InvalidFlatbuffer),
-//     IO(std::io::Error),
-// }
-// pub type Result<T> = std::result::Result<T, Error>;
+/// The main error type for the FCB Core library.
+/// This enum represents all possible errors that can occur during FCB operations.
+#[derive(Debug, Error)]
+pub enum Error {
+    // File format errors
+    #[error("Missing magic bytes in FCB file header")]
+    MissingMagicBytes,
 
-// impl Display for Error {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             Error::MissingMagicBytes => "Missing magic bytes. Is this an fgb file?".fmt(f),
-//             Error::NoIndex => "Index missing".fmt(f),
-//             // #[cfg(feature = "http")]
-//             // Error::HttpClient(http_client) => http_client.fmt(f),
-//             Error::IllegalHeaderSize(size) => write!(f, "Illegal header size: {size}"),
-//             Error::InvalidFlatbuffer(invalid_flatbuffer) => invalid_flatbuffer.fmt(f),
-//             Error::IO(io) => io.fmt(f),
-//         }
-//     }
-// }
+    #[error("Required index is missing")]
+    NoIndex,
 
-// impl std::error::Error for Error {}
+    #[error("Attribute index not found")]
+    AttributeIndexNotFound,
 
-// impl From<std::io::Error> for Error {
-//     fn from(value: std::io::Error) -> Self {
-//         Self::IO(value)
-//     }
-// }
+    #[error("Attribute index size overflow")]
+    AttributeIndexSizeOverflow,
 
-// impl From<InvalidFlatbuffer> for Error {
-//     fn from(value: InvalidFlatbuffer) -> Self {
-//         Error::InvalidFlatbuffer(value)
-//     }
-// }
+    #[error("No columns found in header")]
+    NoColumnsInHeader,
 
-// // #[cfg(feature = "http")]
-// // impl From<http_range_client::HttpError> for Error {
-// //     fn from(value: http_range_client::HttpError) -> Self {
-// //         Error::HttpClient(value)
-// //     }
-// // }
+    #[error("Missing required field of CityJSON: {0}")]
+    MissingRequiredField(String),
 
-// #[derive(Debug)]
-// pub enum CityJSONError {
-//     MissingField(&'static str),
-//     // ParseError(String),
-//     // InvalidData(&'static str),
-// }
-// impl std::error::Error for CityJSONError {}
+    #[error("Invalid header size {0}, expected size between 8 and 1MB")]
+    IllegalHeaderSize(usize),
 
-// impl std::fmt::Display for CityJSONError {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             CityJSONError::MissingField(field) => write!(f, "Missing field: {}", field),
-//             // CityJSONError::ParseError(err) => write!(f, "Parse error: {}", err),
-//             // CityJSONError::InvalidData(msg) => write!(f, "Invalid data: {}", msg),
-//         }
-//     }
-// }
+    #[error("Invalid FlatBuffer format: {0}")]
+    InvalidFlatbuffer(#[from] InvalidFlatbuffer),
+
+    // IO and serialization errors
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
+
+    // Data structure errors
+    #[error("BST error: {0}")]
+    BstError(#[from] bst::Error),
+
+    #[error("R-tree error: {0}")]
+    RtreeError(#[from] packed_rtree::Error),
+
+    // Validation errors
+    #[error("Unsupported column type: {0}")]
+    UnsupportedColumnType(String),
+
+    #[error("Invalid attribute value: {msg}")]
+    InvalidAttributeValue { msg: String },
+
+    // Index and query errors
+    #[error("Failed to create index: {0}")]
+    IndexCreationError(String),
+
+    #[error("Failed to execute query: {0}")]
+    QueryExecutionError(String),
+
+    // HTTP errors (when http feature is enabled)
+    #[cfg(feature = "http")]
+    #[error("HTTP client error: {0}")]
+    HttpClient(#[from] http_range_client::HttpError),
+
+    // CityJSON specific errors
+    #[error("CityJSON error: {source}")]
+    CityJson {
+        #[from]
+        source: crate::cjerror::CjError,
+    },
+}
+
+impl Error {
+    /// Returns true if the error is related to IO operations
+    pub fn is_io_error(&self) -> bool {
+        matches!(self, Error::IoError(_))
+    }
+
+    /// Returns true if the error is related to data format
+    pub fn is_format_error(&self) -> bool {
+        matches!(
+            self,
+            Error::MissingMagicBytes | Error::InvalidFlatbuffer(_) | Error::IllegalHeaderSize(_)
+        )
+    }
+
+    /// Returns true if the error is related to validation
+    pub fn is_validation_error(&self) -> bool {
+        matches!(
+            self,
+            Error::UnsupportedColumnType(_) | Error::InvalidAttributeValue { .. }
+        )
+    }
+
+    /// Returns true if the error is related to index or query operations
+    pub fn is_index_error(&self) -> bool {
+        matches!(
+            self,
+            Error::IndexCreationError(_) | Error::QueryExecutionError(_) | Error::BstError(_)
+        )
+    }
+}
