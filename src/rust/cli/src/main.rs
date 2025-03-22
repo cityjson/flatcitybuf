@@ -1,5 +1,4 @@
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
-use cjseq::{CityJSONFeature, Transform as CjTransform};
 use clap::{Parser, Subcommand};
 use fcb_core::error::Error;
 use fcb_core::{
