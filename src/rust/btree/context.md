@@ -147,10 +147,10 @@ Different key types require specific encoding strategies to ensure both fixed-wi
 struct IntegerKeyEncoder;
 
 impl KeyEncoder<i64> for IntegerKeyEncoder {
-    fn encode(&self, value: &i64) -> Vec<u8> {
+    fn encode(&self, value: &i64) -> Result<Vec<u8>> {
         let mut result = Vec::with_capacity(8);
         result.extend_from_slice(&value.to_le_bytes());
-        result
+        Ok(result)
     }
 
     fn compare(&self, a: &[u8], b: &[u8]) -> std::cmp::Ordering {
@@ -168,12 +168,17 @@ impl KeyEncoder<i64> for IntegerKeyEncoder {
 struct FloatKeyEncoder;
 
 impl KeyEncoder<f64> for FloatKeyEncoder {
-    fn encode(&self, value: &f64) -> Vec<u8> {
-        let ordered_float = ordered_float::OrderedFloat(*value);
-        let bits = ordered_float.into_inner().to_bits();
+    fn encode(&self, value: &f64) -> Result<Vec<u8>> {
+        let bits = if value.is_nan() {
+            // Handle NaN: Use a specific bit pattern
+            u64::MAX
+        } else {
+            value.to_bits()
+        };
+
         let mut result = Vec::with_capacity(8);
         result.extend_from_slice(&bits.to_le_bytes());
-        result
+        Ok(result)
     }
 
     // Compare implementation omitted for brevity
@@ -191,14 +196,14 @@ struct StringKeyEncoder {
 }
 
 impl KeyEncoder<String> for StringKeyEncoder {
-    fn encode(&self, value: &String) -> Vec<u8> {
+    fn encode(&self, value: &String) -> Result<Vec<u8>> {
         let mut result = vec![0u8; self.prefix_length];
         let bytes = value.as_bytes();
         let copy_len = std::cmp::min(bytes.len(), self.prefix_length);
 
         // Copy string prefix (with null padding if needed)
         result[..copy_len].copy_from_slice(&bytes[..copy_len]);
-        result
+        Ok(result)
     }
 
     // Additional methods for handling string collisions when prefixes match
@@ -212,34 +217,38 @@ impl KeyEncoder<String> for StringKeyEncoder {
 struct TimestampKeyEncoder;
 
 impl KeyEncoder<chrono::DateTime<chrono::Utc>> for TimestampKeyEncoder {
-    fn encode(&self, value: &chrono::DateTime<chrono::Utc>) -> Vec<u8> {
+    fn encode(&self, value: &chrono::DateTime<chrono::Utc>) -> Result<Vec<u8>> {
         let mut result = Vec::with_capacity(12);
         let timestamp = value.timestamp();
         let nanos = value.timestamp_subsec_nanos();
 
         result.extend_from_slice(&timestamp.to_le_bytes());
         result.extend_from_slice(&nanos.to_le_bytes());
-        result
+        Ok(result)
     }
 }
 ```
 
-## In-Memory and Disk-Based Query Implementation
+## Core Components of the Implementation
 
-### Core Interfaces
+### 1. Error Handling
 
 ```rust
 use thiserror::Error;
-use std::fmt;
 
-/// Error types for B-tree operations
 #[derive(Error, Debug)]
 pub enum BTreeError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Key error: {0}")]
+    Key(#[from] KeyError),
+
     #[error("Deserialization error: {0}")]
     Deserialization(String),
+
+    #[error("Serialization error: {0}")]
+    Serialization(String),
 
     #[error("Block not found at offset {0}")]
     BlockNotFound(u64),
@@ -249,359 +258,142 @@ pub enum BTreeError {
 
     #[error("Invalid node type: expected {expected}, got {actual}")]
     InvalidNodeType { expected: &'static str, actual: String },
-}
 
-/// Block storage interface
-trait BlockStorage {
-    fn read_block(&self, offset: u64) -> Result<Vec<u8>, BTreeError>;
-    fn write_block(&self, offset: u64, data: &[u8]) -> Result<(), BTreeError>;
-    fn allocate_block(&mut self) -> Result<u64, BTreeError>;
+    #[error("Alignment error: offset {0} is not aligned to block size")]
+    AlignmentError(u64),
 }
+```
 
-/// Key encoder for different data types
-trait KeyEncoder<T> {
-    fn encode(&self, value: &T) -> Vec<u8>;
-    fn decode(&self, bytes: &[u8]) -> T;
-    fn compare(&self, a: &[u8], b: &[u8]) -> std::cmp::Ordering;
-    fn encoded_size(&self) -> usize;
+### 2. Storage Interfaces
+
+The implementation provides two primary storage backends:
+
+#### In-Memory Storage
+
+```rust
+/// Memory-based block storage for testing and small datasets
+pub struct MemoryBlockStorage {
+    blocks: HashMap<u64, Vec<u8>>,
+    next_offset: u64,
+    block_size: usize,
 }
+```
 
-/// B-tree node
-struct Node {
-    node_type: NodeType,
-    entries: Vec<Entry>,
-    next_node: Option<u64>,
+#### File-Based Storage with LRU Cache
+
+```rust
+/// File-based block storage with LRU cache
+pub struct CachedFileBlockStorage {
+    file: RefCell<File>,
+    cache: RefCell<LruCache<u64, Vec<u8>>>,
+    block_size: usize,
 }
+```
 
-/// B-tree index
-struct BTree<K, V> {
-    root: u64,
+Both implementations share a common interface:
+
+```rust
+pub trait BlockStorage {
+    fn read_block(&self, offset: u64) -> Result<Vec<u8>>;
+    fn write_block(&mut self, offset: u64, data: &[u8]) -> Result<()>;
+    fn allocate_block(&mut self) -> Result<u64>;
+    fn block_size(&self) -> usize;
+    fn flush(&mut self) -> Result<()>;
+}
+```
+
+### 3. B-tree Implementation
+
+The core B-tree structure encapsulates the tree's behavior:
+
+```rust
+pub struct BTree<K, S> {
+    root_offset: u64,
+    storage: S,
     key_encoder: Box<dyn KeyEncoder<K>>,
-    storage: Box<dyn BlockStorage>,
+    _phantom: PhantomData<K>,
+}
+```
+
+With methods for:
+- Opening existing B-trees
+- Building B-trees from sorted entries
+- Searching for exact matches
+- Performing range queries
+- Traversing the tree structure
+
+### 4. B-tree Builder
+
+For efficient bulk loading:
+
+```rust
+struct BTreeBuilder<K, S: BlockStorage> {
+    storage: S,
+    key_encoder: Box<dyn KeyEncoder<K>>,
+    leaf_nodes: Vec<u64>,
+    current_leaf: Node,
+    key_size: usize,
+    current_level: Vec<u64>,
     node_size: usize,
 }
 ```
 
-### Block Storage Implementations
+This builder constructs a B-tree from the bottom up, creating leaf nodes first, then internal nodes, resulting in a balanced and compact tree.
 
-#### 1. In-Memory Storage
+### 5. Query System
+
+A comprehensive query system has been implemented to support complex queries across both B-tree (attribute) and R-tree (spatial) indices:
+
+#### Query Conditions
 
 ```rust
-use std::collections::HashMap;
-
-/// Memory-based block storage for testing and small datasets
-struct MemoryBlockStorage {
-    blocks: HashMap<u64, Vec<u8>>,
-    next_offset: u64,
-}
-
-impl BlockStorage for MemoryBlockStorage {
-    fn read_block(&self, offset: u64) -> Result<Vec<u8>, BTreeError> {
-        self.blocks.get(&offset)
-            .cloned()
-            .ok_or(BTreeError::BlockNotFound(offset))
-    }
-
-    fn write_block(&self, offset: u64, data: &[u8]) -> Result<(), BTreeError> {
-        let mut data_copy = data.to_vec();
-        // Ensure block is exactly 4KB
-        data_copy.resize(4096, 0);
-        self.blocks.insert(offset, data_copy);
-        Ok(())
-    }
-
-    fn allocate_block(&mut self) -> Result<u64, BTreeError> {
-        let offset = self.next_offset;
-        self.next_offset += 4096; // Advance to next block
-        Ok(offset)
-    }
+pub enum Condition<T> {
+    Exact(T),                               // Exact match
+    Compare(ComparisonOp, T),               // Comparison (>, <, >=, <=)
+    Range(T, T),                            // Range query
+    In(Vec<T>),                             // Set membership
+    Prefix(String),                         // String prefix match
+    Predicate(Box<dyn Fn(&T) -> bool>),     // Custom predicate
 }
 ```
 
-#### 2. File-Based Storage with Page Cache
+#### Query Execution
+
+The `QueryExecutor` aggregates multiple indices and optimizes query execution:
 
 ```rust
-use std::io::{Seek, SeekFrom, Read, Write};
-use std::fs::File;
-use lru::LruCache;
-
-/// File-based block storage with LRU cache
-struct CachedFileBlockStorage {
-    file: File,
-    cache: LruCache<u64, Vec<u8>>,
-    cache_size: usize,
-}
-
-impl CachedFileBlockStorage {
-    /// Create a new cached file storage
-    fn new(file: File, cache_size: usize) -> Self {
-        Self {
-            file,
-            cache: LruCache::new(cache_size),
-            cache_size,
-        }
-    }
-}
-
-impl BlockStorage for CachedFileBlockStorage {
-    fn read_block(&self, offset: u64) -> Result<Vec<u8>, BTreeError> {
-        // Check cache first
-        if let Some(data) = self.cache.get(&offset) {
-            return Ok(data.clone());
-        }
-
-        // Cache miss - read from file
-        let mut buffer = vec![0u8; 4096];
-        self.file.seek(SeekFrom::Start(offset))?;
-        self.file.read_exact(&mut buffer)?;
-
-        // Update cache
-        self.cache.put(offset, buffer.clone());
-
-        Ok(buffer)
-    }
-
-    fn write_block(&mut self, offset: u64, data: &[u8]) -> Result<(), BTreeError> {
-        let mut data_copy = data.to_vec();
-        // Ensure block is exactly 4KB
-        data_copy.resize(4096, 0);
-
-        // Write to file
-        self.file.seek(SeekFrom::Start(offset))?;
-        self.file.write_all(&data_copy)?;
-        self.file.flush()?;
-
-        // Update cache
-        self.cache.put(offset, data_copy);
-
-        Ok(())
-    }
-
-    fn allocate_block(&mut self) -> Result<u64, BTreeError> {
-        // Get file length
-        let offset = self.file.seek(SeekFrom::End(0))?;
-        // Round up to next 4KB boundary if needed
-        let aligned_offset = (offset + 4095) & !4095;
-        if aligned_offset > offset {
-            // Pad file to ensure alignment
-            let padding = vec![0u8; (aligned_offset - offset) as usize];
-            self.file.write_all(&padding)?;
-        }
-        Ok(aligned_offset)
-    }
+pub struct QueryExecutor<'a> {
+    btree_indices: std::collections::HashMap<String, &'a dyn BTreeIndex>,
+    rtree_index: Option<&'a dyn RTreeIndex>,
 }
 ```
 
-### Query Algorithms
+#### Query Planning
 
-#### 1. Exact Match Query
+The system includes a query planner that determines the most efficient execution strategy:
 
 ```rust
-/// Helper function to deserialize a node from raw bytes
-fn deserialize_node(data: &[u8]) -> Result<Node, BTreeError> {
-    // Implementation details omitted
-    // ...
-    Err(BTreeError::Deserialization("Not implemented".to_string()))
-}
-
-/// Helper function to deserialize a value from raw bytes
-fn deserialize_value<V>(data: &[u8]) -> Result<V, BTreeError> {
-    // Implementation details omitted
-    // ...
-    Err(BTreeError::Deserialization("Not implemented".to_string()))
-}
-
-impl<K: PartialEq, V> BTree<K, V> {
-    /// Search for a single key
-    pub fn search(&self, key: &K) -> Result<Option<V>, BTreeError> {
-        let encoded_key = self.key_encoder.encode(key);
-        let mut current_node_offset = self.root;
-
-        loop {
-            // Read current node
-            let node_data = self.storage.read_block(current_node_offset)?;
-            let node = deserialize_node(&node_data)?;
-
-            match node.node_type {
-                NodeType::Internal => {
-                    // Find child node to follow
-                    match self.find_child_node(&node, &encoded_key)? {
-                        Some(child_offset) => current_node_offset = child_offset,
-                        None => return Ok(None), // Key not found
-                    }
-                },
-                NodeType::Leaf => {
-                    // Search for key in leaf node
-                    return self.find_key_in_leaf(&node, &encoded_key);
-                }
-            }
-        }
-    }
-
-    /// Find the appropriate child node in an internal node
-    fn find_child_node(&self, node: &Node, key: &[u8]) -> Result<Option<u64>, BTreeError> {
-        // Binary search to find the right child
-        let mut low = 0;
-        let mut high = node.entries.len();
-
-        while low < high {
-            let mid = low + (high - low) / 2;
-            let entry = &node.entries[mid];
-
-            match self.key_encoder.compare(&entry.key, key) {
-                std::cmp::Ordering::Less => low = mid + 1,
-                _ => high = mid,
-            }
-        }
-
-        // If we're at the end, use the last entry's child
-        if low == node.entries.len() {
-            low = node.entries.len() - 1;
-        }
-
-        Ok(Some(node.entries[low].value))
-    }
-
-    /// Find a key in a leaf node
-    fn find_key_in_leaf(&self, node: &Node, key: &[u8]) -> Result<Option<V>, BTreeError> {
-        // Binary search for exact match
-        match node.entries.binary_search_by(|entry| {
-            self.key_encoder.compare(&entry.key, key)
-        }) {
-            Ok(idx) => {
-                // Found exact match
-                let value = deserialize_value::<V>(&node.entries[idx].value)?;
-                Ok(Some(value))
-            },
-            Err(_) => {
-                // No exact match found
-                Ok(None)
-            }
-        }
-    }
+enum QueryPlan {
+    SpatialFirst { /* ... */ },
+    AttributeFirst { /* ... */ },
+    SpatialOnly(/* ... */),
+    AttributeOnly(/* ... */),
+    ScanAll,
+    Logical(/* ... */),
 }
 ```
 
-#### 2. Range Query
+#### Query Builder
+
+A fluent API for building complex queries:
 
 ```rust
-impl<K, V> BTree<K, V> {
-    /// Range query to find all keys between start and end (inclusive)
-    pub fn range_query(&self, start: &K, end: &K) -> Result<Vec<V>, BTreeError> {
-        let encoded_start = self.key_encoder.encode(start);
-        let encoded_end = self.key_encoder.encode(end);
-        let mut results = Vec::new();
-
-        // Find leaf containing start key
-        let mut current_offset = self.find_leaf_containing(&encoded_start)?;
-
-        loop {
-            // Read current leaf node
-            let node_data = self.storage.read_block(current_offset)?;
-            let node = deserialize_node(&node_data)?;
-
-            if node.node_type != NodeType::Leaf {
-                return Err(BTreeError::InvalidNodeType {
-                    expected: "Leaf",
-                    actual: format!("{:?}", node.node_type)
-                });
-            }
-
-            // Process entries in this leaf
-            for entry in &node.entries {
-                match self.key_encoder.compare(&entry.key, &encoded_end) {
-                    // If entry key > end key, we're done
-                    std::cmp::Ordering::Greater => return Ok(results),
-
-                    // If entry key >= start key, include it in results
-                    _ if self.key_encoder.compare(&entry.key, &encoded_start) != std::cmp::Ordering::Less => {
-                        let value = deserialize_value::<V>(&entry.value)?;
-                        results.push(value);
-                    },
-
-                    // Otherwise, skip this entry
-                    _ => {}
-                }
-            }
-
-            // Move to next leaf if available
-            match node.next_node {
-                Some(next_offset) => current_offset = next_offset,
-                None => break, // No more leaves
-            }
-        }
-
-        Ok(results)
-    }
-
-    /// Find the leaf node containing the given key
-    fn find_leaf_containing(&self, key: &[u8]) -> Result<u64, BTreeError> {
-        let mut current_offset = self.root;
-
-        loop {
-            let node_data = self.storage.read_block(current_offset)?;
-            let node = deserialize_node(&node_data)?;
-
-            match node.node_type {
-                NodeType::Internal => {
-                    current_offset = self.find_child_node(&node, key)?
-                        .ok_or_else(|| BTreeError::InvalidStructure("Unable to find child node".to_string()))?;
-                },
-                NodeType::Leaf => {
-                    return Ok(current_offset);
-                }
-            }
-        }
-    }
-}
-```
-
-### Page Cache Optimization
-
-The page caching strategy is crucial for performance when querying from disk. Key aspects include:
-
-1. **Cache Size Tuning**
-   - Cache size should be determined based on available memory and typical query patterns
-   - For most workloads, caching 1,000-10,000 nodes (4-40 MB) provides a good balance
-
-2. **Eviction Policy**
-   - LRU (Least Recently Used) eviction works well for typical B-tree traversal patterns
-   - Consider frequency-based policies for workloads with repeated access to specific nodes
-
-3. **Prefetching Strategy**
-   - When reading a leaf node for range queries, prefetch the next 1-2 leaf nodes
-   - For internal nodes, consider prefetching child nodes that are likely to be accessed
-
-```rust
-/// Enhanced block storage with prefetching for range queries
-impl CachedFileBlockStorage {
-    /// Prefetch next leaf node(s) for range query
-    fn prefetch_next_leaves(&mut self, node_offset: u64, count: usize) -> Result<(), BTreeError> {
-        let mut current = node_offset;
-
-        for _ in 0..count {
-            // Read current node
-            let node_data = self.read_block(current)?;
-            let node = deserialize_node(&node_data)?;
-
-            // If this is a leaf with a next pointer, prefetch it
-            if let (NodeType::Leaf, Some(next_offset)) = (node.node_type, node.next_node) {
-                // Only prefetch if not already in cache
-                if !self.cache.contains(&next_offset) {
-                    let mut buffer = vec![0u8; 4096];
-                    self.file.seek(SeekFrom::Start(next_offset))?;
-                    self.file.read_exact(&mut buffer)?;
-                    self.cache.put(next_offset, buffer);
-                }
-                current = next_offset;
-            } else {
-                break;
-            }
-        }
-
-        Ok(())
-    }
-}
+let query = QueryBuilder::new()
+    .attribute("name", conditions::eq("Tower".to_string()), None)
+    .attribute("height", conditions::between(100.0, 200.0), Some(LogicalOp::And))
+    .spatial(10.0, 20.0, 30.0, 40.0, Some(LogicalOp::And))
+    .build()
+    .unwrap();
 ```
 
 ## Integration with Packed R-tree
@@ -616,43 +408,6 @@ For queries involving both spatial and attribute criteria, an optimal strategy i
    - Determine which filter (spatial or attribute) is more selective
    - Apply the more selective filter first to minimize intermediate results
    - Apply the second filter to the reduced result set
-
-2. **Query Planner Implementation**
-   ```rust
-   #[derive(Debug)]
-   enum QueryPlan {
-       SpatialFirst { bbox: BoundingBox, attr_filter: AttributeQuery },
-       AttributeFirst { attr_query: AttributeQuery, spatial_filter: BoundingBox },
-       SpatialOnly(BoundingBox),
-       AttributeOnly(AttributeQuery),
-       ScanAll,
-   }
-
-   fn plan_query(bbox: Option<BoundingBox>, attr_query: Option<AttributeQuery>) -> QueryPlan {
-       match (bbox, attr_query) {
-           (Some(bbox), Some(query)) => {
-               // Estimate selectivity of each filter
-               let spatial_selectivity = estimate_spatial_selectivity(&bbox);
-               let attr_selectivity = estimate_attr_selectivity(&query);
-
-               if spatial_selectivity < attr_selectivity {
-                   QueryPlan::SpatialFirst {
-                       bbox,
-                       attr_filter: query,
-                   }
-               } else {
-                   QueryPlan::AttributeFirst {
-                       attr_query: query,
-                       spatial_filter: bbox,
-                   }
-               }
-           }
-           (Some(bbox), None) => QueryPlan::SpatialOnly(bbox),
-           (None, Some(query)) => QueryPlan::AttributeOnly(query),
-           (None, None) => QueryPlan::ScanAll,
-       }
-   }
-   ```
 
 ### Shared Resource Utilization
 
@@ -698,4 +453,4 @@ After completing and optimizing the in-memory and disk-based implementations, HT
 
 ## Summary
 
-This B-tree based attribute indexing approach addresses the performance issues identified in the current binary search tree implementation. By leveraging fixed-size, block-aligned nodes and cache-friendly access patterns, it significantly improves both in-memory and disk-based query performance for FlatCityBuf files. The initial implementation focuses on these core capabilities, with HTTP optimization to follow as future work.
+This B-tree based attribute indexing approach addresses the performance issues identified in the current binary search tree implementation. By leveraging fixed-size, block-aligned nodes and cache-friendly access patterns, it significantly improves both in-memory and disk-based query performance for FlatCityBuf files. The static nature of the B-tree structure makes it particularly suitable for read-only access patterns common in geographic data analysis. The initial implementation focuses on these core capabilities, with HTTP optimization to follow as future work.

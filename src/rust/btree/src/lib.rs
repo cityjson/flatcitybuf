@@ -1,14 +1,82 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+mod entry;
+mod errors;
+mod key;
+mod node;
+mod query;
+mod storage;
+mod stream;
+mod tree;
+
+// Re-export primary types and functions
+pub use entry::Entry;
+pub use errors::{BTreeError, KeyError, Result};
+pub use key::{FloatKeyEncoder, IntegerKeyEncoder, KeyEncoder, StringKeyEncoder};
+pub use node::{Node, NodeType};
+pub use query::conditions;
+pub use query::{
+    AttributeQuery, BTreeIndex, Condition, LogicalOp, QueryBuilder, QueryExecutor, QueryExpr,
+    QueryResult, RTreeIndex, SpatialQuery,
+};
+pub use storage::{BlockStorage, CachedFileBlockStorage, MemoryBlockStorage};
+pub use stream::{BTreeReader, BTreeStreamProcessor};
+pub use tree::BTree;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn basic_tree_test() {
+        // Simple test for B-tree functionality
+        let storage = MemoryBlockStorage::new(4096);
+        let key_encoder = Box::new(IntegerKeyEncoder);
+
+        // Test will be implemented
+    }
+
+    /// This test demonstrates how to use the query system
+    /// (no actual test, just showing the API usage)
+    #[test]
+    fn query_system_example() {
+        // This is just an example of the API, not a real test
+
+        // 1. Create B-tree indices for different attributes
+        let name_storage = MemoryBlockStorage::new(4096);
+        let name_encoder = Box::new(StringKeyEncoder { prefix_length: 16 });
+        let name_btree = BTree::open(name_storage, name_encoder, 0); // root at offset 0
+
+        let height_storage = MemoryBlockStorage::new(4096);
+        let height_encoder = Box::new(FloatKeyEncoder);
+        let height_btree = BTree::open(height_storage, height_encoder, 0);
+
+        // 2. Create a query executor and register indices
+        let mut executor = QueryExecutor::new();
+        executor
+            .register_btree("name".to_string(), &name_btree)
+            .register_btree("height".to_string(), &height_btree);
+        // Could also register an R-tree with .register_rtree(rtree_index)
+
+        // 3. Build a query using the builder pattern
+        let query = QueryBuilder::new()
+            // Find all buildings named "Tower"
+            .attribute("name", conditions::eq("Tower".to_string()), None)
+            // AND with height between 100 and 200 meters
+            .attribute(
+                "height",
+                conditions::between(100.0, 200.0),
+                Some(LogicalOp::And),
+            )
+            // AND within a bounding box
+            .spatial(10.0, 20.0, 30.0, 40.0, Some(LogicalOp::And))
+            .build()
+            .unwrap();
+
+        // 4. Execute the query
+        // let result = executor.execute(&query).unwrap();
+
+        // 5. Process results
+        // for feature_id in result.feature_ids {
+        //     println!("Found feature with ID: {}", feature_id);
+        // }
     }
 }
