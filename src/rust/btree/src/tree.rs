@@ -2,10 +2,21 @@ use crate::entry::Entry;
 use crate::errors::{BTreeError, Result};
 use crate::key::KeyEncoder;
 use crate::node::{Node, NodeType};
-use crate::query::BTreeIndex;
 use crate::storage::BlockStorage;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
+
+/// Interface for B-tree index operations for use in queries
+pub trait BTreeIndex {
+    /// Execute an exact match query
+    fn exact_match(&self, key: &[u8]) -> Result<Option<u64>>;
+
+    /// Execute a range query
+    fn range_query(&self, start: &[u8], end: &[u8]) -> Result<Vec<u64>>;
+
+    /// Get encoded size of keys in this index
+    fn key_size(&self) -> usize;
+}
 
 /// B-tree index structure
 pub struct BTree<K, S> {

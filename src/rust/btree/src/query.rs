@@ -1,5 +1,5 @@
 use crate::errors::Result;
-use crate::tree::BTree;
+use crate::tree::{BTree, BTreeIndex};
 use std::cmp::Ordering;
 use std::ops::RangeInclusive;
 
@@ -132,18 +132,6 @@ pub struct QueryExecutor<'a> {
 
     /// R-tree index for spatial queries
     rtree_index: Option<&'a dyn RTreeIndex>,
-}
-
-/// Trait for B-tree index access
-pub trait BTreeIndex {
-    /// Execute an exact match query
-    fn exact_match(&self, key: &[u8]) -> Result<Option<u64>>;
-
-    /// Execute a range query
-    fn range_query(&self, start: &[u8], end: &[u8]) -> Result<Vec<u64>>;
-
-    /// Get encoded size of keys in this index
-    fn key_size(&self) -> usize;
 }
 
 /// Trait for R-tree index access

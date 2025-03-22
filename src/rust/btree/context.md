@@ -12,6 +12,43 @@ In this research, the goal is to design a file format and indexing scheme that:
 
 To achieve this, we take inspiration from the storage and indexing strategies of relational databases (RDBMS), which have long optimized for similar requirements.
 
+## Module Structure and Dependencies
+
+The B-tree implementation is organized into several modules with the following dependency structure:
+
+```mermaid
+graph TD
+    lib[lib.rs] --> entry[entry.rs]
+    lib --> errors[errors.rs]
+    lib --> key[key.rs]
+    lib --> node[node.rs]
+    lib --> query[query.rs]
+    lib --> storage[storage.rs]
+    lib --> stream[stream.rs]
+    lib --> tree[tree.rs]
+
+    entry --> errors
+    key --> errors
+    node --> entry
+    node --> errors
+    query --> errors
+    query --> tree
+    storage --> errors
+    stream --> errors
+    stream --> tree
+    tree --> errors
+    tree --> entry
+    tree --> key
+    tree --> node
+    tree --> storage
+```
+
+This structure follows a logical dependency flow where:
+- Core data structures (`entry.rs`, `node.rs`) depend only on errors
+- Storage interfaces (`storage.rs`) define how data is read/written
+- The tree implementation (`tree.rs`) provides the actual B-tree structure
+- Query and stream modules use the tree for their operations
+
 ## Problems with Current Methods
 
 Two implementations of binary search trees have been explored so far, each with significant limitations:
