@@ -63,7 +63,7 @@ path = "src/bin/read.rs"
 
 [[bin]]
 name = "read_profile"
-path = "src/bin/read_profile.rs"
+path = "benches/read_profile.rs"
 
 [[bin]]
 name = "read_benches"
