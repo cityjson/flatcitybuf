@@ -1,4 +1,5 @@
 use anyhow::Result;
+use bson::Document;
 use cjseq::{CityJSON, CityJSONFeature};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::{FcbReader, GeometryType};
@@ -10,7 +11,7 @@ use std::{
 };
 
 /// Read FCB file and count geometry types
-fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
+pub(crate) fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
     let input_file = File::open(path)?;
     let inputreader = BufReader::new(input_file);
 
@@ -39,12 +40,17 @@ fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
         }
     }
 
+    println!("solid_count: {}", solid_count);
+    println!("multi_surface_count: {}", multi_surface_count);
+    println!("other_count: {}", other_count);
+    println!("feat_count: {}", feat_count);
+
     Ok((solid_count, multi_surface_count, other_count))
 }
 
 /// Read FCB file and count geometry types
 #[allow(dead_code)]
-fn read_fcb_as_cj(path: &str) -> Result<(u64, u64, u64)> {
+pub(crate) fn read_fcb_as_cj(path: &str) -> Result<(u64, u64, u64)> {
     let input_file = File::open(path)?;
     let inputreader = BufReader::new(input_file);
 
@@ -92,10 +98,11 @@ fn read_cjseq(path: &str) -> Result<(u64, u64, u64)> {
         let _header: CityJSON = serde_json::from_str(&first_line?)?;
     }
 
+    let mut feat_count = 0;
     // Process features one by one
     for line in lines {
         let feature: CityJSONFeature = serde_json::from_str(&line?)?;
-
+        feat_count += 1;
         // Process each city object in this feature
         for (_id, city_object) in feature.city_objects {
             // Process geometries if they exist
@@ -110,6 +117,86 @@ fn read_cjseq(path: &str) -> Result<(u64, u64, u64)> {
             }
         }
     }
+
+    println!("solid_count: {}", solid_count);
+    println!("multi_surface_count: {}", multi_surface_count);
+    println!("other_count: {}", other_count);
+    println!("feat_count: {}", feat_count);
+
+    Ok((solid_count, multi_surface_count, other_count))
+}
+
+/// Read CBOR file and count geometry types
+pub(crate) fn read_cbor(path: &str) -> Result<(u64, u64, u64)> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let value: serde_json::Value = serde_cbor::from_reader(reader)?;
+
+    let mut solid_count = 0;
+    let mut multi_surface_count = 0;
+    let mut other_count = 0;
+
+    if let Some(city_objects) = value.get("CityObjects") {
+        if let Some(objects) = city_objects.as_object() {
+            for (_id, obj) in objects {
+                if let Some(geometries) = obj.get("geometry") {
+                    if let Some(geom_array) = geometries.as_array() {
+                        for geom in geom_array {
+                            if let Some(type_str) = geom.get("type").and_then(|t| t.as_str()) {
+                                match type_str {
+                                    "Solid" => solid_count += 1,
+                                    "MultiSurface" => multi_surface_count += 1,
+                                    _ => other_count += 1,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!("solid_count: {}", solid_count);
+    println!("multi_surface_count: {}", multi_surface_count);
+    println!("other_count: {}", other_count);
+
+    Ok((solid_count, multi_surface_count, other_count))
+}
+
+/// Read BSON file and count geometry types
+pub(crate) fn read_bson(path: &str) -> Result<(u64, u64, u64)> {
+    let mut file = File::open(path)?;
+    let doc = Document::from_reader(&mut file)?;
+
+    let mut solid_count = 0;
+    let mut multi_surface_count = 0;
+    let mut other_count = 0;
+
+    if let Some(city_objects) = doc.get("CityObjects").and_then(|co| co.as_document()) {
+        for (_id, obj) in city_objects {
+            if let Some(geometries) = obj.as_document().and_then(|o| o.get("geometry")) {
+                if let Some(geom_array) = geometries.as_array() {
+                    for geom in geom_array {
+                        if let Some(type_str) = geom
+                            .as_document()
+                            .and_then(|g| g.get("type"))
+                            .and_then(|t| t.as_str())
+                        {
+                            match type_str {
+                                "Solid" => solid_count += 1,
+                                "MultiSurface" => multi_surface_count += 1,
+                                _ => other_count += 1,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!("solid_count: {}", solid_count);
+    println!("multi_surface_count: {}", multi_surface_count);
+    println!("other_count: {}", other_count);
 
     Ok((solid_count, multi_surface_count, other_count))
 }
@@ -133,64 +220,88 @@ mod tests {
     }
 }
 
-const DATASETS: &[(&str, (&str, &str))] = &[
+const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
     (
         "3DBAG",
         (
-            "benchmark_data/3DBAG.fcb",
+            "benchmark_data/3DBAG.city.fcb",
             "benchmark_data/3DBAG.city.jsonl",
+            "benchmark_data/3DBAG.city.cbor",
+            "benchmark_data/3DBAG.city.bson",
         ),
     ),
     (
         "3DBV",
-        ("benchmark_data/3DBV.fcb", "benchmark_data/3DBV.city.jsonl"),
-    ),
-    (
-        "Helsinki",
         (
-            "benchmark_data/Helsinki.fcb",
-            "benchmark_data/Helsinki.city.jsonl",
+            "benchmark_data/3DBV.city.fcb",
+            "benchmark_data/3DBV.city.jsonl",
+            "benchmark_data/3DBV.city.cbor",
+            "benchmark_data/3DBV.city.bson",
         ),
     ),
-    (
-        "Ingolstadt",
-        (
-            "benchmark_data/Ingolstadt.fcb",
-            "benchmark_data/Ingolstadt.city.jsonl",
-        ),
-    ),
-    (
-        "Montreal",
-        (
-            "benchmark_data/Montreal.fcb",
-            "benchmark_data/Montreal.city.jsonl",
-        ),
-    ),
-    (
-        "NYC",
-        ("benchmark_data/NYC.fcb", "benchmark_data/NYC.city.jsonl"),
-    ),
-    (
-        "Rotterdam",
-        (
-            "benchmark_data/Rotterdam.fcb",
-            "benchmark_data/Rotterdam.city.jsonl",
-        ),
-    ),
-    (
-        "Vienna",
-        (
-            "benchmark_data/Vienna.fcb",
-            "benchmark_data/Vienna.city.jsonl",
-        ),
-    ),
-    (
-        "Zurich",
-        (
-            "benchmark_data/Zurich.fcb",
-            "benchmark_data/Zurich.city.jsonl",
-        ),
-    ),
+    // (
+    //     "Helsinki",
+    //     (
+    //         "benchmark_data/Helsinki.city.fcb",
+    //         "benchmark_data/Helsinki.city.jsonl",
+    //         "benchmark_data/Helsinki.city.cbor",
+    //         "benchmark_data/Helsinki.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Ingolstadt",
+    //     (
+    //         "benchmark_data/Ingolstadt.city.fcb",
+    //         "benchmark_data/Ingolstadt.city.jsonl",
+    //         "benchmark_data/Ingolstadt.city.cbor",
+    //         "benchmark_data/Ingolstadt.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Montreal",
+    //     (
+    //         "benchmark_data/Montreal.city.fcb",
+    //         "benchmark_data/Montreal.city.jsonl",
+    //         "benchmark_data/Montreal.city.cbor",
+    //         "benchmark_data/Montreal.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "NYC",
+    //     (
+    //         "benchmark_data/NYC.fcb",
+    //         "benchmark_data/NYC.jsonl",
+    //         "benchmark_data/NYC.cbor",
+    //         "benchmark_data/NYC.bson",
+    //     ),
+    // ),
+    // (
+    //     "Rotterdam",
+    //     (
+    //         "benchmark_data/Rotterdam.fcb",
+    //         "benchmark_data/Rotterdam.jsonl",
+    //         "benchmark_data/Rotterdam.cbor",
+    //         "benchmark_data/Rotterdam.bson",
+    //     ),
+    // ),
+    // (
+    //     "Vienna",
+    //     (
+    //         "benchmark_data/Vienna.city.fcb",
+    //         "benchmark_data/Vienna.city.jsonl",
+    //         "benchmark_data/Vienna.city.cbor",
+    //         "benchmark_data/Vienna.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Zurich",
+    //     (
+    //         "benchmark_data/Zurich.city.fcb",
+    //         "benchmark_data/Zurich.city.jsonl",
+    //         "benchmark_data/Zurich.city.cbor",
+    //         "benchmark_data/Zurich.city.bson",
+    //     ),
+    // ),
 ];
 
 fn format_duration(d: Duration) -> String {
@@ -209,10 +320,16 @@ struct BenchResult {
 
 pub fn read_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("read");
+
+    let iterations: u32 = 10;
+    // Only specify sample size and minimal warm-up
+    group
+        .sample_size(iterations as usize)
+        .warm_up_time(Duration::from_millis(500));
+
     let mut results = HashMap::new();
 
-    // Run all benchmarks first and collect results
-    for (size, (fcb_path, cjseq_path)) in DATASETS {
+    for (size, (fcb_path, cjseq_path, cbor_path, bson_path)) in DATASETS {
         // FCB benchmark
         let start = Instant::now();
         group.bench_with_input(BenchmarkId::new("fcb", size), fcb_path, |b, path| {
@@ -222,7 +339,7 @@ pub fn read_benchmark(c: &mut Criterion) {
             format!("{}_fcb", size),
             BenchResult {
                 format: "FCB".to_string(),
-                duration: start.elapsed(),
+                duration: start.elapsed() / iterations,
             },
         );
 
@@ -235,7 +352,33 @@ pub fn read_benchmark(c: &mut Criterion) {
             format!("{}_cjseq", size),
             BenchResult {
                 format: "CJSeq".to_string(),
-                duration: start.elapsed(),
+                duration: start.elapsed() / iterations,
+            },
+        );
+
+        // CBOR benchmark
+        let start = Instant::now();
+        group.bench_with_input(BenchmarkId::new("cbor", size), cbor_path, |b, path| {
+            b.iter(|| read_cbor(black_box(path)))
+        });
+        results.insert(
+            format!("{}_cbor", size),
+            BenchResult {
+                format: "CBOR".to_string(),
+                duration: start.elapsed() / iterations,
+            },
+        );
+
+        // BSON benchmark
+        let start = Instant::now();
+        group.bench_with_input(BenchmarkId::new("bson", size), bson_path, |b, path| {
+            b.iter(|| read_bson(black_box(path)))
+        });
+        results.insert(
+            format!("{}_bson", size),
+            BenchResult {
+                format: "BSON".to_string(),
+                duration: start.elapsed() / iterations,
             },
         );
     }
@@ -248,23 +391,15 @@ pub fn read_benchmark(c: &mut Criterion) {
     println!("{:-<42}", "");
 
     for (size, _) in DATASETS {
-        // Print FCB result
-        if let Some(result) = results.get(&format!("{}_fcb", size)) {
-            println!(
-                "{:<12} {:<15} {}",
-                size,
-                result.format,
-                format_duration(result.duration)
-            );
-        }
-        // Print CJSeq result
-        if let Some(result) = results.get(&format!("{}_cjseq", size)) {
-            println!(
-                "{:<12} {:<15} {}",
-                size,
-                result.format,
-                format_duration(result.duration)
-            );
+        for format in &["fcb", "cjseq", "cbor", "bson"] {
+            if let Some(result) = results.get(&format!("{}_{}", size, format)) {
+                println!(
+                    "{:<12} {:<15} {}",
+                    size,
+                    result.format,
+                    format_duration(result.duration)
+                );
+            }
         }
     }
 }
