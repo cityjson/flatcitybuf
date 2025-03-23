@@ -8,14 +8,17 @@ This document tracks the implementation progress of the B-tree attribute indexin
 
 - [x] Defined error types using `thiserror` instead of `anyhow`
 - [x] Implemented `KeyEncoder` trait for different data types:
-  - [x] `IntegerKeyEncoder` for numeric types
-  - [x] `FloatKeyEncoder` for floating point with NaN handling
-  - [x] `StringKeyEncoder` with fixed-width prefix
-  - [x] `TimestampKeyEncoder` for date/time values
+  - [x] Integer key encoders (I64KeyEncoder, I32KeyEncoder, I16KeyEncoder, I8KeyEncoder, U64KeyEncoder, U32KeyEncoder, U16KeyEncoder, U8KeyEncoder)
+  - [x] Float key encoders (FloatKeyEncoder<f64>, F32KeyEncoder)
+  - [x] Boolean key encoder (BoolKeyEncoder)
+  - [x] String key encoder (StringKeyEncoder) with fixed-width prefix
+  - [x] Date/time key encoders (NaiveDateKeyEncoder, NaiveDateTimeKeyEncoder, DateTimeKeyEncoder)
 - [x] Designed fixed-size B-tree node structure
   - [x] Internal and leaf node types
   - [x] Linked list structure for leaf nodes
 - [x] Implemented `Entry` type for key-value pairs
+- [x] Added AnyKeyEncoder enum for type-safe encoding/decoding across different types
+- [x] Created KeyType enum to represent supported key types
 
 ### Storage
 
@@ -52,6 +55,7 @@ This document tracks the implementation progress of the B-tree attribute indexin
 
 - [x] Added API usage examples
 - [x] Set up basic test infrastructure
+- [x] Created and verified test cases for all key encoders
 
 ## In Progress
 
@@ -75,6 +79,7 @@ This document tracks the implementation progress of the B-tree attribute indexin
 - [ ] Implement collision handling for string keys with same prefix
 - [ ] Optimize memory usage in internal data structures
 - [ ] Add more LruCache fixes where needed (proper mutable borrowing)
+- [ ] Fix remaining linter errors in HTTP implementation and query executor
 
 ### Performance Optimization
 
@@ -107,11 +112,12 @@ This document tracks the implementation progress of the B-tree attribute indexin
 
 ## Next Steps
 
-1. Implement and test B-tree for local file system
-2. Optimize file I/O operations for disk-based storage
-3. Fix remaining LruCache issues in file-based storage
-4. Add comprehensive unit tests for file-based operations
-5. Integrate with FlatCityBuf core format
+1. Fix remaining linter errors in HTTP implementation
+2. Implement and test B-tree for local file system
+3. Optimize file I/O operations for disk-based storage
+4. Fix remaining LruCache issues in file-based storage
+5. Add comprehensive unit tests for file-based operations
+6. Integrate with FlatCityBuf core format
 
 ## Performance Goals
 

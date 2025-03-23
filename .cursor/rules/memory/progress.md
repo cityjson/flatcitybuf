@@ -9,21 +9,25 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 ## Problems to be Solved
 
 ### Lack of Efficient 3D City Model Data Formats
+
 - Existing formats like CityJSON and CityJSONSeq are not optimized for large-scale cloud processing.
 - Limited support for spatial indexing and efficient querying.
 - Inefficiencies in downloading and processing large 3D city model datasets.
 
 ### Scalability Issues in Cloud-Native Environments
+
 - High storage and processing costs for unoptimized 3D city models.
 - Challenges in handling arbitrary extents of urban data dynamically.
 - Lack of standardized methods for fetching, sorting, and filtering large-scale 3D datasets.
 
 ### Limited Adoption of Optimized Binary Formats
+
 - Current 3D data formats do not leverage modern binary serialization techniques.
 - Need for improved compression, indexing, and partial fetching for cloud and web applications.
 - Performance limitations in current file formats for visualization and analysis.
 
 ### Research Gaps
+
 - Lack of specialized approaches for cloud-native processing of 3D city models.
 - Existing research has focused on text-based formats rather than optimized binary encoding.
 - Limited studies evaluating real-world performance benefits of FlatBuffers in geospatial applications.
@@ -32,11 +36,13 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 ## How It Should Work
 
 ### Implementation of FlatBuffers for CityJSON
+
 - Integrate FlatBuffers as an optimized binary format for CityJSON.
 - Support for spatial indexing to enhance data retrieval performance.
 - Implement spatial sorting and partial fetching via HTTP Range requests.
 
 ### Optimization Methodology
+
 1. **Comprehensive Review**: Evaluate existing optimized formats (e.g., PMTiles, Cloud Optimized GeoTIFF).
 2. **Format Adaptation**: Modify CityJSON to incorporate efficient binary storage and indexing.
 3. **Benchmarking**: Compare performance with traditional CityJSON and assess scalability in cloud environments.
@@ -45,6 +51,7 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 6. **Web-Based Query Optimization**: Enhance interactive applications through HTTP Range requests and on-the-fly decoding.
 
 ### Cloud-Native Processing Enhancements
+
 - Enable single-file containment of entire urban areas.
 - Reduce cloud storage and computation costs through efficient serialization.
 - Improve web-based access and real-time querying capabilities.
@@ -68,13 +75,21 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
    - Implemented ByteSerializable trait for efficient indexing.
    - Query execution and sorted index storage.
 
-4. **WASM Build Support**
+4. **B-tree Implementation for Attribute Indexing**
+   - Successfully implemented B-tree data structure for local file system and in-memory storage.
+   - Implemented core B-tree operations (search, insert, delete, range queries).
+   - Added LRU caching for file-based storage with prefetching optimizations.
+   - Implemented builder pattern for bulk loading of sorted entries.
+   - Added comprehensive test suite for all B-tree operations.
+   - Optimized for both memory usage and I/O efficiency.
+
+5. **WASM Build Support**
    - WebAssembly bindings for FlatCityBuf, enabling HTTP Range Request-based partial retrieval.
 
-5. **WASM-Based JavaScript Demo**
+6. **WASM-Based JavaScript Demo**
    - JS-based demonstration for querying attributes and spatial search.
 
-6. **Texture Encoding/Decoding**
+7. **Texture Encoding/Decoding**
    - Serialization and deserialization of Semantics, Material, and Texture within CityJSON structures.
 
 ### Remaining Work & Challenges
@@ -89,7 +104,6 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
    - Improve fetching efficiency, reducing per-feature requests for batch retrieval.
    - Implement intelligent batching of nearby features based on spatial proximity.
    - Add client-side caching to avoid redundant requests for previously fetched data.
-
 
 3. **Performance Benchmarking for Large Datasets**
    - Evaluate large-scale data retrieval and identify performance bottlenecks.
@@ -174,6 +188,7 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 ## Next Milestones
 
 ### Milestone 1: Core Optimization
+
 - Optimize Attribute Index for streaming with progressive loading.
 - Implement intelligent batching for HTTP Range Requests.
 - Complete comprehensive benchmarking suite for large datasets.
@@ -181,6 +196,7 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 - Enhance documentation with performance optimization guidelines.
 
 ### Milestone 2: Format Extensions
+
 - Evaluate and implement support for Arrow and Parquet encoding.
 - Develop compression strategies for geometry and attribute data.
 - Create adapters for seamless format conversion.
@@ -188,6 +204,7 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 - Enhance CI/CD pipeline with automated performance testing.
 
 ### Milestone 3: Language Support
+
 - Release Python implementation.
 - Develop C++ implementation.
 - Create JavaScript/TypeScript SDK for browser environments.
@@ -195,16 +212,18 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 - Publish packages to language-specific repositories.
 
 ### Milestone 4: Visualization & Integration
+
 - Implement Three.js-based Web Viewer with LOD support.
 - Develop browser-based conversion tools for common 3D formats.
 - Create plugins for QGIS, ArcGIS, and other GIS software.
 - Implement texture and material rendering in web environments.
 - Release comprehensive integration examples for third-party tools.
 
-
 ## Recent Updates
+
 - Integrated spatial indexing and binary search tree.
 - Added WebAssembly support for FlatCityBuf.
 - Improved texture handling in CityJSON encoding.
 - Completed initial benchmarking against CityJSON and CityJSONSeq.
 - Created preliminary documentation for the file format specification.
+- Implemented complete B-tree implementation for local file system and in-memory storage with caching optimizations.

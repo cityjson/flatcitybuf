@@ -34,7 +34,28 @@ mod tests {
         let storage = MemoryBlockStorage::new(4096);
         let key_encoder = Box::new(I64KeyEncoder);
 
-        // Test will be implemented
+        // Create a new B-tree
+        let mut btree = BTree::new(storage, key_encoder).unwrap();
+
+        // Insert some test data
+        btree.insert(&1, 100).unwrap();
+        btree.insert(&2, 200).unwrap();
+        btree.insert(&3, 300).unwrap();
+
+        // Search for a key
+        let result = btree.search(&2).unwrap();
+        assert_eq!(result, Some(200));
+
+        // Search for a non-existent key
+        let result = btree.search(&4).unwrap();
+        assert_eq!(result, None);
+
+        // Range query
+        let results = btree.range_query(&1, &3).unwrap();
+        assert_eq!(results.len(), 3);
+        assert!(results.contains(&100));
+        assert!(results.contains(&200));
+        assert!(results.contains(&300));
     }
 
     /// This test demonstrates how to use the query system
