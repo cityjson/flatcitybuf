@@ -144,26 +144,33 @@ impl CachedFileBlockStorage {
 
 impl BlockStorage for CachedFileBlockStorage {
     fn read_block(&self, offset: u64) -> Result<Vec<u8>> {
-        // Check alignment
-        if offset % self.block_size as u64 != 0 {
-            return Err(BTreeError::AlignmentError(offset));
+        // Check if the offset is in cache first
+        {
+            let mut cache = self.cache.borrow_mut();
+            if let Some(data) = cache.get(&offset) {
+                return Ok(data.clone());
+            }
         }
 
-        // Check cache first
-        if let Some(data) = self.cache.borrow().get(&offset) {
-            return Ok(data.clone());
-        }
-
-        // Cache miss - read from file
-        let mut buffer = vec![0u8; self.block_size];
+        // Read from file
         let mut file = self.file.borrow_mut();
+        let mut buf = vec![0u8; self.block_size];
         file.seek(SeekFrom::Start(offset))?;
-        file.read_exact(&mut buffer)?;
+        let bytes_read = file.read(&mut buf)?;
 
-        // Update cache
-        self.cache.borrow_mut().put(offset, buffer.clone());
+        if bytes_read == 0 {
+            return Err(BTreeError::BlockNotFound(offset));
+        }
 
-        Ok(buffer)
+        buf.truncate(bytes_read);
+
+        // Update cache with a new borrow
+        {
+            let mut cache = self.cache.borrow_mut();
+            cache.put(offset, buf.clone());
+        }
+
+        Ok(buf)
     }
 
     fn write_block(&mut self, offset: u64, data: &[u8]) -> Result<()> {

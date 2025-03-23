@@ -54,7 +54,7 @@ impl Default for HttpConfig {
 #[cfg(feature = "http")]
 pub struct HttpBlockStorage<C: AsyncHttpRangeClient> {
     /// HTTP client for range requests
-    client: AsyncBufferedHttpRangeClient<C>,
+    client: Arc<RwLock<AsyncBufferedHttpRangeClient<C>>>,
     /// Cache of previously retrieved blocks
     cache: Arc<RwLock<lru::LruCache<u64, Bytes>>>,
     /// Block size in bytes
@@ -84,7 +84,7 @@ impl<C: AsyncHttpRangeClient> HttpBlockStorage<C> {
         let buffered_client = AsyncBufferedHttpRangeClient::with(client, &config.url);
 
         Self {
-            client: buffered_client,
+            client: Arc::new(RwLock::new(buffered_client)),
             cache: Arc::new(RwLock::new(lru::LruCache::new(
                 cache_size.try_into().unwrap(),
             ))),
@@ -133,21 +133,28 @@ impl<C: AsyncHttpRangeClient> HttpBlockStorage<C> {
             "fetching block at offset {} (range: start: {}, end: {})",
             offset, start, end
         );
-        // AsyncBufferedHttpRangeClient wraps the underlying client and already knows the URL
-        let data = self
-            .client
-            .get_range(start, end - start + 1)
-            .await
-            .map_err(|e| BTreeError::Http(e))?;
+
+        // Fetch the data
+        let data = self.fetch_range(start, end - start + 1).await?;
 
         // Add to cache
         {
             let mut cache = self.cache.write().await;
-            let bytes = Bytes::from(data);
+            let bytes = Bytes::from(data.clone());
             cache.put(offset, bytes);
         }
 
-        Ok(data.to_vec())
+        Ok(data)
+    }
+
+    /// Helper method to fetch a range from the HTTP client
+    async fn fetch_range(&self, start: usize, length: usize) -> Result<Vec<u8>> {
+        let mut client_guard = self.client.write().await;
+        client_guard
+            .get_range(start, length)
+            .await
+            .map(|data| data.to_vec())
+            .map_err(BTreeError::Http)
     }
 }
 
@@ -179,7 +186,7 @@ impl<K, C: AsyncHttpRangeClient> HttpBTreeReader<K, C> {
     }
 
     /// Execute an exact match query
-    pub async fn exact_match(&self, key: &[u8]) -> Result<Option<u64>> {
+    pub async fn exact_match(&mut self, key: &[u8]) -> Result<Option<u64>> {
         let mut current_offset = self.root_offset;
 
         loop {
@@ -219,7 +226,7 @@ impl<K, C: AsyncHttpRangeClient> HttpBTreeReader<K, C> {
     }
 
     /// Execute a range query
-    pub async fn range_query(&self, start: &[u8], end: &[u8]) -> Result<Vec<u64>> {
+    pub async fn range_query(&mut self, start: &[u8], end: &[u8]) -> Result<Vec<u64>> {
         // Implementation similar to exact_match but handling a range
         // This is a placeholder - actual implementation would require proper
         // traversal of the B-tree to find all keys in the given range
@@ -289,7 +296,7 @@ impl<K, C: AsyncHttpRangeClient> HttpBTreeReader<K, C> {
     }
 
     /// Find the leaf node containing the given key
-    async fn find_leaf_containing(&self, key: &[u8]) -> Result<u64> {
+    async fn find_leaf_containing(&mut self, key: &[u8]) -> Result<u64> {
         // Similar to exact_match but stops when we reach a leaf
         let mut current_offset = self.root_offset;
 

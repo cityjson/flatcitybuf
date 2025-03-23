@@ -21,7 +21,6 @@ pub enum ComparisonOp {
 }
 
 /// Query condition for a specific attribute
-#[derive(Debug, Clone)]
 pub enum Condition<T> {
     /// Exact match (attribute == value)
     Exact(T),
@@ -37,6 +36,19 @@ pub enum Condition<T> {
     Predicate(Box<dyn Fn(&T) -> bool>),
 }
 
+impl<T: std::fmt::Debug> std::fmt::Debug for Condition<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exact(v) => write!(f, "Exact({:?})", v),
+            Self::Compare(op, v) => write!(f, "Compare({:?}, {:?})", op, v),
+            Self::Range(min, max) => write!(f, "Range({:?}, {:?})", min, max),
+            Self::In(values) => write!(f, "In({:?})", values),
+            Self::Prefix(prefix) => write!(f, "Prefix({:?})", prefix),
+            Self::Predicate(_) => write!(f, "Predicate(<function>)"),
+        }
+    }
+}
+
 /// Logical operators for combining query conditions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalOp {
@@ -47,7 +59,7 @@ pub enum LogicalOp {
 }
 
 /// A complete attribute query
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AttributeQuery<T> {
     /// The attribute name to query
     pub attribute: String,
@@ -69,7 +81,6 @@ pub struct SpatialQuery {
 }
 
 /// Combined query expression with logical operators
-#[derive(Debug, Clone)]
 pub enum QueryExpr {
     /// Attribute query
     Attribute(Box<dyn AttributeQueryTrait>),
@@ -77,6 +88,25 @@ pub enum QueryExpr {
     Spatial(SpatialQuery),
     /// Combined query with logical operator
     Logical(Box<QueryExpr>, LogicalOp, Box<QueryExpr>),
+}
+
+impl std::fmt::Debug for QueryExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Attribute(attr) => write!(f, "Attribute({:?})", attr),
+            Self::Spatial(spatial) => write!(f, "Spatial({:?})", spatial),
+            Self::Logical(left, op, right) => {
+                write!(f, "Logical({:?}, {:?}, {:?})", left, op, right)
+            }
+        }
+    }
+}
+
+/// Trait for query plan
+pub trait AttributeQueryPlan {
+    fn execute(&self) -> Result<Vec<u64>>;
+    fn estimate_cost(&self) -> f64;
+    fn attribute_name(&self) -> &str;
 }
 
 /// Trait for type-erased attribute queries
@@ -91,7 +121,7 @@ pub trait AttributeQueryTrait: std::fmt::Debug {
     fn estimate_selectivity(&self) -> f64;
 }
 
-impl<T: 'static> AttributeQueryTrait for AttributeQuery<T> {
+impl<T: 'static + std::fmt::Debug> AttributeQueryTrait for AttributeQuery<T> {
     fn matches(&self, _feature_id: u64) -> Result<bool> {
         // Implementation will check if the feature matches this condition
         unimplemented!()
@@ -222,7 +252,7 @@ impl QueryBuilder {
     }
 
     /// Add an attribute condition with a logical operator
-    pub fn attribute<T: 'static>(
+    pub fn attribute<T: 'static + std::fmt::Debug>(
         mut self,
         attribute: &str,
         condition: Condition<T>,

@@ -128,7 +128,7 @@ impl<K, S: BlockStorage> BTree<K, S> {
             // Verify node is a leaf
             if node.node_type != NodeType::Leaf {
                 return Err(BTreeError::InvalidNodeType {
-                    expected: "Leaf",
+                    expected: "Leaf".to_string(),
                     actual: format!("{:?}", node.node_type),
                 });
             }
@@ -261,7 +261,7 @@ impl<K, S: BlockStorage> BTreeIndex for BTree<K, S> {
             // Verify node is a leaf
             if node.node_type != NodeType::Leaf {
                 return Err(BTreeError::InvalidNodeType {
-                    expected: "Leaf",
+                    expected: "Leaf".to_string(),
                     actual: format!("{:?}", node.node_type),
                 });
             }

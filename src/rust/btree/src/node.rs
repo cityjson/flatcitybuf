@@ -19,7 +19,7 @@ impl NodeType {
             0 => Ok(NodeType::Internal),
             1 => Ok(NodeType::Leaf),
             _ => Err(BTreeError::InvalidNodeType {
-                expected: "0 or 1",
+                expected: "0 or 1".to_string(),
                 actual: value.to_string(),
             }),
         }
