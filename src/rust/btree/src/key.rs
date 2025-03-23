@@ -1,4 +1,4 @@
-use crate::errors::{KeyError, Result};
+use crate::errors::{BTreeError, KeyError, Result};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
@@ -21,10 +21,11 @@ pub trait KeyEncoder<T> {
     fn compare(&self, a: &[u8], b: &[u8]) -> Ordering;
 }
 
-/// Integer key encoder for i64 numeric types
-pub struct IntegerKeyEncoder;
+/// Integer key encoder (i64)
+#[derive(Debug, Clone)]
+pub struct I64KeyEncoder;
 
-impl KeyEncoder<i64> for IntegerKeyEncoder {
+impl KeyEncoder<i64> for I64KeyEncoder {
     fn encoded_size(&self) -> usize {
         8
     }
@@ -61,7 +62,8 @@ impl KeyEncoder<i64> for IntegerKeyEncoder {
     }
 }
 
-/// Integer key encoder for i32
+/// Integer key encoder (i32)
+#[derive(Debug, Clone)]
 pub struct I32KeyEncoder;
 
 impl KeyEncoder<i32> for I32KeyEncoder {
@@ -100,6 +102,7 @@ impl KeyEncoder<i32> for I32KeyEncoder {
 }
 
 /// Integer key encoder for i16
+#[derive(Debug, Clone)]
 pub struct I16KeyEncoder;
 
 impl KeyEncoder<i16> for I16KeyEncoder {
@@ -138,6 +141,7 @@ impl KeyEncoder<i16> for I16KeyEncoder {
 }
 
 /// Integer key encoder for i8
+#[derive(Debug, Clone)]
 pub struct I8KeyEncoder;
 
 impl KeyEncoder<i8> for I8KeyEncoder {
@@ -173,6 +177,7 @@ impl KeyEncoder<i8> for I8KeyEncoder {
 }
 
 /// Integer key encoder for u64
+#[derive(Debug, Clone)]
 pub struct U64KeyEncoder;
 
 impl KeyEncoder<u64> for U64KeyEncoder {
@@ -213,6 +218,7 @@ impl KeyEncoder<u64> for U64KeyEncoder {
 }
 
 /// Integer key encoder for u32
+#[derive(Debug, Clone)]
 pub struct U32KeyEncoder;
 
 impl KeyEncoder<u32> for U32KeyEncoder {
@@ -251,6 +257,7 @@ impl KeyEncoder<u32> for U32KeyEncoder {
 }
 
 /// Integer key encoder for u16
+#[derive(Debug, Clone)]
 pub struct U16KeyEncoder;
 
 impl KeyEncoder<u16> for U16KeyEncoder {
@@ -289,6 +296,7 @@ impl KeyEncoder<u16> for U16KeyEncoder {
 }
 
 /// Integer key encoder for u8
+#[derive(Debug, Clone)]
 pub struct U8KeyEncoder;
 
 impl KeyEncoder<u8> for U8KeyEncoder {
@@ -324,6 +332,7 @@ impl KeyEncoder<u8> for U8KeyEncoder {
 }
 
 /// Boolean key encoder
+#[derive(Debug, Clone)]
 pub struct BoolKeyEncoder;
 
 impl KeyEncoder<bool> for BoolKeyEncoder {
@@ -359,6 +368,7 @@ impl KeyEncoder<bool> for BoolKeyEncoder {
 }
 
 /// String key encoder with fixed prefix
+#[derive(Debug, Clone)]
 pub struct StringKeyEncoder {
     /// Length of the prefix to use for string keys
     pub prefix_length: usize,
@@ -407,6 +417,7 @@ impl KeyEncoder<String> for StringKeyEncoder {
 }
 
 /// Float key encoder with NaN handling
+#[derive(Debug, Clone)]
 pub struct FloatKeyEncoder;
 
 impl KeyEncoder<f64> for FloatKeyEncoder {
@@ -470,6 +481,7 @@ impl KeyEncoder<f64> for FloatKeyEncoder {
 }
 
 /// Float32 key encoder with NaN handling
+#[derive(Debug, Clone)]
 pub struct F32KeyEncoder;
 
 impl KeyEncoder<f32> for F32KeyEncoder {
@@ -530,89 +542,8 @@ impl KeyEncoder<f32> for F32KeyEncoder {
     }
 }
 
-/// Ordered Float64 key encoder
-pub struct OrderedF64KeyEncoder;
-
-impl KeyEncoder<Float<f64>> for OrderedF64KeyEncoder {
-    fn encoded_size(&self) -> usize {
-        8
-    }
-
-    fn encode(&self, key: &Float<f64>) -> Result<Vec<u8>> {
-        // Convert to f64 and encode
-        let inner_val = key.0;
-        let mut result = Vec::with_capacity(8);
-        result.extend_from_slice(&inner_val.to_bits().to_le_bytes());
-        Ok(result)
-    }
-
-    fn decode(&self, bytes: &[u8]) -> Result<Float<f64>> {
-        // Decode float from 8 bytes
-        if bytes.len() < 8 {
-            return Err(KeyError::InvalidSize {
-                expected: 8,
-                actual: bytes.len(),
-            }
-            .into());
-        }
-
-        let bits = u64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]);
-        let value = f64::from_bits(bits);
-        Ok(OrderedFloat(value))
-    }
-
-    fn compare(&self, a: &[u8], b: &[u8]) -> Ordering {
-        // OrderedFloat implements Ord, so we can directly compare
-        match (self.decode(a), self.decode(b)) {
-            (Ok(a_val), Ok(b_val)) => a_val.cmp(&b_val),
-            _ => Ordering::Equal, // Default in case of error
-        }
-    }
-}
-
-/// Ordered Float32 key encoder
-pub struct OrderedF32KeyEncoder;
-
-impl KeyEncoder<Float<f32>> for OrderedF32KeyEncoder {
-    fn encoded_size(&self) -> usize {
-        4
-    }
-
-    fn encode(&self, key: &Float<f32>) -> Result<Vec<u8>> {
-        // Convert to f32 and encode
-        let inner_val = key.0;
-        let mut result = Vec::with_capacity(4);
-        result.extend_from_slice(&inner_val.to_bits().to_le_bytes());
-        Ok(result)
-    }
-
-    fn decode(&self, bytes: &[u8]) -> Result<Float<f32>> {
-        // Decode float from 4 bytes
-        if bytes.len() < 4 {
-            return Err(KeyError::InvalidSize {
-                expected: 4,
-                actual: bytes.len(),
-            }
-            .into());
-        }
-
-        let bits = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-        let value = f32::from_bits(bits);
-        Ok(OrderedFloat(value))
-    }
-
-    fn compare(&self, a: &[u8], b: &[u8]) -> Ordering {
-        // OrderedFloat implements Ord, so we can directly compare
-        match (self.decode(a), self.decode(b)) {
-            (Ok(a_val), Ok(b_val)) => a_val.cmp(&b_val),
-            _ => Ordering::Equal, // Default in case of error
-        }
-    }
-}
-
 /// Date encoder for NaiveDate
+#[derive(Debug, Clone)]
 pub struct NaiveDateKeyEncoder;
 
 impl KeyEncoder<NaiveDate> for NaiveDateKeyEncoder {
@@ -623,8 +554,8 @@ impl KeyEncoder<NaiveDate> for NaiveDateKeyEncoder {
     fn encode(&self, key: &NaiveDate) -> Result<Vec<u8>> {
         let mut result = Vec::with_capacity(12);
         result.extend_from_slice(&key.year().to_le_bytes());
-        result.extend_from_slice(&(key.month() as u32).to_le_bytes());
-        result.extend_from_slice(&(key.day() as u32).to_le_bytes());
+        result.extend_from_slice(&key.month().to_le_bytes());
+        result.extend_from_slice(&key.day().to_le_bytes());
         Ok(result)
     }
 
@@ -654,6 +585,7 @@ impl KeyEncoder<NaiveDate> for NaiveDateKeyEncoder {
 }
 
 /// DateTime encoder for NaiveDateTime (timestamp seconds + nanoseconds)
+#[derive(Debug, Clone)]
 pub struct NaiveDateTimeKeyEncoder;
 
 impl KeyEncoder<NaiveDateTime> for NaiveDateTimeKeyEncoder {
@@ -701,6 +633,7 @@ impl KeyEncoder<NaiveDateTime> for NaiveDateTimeKeyEncoder {
 }
 
 /// DateTime encoder for DateTime<Utc> (same as NaiveDateTime internally)
+#[derive(Debug, Clone)]
 pub struct DateTimeKeyEncoder;
 
 impl KeyEncoder<DateTime<Utc>> for DateTimeKeyEncoder {
@@ -747,17 +680,253 @@ impl KeyEncoder<DateTime<Utc>> for DateTimeKeyEncoder {
     }
 }
 
+/// Enum wrapper for all supported key encoder types that can be used to create a type-safe API
+#[derive(Debug, Clone)]
+pub enum AnyKeyEncoder {
+    /// Integer (i64) key encoder
+    I64(I64KeyEncoder),
+    /// i32 integer key encoder
+    I32(I32KeyEncoder),
+    /// i16 integer key encoder
+    I16(I16KeyEncoder),
+    /// i8 integer key encoder
+    I8(I8KeyEncoder),
+    /// u64 unsigned integer key encoder
+    U64(U64KeyEncoder),
+    /// u32 unsigned integer key encoder
+    U32(U32KeyEncoder),
+    /// u16 unsigned integer key encoder
+    U16(U16KeyEncoder),
+    /// u8 unsigned integer key encoder
+    U8(U8KeyEncoder),
+    /// f64 floating point key encoder with NaN handling
+    F64(FloatKeyEncoder),
+    /// f32 floating point key encoder with NaN handling
+    F32(F32KeyEncoder),
+    /// Boolean key encoder
+    Bool(BoolKeyEncoder),
+    /// String key encoder with a specific prefix length
+    String(StringKeyEncoder),
+    /// Naive date key encoder
+    NaiveDate(NaiveDateKeyEncoder),
+    /// Naive datetime key encoder
+    NaiveDateTime(NaiveDateTimeKeyEncoder),
+    /// UTC datetime key encoder
+    DateTime(DateTimeKeyEncoder),
+}
+
+/// Helper type to represent any encodable key type
+#[derive(Debug, Clone)]
+pub enum KeyType {
+    /// Integer (i64)
+    I64(i64),
+    /// i32 integer
+    I32(i32),
+    /// i16 integer
+    I16(i16),
+    /// i8 integer
+    I8(i8),
+    /// u64 unsigned integer
+    U64(u64),
+    /// u32 unsigned integer
+    U32(u32),
+    /// u16 unsigned integer
+    U16(u16),
+    /// u8 unsigned integer
+    U8(u8),
+    /// f64 floating point
+    F64(f64),
+    /// f32 floating point
+    F32(f32),
+    /// Boolean
+    Bool(bool),
+    /// String
+    String(String),
+    /// NaiveDate
+    NaiveDate(NaiveDate),
+    /// NaiveDateTime
+    NaiveDateTime(NaiveDateTime),
+    /// UTC DateTime
+    DateTime(DateTime<Utc>),
+}
+
+/// Factory methods for AnyKeyEncoder
+impl AnyKeyEncoder {
+    /// Create a new integer key encoder
+    pub fn i64() -> Self {
+        Self::I64(I64KeyEncoder)
+    }
+
+    /// Create a new i32 key encoder
+    pub fn i32() -> Self {
+        Self::I32(I32KeyEncoder)
+    }
+
+    /// Create a new i16 key encoder
+    pub fn i16() -> Self {
+        Self::I16(I16KeyEncoder)
+    }
+
+    /// Create a new i8 key encoder
+    pub fn i8() -> Self {
+        Self::I8(I8KeyEncoder)
+    }
+
+    /// Create a new u64 key encoder
+    pub fn u64() -> Self {
+        Self::U64(U64KeyEncoder)
+    }
+
+    /// Create a new u32 key encoder
+    pub fn u32() -> Self {
+        Self::U32(U32KeyEncoder)
+    }
+
+    /// Create a new u16 key encoder
+    pub fn u16() -> Self {
+        Self::U16(U16KeyEncoder)
+    }
+
+    /// Create a new u8 key encoder
+    pub fn u8() -> Self {
+        Self::U8(U8KeyEncoder)
+    }
+
+    /// Create a new f64 key encoder
+    pub fn f64() -> Self {
+        Self::F64(FloatKeyEncoder)
+    }
+
+    /// Create a new f32 key encoder
+    pub fn f32() -> Self {
+        Self::F32(F32KeyEncoder)
+    }
+
+    /// Create a new boolean key encoder
+    pub fn bool() -> Self {
+        Self::Bool(BoolKeyEncoder)
+    }
+
+    /// Create a new string key encoder with a specific prefix length
+    pub fn string(prefix_length: usize) -> Self {
+        Self::String(StringKeyEncoder { prefix_length })
+    }
+
+    /// Create a new naive date key encoder
+    pub fn naive_date() -> Self {
+        Self::NaiveDate(NaiveDateKeyEncoder)
+    }
+
+    /// Create a new naive datetime key encoder
+    pub fn naive_datetime() -> Self {
+        Self::NaiveDateTime(NaiveDateTimeKeyEncoder)
+    }
+
+    /// Create a new UTC datetime key encoder
+    pub fn datetime() -> Self {
+        Self::DateTime(DateTimeKeyEncoder)
+    }
+
+    /// Encode a key value
+    pub fn encode_key(&self, key: &KeyType) -> Result<Vec<u8>> {
+        match (self, key) {
+            (Self::I64(encoder), KeyType::I64(value)) => encoder.encode(value),
+            (Self::I32(encoder), KeyType::I32(value)) => encoder.encode(value),
+            (Self::I16(encoder), KeyType::I16(value)) => encoder.encode(value),
+            (Self::I8(encoder), KeyType::I8(value)) => encoder.encode(value),
+            (Self::U64(encoder), KeyType::U64(value)) => encoder.encode(value),
+            (Self::U32(encoder), KeyType::U32(value)) => encoder.encode(value),
+            (Self::U16(encoder), KeyType::U16(value)) => encoder.encode(value),
+            (Self::U8(encoder), KeyType::U8(value)) => encoder.encode(value),
+            (Self::F64(encoder), KeyType::F64(value)) => encoder.encode(value),
+            (Self::F32(encoder), KeyType::F32(value)) => encoder.encode(value),
+            (Self::Bool(encoder), KeyType::Bool(value)) => encoder.encode(value),
+            (Self::String(encoder), KeyType::String(value)) => encoder.encode(value),
+            (Self::NaiveDate(encoder), KeyType::NaiveDate(value)) => encoder.encode(value),
+            (Self::NaiveDateTime(encoder), KeyType::NaiveDateTime(value)) => encoder.encode(value),
+            (Self::DateTime(encoder), KeyType::DateTime(value)) => encoder.encode(value),
+            _ => Err(BTreeError::TypeMismatch {
+                expected: format!("{:?}", self),
+                actual: format!("{:?}", key),
+            }),
+        }
+    }
+
+    /// Decode bytes to a key value
+    pub fn decode_key(&self, bytes: &[u8]) -> Result<KeyType> {
+        match self {
+            Self::I64(encoder) => encoder.decode(bytes).map(KeyType::I64),
+            Self::I32(encoder) => encoder.decode(bytes).map(KeyType::I32),
+            Self::I16(encoder) => encoder.decode(bytes).map(KeyType::I16),
+            Self::I8(encoder) => encoder.decode(bytes).map(KeyType::I8),
+            Self::U64(encoder) => encoder.decode(bytes).map(KeyType::U64),
+            Self::U32(encoder) => encoder.decode(bytes).map(KeyType::U32),
+            Self::U16(encoder) => encoder.decode(bytes).map(KeyType::U16),
+            Self::U8(encoder) => encoder.decode(bytes).map(KeyType::U8),
+            Self::F64(encoder) => encoder.decode(bytes).map(KeyType::F64),
+            Self::F32(encoder) => encoder.decode(bytes).map(KeyType::F32),
+            Self::Bool(encoder) => encoder.decode(bytes).map(KeyType::Bool),
+            Self::String(encoder) => encoder.decode(bytes).map(KeyType::String),
+            Self::NaiveDate(encoder) => encoder.decode(bytes).map(KeyType::NaiveDate),
+            Self::NaiveDateTime(encoder) => encoder.decode(bytes).map(KeyType::NaiveDateTime),
+            Self::DateTime(encoder) => encoder.decode(bytes).map(KeyType::DateTime),
+        }
+    }
+
+    /// Get the encoded size for this key encoder
+    pub fn encoded_size(&self) -> usize {
+        match self {
+            Self::I64(encoder) => encoder.encoded_size(),
+            Self::I32(encoder) => encoder.encoded_size(),
+            Self::I16(encoder) => encoder.encoded_size(),
+            Self::I8(encoder) => encoder.encoded_size(),
+            Self::U64(encoder) => encoder.encoded_size(),
+            Self::U32(encoder) => encoder.encoded_size(),
+            Self::U16(encoder) => encoder.encoded_size(),
+            Self::U8(encoder) => encoder.encoded_size(),
+            Self::F64(encoder) => encoder.encoded_size(),
+            Self::F32(encoder) => encoder.encoded_size(),
+            Self::Bool(encoder) => encoder.encoded_size(),
+            Self::String(encoder) => encoder.encoded_size(),
+            Self::NaiveDate(encoder) => encoder.encoded_size(),
+            Self::NaiveDateTime(encoder) => encoder.encoded_size(),
+            Self::DateTime(encoder) => encoder.encoded_size(),
+        }
+    }
+
+    /// Compare two encoded keys
+    pub fn compare(&self, a: &[u8], b: &[u8]) -> Ordering {
+        match self {
+            Self::I64(encoder) => encoder.compare(a, b),
+            Self::I32(encoder) => encoder.compare(a, b),
+            Self::I16(encoder) => encoder.compare(a, b),
+            Self::I8(encoder) => encoder.compare(a, b),
+            Self::U64(encoder) => encoder.compare(a, b),
+            Self::U32(encoder) => encoder.compare(a, b),
+            Self::U16(encoder) => encoder.compare(a, b),
+            Self::U8(encoder) => encoder.compare(a, b),
+            Self::F64(encoder) => encoder.compare(a, b),
+            Self::F32(encoder) => encoder.compare(a, b),
+            Self::Bool(encoder) => encoder.compare(a, b),
+            Self::String(encoder) => encoder.compare(a, b),
+            Self::NaiveDate(encoder) => encoder.compare(a, b),
+            Self::NaiveDateTime(encoder) => encoder.compare(a, b),
+            Self::DateTime(encoder) => encoder.compare(a, b),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-    use ordered_float::OrderedFloat;
-    use std::cmp::Ordering;
+    use chrono::{DateTime, NaiveDate, NaiveDateTime};
+    
+    
 
     #[test]
     fn test_i64_encoder() {
         println!("testing i64 encoder...");
-        let encoder = IntegerKeyEncoder;
+        let encoder = I64KeyEncoder;
         let val = 42i64;
         let encoded = encoder.encode(&val).unwrap();
         let decoded = encoder.decode(&encoded).unwrap();
@@ -834,23 +1003,12 @@ mod tests {
     #[test]
     fn test_float_encoder() {
         println!("testing f64 encoder...");
-        let encoder = OrderedF64KeyEncoder;
-        let val = OrderedFloat(std::f64::consts::PI);
+        let encoder = FloatKeyEncoder;
+        let val = std::f64::consts::PI;
         let encoded = encoder.encode(&val).unwrap();
         let decoded = encoder.decode(&encoded).unwrap();
         assert_eq!(val, decoded);
         println!("f64 encoder passed");
-    }
-
-    #[test]
-    fn test_ordered_float_encoder() {
-        println!("testing ordered float encoder...");
-        let encoder = OrderedF32KeyEncoder;
-        let val = OrderedFloat(std::f32::consts::PI);
-        let encoded = encoder.encode(&val).unwrap();
-        let decoded = encoder.decode(&encoded).unwrap();
-        assert_eq!(val, decoded);
-        println!("ordered float encoder passed");
     }
 
     #[test]

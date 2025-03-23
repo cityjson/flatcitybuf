@@ -1,6 +1,5 @@
 use crate::entry::Entry;
 use crate::errors::{BTreeError, Result};
-use std::io::{Read, Write};
 
 /// Type of B-tree node
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

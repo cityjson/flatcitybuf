@@ -1,4 +1,3 @@
-use std::fmt;
 use thiserror::Error;
 
 /// Error types for B-tree operations
@@ -39,6 +38,10 @@ pub enum BTreeError {
 
     #[error("HTTP error: {0}")]
     Http(#[from] http_range_client::HttpError),
+
+    /// Type mismatch
+    #[error("Type mismatch: expected {expected}, got {actual}")]
+    TypeMismatch { expected: String, actual: String },
 }
 
 /// Error types for key operations

@@ -361,6 +361,12 @@ impl<K, C: AsyncHttpRangeClient> HttpBTreeReader<K, C> {
 pub struct HttpBTreeBuilder {}
 
 #[cfg(feature = "http")]
+impl Default for HttpBTreeBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HttpBTreeBuilder {
     /// Create a new HTTP B-tree builder
     pub fn new() -> Self {

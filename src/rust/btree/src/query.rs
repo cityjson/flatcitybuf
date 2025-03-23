@@ -1,7 +1,5 @@
 use crate::errors::Result;
-use crate::tree::{BTree, BTreeIndex};
-use std::cmp::Ordering;
-use std::ops::RangeInclusive;
+use crate::tree::BTreeIndex;
 
 /// Comparison operators for attribute queries
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,6 +171,12 @@ pub trait RTreeIndex {
     fn estimate_count(&self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Result<usize>;
 }
 
+impl Default for QueryExecutor<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> QueryExecutor<'a> {
     /// Create a new query executor
     pub fn new() -> Self {
@@ -243,6 +247,12 @@ enum QueryPlan {
 /// Builder for constructing complex queries
 pub struct QueryBuilder {
     expr: Option<QueryExpr>,
+}
+
+impl Default for QueryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl QueryBuilder {

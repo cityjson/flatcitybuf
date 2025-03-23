@@ -13,7 +13,7 @@ pub use entry::Entry;
 pub use errors::{BTreeError, KeyError, Result};
 #[cfg(feature = "http")]
 pub use http::{HttpBTreeBuilder, HttpBTreeReader, HttpBlockStorage, HttpConfig, HttpMetrics};
-pub use key::{FloatKeyEncoder, IntegerKeyEncoder, KeyEncoder, StringKeyEncoder};
+pub use key::{FloatKeyEncoder, I64KeyEncoder, KeyEncoder, StringKeyEncoder};
 pub use node::{Node, NodeType};
 pub use query::conditions;
 pub use query::{
@@ -32,7 +32,7 @@ mod tests {
     fn basic_tree_test() {
         // Simple test for B-tree functionality
         let storage = MemoryBlockStorage::new(4096);
-        let key_encoder = Box::new(IntegerKeyEncoder);
+        let key_encoder = Box::new(I64KeyEncoder);
 
         // Test will be implemented
     }

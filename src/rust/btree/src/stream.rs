@@ -1,9 +1,7 @@
-use crate::errors::{BTreeError, Result};
-use crate::key::KeyEncoder;
-use crate::node::{Node, NodeType};
+use crate::errors::Result;
 use crate::storage::BlockStorage;
 use crate::tree::BTree;
-use std::io::{Read, Seek};
+use std::io::Read;
 use std::marker::PhantomData;
 
 /// Reader for streaming read of B-tree data
