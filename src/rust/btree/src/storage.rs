@@ -463,40 +463,77 @@ mod tests {
         // Create a temporary file
         let file = tempfile().unwrap();
 
-        // Create a cached file storage with small cache size (2)
-        let mut storage = CachedFileBlockStorage::new(file, 128, 2);
+        // Initialize storage with a cache size of 2 blocks
+        let mut storage = CachedFileBlockStorage::with_config(file, 128, 2, 0, 0);
 
-        // Allocate 3 blocks
-        let offsets: Vec<u64> = (0..3).map(|_| storage.allocate_block().unwrap()).collect();
+        // Allocate 3 blocks (0, 1, 2)
+        let offsets: Vec<u64> = (0..3).map(|i| i * 128).collect();
 
         // Write unique data to each block
-        for (i, offset) in offsets.iter().enumerate() {
-            let data = vec![i as u8 + 1; 5]; // [1,1,1,1,1], [2,2,2,2,2], [3,3,3,3,3]
-            storage.write_block(*offset, &data).unwrap();
+        for (i, &offset) in offsets.iter().enumerate() {
+            let data = vec![i as u8; 5];
+            storage.write_block(offset, &data).unwrap();
         }
 
         // Flush to ensure all blocks are written to disk
         storage.flush().unwrap();
 
-        // Read the blocks in reverse order to populate cache with blocks 2 and 1
-        for i in (1..3).rev() {
-            let _ = storage.read_block(offsets[i]).unwrap();
+        // Clear the cache to start fresh
+        storage.clear_cache();
+
+        // Verify no blocks are in cache
+        for &offset in &offsets {
+            assert!(
+                !storage.is_cached(offset),
+                "Block at offset {} should NOT be in cache",
+                offset
+            );
         }
 
-        // Now read block 0 - this should cause block 2 to be evicted
+        // Read block 0 and 1, which should fill the cache
         let _ = storage.read_block(offsets[0]).unwrap();
+        let _ = storage.read_block(offsets[1]).unwrap();
 
-        // Modify the file directly to change block 2's data
-        {
-            let mut file = storage.file.borrow_mut();
-            file.seek(SeekFrom::Start(offsets[2])).unwrap();
-            file.write_all(&[9, 9, 9, 9, 9]).unwrap();
-            file.flush().unwrap();
-        }
+        // Verify blocks 0 and 1 are in cache
+        assert!(
+            storage.is_cached(offsets[0]),
+            "Block at offset {} should be in cache",
+            offsets[0]
+        );
+        assert!(
+            storage.is_cached(offsets[1]),
+            "Block at offset {} should be in cache",
+            offsets[1]
+        );
 
-        // Read block 2 again - should read from disk with new values
-        let data = storage.read_block(offsets[2]).unwrap();
-        assert_eq!(data[0..5], [9, 9, 9, 9, 9]);
+        // Block 2 should not be in cache
+        assert!(
+            !storage.is_cached(offsets[2]),
+            "Block at offset {} should NOT be in cache",
+            offsets[2]
+        );
+
+        // Read block 2, which should cause block 0 to be evicted (LRU)
+        let _ = storage.read_block(offsets[2]).unwrap();
+
+        // Verify block 0 is no longer in cache
+        assert!(
+            !storage.is_cached(offsets[0]),
+            "Block at offset {} should have been evicted",
+            offsets[0]
+        );
+
+        // Blocks 1 and 2 should be in cache
+        assert!(
+            storage.is_cached(offsets[1]),
+            "Block at offset {} should be in cache",
+            offsets[1]
+        );
+        assert!(
+            storage.is_cached(offsets[2]),
+            "Block at offset {} should be in cache",
+            offsets[2]
+        );
 
         println!("cache eviction passed");
     }
@@ -540,12 +577,11 @@ mod tests {
         // Create a temporary file
         let file = tempfile().unwrap();
 
-        // Create cached file storage with small cache but prefetching enabled
-        let mut storage = CachedFileBlockStorage::new(file, 128, 5);
-        storage.set_prefetch_count(3);
+        // Create cached file storage with prefetching explicitly configured
+        let mut storage = CachedFileBlockStorage::with_config(file, 128, 5, 3, 2);
 
         // Allocate several consecutive blocks
-        let offsets: Vec<u64> = (0..10).map(|_| storage.allocate_block().unwrap()).collect();
+        let offsets: Vec<u64> = (0..5).map(|i| i * 128).collect();
 
         // Write different data to each block
         for (i, offset) in offsets.iter().enumerate() {
@@ -559,11 +595,27 @@ mod tests {
         // Clear the cache to ensure next read comes from disk
         storage.clear_cache();
 
-        // Read first block - should trigger prefetching of next 3 blocks
-        let _ = storage.read_block(offsets[0]).unwrap();
+        // Verify no blocks are in cache
+        for &offset in &offsets {
+            assert!(
+                !storage.is_cached(offset),
+                "Block at offset {} should NOT be in cache",
+                offset
+            );
+        }
 
-        // The next 3 blocks should now be in cache
-        for i in 1..4 {
+        // Read block at index 1 - should trigger prefetching of blocks 2, 3, 4
+        let _ = storage.read_block(offsets[1]).unwrap();
+
+        // Block 1 should be in cache (the one we read)
+        assert!(
+            storage.is_cached(offsets[1]),
+            "Block at offset {} should be in cache",
+            offsets[1]
+        );
+
+        // Blocks 2, 3, 4 should be prefetched
+        for i in 2..5 {
             assert!(
                 storage.is_cached(offsets[i]),
                 "Block at offset {} should be in cache",
@@ -571,11 +623,11 @@ mod tests {
             );
         }
 
-        // Block 4 should not be in cache yet
+        // Block 0 should NOT be in cache (it's before the one we read)
         assert!(
-            !storage.is_cached(offsets[4]),
+            !storage.is_cached(offsets[0]),
             "Block at offset {} should NOT be in cache",
-            offsets[4]
+            offsets[0]
         );
 
         println!("prefetching passed");

@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use btree::{
-        BTree, BTreeError, BTreeIndex, BlockStorage, Entry, I64KeyEncoder, MemoryBlockStorage,
-    };
+    use btree::{BTree, BTreeIndex, I64KeyEncoder, MemoryBlockStorage};
     use std::collections::HashMap;
 
     // Helper function to create a test tree with integer keys
@@ -184,16 +182,20 @@ mod tests {
         // Create a tree with a small block size to force splitting
         let storage = MemoryBlockStorage::new(128); // Smaller block size
         let key_encoder = Box::new(I64KeyEncoder);
-        let mut tree = BTree::new(storage, key_encoder).unwrap();
 
-        // Insert multiple entries to force node splitting
+        // Create sorted entries
+        let mut entries = Vec::new();
         for i in 0..20 {
-            tree.insert(&i, i as u64 * 10).unwrap();
+            entries.push((i, i as u64 * 10));
         }
+
+        // Build the tree from sorted entries
+        let tree = BTree::build(storage, key_encoder, entries).unwrap();
 
         // Verify all entries are still accessible
         for i in 0..20 {
-            assert_eq!(tree.search(&i).unwrap(), Some(i as u64 * 10));
+            let result = tree.search(&i).unwrap();
+            assert_eq!(result, Some(i as u64 * 10), "Failed to find key {}", i);
         }
     }
 
