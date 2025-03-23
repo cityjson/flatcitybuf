@@ -23,10 +23,7 @@ pub enum BTreeError {
     InvalidStructure(String),
 
     #[error("Invalid node type: expected {expected}, got {actual}")]
-    InvalidNodeType {
-        expected: &'static str,
-        actual: String,
-    },
+    InvalidNodeType { expected: String, actual: String },
 
     #[error("Alignment error: offset {0} is not aligned to block size")]
     AlignmentError(u64),
@@ -36,6 +33,12 @@ pub enum BTreeError {
 
     #[error("Stream error: {0}")]
     Stream(String),
+
+    #[error("Unsupported operation: {0}")]
+    Unsupported(String),
+
+    #[error("HTTP error: {0}")]
+    Http(#[from] http_range_client::HttpError),
 }
 
 /// Error types for key operations

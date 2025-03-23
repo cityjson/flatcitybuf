@@ -1,5 +1,6 @@
 mod entry;
 mod errors;
+mod http;
 mod key;
 mod node;
 mod query;
@@ -10,16 +11,18 @@ mod tree;
 // Re-export primary types and functions
 pub use entry::Entry;
 pub use errors::{BTreeError, KeyError, Result};
+#[cfg(feature = "http")]
+pub use http::{HttpBTreeBuilder, HttpBTreeReader, HttpBlockStorage, HttpConfig, HttpMetrics};
 pub use key::{FloatKeyEncoder, IntegerKeyEncoder, KeyEncoder, StringKeyEncoder};
 pub use node::{Node, NodeType};
 pub use query::conditions;
 pub use query::{
-    AttributeQuery, BTreeIndex, Condition, LogicalOp, QueryBuilder, QueryExecutor, QueryExpr,
-    QueryResult, RTreeIndex, SpatialQuery,
+    AttributeQuery, Condition, LogicalOp, QueryBuilder, QueryExecutor, QueryExpr, QueryResult,
+    RTreeIndex, SpatialQuery,
 };
 pub use storage::{BlockStorage, CachedFileBlockStorage, MemoryBlockStorage};
 pub use stream::{BTreeReader, BTreeStreamProcessor};
-pub use tree::BTree;
+pub use tree::{BTree, BTreeIndex};
 
 #[cfg(test)]
 mod tests {
