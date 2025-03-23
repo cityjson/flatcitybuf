@@ -37,14 +37,23 @@ This document tracks the implementation progress of the B-tree attribute indexin
 - [x] Defined interfaces for B-tree and R-tree integration
 - [x] Added selectivity-based query planning
 
+### HTTP Support
+- [x] Added basic HTTP client interface integration
+- [x] Implemented `HttpBlockStorage` with caching
+- [x] Created `HttpBTreeReader` for remote B-trees
+- [x] Added metrics collection for HTTP operations
+
 ### Testing & Examples
 - [x] Added API usage examples
 - [x] Set up basic test infrastructure
 
 ## In Progress
-- [ ] Fix linter errors in query implementation (Debug+Clone trait issues)
-- [ ] Optimize LRU cache implementation for thread safety
-- [ ] Implement prefetching for sequential leaf node access
+- [ ] Fix compilation issues in HTTP implementation
+  - [ ] Resolve Rust borrowing issues with HTTP client
+  - [ ] Fix expected signature for AsyncBufferedHttpRangeClient
+- [ ] Integrate async operations with sync BTreeIndex trait
+- [ ] Add support for cancellation in HTTP operations
+- [ ] Complete unit tests for HTTP-based access
 
 ## Pending Items
 
@@ -60,10 +69,10 @@ This document tracks the implementation progress of the B-tree attribute indexin
 - [ ] Add batch processing for multiple operations
 
 ### HTTP Support
-- [ ] Design range request batching strategy
-- [ ] Implement HTTP-based storage backend
+- [ ] Implement range request batching strategy
 - [ ] Add progressive loading support
 - [ ] Optimize for web-based access patterns
+- [ ] Implement advanced caching with TTL and size limits
 
 ### Integration
 - [ ] Integrate with FlatCityBuf header structure
@@ -79,15 +88,16 @@ This document tracks the implementation progress of the B-tree attribute indexin
 
 ## Next Steps
 
-1. Fix the remaining linter errors in the query implementation
-2. Complete the serialization/deserialization logic
-3. Implement the thread-safe LRU cache
-4. Add unit tests for key components
-5. Begin implementing the HTTP-specific optimizations
+1. Fix the compilation issues in the HTTP implementation
+2. Complete the thread-safe LRU cache
+3. Implement batching for HTTP range requests
+4. Add comprehensive unit tests for remote B-tree access
+5. Integrate with FlatCityBuf core format
 
 ## Performance Goals
 
 - 5-10x fewer system calls compared to BST approach
 - 80-95% cache hit rates for typical query patterns
 - Support for files exceeding available memory
-- Efficient operation over both local storage and HTTP 
+- Efficient operation over both local storage and HTTP
+- Reduced memory usage during bulk loading operations 
