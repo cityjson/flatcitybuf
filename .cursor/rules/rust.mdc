@@ -1,6 +1,7 @@
 ---
 description: Coding rules for Rust implementation in FlatCityBuf
 globs: src/rust/**
+alwaysApply: true
 ---
 # Rust Coding Guidelines for Library Development
 
@@ -29,51 +30,95 @@ globs: src/rust/**
 
 ### Example Folder Structure
 ```
-flatcitybuf/
-├── Cargo.lock
-├── Cargo.toml
-├── bst/
-│   ├── Cargo.toml
-│   └── src/
+.
+├── bst
+│   └── src
 │       ├── byte_serializable.rs
 │       ├── error.rs
 │       ├── lib.rs
-│       ├── query.rs
+│       ├── query
+│       │   ├── common.rs
+│       │   ├── fs.rs
+│       │   ├── http.rs
+│       │   ├── mod.rs
+│       │   └── stream.rs
 │       └── sorted_index.rs
-├── cli/
-│   ├── Cargo.toml
-│   └── src/
-│       ├── error.rs
+├── btree
+│   └── src
+│       ├── entry.rs
+│       ├── errors.rs
+│       ├── http.rs
+│       ├── key.rs
+│       ├── lib.rs
+│       ├── node.rs
+│       ├── query.rs
+│       ├── storage.rs
+│       ├── stream.rs
+│       └── tree.rs
+├── cli
+│   └── src
 │       └── main.rs
-├── fcb_core/
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── lib.rs
-│   │   ├── reader/
-│   │   ├── writer/
-│   │   ├── http_reader/
-│   │   ├── fb/
-│   │   ├── error.rs
-│   │   ├── const_vars.rs
-│   │   ├── cj_utils.rs
-│   │   └── cjerror.rs
-├── packed_rtree/
-│   ├── Cargo.toml
-│   └── src/
+├── fcb_core
+│   ├── benches
+│   │   ├── read.rs
+│   │   ├── read_attr.rs
+│   │   └── read_profile.rs
+│   ├── benchmark_data
+│   │   └── attribute
+│   ├── scripts
+│   └── src
+│       ├── bin
+│       │   ├── read.rs
+│       │   ├── read_attr.rs
+│       │   ├── read_attr_stream.rs
+│       │   ├── read_cj.rs
+│       │   └── write.rs
+│       ├── cj_utils.rs
+│       ├── cjerror.rs
+│       ├── const_vars.rs
+│       ├── error.rs
+│       ├── fb
+│       │   ├── feature_generated.rs
+│       │   ├── header_generated.rs
+│       │   └── mod.rs
+│       ├── http_reader
+│       │   ├── mock_http_range_client.rs
+│       │   └── mod.rs
+│       ├── lib.rs
+│       ├── reader
+│       │   ├── attr_query.rs
+│       │   ├── city_buffer.rs
+│       │   ├── deserializer.rs
+│       │   ├── geom_decoder.rs
+│       │   └── mod.rs
+│       └── writer
+│           ├── attr_index.rs
+│           ├── attribute.rs
+│           ├── error.rs
+│           ├── feature_writer.rs
+│           ├── geom_encoder.rs
+│           ├── header_writer.rs
+│           ├── mod.rs
+│           └── serializer.rs
+├── packed_rtree
+│   └── src
 │       ├── error.rs
 │       └── lib.rs
-├── wasm/
-│   ├── Cargo.toml
-│   ├── pkg/
-│   └── src/
-│       ├── gloo_client.rs
-│       └── lib.rs
+├── src
+│   └── lib.rs
+├── temp
+└── wasm
+    ├── pkg
+    └── src
+        ├── gloo_client.rs
+        └── lib.rs
+
 ```
 
 ---
 
 ## Error Handling
-- Use `anyhow` for application code and `thiserror` for package-level errors.
+- Use `thiserror` to make custom error for package-level errors. You shouldn't use `anyhow` unless I explictly approve you to do that.
 - Avoid panics in library code; return errors instead.
 - Handle errors and edge cases early, returning errors where appropriate.
 
@@ -127,4 +172,3 @@ mentation
 - Follow **Rust's idiomatic coding practices**.
 - Endut e, safety, and maintainability**.
 - Maintain a **black-and-white, pixelated/nerdy ltao  will remain robust, efficient, and maintainable across its m crates and modules. 🚀
-
