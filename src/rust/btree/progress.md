@@ -56,6 +56,9 @@ This document tracks the implementation progress of the B-tree attribute indexin
 - [x] Added API usage examples
 - [x] Set up basic test infrastructure
 - [x] Created and verified test cases for all key encoders
+- [x] Implemented comprehensive tests for `Node` operations
+- [x] Implemented comprehensive tests for `BlockStorage` implementations
+- [x] Implemented comprehensive tests for core `BTree` operations
 
 ## In Progress
 
@@ -64,22 +67,32 @@ This document tracks the implementation progress of the B-tree attribute indexin
   - [x] Add support for Float<f32>
   - [x] Add support for Bool
   - [x] Add support for date/time types (NaiveDateTime, NaiveDate, DateTime<Utc>)
+- [x] Enhance B-tree implementation
+  - [x] Complete and enhance `Node` serialization/deserialization
+  - [x] Add comprehensive unit tests for Node operations
+  - [x] Fix any identified issues with Node implementation
+- [x] Storage Implementation Review and Testing
+  - [x] Review the existing MemoryBlockStorage implementation
+  - [x] Enhance CachedFileBlockStorage if needed
+  - [x] Add comprehensive unit tests for both storage implementations
+- [x] B-tree Core Implementation and Testing
+  - [x] Review the existing B-tree implementation
+  - [x] Add comprehensive unit tests for B-tree operations
 - [ ] Fix compilation issues in HTTP implementation
   - [x] Resolve Rust borrowing issues with HTTP client
   - [ ] Fix expected signature for AsyncBufferedHttpRangeClient
-- [ ] Integrate async operations with sync BTreeIndex trait
-- [ ] Add support for cancellation in HTTP operations
-- [ ] Complete unit tests for HTTP-based access
 
 ## Pending Items
 
 ### Core Implementation
 
-- [ ] Complete `Node` serialization/deserialization
+- [ ] Fix any LruCache issues with proper mutable borrowing
 - [ ] Implement collision handling for string keys with same prefix
 - [ ] Optimize memory usage in internal data structures
-- [ ] Add more LruCache fixes where needed (proper mutable borrowing)
 - [ ] Fix remaining linter errors in HTTP implementation and query executor
+- [ ] Integrate async operations with sync BTreeIndex trait
+- [ ] Add support for cancellation in HTTP operations
+- [ ] Complete unit tests for HTTP-based access
 
 ### Performance Optimization
 
@@ -105,19 +118,20 @@ This document tracks the implementation progress of the B-tree attribute indexin
 ### Documentation & Testing
 
 - [x] Created simple test case for key encoders
+- [x] Created comprehensive test cases for Node, Storage, and Tree components
 - [ ] Add detailed documentation for all public APIs
-- [ ] Create more comprehensive test suite
 - [ ] Add benchmarking for performance comparison with BST
 - [ ] Create examples for common use cases
 
-## Next Steps
+## Next Steps (Immediate Focus)
 
-1. Fix remaining linter errors in HTTP implementation
-2. Implement and test B-tree for local file system
-3. Optimize file I/O operations for disk-based storage
-4. Fix remaining LruCache issues in file-based storage
-5. Add comprehensive unit tests for file-based operations
-6. Integrate with FlatCityBuf core format
+1. Fix compilation issues in HTTP implementation
+   - Focus on fixing the expected signature for AsyncBufferedHttpRangeClient
+   - Complete integration of async operations with sync BTreeIndex trait
+2. Implement collision handling for string keys with same prefix
+3. Optimize memory usage in internal data structures
+4. Add comprehensive unit tests for HTTP-based access
+5. Integrate with FlatCityBuf header structure
 
 ## Performance Goals
 

@@ -1,4 +1,5 @@
 use crate::errors::{KeyError, Result};
+use std::mem::size_of;
 
 /// Entry in a B-tree node, consisting of a key and value
 #[derive(Debug, Clone)]
