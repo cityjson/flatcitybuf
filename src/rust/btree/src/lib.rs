@@ -20,13 +20,14 @@ pub use query::{
     AttributeQuery, Condition, LogicalOp, QueryBuilder, QueryExecutor, QueryExpr, QueryResult,
     RTreeIndex, SpatialQuery,
 };
-pub use storage::{BlockStorage, CachedFileBlockStorage, MemoryBlockStorage};
+pub use storage::{BlockStorage, GenericBlockStorage, MemoryBlockStorage};
 pub use stream::{BTreeReader, BTreeStreamProcessor};
 pub use tree::{BTree, BTreeIndex};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn basic_tree_test() {
@@ -104,5 +105,60 @@ mod tests {
         // for feature_id in result.feature_ids {
         //     println!("Found feature with ID: {}", feature_id);
         // }
+    }
+
+    /// This test demonstrates how to embed a B-tree within a larger byte buffer
+    /// using the GenericBlockStorage adapter.
+    #[test]
+    fn embedded_btree_example() {
+        println!("testing embedded b-tree...");
+
+        // Create a buffer to hold our composite format
+        // The layout will be:
+        // - 0-512: Header/metadata section
+        // - 512-4608: B-tree index section
+        // - 4608+: Data section
+        let buffer_size = 10 * 1024; // 10KB total
+        let buffer = vec![0u8; buffer_size];
+        let cursor = Cursor::new(buffer);
+
+        // Create a block storage that starts at offset 512, with 4KB available
+        // (enough for a small B-tree)
+        let block_size = 512; // Smaller blocks for this example
+        let btree_section_start = 512;
+        let btree_section_end = 4608;
+
+        let storage = GenericBlockStorage::with_bounds(
+            cursor,
+            btree_section_start,
+            Some(btree_section_end),
+            block_size,
+            5, // Cache 5 blocks
+        );
+
+        // Create a B-tree for storing integer keys
+        let key_encoder = Box::new(AnyKeyEncoder::i64());
+        let mut btree = BTree::new(storage, key_encoder).unwrap();
+
+        // Insert some test data
+        btree.insert(&KeyType::I64(1), 100).unwrap();
+        btree.insert(&KeyType::I64(2), 200).unwrap();
+        btree.insert(&KeyType::I64(3), 300).unwrap();
+
+        // Search for a key
+        let result = btree.search(&KeyType::I64(2)).unwrap();
+        assert_eq!(result, Some(200));
+
+        // The btree is now embedded within our buffer at the specified section
+
+        // We can access the buffer to verify or to serialize it
+        let storage = btree.into_storage();
+        // let cursor = storage.source.borrow();
+        // let final_buffer = cursor.get_ref();
+
+        // At this point, final_buffer contains our composite data format
+        // with the B-tree embedded in the specified section
+
+        println!("embedded b-tree test passed");
     }
 }

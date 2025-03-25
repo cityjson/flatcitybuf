@@ -42,6 +42,10 @@ pub enum BTreeError {
     /// Type mismatch
     #[error("Type mismatch: expected {expected}, got {actual}")]
     TypeMismatch { expected: String, actual: String },
+
+    /// Custom I/O related error (like bounds exceeded)
+    #[error("I/O operation error: {0}")]
+    IoError(String),
 }
 
 /// Error types for key operations

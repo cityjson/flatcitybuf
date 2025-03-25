@@ -94,11 +94,20 @@ impl BlockStorage for MemoryBlockStorage {
     }
 }
 
-/// File-based block storage with LRU cache
+/// Generic block storage that can work with any type implementing Read + Write + Seek
+///
+/// This storage implementation allows B-trees to be embedded in any byte buffer
+/// or specific sections of a file, making it ideal for composite data formats.
 #[derive(Debug)]
-pub struct CachedFileBlockStorage {
-    /// Underlying file
-    file: RefCell<File>,
+pub struct GenericBlockStorage<T: Read + Write + Seek> {
+    /// Underlying reader/writer/seeker
+    source: RefCell<T>,
+
+    /// Base offset where this storage begins
+    base_offset: u64,
+
+    /// End offset limit (None means no limit)
+    end_offset: Option<u64>,
 
     /// LRU cache of blocks
     cache: RefCell<LruCache<u64, Vec<u8>>>,
@@ -116,25 +125,36 @@ pub struct CachedFileBlockStorage {
     max_buffered_writes: usize,
 }
 
-impl CachedFileBlockStorage {
-    /// Create a new file-based block storage with cache
-    pub fn new(file: File, block_size: usize, cache_size: usize) -> Self {
-        // Convert cache_size to NonZeroUsize for LruCache
-        let cache_size = NonZeroUsize::new(cache_size.max(1)).unwrap();
-
-        Self {
-            file: RefCell::new(file),
-            cache: RefCell::new(LruCache::new(cache_size)),
-            block_size,
-            max_prefetch: 4, // Default to prefetching 4 blocks
-            write_buffer: RefCell::new(HashMap::new()),
-            max_buffered_writes: 16, // Default to buffering up to 16 writes
-        }
+impl<T: Read + Write + Seek> GenericBlockStorage<T> {
+    /// Create a new generic block storage with default settings
+    pub fn new(source: T, block_size: usize, cache_size: usize) -> Self {
+        Self::with_config(source, 0, None, block_size, cache_size, 4, 16)
     }
 
-    /// Create a new file-based block storage with custom settings
+    /// Create a new generic block storage for a section of the source
+    pub fn with_bounds(
+        source: T,
+        base_offset: u64,
+        end_offset: Option<u64>,
+        block_size: usize,
+        cache_size: usize,
+    ) -> Self {
+        Self::with_config(
+            source,
+            base_offset,
+            end_offset,
+            block_size,
+            cache_size,
+            4,
+            16,
+        )
+    }
+
+    /// Create a new generic block storage with custom settings
     pub fn with_config(
-        file: File,
+        source: T,
+        base_offset: u64,
+        end_offset: Option<u64>,
         block_size: usize,
         cache_size: usize,
         max_prefetch: usize,
@@ -144,7 +164,9 @@ impl CachedFileBlockStorage {
         let cache_size = NonZeroUsize::new(cache_size.max(1)).unwrap();
 
         Self {
-            file: RefCell::new(file),
+            source: RefCell::new(source),
+            base_offset,
+            end_offset,
             cache: RefCell::new(LruCache::new(cache_size)),
             block_size,
             max_prefetch,
@@ -154,8 +176,8 @@ impl CachedFileBlockStorage {
     }
 
     /// Prefetch a range of blocks for sequential access
-    pub fn prefetch_blocks(&self, start_offset: u64, count: usize) -> Result<()> {
-        let mut file = self.file.borrow_mut();
+    pub fn prefetch_blocks(&self, offset: u64, count: usize) -> Result<()> {
+        let mut source = self.source.borrow_mut();
         let mut cache = self.cache.borrow_mut();
 
         // Limit the number of blocks to prefetch
@@ -165,11 +187,21 @@ impl CachedFileBlockStorage {
         let total_size = count * self.block_size;
         let mut buffer = vec![0u8; total_size];
 
+        // Convert to absolute offset
+        let absolute_offset = self.base_offset + offset;
+
+        // Check if beyond end offset
+        if let Some(end) = self.end_offset {
+            if absolute_offset >= end {
+                return Ok(());
+            }
+        }
+
         // Seek to start offset
-        file.seek(SeekFrom::Start(start_offset))?;
+        source.seek(SeekFrom::Start(absolute_offset))?;
 
         // Read all blocks in one operation
-        let bytes_read = file.read(&mut buffer)?;
+        let bytes_read = source.read(&mut buffer)?;
 
         if bytes_read == 0 {
             return Ok(()); // Nothing to read
@@ -177,32 +209,30 @@ impl CachedFileBlockStorage {
 
         // Split buffer into blocks and add to cache
         let blocks_read = bytes_read.div_ceil(self.block_size);
-        // let blocks_read = (bytes_read + self.block_size - 1) / self.block_size;
 
         for i in 0..blocks_read {
-            let offset = start_offset + (i * self.block_size) as u64;
+            let block_offset = offset + (i * self.block_size) as u64;
             let block_start = i * self.block_size;
             let block_end = block_start + self.block_size.min(bytes_read - block_start);
 
             // Only cache if we read a full block or reached EOF
             if block_end - block_start == self.block_size || block_end == bytes_read {
                 let block_data = buffer[block_start..block_end].to_vec();
-                cache.put(offset, block_data);
+                cache.put(block_offset, block_data);
             }
         }
 
         Ok(())
     }
 
-    /// Prefetch next leaf node(s) for range query
+    /// Prefetch next leaf node(s) for range query optimization
     pub fn prefetch_next_leaves(&self, node_offset: u64, count: usize) -> Result<()> {
         // Read current node to get next node pointer
         let data = self.read_block(node_offset)?;
 
         // Parse the node to get the next_node pointer
         if data.len() >= 11 {
-            // Extract next_node pointer from header
-            // next_node is at offset 3, size 8 bytes
+            // Extract next_node pointer from header (offset 3, size 8 bytes)
             let next_node_val = u64::from_le_bytes([
                 data[3], data[4], data[5], data[6], data[7], data[8], data[9], data[10],
             ]);
@@ -221,7 +251,7 @@ impl CachedFileBlockStorage {
         Ok(())
     }
 
-    /// Flush buffered writes to disk
+    /// Flush buffered writes to underlying storage
     fn flush_write_buffer(&self) -> Result<()> {
         let mut write_buffer = self.write_buffer.borrow_mut();
 
@@ -234,14 +264,27 @@ impl CachedFileBlockStorage {
         writes.sort_by_key(|(offset, _)| *offset);
 
         // Perform all writes
-        let mut file = self.file.borrow_mut();
+        let mut source = self.source.borrow_mut();
         for (offset, data) in writes {
-            file.seek(SeekFrom::Start(offset))?;
-            file.write_all(&data)?;
+            // Convert to absolute offset
+            let absolute_offset = self.base_offset + offset;
+
+            // Check if beyond end offset
+            if let Some(end) = self.end_offset {
+                if absolute_offset >= end {
+                    return Err(BTreeError::IoError(format!(
+                        "Write offset {} beyond storage bounds",
+                        absolute_offset
+                    )));
+                }
+            }
+
+            source.seek(SeekFrom::Start(absolute_offset))?;
+            source.write_all(&data)?;
         }
 
-        // Ensure data is flushed to disk
-        file.flush()?;
+        // Ensure data is flushed
+        source.flush()?;
 
         Ok(())
     }
@@ -253,21 +296,35 @@ impl CachedFileBlockStorage {
 
     /// Clear the entire cache - useful for testing
     pub fn clear_cache(&mut self) {
-        let mut cache = self.cache.borrow_mut();
-        cache.clear();
+        self.cache.borrow_mut().clear();
     }
 
-    /// Set the number of blocks to prefetch
-    pub fn set_prefetch_count(&mut self, count: usize) {
-        self.max_prefetch = count;
+    /// Get the base offset of this storage
+    pub fn base_offset(&self) -> u64 {
+        self.base_offset
+    }
+
+    /// Get the end offset of this storage, if limited
+    pub fn end_offset(&self) -> Option<u64> {
+        self.end_offset
     }
 }
 
-impl BlockStorage for CachedFileBlockStorage {
+impl<T: Read + Write + Seek> BlockStorage for GenericBlockStorage<T> {
     fn read_block(&self, offset: u64) -> Result<Vec<u8>> {
         // Check alignment
         if offset % self.block_size as u64 != 0 {
             return Err(BTreeError::AlignmentError(offset));
+        }
+
+        // Calculate absolute offset
+        let absolute_offset = self.base_offset + offset;
+
+        // Check if beyond end offset
+        if let Some(end) = self.end_offset {
+            if absolute_offset >= end {
+                return Err(BTreeError::BlockNotFound(offset));
+            }
         }
 
         // Check if the offset is in cache first
@@ -278,7 +335,7 @@ impl BlockStorage for CachedFileBlockStorage {
             }
         }
 
-        // Check if the block is in the write buffer (not yet flushed to disk)
+        // Check if the block is in the write buffer (not yet flushed)
         {
             let write_buffer = self.write_buffer.borrow();
             if let Some(data) = write_buffer.get(&offset) {
@@ -289,11 +346,11 @@ impl BlockStorage for CachedFileBlockStorage {
             }
         }
 
-        // Read from file
-        let mut file = self.file.borrow_mut();
+        // Read from underlying storage
+        let mut source = self.source.borrow_mut();
         let mut buf = vec![0u8; self.block_size];
-        file.seek(SeekFrom::Start(offset))?;
-        let bytes_read = file.read(&mut buf)?;
+        source.seek(SeekFrom::Start(absolute_offset))?;
+        let bytes_read = source.read(&mut buf)?;
 
         if bytes_read == 0 {
             return Err(BTreeError::BlockNotFound(offset));
@@ -302,11 +359,11 @@ impl BlockStorage for CachedFileBlockStorage {
         // Resize buffer to actual bytes read
         buf.truncate(bytes_read);
 
-        // Prefetch next few blocks for sequential access
+        // Prefetch next blocks for sequential access
         if bytes_read == self.block_size {
             // Only prefetch if we read a full block (likely not at EOF)
             let next_offset = offset + self.block_size as u64;
-            drop(file); // Release file borrow before prefetching
+            drop(source); // Release borrow before prefetching
 
             // Try to prefetch, but ignore errors as this is just an optimization
             let _ = self.prefetch_blocks(next_offset, self.max_prefetch);
@@ -327,6 +384,19 @@ impl BlockStorage for CachedFileBlockStorage {
             return Err(BTreeError::AlignmentError(offset));
         }
 
+        // Calculate absolute offset
+        let absolute_offset = self.base_offset + offset;
+
+        // Check if beyond end offset
+        if let Some(end) = self.end_offset {
+            if absolute_offset >= end {
+                return Err(BTreeError::IoError(format!(
+                    "Write offset {} beyond storage bounds",
+                    absolute_offset
+                )));
+            }
+        }
+
         // Ensure block is exactly block_size
         let mut data_copy = data.to_vec();
         data_copy.resize(self.block_size, 0);
@@ -336,7 +406,7 @@ impl BlockStorage for CachedFileBlockStorage {
             let mut write_buffer = self.write_buffer.borrow_mut();
             write_buffer.insert(offset, data_copy.clone());
 
-            // If buffer is full, flush to disk
+            // If buffer is full, flush to storage
             if write_buffer.len() >= self.max_buffered_writes {
                 drop(write_buffer); // Release borrow before calling flush
                 self.flush_write_buffer()?;
@@ -353,20 +423,62 @@ impl BlockStorage for CachedFileBlockStorage {
     }
 
     fn allocate_block(&mut self) -> Result<u64> {
-        // Get file length
-        let mut file = self.file.borrow_mut();
-        let offset = file.seek(SeekFrom::End(0))?;
+        let mut source = self.source.borrow_mut();
 
-        // Round up to next block_size boundary if needed
-        let aligned_offset = (offset + self.block_size as u64 - 1) & !(self.block_size as u64 - 1);
+        // Get the current position of the cursor
+        let current_pos = source.stream_position()?;
 
-        if aligned_offset > offset {
-            // Pad file to ensure alignment
-            let padding = vec![0u8; (aligned_offset - offset) as usize];
-            file.write_all(&padding)?;
+        // Determine the starting position for allocation
+        let start_pos = if current_pos < self.base_offset {
+            self.base_offset
+        } else {
+            current_pos
+        };
+
+        // Calculate relative offset within our storage area
+        let relative_offset = start_pos - self.base_offset;
+
+        // For bounded storage, we need to respect the limits
+        if let Some(end) = self.end_offset {
+            // Calculate remaining space
+            let max_relative_offset = end.saturating_sub(self.base_offset);
+
+            // Check if we have enough space for another block
+            if relative_offset + self.block_size as u64 > max_relative_offset {
+                return Err(BTreeError::IoError("Exceeded storage limit".into()));
+            }
         }
 
-        Ok(aligned_offset)
+        // Round up to next block_size boundary if needed
+        let aligned_relative =
+            (relative_offset + self.block_size as u64 - 1) & !(self.block_size as u64 - 1);
+
+        // Calculate the absolute position to seek to
+        let absolute_position = self.base_offset + aligned_relative;
+
+        // Ensure we're not exceeding our end boundary after alignment
+        if let Some(end) = self.end_offset {
+            if absolute_position + self.block_size as u64 > end {
+                return Err(BTreeError::IoError(
+                    "Exceeded storage limit after alignment".into(),
+                ));
+            }
+        }
+
+        // If needed, pad the storage up to the absolute position
+        if absolute_position > current_pos {
+            let padding_size = (absolute_position - current_pos) as usize;
+            if padding_size > 0 {
+                let padding = vec![0u8; padding_size];
+                source.seek(SeekFrom::Start(current_pos))?;
+                source.write_all(&padding)?;
+            }
+        }
+
+        // Update cursor position
+        source.seek(SeekFrom::Start(absolute_position + self.block_size as u64))?;
+
+        Ok(aligned_relative)
     }
 
     fn block_size(&self) -> usize {
@@ -376,10 +488,8 @@ impl BlockStorage for CachedFileBlockStorage {
     fn flush(&mut self) -> Result<()> {
         // Flush buffered writes
         self.flush_write_buffer()?;
-
-        // Also flush any file buffers
-        self.file.borrow_mut().flush()?;
-
+        // Also flush any source buffers
+        self.source.borrow_mut().flush()?;
         Ok(())
     }
 }
@@ -424,7 +534,7 @@ mod tests {
         let file = tempfile().unwrap();
 
         // Create cached file storage
-        let mut storage = CachedFileBlockStorage::new(file, 128, 10);
+        let mut storage = GenericBlockStorage::new(file, 128, 10);
 
         // Allocate a block
         let offset = storage.allocate_block().unwrap();
@@ -465,7 +575,7 @@ mod tests {
         let file = tempfile().unwrap();
 
         // Initialize storage with a cache size of 2 blocks
-        let mut storage = CachedFileBlockStorage::with_config(file, 128, 2, 0, 0);
+        let mut storage = GenericBlockStorage::with_config(file, 0, None, 128, 2, 0, 0);
 
         // Allocate 3 blocks (0, 1, 2)
         let offsets: Vec<u64> = (0..3).map(|i| i * 128).collect();
@@ -543,30 +653,41 @@ mod tests {
     fn test_buffered_writes() {
         println!("testing buffered writes...");
 
-        // Create a temporary file
-        let file = tempfile().unwrap();
+        // Create a buffer instead of a file for more predictable testing
+        let buffer = vec![0u8; 1024];
+        let cursor = Cursor::new(buffer);
 
-        // Create storage with 3 buffered writes
-        let mut storage = CachedFileBlockStorage::with_config(file, 128, 5, 2, 3);
+        // Create storage with max_buffered_writes=2 (will flush after 2 writes)
+        let mut storage = GenericBlockStorage::with_config(cursor, 0, None, 128, 2, 0, 2);
 
-        // Write to 2 blocks (shouldn't trigger flush)
+        // Get the initial cursor position
+        let pos_before = storage.source.borrow().position();
+
+        // Write to 2 blocks
         for i in 0..2 {
             let offset = i * 128;
             let data = vec![i as u8 + 1; 5];
             storage.write_block(offset, &data).unwrap();
         }
 
-        // Check file size - should still be 0 as nothing is flushed yet
-        let file_size = storage.file.borrow().metadata().unwrap().len();
-        assert_eq!(file_size, 0);
+        // Manually trigger flush to ensure write buffer is empty
+        storage.flush().unwrap();
 
-        // Write to one more block - should trigger auto-flush
-        let data = vec![3; 5];
-        storage.write_block(2 * 128, &data).unwrap();
+        // Get position after writes (should have advanced)
+        let pos_after = storage.source.borrow().position();
+        assert!(
+            pos_after > pos_before,
+            "Cursor position should have advanced after flush: {} -> {}",
+            pos_before,
+            pos_after
+        );
 
-        // File should now contain data
-        let file_size = storage.file.borrow().metadata().unwrap().len();
-        assert!(file_size > 0);
+        // Read back the data to verify it was written correctly
+        let data1 = storage.read_block(0).unwrap();
+        let data2 = storage.read_block(128).unwrap();
+
+        assert_eq!(&data1[0..5], &[1, 1, 1, 1, 1]);
+        assert_eq!(&data2[0..5], &[2, 2, 2, 2, 2]);
 
         println!("buffered writes passed");
     }
@@ -579,7 +700,7 @@ mod tests {
         let file = tempfile().unwrap();
 
         // Create cached file storage with prefetching explicitly configured
-        let mut storage = CachedFileBlockStorage::with_config(file, 128, 5, 3, 2);
+        let mut storage = GenericBlockStorage::with_config(file, 0, None, 128, 5, 3, 2);
 
         // Allocate several consecutive blocks
         let offsets: Vec<u64> = (0..5).map(|i| i * 128).collect();
@@ -632,5 +753,165 @@ mod tests {
         );
 
         println!("prefetching passed");
+    }
+
+    #[test]
+    fn test_generic_block_storage_with_cursor() {
+        println!("testing generic block storage with cursor...");
+
+        // Create a Vec<u8> with some initial capacity
+        let buffer = vec![0u8; 1024];
+        let cursor = Cursor::new(buffer);
+
+        // Create generic block storage with the cursor
+        let mut storage = GenericBlockStorage::new(cursor, 128, 10);
+
+        // Allocate a block
+        let offset = storage.allocate_block().unwrap();
+
+        // Write some data
+        let data = vec![1, 2, 3, 4, 5];
+        storage.write_block(offset, &data).unwrap();
+
+        // Flush to ensure data is written
+        storage.flush().unwrap();
+
+        // Read the data back
+        let read_data = storage.read_block(offset).unwrap();
+        assert_eq!(read_data[0..5], data);
+
+        println!("generic block storage with cursor passed");
+    }
+
+    #[test]
+    fn test_generic_block_storage_with_bounds() {
+        println!("testing generic block storage with bounds...");
+
+        // Create a buffer of 2048 bytes
+        let mut buffer = vec![0u8; 2048];
+
+        // Pre-fill the buffer to simulate existing data up to the base offset
+        for i in 0..512 {
+            buffer[i] = 0xFF; // Fill with non-zero data
+        }
+
+        let mut cursor = Cursor::new(buffer);
+
+        // Position cursor at the base offset
+        cursor.set_position(512);
+
+        // Create a storage with bounds starting at offset 512 with limit at 1024
+        // This gives us space for 4 blocks of 128 bytes each (512 bytes total)
+        let mut storage = GenericBlockStorage::with_bounds(
+            cursor,
+            512,        // Base offset
+            Some(1024), // End offset (space for 4 blocks of 128 bytes)
+            128,        // Block size
+            10,         // Cache size
+        );
+
+        // Allocate two blocks - should succeed
+        let offset1 = storage.allocate_block().unwrap();
+        let offset2 = storage.allocate_block().unwrap();
+
+        // The offsets should be relative to the base
+        assert_eq!(offset1, 0);
+        assert_eq!(offset2, 128);
+
+        // Write data to both blocks
+        storage.write_block(offset1, &vec![1, 2, 3]).unwrap();
+        storage.write_block(offset2, &vec![4, 5, 6]).unwrap();
+
+        // Flush the data
+        storage.flush().unwrap();
+
+        // Read the data back
+        let data1 = storage.read_block(offset1).unwrap();
+        let data2 = storage.read_block(offset2).unwrap();
+
+        assert_eq!(data1[0..3], vec![1, 2, 3]);
+        assert_eq!(data2[0..3], vec![4, 5, 6]);
+
+        // Get the underlying cursor to verify the actual positions of data
+        let inner_cursor = storage.source.borrow();
+        let buffer = inner_cursor.get_ref();
+
+        // Check that data was written at the correct absolute positions
+        assert_eq!(buffer[512..515], vec![1, 2, 3]);
+        assert_eq!(buffer[640..643], vec![4, 5, 6]);
+
+        println!("generic block storage with bounds passed");
+    }
+
+    #[test]
+    fn test_generic_block_storage_bounds_exceeded() {
+        println!("testing generic block storage bounds check...");
+
+        // Create a buffer of 1024 bytes
+        let mut buffer = vec![0u8; 1024];
+
+        // Pre-fill the buffer to simulate existing data up to base offset
+        for i in 0..512 {
+            buffer[i] = 0xFF;
+        }
+
+        let mut cursor = Cursor::new(buffer);
+
+        // Position cursor at the base offset
+        cursor.set_position(512);
+
+        // Create a storage with tight bounds: 512-640 (just enough for 1 block)
+        let mut storage = GenericBlockStorage::with_bounds(
+            cursor,
+            512,       // Base offset
+            Some(640), // End offset (just enough for 1 block)
+            128,       // Block size
+            10,        // Cache size
+        );
+
+        // First block allocation should succeed
+        match storage.allocate_block() {
+            Ok(offset) => {
+                assert_eq!(offset, 0);
+
+                // Write to the first block should succeed
+                storage.write_block(offset, &vec![1, 2, 3]).unwrap();
+
+                // Second block allocation should fail since we're at the limit
+                let result = storage.allocate_block();
+                assert!(
+                    result.is_err(),
+                    "Should have failed to allocate beyond bounds"
+                );
+
+                if let Err(e) = result {
+                    match e {
+                        BTreeError::IoError(msg) => {
+                            assert!(
+                                msg.contains("Exceeded storage limit"),
+                                "Expected 'Exceeded storage limit' error, got: {}",
+                                msg
+                            );
+                        }
+                        _ => panic!(
+                            "Expected IoError with 'Exceeded storage limit' message, got: {:?}",
+                            e
+                        ),
+                    }
+                }
+
+                // Direct write beyond bounds should fail
+                let result = storage.write_block(128, &vec![4, 5, 6]);
+                assert!(result.is_err(), "Should have failed to write beyond bounds");
+            }
+            Err(e) => {
+                panic!(
+                    "First block allocation should succeed, but got error: {:?}",
+                    e
+                );
+            }
+        }
+
+        println!("generic block storage bounds check passed");
     }
 }

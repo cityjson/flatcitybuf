@@ -568,6 +568,22 @@ impl<K, S: BlockStorage> BTree<K, S> {
             }
         }
     }
+
+    /// Consumes the B-tree and returns the underlying storage.
+    ///
+    /// This is useful when the B-tree's storage is embedded within a larger data structure,
+    /// allowing you to access the underlying bytes after B-tree operations are complete.
+    pub fn into_storage(self) -> S {
+        self.storage
+    }
+
+    /// Flushes any pending writes to the underlying storage.
+    ///
+    /// This ensures that all changes made to the B-tree are written
+    /// to the storage medium.
+    pub fn flush(&mut self) -> Result<()> {
+        self.storage.flush()
+    }
 }
 
 impl<K, S: BlockStorage> BTreeIndex for BTree<K, S> {
