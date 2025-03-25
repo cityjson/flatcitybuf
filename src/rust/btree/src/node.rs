@@ -1,8 +1,17 @@
+// B-tree node implementation
+//
+// This module provides node structures for B-tree indexes, including internal and leaf nodes.
+// Nodes store entries with fixed-size keys and 64-bit value pointers, and can be serialized
+// to/from binary for efficient disk storage.
+
 use crate::entry::Entry;
 use crate::errors::{BTreeError, Result};
-use crate::key::I64KeyEncoder;
 
-/// Type of B-tree node
+/// Type of B-tree node, either Internal or Leaf.
+///
+/// Internal nodes contain keys and pointers to child nodes, forming the internal structure
+/// of the B-tree. Leaf nodes contain the actual key-value pairs and form a linked list
+/// for efficient range queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
     /// Internal node contains keys and pointers to child nodes
@@ -13,7 +22,11 @@ pub enum NodeType {
 }
 
 impl NodeType {
-    /// Convert from u8 to NodeType
+    /// Convert from u8 to NodeType.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the value is not 0 or 1.
     pub fn from_u8(value: u8) -> Result<Self> {
         match value {
             0 => Ok(NodeType::Internal),
@@ -25,19 +38,35 @@ impl NodeType {
         }
     }
 
-    /// Convert NodeType to u8
+    /// Convert NodeType to u8 for serialization.
     pub fn to_u8(&self) -> u8 {
         *self as u8
     }
 }
 
-/// B-tree node structure
+/// B-tree node structure for storing entries.
+///
+/// A node can be either an internal node (containing pointers to child nodes)
+/// or a leaf node (containing actual key-value pairs). Leaf nodes form a linked
+/// list through the `next_node` field, allowing efficient range queries.
+///
+/// # Node Structure
+///
+/// The on-disk/serialized structure of a node is:
+/// - 1 byte: node type (0 = internal, 1 = leaf)
+/// - 2 bytes: entry count (little-endian u16)
+/// - 8 bytes: next node pointer (little-endian u64, 0 = None)
+/// - 1 byte: reserved for future use
+/// - Entries: array of entry records, each containing:
+///   - N bytes: key (fixed size defined by key_size)
+///   - 8 bytes: value (little-endian u64)
+/// - Padding: zeroes to fill the node to node_size
 #[derive(Debug, Clone)]
 pub struct Node {
     /// Type of node (internal or leaf)
     pub node_type: NodeType,
 
-    /// Entries in this node
+    /// Entries in this node, sorted by key
     pub entries: Vec<Entry>,
 
     /// Pointer to next node (only for leaf nodes, forms a linked list)
@@ -45,7 +74,11 @@ pub struct Node {
 }
 
 impl Node {
-    /// Create a new node of the given type
+    /// Create a new empty node of the given type.
+    ///
+    /// # Parameters
+    ///
+    /// * `node_type` - The type of node to create (Internal or Leaf)
     pub fn new(node_type: NodeType) -> Self {
         Self {
             node_type,
@@ -54,28 +87,45 @@ impl Node {
         }
     }
 
-    /// Create a new internal node
+    /// Create a new empty internal node.
+    ///
+    /// This is a convenience method equivalent to `Node::new(NodeType::Internal)`.
     pub fn new_internal() -> Self {
         Self::new(NodeType::Internal)
     }
 
-    /// Create a new leaf node
+    /// Create a new empty leaf node.
+    ///
+    /// This is a convenience method equivalent to `Node::new(NodeType::Leaf)`.
     pub fn new_leaf() -> Self {
         Self::new(NodeType::Leaf)
     }
 
-    /// Check if this node is a leaf
+    /// Check if this node is a leaf node.
     pub fn is_leaf(&self) -> bool {
         self.node_type == NodeType::Leaf
     }
 
-    /// Add an entry to this node
+    /// Add an entry to this node.
+    ///
+    /// This method adds an entry to the node without enforcing any ordering.
+    /// The caller is responsible for inserting entries in the correct order
+    /// or reordering them after insertion.
     pub fn add_entry(&mut self, entry: Entry) {
         // Insert an entry into the node, maintaining ordering
         self.entries.push(entry);
     }
 
-    /// Find an entry by key
+    /// Find an entry by key using binary search.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to search for
+    /// * `compare` - A function that compares two keys and returns their ordering
+    ///
+    /// # Returns
+    ///
+    /// The index of the entry if found, or None if not found
     pub fn find_entry(
         &self,
         key: &[u8],
@@ -87,7 +137,20 @@ impl Node {
             .ok()
     }
 
-    /// Encode this node to bytes
+    /// Encode this node to bytes for storage.
+    ///
+    /// # Parameters
+    ///
+    /// * `node_size` - The total size of the encoded node in bytes
+    /// * `key_size` - The fixed size of keys in bytes
+    ///
+    /// # Returns
+    ///
+    /// A byte vector of length `node_size` containing the encoded node
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node has too many entries to fit in `node_size`
     pub fn encode(&self, node_size: usize, key_size: usize) -> Result<Vec<u8>> {
         // Calculate the maximum number of entries that can fit in this node
         let entry_size = key_size + 8; // key size + value size
@@ -122,7 +185,20 @@ impl Node {
         Ok(result)
     }
 
-    /// Decode a node from bytes
+    /// Decode a node from bytes.
+    ///
+    /// # Parameters
+    ///
+    /// * `bytes` - The byte slice containing the encoded node
+    /// * `key_size` - The fixed size of keys in bytes
+    ///
+    /// # Returns
+    ///
+    /// The decoded node
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the byte slice is too small or contains invalid data
     pub fn decode(bytes: &[u8], key_size: usize) -> Result<Self> {
         if bytes.len() < 12 {
             return Err(BTreeError::Deserialization(
@@ -181,7 +257,7 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::{AnyKeyEncoder, KeyEncoder};
+    use crate::key::{AnyKeyEncoder, KeyEncoder, KeyType};
     #[test]
     fn test_node_type_conversion() {
         // Test NodeType::from_u8
@@ -218,50 +294,73 @@ mod tests {
     }
 
     #[test]
-    // fn test_add_entry_and_find() {
-    //     let mut node = Node::new_leaf();
-    //     let key_encoder = AnyKeyEncoder::i64();
+    fn test_add_entry_and_find() {
+        let mut node = Node::new_leaf();
+        let key_encoder = AnyKeyEncoder::i64();
 
-    //     // Create test entries using I64KeyEncoder
-    //     let entry1 = Entry::new(key_encoder.encode(&1).unwrap(), 100);
-    //     let entry2 = Entry::new(key_encoder.encode(&2).unwrap(), 200);
-    //     let entry3 = Entry::new(key_encoder.encode(&3).unwrap(), 300);
+        // Create test entries using I64KeyEncoder
+        let entry1 = Entry::new(key_encoder.encode(&KeyType::I64(1)).unwrap(), 100);
+        let entry2 = Entry::new(key_encoder.encode(&KeyType::I64(2)).unwrap(), 200);
+        let entry3 = Entry::new(key_encoder.encode(&KeyType::I64(3)).unwrap(), 300);
+        let entry4 = Entry::new(key_encoder.encode(&KeyType::I64(4)).unwrap(), 400);
+        let entry5 = Entry::new(key_encoder.encode(&KeyType::I64(5)).unwrap(), 500);
 
-    //     // Add entries to node
-    //     node.add_entry(entry1.clone());
-    //     node.add_entry(entry2.clone());
-    //     node.add_entry(entry3.clone());
+        // Add entries to node
+        node.add_entry(entry1.clone());
+        node.add_entry(entry2.clone());
+        node.add_entry(entry3.clone());
+        node.add_entry(entry4.clone());
+        node.add_entry(entry5.clone());
 
-    //     // Verify entries were added
-    //     assert_eq!(node.entries.len(), 3);
-    //     assert_eq!(key_encoder.decode(&node.entries[0].key).unwrap(), 1);
-    //     assert_eq!(node.entries[0].value, 100);
-    //     assert_eq!(key_encoder.decode(&node.entries[1].key).unwrap(), 2);
-    //     assert_eq!(node.entries[1].value, 200);
-    //     assert_eq!(key_encoder.decode(&node.entries[2].key).unwrap(), 3);
-    //     assert_eq!(node.entries[2].value, 300);
+        // Verify entries were added
+        assert_eq!(node.entries.len(), 5);
+        assert_eq!(
+            key_encoder.decode(&node.entries[0].key).unwrap(),
+            KeyType::I64(1)
+        );
+        assert_eq!(node.entries[0].value, 100);
+        assert_eq!(
+            key_encoder.decode(&node.entries[1].key).unwrap(),
+            KeyType::I64(2)
+        );
+        assert_eq!(node.entries[1].value, 200);
+        assert_eq!(
+            key_encoder.decode(&node.entries[2].key).unwrap(),
+            KeyType::I64(3)
+        );
+        assert_eq!(node.entries[2].value, 300);
 
-    //     // Test find_entry with key encoder's compare function
-    //     let search_key = key_encoder.encode(&2).unwrap();
-    //     let idx = node.find_entry(&search_key, |a, b| key_encoder.compare(a, b));
-    //     assert_eq!(idx, Some(1));
+        // Test find_entry with key encoder's compare function
+        let search_key = key_encoder.encode(&KeyType::I64(2)).unwrap();
+        let idx = node.find_entry(&search_key, |a, b| key_encoder.compare(a, b));
+        assert_eq!(idx, Some(1));
 
-    //     // Try to find non-existing entry
-    //     let search_key = key_encoder.encode(&4).unwrap();
-    //     let idx = node.find_entry(&search_key, |a, b| key_encoder.compare(a, b));
-    //     assert_eq!(idx, None);
-    // }
+        // Try to find non-existing entry
+        let search_key = key_encoder.encode(&KeyType::I64(6)).unwrap();
+        let idx = node.find_entry(&search_key, |a, b| key_encoder.compare(a, b));
+        assert_eq!(idx, None);
+    }
+
     #[test]
     fn test_node_encode_decode() {
         // Create a node with some entries
         let mut node = Node::new_leaf();
-        let key_encoder = I64KeyEncoder;
+        let key_encoder = AnyKeyEncoder::i64();
         node.next_node = Some(12345);
 
         // Add entries using I64KeyEncoder
-        node.add_entry(Entry::new(key_encoder.encode(&1).unwrap(), 100));
-        node.add_entry(Entry::new(key_encoder.encode(&2).unwrap(), 200));
-        node.add_entry(Entry::new(key_encoder.encode(&3).unwrap(), 300));
+        node.add_entry(Entry::new(
+            key_encoder.encode(&KeyType::I64(1)).unwrap(),
+            100,
+        ));
+        node.add_entry(Entry::new(
+            key_encoder.encode(&KeyType::I64(2)).unwrap(),
+            200,
+        ));
+        node.add_entry(Entry::new(
+            key_encoder.encode(&KeyType::I64(3)).unwrap(),
+            300,
+        ));
 
         // Encode the node
         let node_size = 256; // Choose a small size for testing
@@ -280,11 +379,20 @@ mod tests {
         assert_eq!(decoded.entries.len(), 3);
 
         // Verify all entries were preserved
-        assert_eq!(key_encoder.decode(&decoded.entries[0].key).unwrap(), 1);
+        assert_eq!(
+            key_encoder.decode(&decoded.entries[0].key).unwrap(),
+            KeyType::I64(1)
+        );
         assert_eq!(decoded.entries[0].value, 100);
-        assert_eq!(key_encoder.decode(&decoded.entries[1].key).unwrap(), 2);
+        assert_eq!(
+            key_encoder.decode(&decoded.entries[1].key).unwrap(),
+            KeyType::I64(2)
+        );
         assert_eq!(decoded.entries[1].value, 200);
-        assert_eq!(key_encoder.decode(&decoded.entries[2].key).unwrap(), 3);
+        assert_eq!(
+            key_encoder.decode(&decoded.entries[2].key).unwrap(),
+            KeyType::I64(3)
+        );
         assert_eq!(decoded.entries[2].value, 300);
     }
 
@@ -292,11 +400,14 @@ mod tests {
     fn test_node_encode_too_many_entries() {
         // Create a node with too many entries for the node size
         let mut node = Node::new_leaf();
-        let key_encoder = I64KeyEncoder;
+        let key_encoder = AnyKeyEncoder::i64();
 
         // Add entries using I64KeyEncoder
         for i in 1..=10 {
-            node.add_entry(Entry::new(key_encoder.encode(&i).unwrap(), i as u64 * 100));
+            node.add_entry(Entry::new(
+                key_encoder.encode(&KeyType::I64(i)).unwrap(),
+                i as u64 * 100,
+            ));
         }
 
         // Try to encode with a small node size
@@ -312,7 +423,7 @@ mod tests {
     fn test_decode_incomplete_node() {
         // Test decoding with insufficient bytes
         let bytes = vec![1, 0, 0]; // Only 3 bytes, not enough for header
-        let key_size = I64KeyEncoder.encoded_size();
+        let key_size = AnyKeyEncoder::i64().encoded_size();
         let result = Node::decode(&bytes, key_size);
 
         // This should fail with a deserialization error
@@ -327,7 +438,7 @@ mod tests {
         bytes[1] = 2; // 2 entries (entry_count low byte)
         bytes[2] = 0; // entry_count high byte
 
-        let key_size = I64KeyEncoder.encoded_size();
+        let key_size = AnyKeyEncoder::i64().encoded_size();
         let result = Node::decode(&bytes, key_size);
 
         // This should fail with a deserialization error
@@ -337,11 +448,14 @@ mod tests {
     #[test]
     fn test_next_node_roundtrip() {
         // Test that next_node gets properly encoded/decoded for leaf nodes
-        let key_encoder = I64KeyEncoder;
+        let key_encoder = AnyKeyEncoder::i64();
 
         // Test with next_node = None
         let mut node1 = Node::new_leaf();
-        node1.add_entry(Entry::new(key_encoder.encode(&1).unwrap(), 100));
+        node1.add_entry(Entry::new(
+            key_encoder.encode(&KeyType::I64(1)).unwrap(),
+            100,
+        ));
         let encoded1 = node1.encode(128, key_encoder.encoded_size()).unwrap();
         let decoded1 = Node::decode(&encoded1, key_encoder.encoded_size()).unwrap();
         assert_eq!(decoded1.next_node, None);
@@ -349,7 +463,10 @@ mod tests {
         // Test with next_node = Some(value)
         let mut node2 = Node::new_leaf();
         node2.next_node = Some(0xDEADBEEF);
-        node2.add_entry(Entry::new(key_encoder.encode(&1).unwrap(), 100));
+        node2.add_entry(Entry::new(
+            key_encoder.encode(&KeyType::I64(1)).unwrap(),
+            100,
+        ));
         let encoded2 = node2.encode(128, key_encoder.encoded_size()).unwrap();
         let decoded2 = Node::decode(&encoded2, key_encoder.encoded_size()).unwrap();
         assert_eq!(decoded2.next_node, Some(0xDEADBEEF));

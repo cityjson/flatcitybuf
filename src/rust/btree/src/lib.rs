@@ -13,7 +13,7 @@ pub use entry::Entry;
 pub use errors::{BTreeError, KeyError, Result};
 #[cfg(feature = "http")]
 pub use http::{HttpBTreeBuilder, HttpBTreeReader, HttpBlockStorage, HttpConfig, HttpMetrics};
-pub use key::{FloatKeyEncoder, I64KeyEncoder, KeyEncoder, StringKeyEncoder};
+pub use key::{AnyKeyEncoder, KeyEncoder, KeyType};
 pub use node::{Node, NodeType};
 pub use query::conditions;
 pub use query::{
@@ -32,26 +32,28 @@ mod tests {
     fn basic_tree_test() {
         // Simple test for B-tree functionality
         let storage = MemoryBlockStorage::new(4096);
-        let key_encoder = Box::new(I64KeyEncoder);
+        let key_encoder = Box::new(AnyKeyEncoder::i64());
 
         // Create a new B-tree
         let mut btree = BTree::new(storage, key_encoder).unwrap();
 
         // Insert some test data
-        btree.insert(&1, 100).unwrap();
-        btree.insert(&2, 200).unwrap();
-        btree.insert(&3, 300).unwrap();
+        btree.insert(&KeyType::I64(1), 100).unwrap();
+        btree.insert(&KeyType::I64(2), 200).unwrap();
+        btree.insert(&KeyType::I64(3), 300).unwrap();
 
         // Search for a key
-        let result = btree.search(&2).unwrap();
+        let result = btree.search(&KeyType::I64(2)).unwrap();
         assert_eq!(result, Some(200));
 
         // Search for a non-existent key
-        let result = btree.search(&4).unwrap();
+        let result = btree.search(&KeyType::I64(4)).unwrap();
         assert_eq!(result, None);
 
         // Range query
-        let results = btree.range_query(&1, &3).unwrap();
+        let results = btree
+            .range_query(&KeyType::I64(1), &KeyType::I64(3))
+            .unwrap();
         assert_eq!(results.len(), 3);
         assert!(results.contains(&100));
         assert!(results.contains(&200));
@@ -66,11 +68,11 @@ mod tests {
 
         // 1. Create B-tree indices for different attributes
         let name_storage = MemoryBlockStorage::new(4096);
-        let name_encoder = Box::new(StringKeyEncoder { prefix_length: 16 });
+        let name_encoder = Box::new(AnyKeyEncoder::string(Some(16)));
         let name_btree = BTree::open(name_storage, name_encoder, 0); // root at offset 0
 
         let height_storage = MemoryBlockStorage::new(4096);
-        let height_encoder = Box::new(FloatKeyEncoder);
+        let height_encoder = Box::new(AnyKeyEncoder::f64());
         let height_btree = BTree::open(height_storage, height_encoder, 0);
 
         // 2. Create a query executor and register indices

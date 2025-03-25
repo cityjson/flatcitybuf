@@ -1,19 +1,38 @@
+// Key encoding/decoding for B-tree indexes
+//
+// This module provides type-safe encoders for storing different key types in a B-tree.
+// The encoders convert various types to fixed-width binary representations for efficient storage.
+// Each encoder guarantees consistent binary representation and proper ordering semantics.
+
 use crate::errors::{BTreeError, KeyError, Result};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
 use std::cmp::Ordering;
 
-/// Trait for encoding/decoding and comparing keys in the B-tree
+/// Trait for encoding/decoding and comparing keys in the B-tree.
+///
+/// Implementers of this trait provide methods to convert keys to and from byte representation
+/// with fixed width for efficient storage and retrieval in B-tree nodes.
 pub trait KeyEncoder<T> {
-    /// Returns the fixed size of encoded keys in bytes
+    /// Returns the fixed size of encoded keys in bytes.
+    ///
+    /// This is critical for B-tree nodes where keys must have consistent sizes.
     fn encoded_size(&self) -> usize;
 
-    /// Encodes a key into bytes with fixed width
+    /// Encodes a key into bytes with fixed width.
+    ///
+    /// The returned byte vector will always have a length equal to `encoded_size()`.
     fn encode(&self, key: &T) -> Result<Vec<u8>>;
 
-    /// Decodes a key from bytes
+    /// Decodes a key from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the byte slice is too small or the content is invalid.
     fn decode(&self, bytes: &[u8]) -> Result<T>;
 
-    /// Compares two encoded keys
+    /// Compares two encoded keys.
+    ///
+    /// Used for binary search and maintaining order within B-tree nodes.
     fn compare(&self, a: &[u8], b: &[u8]) -> Ordering;
 }
 
@@ -676,7 +695,27 @@ impl KeyEncoder<DateTime<Utc>> for DateTimeKeyEncoder {
     }
 }
 
-/// Enum wrapper for all supported key encoder types that can be used to create a type-safe API
+/// Enum wrapper for all supported key encoder types that provides a unified interface.
+///
+/// This type allows for dynamic selection of key encoders while maintaining type safety.
+/// Use the factory methods (e.g., `i64()`, `string()`) to create specific encoders.
+///
+/// # Examples
+///
+/// ```
+/// use btree::key::{AnyKeyEncoder, KeyType};
+///
+/// // Create an encoder for i64 values
+/// let encoder = AnyKeyEncoder::i64();
+///
+/// // Encode a key
+/// let key = KeyType::I64(42);
+/// let encoded = encoder.encode(&key).unwrap();
+///
+/// // Decode the key
+/// let decoded = encoder.decode(&encoded).unwrap();
+/// assert!(matches!(decoded, KeyType::I64(42)));
+/// ```
 #[derive(Debug, Clone)]
 pub enum AnyKeyEncoder {
     /// Integer (i64) key encoder
@@ -711,8 +750,15 @@ pub enum AnyKeyEncoder {
     DateTime(DateTimeKeyEncoder),
 }
 
-/// Helper type to represent any encodable key type
-#[derive(Debug, Clone)]
+/// Helper type to represent any encodable key type.
+///
+/// This enum provides a unified representation for all key types that can be used
+/// with the `AnyKeyEncoder`. It allows for dynamic type selection while maintaining
+/// type safety.
+///
+/// Note: This type implements `PartialEq` but not `Eq` because floating-point types
+/// don't satisfy the requirements for `Eq` due to NaN comparisons.
+#[derive(Debug, Clone, PartialEq)]
 pub enum KeyType {
     /// Integer (i64)
     I64(i64),
@@ -748,7 +794,15 @@ pub enum KeyType {
 
 /// Factory methods for AnyKeyEncoder
 impl AnyKeyEncoder {
-    /// Create a new integer key encoder
+    /// Create a new integer key encoder for i64 values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use btree::key::AnyKeyEncoder;
+    ///
+    /// let encoder = AnyKeyEncoder::i64();
+    /// ```
     pub fn i64() -> Self {
         Self::I64(I64KeyEncoder)
     }
@@ -803,9 +857,14 @@ impl AnyKeyEncoder {
         Self::Bool(BoolKeyEncoder)
     }
 
-    /// Create a new string key encoder with a specific prefix length
-    pub fn string(prefix_length: usize) -> Self {
-        Self::String(StringKeyEncoder { prefix_length })
+    /// Create a new string key encoder with a specific prefix length.
+    ///
+    /// If the prefix_length is None, a default of 10 bytes is used.
+    /// String keys longer than the prefix length will be truncated.
+    pub fn string(prefix_length: Option<usize>) -> Self {
+        Self::String(StringKeyEncoder {
+            prefix_length: prefix_length.unwrap_or(10),
+        })
     }
 
     /// Create a new naive date key encoder
@@ -824,8 +883,10 @@ impl AnyKeyEncoder {
     }
 }
 
-/// Implementation of KeyEncoder trait for AnyKeyEncoder
-/// This allows users to use AnyKeyEncoder directly with APIs requiring KeyEncoder
+/// Implementation of KeyEncoder trait for AnyKeyEncoder.
+///
+/// This allows users to use AnyKeyEncoder directly with APIs that require KeyEncoder,
+/// making the interface more consistent and user-friendly.
 impl KeyEncoder<KeyType> for AnyKeyEncoder {
     fn encoded_size(&self) -> usize {
         // Delegate to the inner encoder
@@ -849,7 +910,7 @@ impl KeyEncoder<KeyType> for AnyKeyEncoder {
     }
 
     fn encode(&self, key: &KeyType) -> Result<Vec<u8>> {
-        // Use encode_key which handles type checking and encoding
+        // Type-check and encode the key
         match (self, key) {
             (Self::I64(encoder), KeyType::I64(value)) => encoder.encode(value),
             (Self::I32(encoder), KeyType::I32(value)) => encoder.encode(value),
@@ -874,7 +935,7 @@ impl KeyEncoder<KeyType> for AnyKeyEncoder {
     }
 
     fn decode(&self, bytes: &[u8]) -> Result<KeyType> {
-        // Use decode_key which handles decoding to the appropriate type
+        // Decode to the appropriate KeyType variant
         match self {
             Self::I64(encoder) => encoder.decode(bytes).map(KeyType::I64),
             Self::I32(encoder) => encoder.decode(bytes).map(KeyType::I32),
@@ -895,7 +956,7 @@ impl KeyEncoder<KeyType> for AnyKeyEncoder {
     }
 
     fn compare(&self, a: &[u8], b: &[u8]) -> Ordering {
-        // Delegate to the inner encoder
+        // Delegate comparison to the inner encoder
         match self {
             Self::I64(encoder) => encoder.compare(a, b),
             Self::I32(encoder) => encoder.compare(a, b),

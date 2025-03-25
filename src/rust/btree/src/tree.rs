@@ -912,41 +912,41 @@ impl<K, S: BlockStorage> BTreeBuilder<K, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::{AnyKeyEncoder, I64KeyEncoder, KeyType};
+    use crate::key::{AnyKeyEncoder, KeyType};
     use crate::storage::MemoryBlockStorage;
     use std::collections::HashMap;
 
     // Helper function to create a test tree with integer keys
-    fn create_test_tree() -> Result<BTree<i64, MemoryBlockStorage>> {
+    fn create_test_tree() -> Result<BTree<KeyType, MemoryBlockStorage>> {
         let storage = MemoryBlockStorage::new(4096);
-        let key_encoder = Box::new(I64KeyEncoder);
+        let key_encoder = Box::new(AnyKeyEncoder::i64());
         BTree::new(storage, key_encoder)
     }
 
     // Helper function to create a test tree with a specific block size
     fn create_test_tree_with_storage(
         storage: MemoryBlockStorage,
-    ) -> Result<BTree<i64, MemoryBlockStorage>> {
-        let key_encoder = Box::new(I64KeyEncoder);
+    ) -> Result<BTree<KeyType, MemoryBlockStorage>> {
+        let key_encoder = Box::new(AnyKeyEncoder::i64());
         BTree::new(storage, key_encoder)
     }
 
     // Helper function to create a tree with some preset data
-    fn create_populated_tree() -> Result<BTree<i64, MemoryBlockStorage>> {
+    fn create_populated_tree() -> Result<BTree<KeyType, MemoryBlockStorage>> {
         let storage = MemoryBlockStorage::new(4096);
-        let key_encoder = Box::new(I64KeyEncoder);
+        let key_encoder = Box::new(AnyKeyEncoder::i64());
 
         // Create sorted entries
         let entries = vec![
-            (10, 100),
-            (20, 200),
-            (30, 300),
-            (40, 400),
-            (50, 500),
-            (60, 600),
-            (70, 700),
-            (80, 800),
-            (90, 900),
+            (KeyType::I64(10), 100),
+            (KeyType::I64(20), 200),
+            (KeyType::I64(30), 300),
+            (KeyType::I64(40), 400),
+            (KeyType::I64(50), 500),
+            (KeyType::I64(60), 600),
+            (KeyType::I64(70), 700),
+            (KeyType::I64(80), 800),
+            (KeyType::I64(90), 900),
         ];
 
         BTree::build(storage, key_encoder, entries)
@@ -979,11 +979,11 @@ mod tests {
         let tree = create_populated_tree().unwrap();
 
         // Search for existing key
-        let result = tree.search(&30).unwrap();
+        let result = tree.search(&KeyType::I64(30)).unwrap();
         assert_eq!(result, Some(300));
 
         // Search for non-existing key
-        let result = tree.search(&35).unwrap();
+        let result = tree.search(&KeyType::I64(35)).unwrap();
         assert_eq!(result, None);
 
         println!("search passed");
@@ -995,7 +995,9 @@ mod tests {
         let tree = create_populated_tree().unwrap();
 
         // Query for range 20-60
-        let results = tree.range_query(&20, &60).unwrap();
+        let results = tree
+            .range_query(&KeyType::I64(20), &KeyType::I64(60))
+            .unwrap();
         assert_eq!(results.len(), 5); // Should include 20, 30, 40, 50, 60
         assert!(results.contains(&200));
         assert!(results.contains(&300));
@@ -1004,7 +1006,9 @@ mod tests {
         assert!(results.contains(&600));
 
         // Query for empty range
-        let results = tree.range_query(&25, &28).unwrap();
+        let results = tree
+            .range_query(&KeyType::I64(25), &KeyType::I64(28))
+            .unwrap();
         assert_eq!(results.len(), 0);
 
         println!("range query passed");
@@ -1016,23 +1020,23 @@ mod tests {
         let mut tree = create_test_tree().unwrap();
 
         // Insert some keys
-        tree.insert(&10, 100).unwrap();
-        tree.insert(&20, 200).unwrap();
-        tree.insert(&30, 300).unwrap();
+        tree.insert(&KeyType::I64(10), 100).unwrap();
+        tree.insert(&KeyType::I64(20), 200).unwrap();
+        tree.insert(&KeyType::I64(30), 300).unwrap();
 
         // Verify keys were inserted
-        let result = tree.search(&10).unwrap();
+        let result = tree.search(&KeyType::I64(10)).unwrap();
         assert_eq!(result, Some(100));
 
-        let result = tree.search(&20).unwrap();
+        let result = tree.search(&KeyType::I64(20)).unwrap();
         assert_eq!(result, Some(200));
 
-        let result = tree.search(&30).unwrap();
+        let result = tree.search(&KeyType::I64(30)).unwrap();
         assert_eq!(result, Some(300));
 
         // Update an existing key
-        tree.insert(&20, 250).unwrap();
-        let result = tree.search(&20).unwrap();
+        tree.insert(&KeyType::I64(20), 250).unwrap();
+        let result = tree.search(&KeyType::I64(20)).unwrap();
         assert_eq!(result, Some(250));
 
         println!("insert passed");
@@ -1048,11 +1052,11 @@ mod tests {
         assert_eq!(size_before, 9);
 
         // Remove an existing key
-        let result = tree.remove(&30).unwrap();
+        let result = tree.remove(&KeyType::I64(30)).unwrap();
         assert!(result);
 
         // Search for removed key
-        let search_result = tree.search(&30).unwrap();
+        let search_result = tree.search(&KeyType::I64(30)).unwrap();
         assert_eq!(search_result, None);
 
         // Size should be reduced
@@ -1060,7 +1064,7 @@ mod tests {
         assert_eq!(size_after, 8);
 
         // Remove a non-existing key
-        let result = tree.remove(&35).unwrap();
+        let result = tree.remove(&KeyType::I64(35)).unwrap();
         assert!(!result);
 
         // Size should be unchanged
@@ -1076,25 +1080,25 @@ mod tests {
 
         // Create a tree with reasonable block size
         let storage = MemoryBlockStorage::new(512);
-        let key_encoder = Box::new(I64KeyEncoder);
+        let key_encoder = Box::new(AnyKeyEncoder::i64());
 
         // Create a new tree directly
         let mut tree = BTree::new(storage, key_encoder).unwrap();
 
         // Only insert 20 entries to avoid potential issues with larger trees
-        let count = 20i64;
+        let count = 20;
 
         // Insert entries one by one
         let mut inserted_keys = Vec::new();
         for i in 0..count {
             println!("Inserting key {}", i);
             inserted_keys.push(i);
-            tree.insert(&i, i as u64 * 10).unwrap();
+            tree.insert(&KeyType::I64(i), (i * 10) as u64).unwrap();
         }
 
         // Verify each key can be found
         for &key in &inserted_keys {
-            let result = tree.search(&key).unwrap();
+            let result = tree.search(&KeyType::I64(key)).unwrap();
             println!("Searching for key {}, result: {:?}", key, result);
             assert_eq!(result, Some(key as u64 * 10), "Failed to find key {}", key);
         }
@@ -1116,40 +1120,42 @@ mod tests {
 
         // Create a tree with some initial data
         let storage = MemoryBlockStorage::new(512);
-        let key_encoder = Box::new(I64KeyEncoder);
+        let key_encoder = Box::new(AnyKeyEncoder::i64());
         let mut tree = BTree::new(storage, key_encoder).unwrap();
 
         // Insert some entries
         for i in 1..=10 {
-            tree.insert(&i, (i * 10) as u64).unwrap();
+            tree.insert(&KeyType::I64(i), (i * 10) as u64).unwrap();
         }
 
         // Remove some entries
-        tree.remove(&2).unwrap();
-        tree.remove(&4).unwrap();
-        tree.remove(&6).unwrap();
-        tree.remove(&8).unwrap();
+        tree.remove(&KeyType::I64(2)).unwrap();
+        tree.remove(&KeyType::I64(4)).unwrap();
+        tree.remove(&KeyType::I64(6)).unwrap();
+        tree.remove(&KeyType::I64(8)).unwrap();
 
         // Check size (should be 6 entries remaining)
         let size = tree.size().unwrap();
         assert_eq!(size, 6, "Expected 6 entries after removals, got {}", size);
 
         // Check that removed entries are gone
-        assert_eq!(tree.search(&2).unwrap(), None);
-        assert_eq!(tree.search(&4).unwrap(), None);
-        assert_eq!(tree.search(&6).unwrap(), None);
-        assert_eq!(tree.search(&8).unwrap(), None);
+        assert_eq!(tree.search(&KeyType::I64(2)).unwrap(), None);
+        assert_eq!(tree.search(&KeyType::I64(4)).unwrap(), None);
+        assert_eq!(tree.search(&KeyType::I64(6)).unwrap(), None);
+        assert_eq!(tree.search(&KeyType::I64(8)).unwrap(), None);
 
         // Check that remaining entries are still there
-        assert_eq!(tree.search(&1).unwrap(), Some(10));
-        assert_eq!(tree.search(&3).unwrap(), Some(30));
-        assert_eq!(tree.search(&5).unwrap(), Some(50));
-        assert_eq!(tree.search(&7).unwrap(), Some(70));
-        assert_eq!(tree.search(&9).unwrap(), Some(90));
-        assert_eq!(tree.search(&10).unwrap(), Some(100));
+        assert_eq!(tree.search(&KeyType::I64(1)).unwrap(), Some(10));
+        assert_eq!(tree.search(&KeyType::I64(3)).unwrap(), Some(30));
+        assert_eq!(tree.search(&KeyType::I64(5)).unwrap(), Some(50));
+        assert_eq!(tree.search(&KeyType::I64(7)).unwrap(), Some(70));
+        assert_eq!(tree.search(&KeyType::I64(9)).unwrap(), Some(90));
+        assert_eq!(tree.search(&KeyType::I64(10)).unwrap(), Some(100));
 
         // Verify range query
-        let results = tree.range_query(&3, &9).unwrap();
+        let results = tree
+            .range_query(&KeyType::I64(3), &KeyType::I64(9))
+            .unwrap();
         assert_eq!(results.len(), 4); // 3,5,7,9
         assert!(results.contains(&30));
         assert!(results.contains(&50));
@@ -1179,11 +1185,11 @@ mod tests {
 
             // Create a fresh storage for each test
             let storage = MemoryBlockStorage::new(256);
-            let key_encoder = Box::new(I64KeyEncoder);
+            let key_encoder = Box::new(AnyKeyEncoder::i64());
 
             // Create entries to build the tree
-            let entries: Vec<(i64, u64)> = (0..entry_count as i64)
-                .map(|i| (i, (i * 10) as u64))
+            let entries: Vec<(KeyType, u64)> = (0..entry_count as i64)
+                .map(|i| (KeyType::I64(i), (i * 10) as u64))
                 .collect();
 
             // Build the tree
@@ -1201,7 +1207,7 @@ mod tests {
 
     // Helper function to verify node distribution
     fn verify_node_distribution(
-        tree: &BTree<i64, MemoryBlockStorage>,
+        tree: &BTree<KeyType, MemoryBlockStorage>,
         expected_nodes_count: usize,
         expected_distribution: &[usize],
     ) {
