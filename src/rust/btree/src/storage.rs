@@ -176,7 +176,8 @@ impl CachedFileBlockStorage {
         }
 
         // Split buffer into blocks and add to cache
-        let blocks_read = (bytes_read + self.block_size - 1) / self.block_size;
+        let blocks_read = bytes_read.div_ceil(self.block_size);
+        // let blocks_read = (bytes_read + self.block_size - 1) / self.block_size;
 
         for i in 0..blocks_read {
             let offset = start_offset + (i * self.block_size) as u64;
