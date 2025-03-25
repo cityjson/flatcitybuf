@@ -1,0 +1,52 @@
+[package]
+name = "static-btree"
+version = "0.1.0"
+edition = "2021"
+authors = ["HideBa"]
+description = "A high-performance static B+tree implementation for read-only workloads"
+license = "MIT"
+repository = "https://github.com/hideba/flatcitybuf"
+readme = "README.md"
+
+[dependencies]
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# SIMD support
+packed_simd = { version = "0.3.9", optional = true }
+
+# For platforms without packed_simd support
+bytemuck = { workspace = true }
+
+# Other utilities
+lru = { version = "0.13" }
+chrono = { workspace = true }
+
+# Async support
+tokio = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+rand = { workspace = true }
+tempfile = { workspace = true }
+
+# [features]
+# default = []
+# simd = ["packed_simd"]
+
+# [[bench]]
+# name = "search_benchmark"
+# harness = false
+
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "http_usage"
+path = "examples/http_usage.rs"
+
+[lib]
+name = "static_btree"
+path = "src/lib.rs"
