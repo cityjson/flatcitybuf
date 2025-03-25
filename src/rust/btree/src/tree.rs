@@ -1,6 +1,6 @@
 use crate::entry::Entry;
 use crate::errors::{BTreeError, Result};
-use crate::key::KeyEncoder;
+use crate::key::{AnyKeyEncoder, KeyEncoder, KeyType};
 use crate::node::{Node, NodeType};
 use crate::storage::BlockStorage;
 use std::cmp::Ordering;
@@ -912,7 +912,7 @@ impl<K, S: BlockStorage> BTreeBuilder<K, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::I64KeyEncoder;
+    use crate::key::{AnyKeyEncoder, I64KeyEncoder, KeyType};
     use crate::storage::MemoryBlockStorage;
     use std::collections::HashMap;
 
@@ -1278,5 +1278,48 @@ mod tests {
                 "Node distribution does not match expected distribution"
             );
         }
+    }
+
+    #[test]
+    fn test_any_key_encoder_methods() -> Result<()> {
+        // Create a memory storage with 4KB blocks
+        let storage = MemoryBlockStorage::new(4096);
+
+        // Create an AnyKeyEncoder for i64 values
+        let encoder = AnyKeyEncoder::i64();
+
+        // Create a new B-tree with the encoder
+        let mut tree = BTree::new(storage, Box::new(encoder))?;
+
+        // Insert some values
+        let key1 = KeyType::I64(42);
+        let key2 = KeyType::I64(100);
+        let key3 = KeyType::I64(200);
+
+        tree.insert(&key1, 1000)?;
+        tree.insert(&key2, 2000)?;
+        tree.insert(&key3, 3000)?;
+
+        // Test exact_match_key
+        let value = tree.search(&key1)?;
+        assert_eq!(value, Some(1000));
+
+        // Test non-existent key
+        let missing_key = KeyType::I64(999);
+        let value = tree.search(&missing_key)?;
+        assert_eq!(value, None);
+
+        // Test range_query_key
+        let range_start = KeyType::I64(40);
+        let range_end = KeyType::I64(150);
+        let values = tree.range_query(&range_start, &range_end)?;
+
+        // Should return values for key1 and key2 (42 and 100)
+        assert_eq!(values.len(), 2);
+        assert!(values.contains(&1000));
+        assert!(values.contains(&2000));
+        assert!(!values.contains(&3000));
+
+        Ok(())
     }
 }
