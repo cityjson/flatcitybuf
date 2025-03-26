@@ -147,44 +147,200 @@ Unlike traditional B+trees which use a linked list of leaf nodes, our implementa
 
 This approach maintains the cache efficiency advantages while supporting efficient range queries.
 
+## Duplicate Key Handling
+
+Our implementation properly handles duplicate keys by:
+
+1. Preserving all entries with the same key (no deduplication)
+2. Returning all matching values for exact match queries
+3. Checking adjacent nodes for duplicates at node boundaries
+4. Ensuring range queries include all duplicate keys
+
+This is particularly important for CityJSON data where multiple features can share the same attribute value.
+
 ## Storage Integration
 
-The static B+tree can be used with different storage backends:
+The static B+tree is designed to work with different storage backends through a unified interface:
 
-1. **In-Memory**: The entire tree is loaded in memory for maximum performance
-2. **File-Based**: The tree is mapped to a file and accessed via paging
-3. **HTTP-Based**: The tree is stored remotely and accessed via HTTP range requests
+### BTreeStorage Trait
 
-For each storage backend, we:
+```rust
+pub trait BTreeStorage {
+    fn read_node(&self, node_index: usize) -> Result<Vec<u8>>;
+    fn write_node(&mut self, node_index: usize, data: &[u8]) -> Result<()>;
+    fn node_size(&self) -> usize;
+    fn node_count(&self) -> usize;
+    fn flush(&mut self) -> Result<()>;
+}
+```
 
-- Maintain the same implicit layout
-- Optimize access patterns for the specific medium
-- Implement prefetching and caching strategies
+### In-Memory Storage
 
-## Configurable Branching Factor
+The in-memory storage implementation is optimized for performance:
 
-The branching factor is configurable at tree creation time:
+```rust
+pub struct MemoryStorage {
+    nodes: Vec<Vec<u8>>,
+    node_size: usize,
+}
+```
 
-- Default of 16 (aligns with 64-byte cache line for many key types)
-- Can be increased for wider keys or to reduce tree height
-- Can be decreased for smaller memory footprint
+Key features:
 
-The optimal branching factor depends on:
+- Direct access to node data
+- No serialization overhead
+- Limited by available RAM
+- Suitable for small to medium datasets
 
-- Key size
-- Cache line size of the target architecture
-- Total number of entries
-- Access patterns
+### File-Based Storage
+
+The file-based storage enables persistent trees:
+
+```rust
+pub struct FileStorage {
+    file: MmapMut,
+    node_size: usize,
+    node_count: usize,
+}
+```
+
+Key features:
+
+- Memory-mapped file access for performance
+- Support for trees larger than available RAM
+- Persistence across program runs
+- Optional read-only mode for shared access
+
+### HTTP Storage
+
+For remote storage of large trees:
+
+```rust
+pub struct HttpStorage {
+    base_url: String,
+    client: HttpClient,
+    cache: LruCache<usize, Vec<u8>>,
+    node_size: usize,
+    node_count: usize,
+}
+```
+
+Key features:
+
+- HTTP range requests to fetch only needed nodes
+- Local caching to minimize network traffic
+- Support for authentication and compression
+- Suitable for distributed access patterns
+
+### Node Size Considerations
+
+Unlike the standard B-tree implementation which uses a fixed 4KB block size, the static B+tree's node size is determined by:
+
+- The branching factor
+- The key type's encoded size
+- Implementation overhead
+
+Node sizes are calculated to ensure optimal memory usage while maintaining cache efficiency. For typical integer keys with a branching factor of 16, node sizes range from 128-256 bytes.
+
+## Caching System
+
+To optimize storage access, we implement a caching layer:
+
+```rust
+pub struct CachedStorage<S: BTreeStorage> {
+    storage: S,
+    cache: LruCache<usize, Vec<u8>>,
+    prefetch_strategy: PrefetchStrategy,
+    stats: CacheStats,
+}
+```
+
+### LRU Cache
+
+The Least Recently Used (LRU) cache maintains frequently accessed nodes in memory:
+
+- Configurable cache size (in nodes or bytes)
+- Automatic eviction of least recently used nodes
+- Thread-safe implementation for concurrent access
+
+### Prefetching Strategies
+
+Several prefetching strategies are implemented:
+
+1. **Sequential Prefetching**: Loads adjacent nodes for range queries
+
+   ```rust
+   fn prefetch_sequential(&self, current_node: usize, count: usize) -> Result<()>;
+   ```
+
+2. **Hierarchical Prefetching**: Prefetches nodes across the hierarchy
+
+   ```rust
+   fn prefetch_hierarchical(&self, node_index: usize, depth: usize) -> Result<()>;
+   ```
+
+3. **Predictive Prefetching**: Uses access patterns to predict future needs
+
+   ```rust
+   fn prefetch_predictive(&self, access_history: &[usize]) -> Result<()>;
+   ```
+
+### Monitoring and Adaptation
+
+The caching system includes monitoring capabilities:
+
+```rust
+pub struct CacheStats {
+    hits: AtomicUsize,
+    misses: AtomicUsize,
+    prefetch_hits: AtomicUsize,
+    bytes_transferred: AtomicUsize,
+}
+```
+
+These statistics enable adaptive strategies that optimize prefetching based on observed access patterns.
 
 ## Performance Considerations
 
 Our implementation focuses on maximizing performance through:
 
-1. **Cache Efficiency**: Aligning node size with cache lines
-2. **SIMD Utilization**: Using vector instructions for parallel comparisons
-3. **Branch Prediction**: Minimizing branch mispredictions
-4. **Prefetching**: Strategic prefetching of nodes
-5. **Memory Layout**: Contiguous memory layout for better spatial locality
+1. **Cache Efficiency**:
+   - Aligning node size with cache lines
+   - Minimizing node access during tree traversal
+   - Using prefetching to hide I/O latency
+
+2. **Reduced Memory Usage**:
+   - No explicit pointers
+   - Nearly 100% space utilization
+   - Compact node representation
+
+3. **Concurrency**:
+   - Thread-safe storage implementations
+   - Lock-free read operations for multiple readers
+   - Optional concurrent caching
+
+4. **Adaptation to Access Patterns**:
+   - Monitoring of cache performance
+   - Adjustment of prefetch strategies
+   - Optimization for specific workloads
+
+## Integration with CityJSON
+
+The static B+tree is particularly well-suited for CityJSON use cases:
+
+1. **Attribute Indexing**:
+   - Create indexes on commonly queried attributes
+   - Support fast filtering of features based on properties
+   - Handle duplicate attribute values properly
+
+2. **Spatial Indexing**:
+   - Combined with R-tree for spatial queries
+   - Two-phase filtering for complex queries
+
+3. **Remote Access**:
+   - HTTP-based access to large datasets
+   - Minimal data transfer for queries
+   - Efficient caching for repeated access patterns
 
 ## Comparison with Existing Implementation
 
@@ -193,6 +349,28 @@ Compared to the current btree crate, our static-btree implementation:
 1. Offers significantly faster search (up to 15x for large datasets)
 2. Uses less memory due to elimination of pointers and better space utilization
 3. Has better cache efficiency due to optimized memory layout
-4. Does not support modifications after construction
+4. Supports multiple storage backends with the same interface
+5. Properly handles duplicate keys for CityJSON use cases
+6. Does not support modifications after construction
 
-These tradeoffs make it ideal for read-heavy workloads with static data.
+These tradeoffs make it ideal for read-heavy workloads with static data, such as CityJSON databases.
+
+## Future Directions
+
+Beyond the current implementation plan, future enhancements might include:
+
+1. **SIMD-Accelerated Search**:
+   - Using AVX2/AVX-512 for parallel key comparison
+   - Optimizing for specific key types
+
+2. **Hybrid Storage**:
+   - Combining multiple backends for different parts of the tree
+   - Caching most frequently accessed nodes in memory
+
+3. **Distributed Operation**:
+   - Sharding large trees across multiple servers
+   - Distributed query processing
+
+4. **Versioned Trees**:
+   - Immutable versions for historical data
+   - Copy-on-write mechanisms for updates
