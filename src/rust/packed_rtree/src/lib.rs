@@ -324,7 +324,7 @@ impl PackedRTree {
         // number of nodes per level in bottom-up order
         let mut level_num_nodes: Vec<usize> = Vec::new();
         let mut n = num_items;
-        let mut num_nodes = n;
+        let mut num_nodes: usize = n;
         level_num_nodes.push(n);
         loop {
             n = n.div_ceil(node_size as usize);

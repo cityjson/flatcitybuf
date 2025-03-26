@@ -24,16 +24,26 @@ lru = { version = "0.13" }
 chrono = { workspace = true }
 
 # Async support
-tokio = { workspace = true }
+tokio = { workspace = true, features = [
+  "sync",
+  "rt-multi-thread",
+  "macros",
+], optional = true }
+async-trait = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["json"], optional = true }
+
+# Test helpers (only used in tests)
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
 rand = { workspace = true }
-tempfile = { workspace = true }
 
-# [features]
-# default = []
+[features]
+default = []
 # simd = ["packed_simd"]
+testing = ["tempfile"]
+http = ["tokio", "async-trait", "reqwest"]
 
 # [[bench]]
 # name = "search_benchmark"
@@ -46,6 +56,7 @@ path = "examples/basic_usage.rs"
 [[example]]
 name = "http_usage"
 path = "examples/http_usage.rs"
+required-features = ["http"]
 
 [lib]
 name = "static_btree"

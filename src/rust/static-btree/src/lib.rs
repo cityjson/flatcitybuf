@@ -12,18 +12,25 @@
 //! - Fast lookups with O(log n) complexity
 //! - Support for range queries
 //! - Type-safe key encoding
+//! - Flexible storage backends (memory, file, HTTP)
 
 // Core modules
 pub mod entry;
 pub mod errors;
 pub mod key;
 pub mod node;
+pub mod storage;
 pub mod tree;
 pub mod utils;
 
 // Re-export key types and tree implementation
 pub use crate::key::{KeyEncoder, KeyType};
+pub use crate::storage::{BTreeStorage, FileStorage, MemoryStorage};
 pub use crate::tree::{StaticBTree, StaticBTreeBuilder};
+
+// Conditional re-exports for HTTP support
+#[cfg(feature = "http")]
+pub use crate::storage::{AsyncBTreeStorage, HttpRange, HttpStorage};
 
 /// Interface for static B+tree index operations
 pub trait StaticBTreeIndex {

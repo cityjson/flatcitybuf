@@ -194,19 +194,10 @@ Key features:
 
 ### File-Based Storage
 
-The file-based storage enables persistent trees:
-
-```rust
-pub struct FileStorage {
-    file: MmapMut,
-    node_size: usize,
-    node_count: usize,
-}
-```
+TODO: Implement file-based storage
 
 Key features:
 
-- Memory-mapped file access for performance
 - Support for trees larger than available RAM
 - Persistence across program runs
 - Optional read-only mode for shared access

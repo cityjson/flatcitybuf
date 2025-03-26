@@ -1,75 +1,90 @@
-use static_btree::{KeyType, StaticBTree};
-use std::time::Instant;
+use static_btree::{
+    key::{I64KeyEncoder, KeyEncoder},
+    BTreeStorage, FileStorage, MemoryStorage,
+};
+use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("static b+tree basic usage example");
-    println!("--------------------------------");
+    println!("Static B+Tree Storage Example");
+    println!("-----------------------------");
 
-    // Create a tree with i32 keys and branching factor 16
-    let mut builder = StaticBTree::<i32>::builder(16, KeyType::I32);
+    // Create in-memory storage for a small tree
+    let node_size = 256; // Each node is 256 bytes
+    let node_count = 10; // We'll have 10 nodes total
+    let mut memory_storage = MemoryStorage::new(node_size, node_count)?;
 
-    // Number of entries to insert
-    let n = 100_000;
-    println!("building tree with {} entries...", n);
+    // Create some test data
+    let key_encoder = I64KeyEncoder;
+    let key1 = key_encoder.encode(&1)?;
+    let key2 = key_encoder.encode(&2)?;
+    let key3 = key_encoder.encode(&3)?;
 
-    // Add entries to the tree (in this case, key = value)
-    let start = Instant::now();
-    for i in 0..n {
-        let key = (i as i32).to_le_bytes();
-        builder.add_entry(&key, i as u64);
+    // Create a simple entry (would normally be done by the tree implementation)
+    let mut entry1 = format!("{:<8}", key1.len()).into_bytes();
+    entry1.extend(&key1);
+    entry1.extend(&100u64.to_le_bytes());
+
+    let mut entry2 = format!("{:<8}", key2.len()).into_bytes();
+    entry2.extend(&key2);
+    entry2.extend(&200u64.to_le_bytes());
+
+    let mut entry3 = format!("{:<8}", key3.len()).into_bytes();
+    entry3.extend(&key3);
+    entry3.extend(&300u64.to_le_bytes());
+
+    // Write entries to nodes
+    memory_storage.write_node(0, &entry1)?;
+    memory_storage.write_node(1, &entry2)?;
+    memory_storage.write_node(2, &entry3)?;
+
+    // Read back the entries
+    let mut buffer = vec![0u8; node_size];
+
+    memory_storage.read_node(0, &mut buffer)?;
+    println!("Node 0: {:?}", buffer[0..20].to_vec());
+
+    memory_storage.read_node(1, &mut buffer)?;
+    println!("Node 1: {:?}", buffer[0..20].to_vec());
+
+    memory_storage.read_node(2, &mut buffer)?;
+    println!("Node 2: {:?}", buffer[0..20].to_vec());
+
+    // Save to a file
+    println!("\nSaving to file...");
+    let file_path = Path::new("temp/example.btree");
+
+    // Create directory if it doesn't exist
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
-    // Build the tree
-    let tree = builder.build()?;
-    let build_time = start.elapsed();
+    // Create file storage
+    let mut file_storage = FileStorage::create(&file_path, node_size, node_count)?;
 
-    println!("tree built in {:?}", build_time);
-    println!("tree height: {}", tree.height());
-    println!("tree size: {} entries", tree.len());
-    println!("tree branching factor: {}", tree.branching_factor());
-    println!("tree memory usage: ~{} bytes", tree.data().len());
-
-    // Perform some lookups
-    println!("\nperforming lookups...");
-    let start = Instant::now();
-
-    // Try to find some existing keys
-    for i in (0..n).step_by(n / 10) {
-        let key = (i as i32).to_le_bytes();
-        let values = tree.find(&key)?;
-        match values.first() {
-            Some(&value) => println!("found key {}: {} ({} values)", i, value, values.len()),
-            None => println!("key {} not found (this should not happen)", i),
-        }
+    // Transfer data from memory to file
+    for i in 0..node_count {
+        memory_storage.read_node(i, &mut buffer)?;
+        file_storage.write_node(i, &buffer)?;
     }
 
-    // Try to find a non-existent key
-    let non_existent = ((n + 1000) as i32).to_le_bytes();
-    let values = tree.find(&non_existent)?;
-    match values.is_empty() {
-        false => println!("found non-existent key: {:?} (unexpected)", values),
-        true => println!("non-existent key not found (expected)"),
-    }
+    // Flush changes
+    file_storage.flush()?;
+    println!("Data written to {}", file_path.display());
 
-    let lookup_time = start.elapsed();
-    println!("lookups completed in {:?}", lookup_time);
+    // Reopen the file
+    println!("\nReopening file...");
+    let mut reopened_storage = FileStorage::open(&file_path)?;
 
-    // Perform a range query
-    println!("\nperforming range query...");
-    let start = Instant::now();
+    // Read back the entries
+    reopened_storage.read_node(0, &mut buffer)?;
+    println!("Node 0 (from file): {:?}", buffer[0..20].to_vec());
 
-    let range_start = ((n / 2) as i32).to_le_bytes();
-    let range_end = ((n / 2 + 10) as i32).to_le_bytes();
-    let results = tree.range(&range_start, &range_end)?;
+    reopened_storage.read_node(1, &mut buffer)?;
+    println!("Node 1 (from file): {:?}", buffer[0..20].to_vec());
 
-    println!("range query returned {} results", results.len());
-    for (i, (key, value)) in results.iter().enumerate().take(5) {
-        let key_val = i32::from_le_bytes([key[0], key[1], key[2], key[3]]);
-        println!("result {}: key {} -> value {}", i, key_val, value);
-    }
+    reopened_storage.read_node(2, &mut buffer)?;
+    println!("Node 2 (from file): {:?}", buffer[0..20].to_vec());
 
-    let range_time = start.elapsed();
-    println!("range query completed in {:?}", range_time);
-
+    println!("\nStorage example completed successfully!");
     Ok(())
 }

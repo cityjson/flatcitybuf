@@ -191,40 +191,39 @@ impl<K: 'static> StaticBTreeBuilder<K> {
 
         Ok(())
     }
+}
+/// Find all values associated with a key in a leaf node
+fn find_all_values_in_node<K: 'static>(
+    node: &Node,
+    key: &[u8],
+    key_encoder: &dyn KeyEncoder<K>,
+) -> Vec<u64> {
+    let mut values = Vec::new();
+    let i = node.find_lower_bound(key, |a, b| key_encoder.compare(a, b));
 
-    /// Find all values associated with a key in a leaf node
-    fn find_all_values_in_node(
-        node: &Node,
-        key: &[u8],
-        key_encoder: &dyn KeyEncoder<K>,
-    ) -> Vec<u64> {
-        let mut values = Vec::new();
-        let i = node.find_lower_bound(key, |a, b| key_encoder.compare(a, b));
-
-        // Check entries before the found index for duplicates
-        let mut check_idx = i;
-        while check_idx > 0 {
-            check_idx -= 1;
-            let entry = &node.entries[check_idx];
-            if key_encoder.compare(&entry.key, key) != Ordering::Equal {
-                break;
-            }
-            values.push(entry.value);
+    // Check entries before the found index for duplicates
+    let mut check_idx = i;
+    while check_idx > 0 {
+        check_idx -= 1;
+        let entry = &node.entries[check_idx];
+        if key_encoder.compare(&entry.key, key) != Ordering::Equal {
+            break;
         }
-
-        // Check the found index and entries after it
-        check_idx = i;
-        while check_idx < node.entries.len() {
-            let entry = &node.entries[check_idx];
-            if key_encoder.compare(&entry.key, key) != Ordering::Equal {
-                break;
-            }
-            values.push(entry.value);
-            check_idx += 1;
-        }
-
-        values
+        values.push(entry.value);
     }
+
+    // Check the found index and entries after it
+    check_idx = i;
+    while check_idx < node.entries.len() {
+        let entry = &node.entries[check_idx];
+        if key_encoder.compare(&entry.key, key) != Ordering::Equal {
+            break;
+        }
+        values.push(entry.value);
+        check_idx += 1;
+    }
+
+    values
 }
 
 impl<K: 'static> StaticBTree<K> {
@@ -273,11 +272,7 @@ impl<K: 'static> StaticBTree<K> {
 
             if level == self.height - 1 {
                 // At leaf level, collect all matching values
-                values.extend(StaticBTreeBuilder::<K>::find_all_values_in_node(
-                    &node,
-                    key,
-                    &*self.key_encoder,
-                ));
+                values.extend(find_all_values_in_node(&node, key, &*self.key_encoder));
 
                 // Check adjacent nodes for duplicates at boundaries
                 if !node.entries.is_empty()
@@ -290,11 +285,7 @@ impl<K: 'static> StaticBTree<K> {
                             &self.data[prev_offset..prev_offset + max_node_size],
                             self.key_encoder.encoded_size(),
                         )?;
-                        values.extend(StaticBTreeBuilder::<K>::find_all_values_in_node(
-                            &prev_node,
-                            key,
-                            &*self.key_encoder,
-                        ));
+                        values.extend(find_all_values_in_node(&prev_node, key, &*self.key_encoder));
                     }
                 }
 
@@ -312,7 +303,7 @@ impl<K: 'static> StaticBTree<K> {
                             self.key_encoder.encoded_size(),
                         )?;
                         if next_node.node_type == NodeType::Leaf {
-                            values.extend(StaticBTreeBuilder::<K>::find_all_values_in_node(
+                            values.extend(find_all_values_in_node(
                                 &next_node,
                                 key,
                                 &*self.key_encoder,
