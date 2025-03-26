@@ -1,0 +1,15 @@
+[package]
+name = "implicit-btree"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["http"]
+http = ["http-range-client"]
+
+[dependencies]
+byteorder = { workspace = true }
+http-range-client = { workspace = true, optional = true, default-features = false }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }

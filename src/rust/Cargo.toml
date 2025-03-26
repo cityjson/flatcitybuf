@@ -11,7 +11,7 @@ members = [
   "wasm",
   "bst",
   "btree",
-  "static-btree",
+  "static-btree", "implicit-btree",
 ]
 resolver = "2"
 
