@@ -22,9 +22,11 @@ bytemuck = { workspace = true }
 # Other utilities
 lru = { version = "0.13" }
 chrono = { workspace = true }
+bytes = { workspace = true }  # For efficient byte handling
 
 # Async support
 tokio = { workspace = true }
+async-trait = { workspace = true } # For async traits
 
 [dev-dependencies]
 criterion = { workspace = true }

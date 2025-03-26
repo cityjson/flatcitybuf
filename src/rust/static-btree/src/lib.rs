@@ -18,11 +18,13 @@ pub mod entry;
 pub mod errors;
 pub mod key;
 pub mod node;
+pub mod storage; // Add storage module
 pub mod tree;
 pub mod utils;
 
-// Re-export key types and tree implementation
+// Re-export key types, storage types, and tree implementation
 pub use crate::key::{KeyEncoder, KeyType};
+pub use crate::storage::{BTreeStorage, MemoryStorage}; // Re-export storage types
 pub use crate::tree::{StaticBTree, StaticBTreeBuilder};
 
 /// Interface for static B+tree index operations
