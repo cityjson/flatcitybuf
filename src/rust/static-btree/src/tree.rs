@@ -7,9 +7,10 @@
 use crate::entry::Entry;
 use crate::errors::{Error, Result, TreeError};
 use crate::key::{KeyEncoder, KeyEncoderFactory, KeyType};
-use crate::node::{Node, NodeType};
+use crate::node::{max_node_size, Node, NodeType};
 use crate::utils;
 
+use core::error;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 
@@ -19,7 +20,7 @@ use std::marker::PhantomData;
 /// a compact, cache-friendly layout in memory. The tree is static, meaning
 /// it can only be built once and does not support modifications after
 /// construction.
-pub struct StaticBTree<K> {
+pub struct StaticBTree<K: 'static> {
     /// The raw data buffer containing the serialized tree
     data: Vec<u8>,
     /// The height of the tree
@@ -35,14 +36,14 @@ pub struct StaticBTree<K> {
 }
 
 /// Builder for constructing a static B+tree
-pub struct StaticBTreeBuilder<K> {
+pub struct StaticBTreeBuilder<K: 'static> {
     branching_factor: usize,
     entries: Vec<Entry>,
     key_encoder: Box<dyn KeyEncoder<K>>,
     _phantom: PhantomData<K>,
 }
 
-impl<K> StaticBTreeBuilder<K> {
+impl<K: 'static> StaticBTreeBuilder<K> {
     /// Create a new builder with the specified branching factor and key type
     pub fn new(branching_factor: usize, key_type: KeyType) -> Self {
         if branching_factor < 4 {
@@ -71,26 +72,22 @@ impl<K> StaticBTreeBuilder<K> {
             return Err(Error::Tree(TreeError::EmptyTree));
         }
 
-        // Sort entries by key
+        // Sort entries by key but preserve order of equal keys
         self.entries
-            .sort_by(|a, b| self.key_encoder.compare(&a.key(), &b.key()));
-
-        // Remove duplicates (keep only the last entry for each key)
-        self.entries.dedup_by(|a, b| {
-            if self.key_encoder.compare(&a.key(), &b.key()) == Ordering::Equal {
-                // Keep b (the later entry) and drop a
-                true
-            } else {
-                false
-            }
-        });
+            .sort_by(|a, b| self.key_encoder.compare(&a.key, &b.key));
 
         let size = self.entries.len();
         let height = utils::calculate_tree_height(size, self.branching_factor);
 
         // Allocate buffer for the entire tree
         let total_nodes = utils::calculate_total_nodes(size, self.branching_factor);
-        let max_node_size = Node::max_size(self.branching_factor);
+        let max_node_size = max_node_size(
+            self.branching_factor,
+            self.entries
+                .first()
+                .ok_or(Error::Tree(TreeError::EmptyTree))?
+                .encoded_size(),
+        ); //TODO: make sure this is correct. The last node might not be full.
         let buffer_size = total_nodes * max_node_size;
         let mut buffer = vec![0u8; buffer_size];
 
@@ -125,7 +122,13 @@ impl<K> StaticBTreeBuilder<K> {
         level: usize,
     ) -> Result<()> {
         let entry_count = end_entry - start_entry + 1;
-        let max_node_size = Node::max_size(self.branching_factor);
+        let max_node_size = max_node_size(
+            self.branching_factor,
+            self.entries
+                .first()
+                .ok_or(Error::Tree(TreeError::EmptyTree))?
+                .encoded_size(),
+        );
 
         // Calculate the node's offset in the buffer
         let node_offset = node_index * max_node_size;
@@ -137,17 +140,17 @@ impl<K> StaticBTreeBuilder<K> {
             NodeType::Internal
         };
 
-        let mut node = Node::new(self.branching_factor, node_type);
+        let mut node = Node::new(node_type);
 
         if node_type == NodeType::Leaf {
             // For leaf nodes, add all entries
             for i in start_entry..=end_entry {
-                node.add_entry(&self.entries[i])?;
+                node.add_entry(self.entries[i].clone(), self.branching_factor)?;
             }
         } else {
             // For internal nodes, we need to add separator keys and child pointers
             let children_per_node = self.branching_factor;
-            let entries_per_child = (entry_count + children_per_node - 1) / children_per_node;
+            let entries_per_child = entry_count.div_ceil(children_per_node);
 
             let mut child_index = node_index * self.branching_factor + 1;
 
@@ -163,7 +166,10 @@ impl<K> StaticBTreeBuilder<K> {
 
                 // Add the first key from this child's range as a separator
                 let separator_entry = &self.entries[child_start];
-                node.add_entry(&Entry::new(separator_entry.key(), child_index as u64))?;
+                node.add_entry(
+                    Entry::new(separator_entry.key.clone(), child_index as u64), //TODO: check if `child_index` is correct
+                    self.branching_factor,
+                )?;
 
                 // Recursively build the child node
                 self.build_tree_recursive(
@@ -179,14 +185,49 @@ impl<K> StaticBTreeBuilder<K> {
             }
         }
 
+        let encoded_node = node.encode(self.key_encoder.encoded_size())?;
         // Serialize the node into the buffer
-        node.encode(&mut buffer[node_offset..node_offset + max_node_size])?;
+        buffer[node_offset..node_offset + encoded_node.len()].copy_from_slice(&encoded_node);
 
         Ok(())
     }
+
+    /// Find all values associated with a key in a leaf node
+    fn find_all_values_in_node(
+        node: &Node,
+        key: &[u8],
+        key_encoder: &dyn KeyEncoder<K>,
+    ) -> Vec<u64> {
+        let mut values = Vec::new();
+        let i = node.find_lower_bound(key, |a, b| key_encoder.compare(a, b));
+
+        // Check entries before the found index for duplicates
+        let mut check_idx = i;
+        while check_idx > 0 {
+            check_idx -= 1;
+            let entry = &node.entries[check_idx];
+            if key_encoder.compare(&entry.key, key) != Ordering::Equal {
+                break;
+            }
+            values.push(entry.value);
+        }
+
+        // Check the found index and entries after it
+        check_idx = i;
+        while check_idx < node.entries.len() {
+            let entry = &node.entries[check_idx];
+            if key_encoder.compare(&entry.key, key) != Ordering::Equal {
+                break;
+            }
+            values.push(entry.value);
+            check_idx += 1;
+        }
+
+        values
+    }
 }
 
-impl<K> StaticBTree<K> {
+impl<K: 'static> StaticBTree<K> {
     /// Create a new static B+tree builder
     pub fn builder(branching_factor: usize, key_type: KeyType) -> StaticBTreeBuilder<K> {
         StaticBTreeBuilder::new(branching_factor, key_type)
@@ -212,43 +253,90 @@ impl<K> StaticBTree<K> {
         self.branching_factor
     }
 
-    /// Find a value by its key
-    pub fn find(&self, key: &[u8]) -> Result<Option<u64>> {
+    /// Find all values associated with a key
+    pub fn find(&self, key: &[u8]) -> Result<Vec<u64>> {
         if self.is_empty() {
-            return Ok(None);
+            return Ok(Vec::new());
         }
 
-        let max_node_size = Node::max_size(self.branching_factor);
+        let max_node_size = max_node_size(self.branching_factor, self.key_encoder.encoded_size());
         let mut node_index = 0;
+        let mut values = Vec::new();
 
         // Traverse the tree from root to leaf
         for level in 0..self.height {
             let node_offset = node_index * max_node_size;
-
-            // Read the node
             let node = Node::decode(
                 &self.data[node_offset..node_offset + max_node_size],
-                self.branching_factor,
+                self.key_encoder.encoded_size(),
             )?;
 
             if level == self.height - 1 {
-                // Leaf node, search for the exact key
-                match node.find_entry(key, &*self.key_encoder) {
-                    Some(entry) => return Ok(Some(entry.value())),
-                    None => return Ok(None),
+                // At leaf level, collect all matching values
+                values.extend(StaticBTreeBuilder::<K>::find_all_values_in_node(
+                    &node,
+                    key,
+                    &*self.key_encoder,
+                ));
+
+                // Check adjacent nodes for duplicates at boundaries
+                if !node.entries.is_empty()
+                    && self.key_encoder.compare(&node.entries[0].key, key) == Ordering::Equal
+                {
+                    // Check previous node
+                    if node_index > 0 {
+                        let prev_offset = (node_index - 1) * max_node_size;
+                        let prev_node = Node::decode(
+                            &self.data[prev_offset..prev_offset + max_node_size],
+                            self.key_encoder.encoded_size(),
+                        )?;
+                        values.extend(StaticBTreeBuilder::<K>::find_all_values_in_node(
+                            &prev_node,
+                            key,
+                            &*self.key_encoder,
+                        ));
+                    }
                 }
+
+                if !node.entries.is_empty()
+                    && self
+                        .key_encoder
+                        .compare(&node.entries[node.entries.len() - 1].key, key)
+                        == Ordering::Equal
+                {
+                    // Check next node
+                    let next_offset = (node_index + 1) * max_node_size;
+                    if next_offset < self.data.len() {
+                        let next_node = Node::decode(
+                            &self.data[next_offset..next_offset + max_node_size],
+                            self.key_encoder.encoded_size(),
+                        )?;
+                        if next_node.node_type == NodeType::Leaf {
+                            values.extend(StaticBTreeBuilder::<K>::find_all_values_in_node(
+                                &next_node,
+                                key,
+                                &*self.key_encoder,
+                            ));
+                        }
+                    }
+                }
+
+                break;
             } else {
                 // Internal node, find the next node to traverse
-                let child_index = match node.find_lower_bound(key, &*self.key_encoder) {
-                    Some(entry) => entry.value() as usize,
-                    None => return Ok(None), // This should not happen in a well-formed tree
-                };
-
-                node_index = child_index;
+                let idx = node.find_lower_bound(key, |a, b| self.key_encoder.compare(a, b));
+                if idx >= node.entries.len() {
+                    if node.entries.is_empty() {
+                        return Ok(values);
+                    }
+                    node_index = node.entries[node.entries.len() - 1].value as usize;
+                } else {
+                    node_index = node.entries[idx].value as usize;
+                }
             }
         }
 
-        Ok(None)
+        Ok(values)
     }
 
     /// Find entries with keys in the range [start, end]
@@ -259,88 +347,87 @@ impl<K> StaticBTree<K> {
             return Ok(results);
         }
 
-        // First, find the leaf node containing the start key
-        let max_node_size = Node::max_size(self.branching_factor);
+        let max_node_size = max_node_size(self.branching_factor, self.key_encoder.encoded_size());
         let mut node_index = 0;
 
-        // Traverse the tree to find the leaf node containing the start key
+        // Traverse to the leaf node containing the start key
         for level in 0..self.height - 1 {
             let node_offset = node_index * max_node_size;
-
-            // Read the node
             let node = Node::decode(
                 &self.data[node_offset..node_offset + max_node_size],
-                self.branching_factor,
+                self.key_encoder.encoded_size(),
             )?;
 
-            // Find the next node to traverse
-            let child_index = match node.find_lower_bound(start, &*self.key_encoder) {
-                Some(entry) => entry.value() as usize,
-                None => {
-                    // If we can't find a lower bound, use the last entry
-                    if node.len() > 0 {
-                        node.get_entry(node.len() - 1).unwrap().value() as usize
-                    } else {
-                        return Ok(results); // Empty node, should not happen
-                    }
+            let idx = node.find_lower_bound(start, |a, b| self.key_encoder.compare(a, b));
+            if idx >= node.entries.len() {
+                if node.entries.is_empty() {
+                    return Ok(results);
                 }
-            };
-
-            node_index = child_index;
+                node_index = node.entries[node.entries.len() - 1].value as usize;
+            } else {
+                node_index = node.entries[idx].value as usize;
+            }
         }
 
-        // Scan leaf nodes until we find entries greater than the end key
+        // Check if we need to look at the previous node for duplicates at the start
+        if node_index > 0 {
+            let prev_offset = (node_index - 1) * max_node_size;
+            let prev_node = Node::decode(
+                &self.data[prev_offset..prev_offset + max_node_size],
+                self.key_encoder.encoded_size(),
+            )?;
+
+            if !prev_node.entries.is_empty() {
+                let last_entry = &prev_node.entries[prev_node.entries.len() - 1];
+                if self.key_encoder.compare(&last_entry.key, start) >= Ordering::Equal {
+                    // Process entries from the previous node
+                    for entry in &prev_node.entries {
+                        let key = entry.key.clone();
+                        if self.key_encoder.compare(&key, start) >= Ordering::Equal
+                            && self.key_encoder.compare(&key, end) <= Ordering::Equal
+                        {
+                            results.push((key, entry.value));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Scan leaf nodes
         loop {
             let node_offset = node_index * max_node_size;
-
-            // Check if we're still within the buffer bounds
             if node_offset >= self.data.len() {
                 break;
             }
 
-            // Read the leaf node
             let node = Node::decode(
                 &self.data[node_offset..node_offset + max_node_size],
-                self.branching_factor,
+                self.key_encoder.encoded_size(),
             )?;
 
-            // Process entries in this leaf node
-            for i in 0..node.len() {
-                let entry = node.get_entry(i).unwrap();
-                let key = entry.key();
+            if node.node_type != NodeType::Leaf {
+                break;
+            }
 
-                // If the key is greater than the end key, we're done
-                if self.key_encoder.compare(&key, end) == Ordering::Greater {
-                    return Ok(results);
+            let mut found_greater = false;
+            for entry in &node.entries {
+                let key = entry.key.clone();
+
+                if self.key_encoder.compare(&key, end) > Ordering::Equal {
+                    found_greater = true;
+                    break;
                 }
 
-                // If the key is greater than or equal to the start key, add it to results
-                if self.key_encoder.compare(&key, start) != Ordering::Less {
-                    results.push((key, entry.value()));
+                if self.key_encoder.compare(&key, start) >= Ordering::Equal {
+                    results.push((key, entry.value));
                 }
             }
 
-            // Move to the next leaf node if it exists
-            // In a well-formed tree, the next node is at index node_index + 1
-            // but we need to check if it exists
+            if found_greater {
+                break;
+            }
+
             node_index += 1;
-
-            // If we've reached a node index that would be out of bounds or not a leaf node,
-            // we're done
-            if node_index * max_node_size >= self.data.len() {
-                break;
-            }
-
-            // Check if the next node is still a leaf node
-            let next_node_offset = node_index * max_node_size;
-            let next_node = Node::decode(
-                &self.data[next_node_offset..next_node_offset + max_node_size],
-                self.branching_factor,
-            )?;
-
-            if next_node.node_type() != NodeType::Leaf {
-                break;
-            }
         }
 
         Ok(results)

@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Add entries to the tree (in this case, key = value)
     let start = Instant::now();
     for i in 0..n {
-        let key = i.to_le_bytes();
+        let key = (i as i32).to_le_bytes();
         builder.add_entry(&key, i as u64);
     }
 
@@ -26,8 +26,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("tree built in {:?}", build_time);
     println!("tree height: {}", tree.height());
     println!("tree size: {} entries", tree.len());
-    println!("branching factor: {}", tree.branching_factor());
-    println!("memory usage: ~{} bytes", tree.data().len());
+    println!("tree branching factor: {}", tree.branching_factor());
+    println!("tree memory usage: ~{} bytes", tree.data().len());
 
     // Perform some lookups
     println!("\nperforming lookups...");
@@ -35,20 +35,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Try to find some existing keys
     for i in (0..n).step_by(n / 10) {
-        let key = i.to_le_bytes();
-        let result = tree.find(&key)?;
-        match result {
-            Some(value) => println!("found key {}: {}", i, value),
+        let key = (i as i32).to_le_bytes();
+        let values = tree.find(&key)?;
+        match values.first() {
+            Some(&value) => println!("found key {}: {} ({} values)", i, value, values.len()),
             None => println!("key {} not found (this should not happen)", i),
         }
     }
 
     // Try to find a non-existent key
-    let non_existent = (n + 1000).to_le_bytes();
-    let result = tree.find(&non_existent)?;
-    match result {
-        Some(value) => println!("found non-existent key: {} (unexpected)", value),
-        None => println!("non-existent key not found (expected)"),
+    let non_existent = ((n + 1000) as i32).to_le_bytes();
+    let values = tree.find(&non_existent)?;
+    match values.is_empty() {
+        false => println!("found non-existent key: {:?} (unexpected)", values),
+        true => println!("non-existent key not found (expected)"),
     }
 
     let lookup_time = start.elapsed();
@@ -58,8 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nperforming range query...");
     let start = Instant::now();
 
-    let range_start = (n / 2).to_le_bytes();
-    let range_end = (n / 2 + 10).to_le_bytes();
+    let range_start = ((n / 2) as i32).to_le_bytes();
+    let range_end = ((n / 2 + 10) as i32).to_le_bytes();
     let results = tree.range(&range_start, &range_end)?;
 
     println!("range query returned {} results", results.len());

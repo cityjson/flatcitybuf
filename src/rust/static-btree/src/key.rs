@@ -279,16 +279,81 @@ pub struct KeyEncoderFactory;
 
 impl KeyEncoderFactory {
     /// Creates a key encoder for the given key type
-    pub fn for_type<T>(key_type: KeyType) -> Box<dyn KeyEncoder<T>> {
+    pub fn for_type<T: 'static>(key_type: KeyType) -> Box<dyn KeyEncoder<T>> {
         match key_type {
-            KeyType::I8 => Box::new(I8KeyEncoder) as Box<dyn KeyEncoder<T>>,
-            KeyType::I16 => Box::new(I16KeyEncoder) as Box<dyn KeyEncoder<T>>,
-            KeyType::I32 => Box::new(I32KeyEncoder) as Box<dyn KeyEncoder<T>>,
-            KeyType::I64 => Box::new(I64KeyEncoder) as Box<dyn KeyEncoder<T>>,
-            KeyType::U8 => Box::new(U8KeyEncoder) as Box<dyn KeyEncoder<T>>,
-            KeyType::U16 => Box::new(U16KeyEncoder) as Box<dyn KeyEncoder<T>>,
-            KeyType::U32 => Box::new(U32KeyEncoder) as Box<dyn KeyEncoder<T>>,
-            KeyType::U64 => Box::new(U64KeyEncoder) as Box<dyn KeyEncoder<T>>,
+            KeyType::I8 => {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<i8>() {
+                    // Safety: we've verified T is i8
+                    unsafe {
+                        std::mem::transmute(Box::new(I8KeyEncoder) as Box<dyn KeyEncoder<i8>>)
+                    }
+                } else {
+                    panic!("Type mismatch: expected i8")
+                }
+            }
+            KeyType::I16 => {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<i16>() {
+                    unsafe {
+                        std::mem::transmute(Box::new(I16KeyEncoder) as Box<dyn KeyEncoder<i16>>)
+                    }
+                } else {
+                    panic!("Type mismatch: expected i16")
+                }
+            }
+            KeyType::I32 => {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<i32>() {
+                    unsafe {
+                        std::mem::transmute(Box::new(I32KeyEncoder) as Box<dyn KeyEncoder<i32>>)
+                    }
+                } else {
+                    panic!("Type mismatch: expected i32")
+                }
+            }
+            KeyType::I64 => {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<i64>() {
+                    unsafe {
+                        std::mem::transmute(Box::new(I64KeyEncoder) as Box<dyn KeyEncoder<i64>>)
+                    }
+                } else {
+                    panic!("Type mismatch: expected i64")
+                }
+            }
+            KeyType::U8 => {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<u8>() {
+                    unsafe {
+                        std::mem::transmute(Box::new(U8KeyEncoder) as Box<dyn KeyEncoder<u8>>)
+                    }
+                } else {
+                    panic!("Type mismatch: expected u8")
+                }
+            }
+            KeyType::U16 => {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<u16>() {
+                    unsafe {
+                        std::mem::transmute(Box::new(U16KeyEncoder) as Box<dyn KeyEncoder<u16>>)
+                    }
+                } else {
+                    panic!("Type mismatch: expected u16")
+                }
+            }
+            KeyType::U32 => {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<u32>() {
+                    unsafe {
+                        std::mem::transmute(Box::new(U32KeyEncoder) as Box<dyn KeyEncoder<u32>>)
+                    }
+                } else {
+                    panic!("Type mismatch: expected u32")
+                }
+            }
+            KeyType::U64 => {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<u64>() {
+                    unsafe {
+                        std::mem::transmute(Box::new(U64KeyEncoder) as Box<dyn KeyEncoder<u64>>)
+                    }
+                } else {
+                    panic!("Type mismatch: expected u64")
+                }
+            }
             _ => panic!("Unsupported key type for generic factory method"),
         }
     }

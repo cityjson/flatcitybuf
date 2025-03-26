@@ -14,7 +14,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 
 # SIMD support
-packed_simd = { version = "0.3.9", optional = true }
+# packed_simd = { version = "0.3.9", optional = true }
 
 # For platforms without packed_simd support
 bytemuck = { workspace = true }

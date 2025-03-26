@@ -58,9 +58,9 @@ impl Entry {
     /// # Returns
     ///
     /// The total size of the encoded entry in bytes
-    pub fn encoded_size(&self, key_size: usize) -> usize {
+    pub fn encoded_size(&self) -> usize {
         // Return fixed size of key + 8 bytes for value
-        key_size + size_of::<u64>()
+        self.key.len() + size_of::<u64>()
     }
 
     /// Encodes the entry into bytes.

@@ -16,7 +16,7 @@ fn test_small_tree() {
 
     // Add some entries with i32 keys
     for i in 0..10 {
-        let key = i.to_le_bytes();
+        let key = (i as i32).to_le_bytes();
         builder.add_entry(&key, i as u64);
     }
 
@@ -32,14 +32,15 @@ fn test_small_tree() {
 
     // Find values
     for i in 0..10 {
-        let key = i.to_le_bytes();
+        let key = (i as i32).to_le_bytes();
         let result = tree.find(&key).unwrap();
-        assert_eq!(result, Some(i as u64));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], i as u64);
     }
 
     // Try to find a key that doesn't exist
     let non_existent = 100i32.to_le_bytes();
-    assert_eq!(tree.find(&non_existent).unwrap(), None);
+    assert!(tree.find(&non_existent).unwrap().is_empty());
 }
 
 #[test]
@@ -49,7 +50,7 @@ fn test_medium_tree() {
 
     // Add 100 entries with i64 keys
     for i in 0..100 {
-        let key = i.to_le_bytes();
+        let key = (i as i64).to_le_bytes();
         builder.add_entry(&key, (i * 2) as u64); // Value is key * 2
     }
 
@@ -62,9 +63,10 @@ fn test_medium_tree() {
 
     // Find some values
     for i in 0..100 {
-        let key = i.to_le_bytes();
+        let key = (i as i64).to_le_bytes();
         let result = tree.find(&key).unwrap();
-        assert_eq!(result, Some((i * 2) as u64));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (i * 2) as u64);
     }
 }
 
@@ -75,7 +77,7 @@ fn test_tree_with_duplicates() {
 
     // Add entries with some duplicates
     for i in 0..10 {
-        let key = i.to_le_bytes();
+        let key = (i as i32).to_le_bytes();
         builder.add_entry(&key, i as u64);
 
         // Add a duplicate with a different value
@@ -86,15 +88,26 @@ fn test_tree_with_duplicates() {
 
     let tree = builder.build().unwrap();
 
-    // Tree should deduplicate and keep the last value for each key
-    assert_eq!(tree.len(), 10);
+    // Tree keeps all duplicates now (no deduplication)
+    let expected_count = 10 + 5; // 10 original entries + 5 duplicates (for even numbers)
+    assert_eq!(tree.len(), expected_count);
 
-    // Check that the duplicates have the correct (last) values
+    // Check that the duplicates are preserved
     for i in 0..10 {
-        let key = i.to_le_bytes();
-        let expected = if i % 2 == 0 { i + 100 } else { i } as u64;
-        let result = tree.find(&key).unwrap();
-        assert_eq!(result, Some(expected));
+        let key = (i as i32).to_le_bytes();
+        let results = tree.find(&key).unwrap();
+
+        if i % 2 == 0 {
+            // Even numbers have duplicates
+            assert_eq!(results.len(), 2);
+            // Values should include both the original and the duplicate
+            assert!(results.contains(&(i as u64)));
+            assert!(results.contains(&((i + 100) as u64)));
+        } else {
+            // Odd numbers have only one entry
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0], i as u64);
+        }
     }
 }
 
@@ -105,7 +118,7 @@ fn test_range_query() {
 
     // Add 20 entries
     for i in 0..20 {
-        let key = i.to_le_bytes();
+        let key = (i as i32).to_le_bytes();
         builder.add_entry(&key, i as u64);
     }
 
@@ -149,7 +162,7 @@ fn test_large_tree() {
 
     // Add entries in reverse order to test sorting
     for i in (0..N).rev() {
-        let key = i.to_le_bytes();
+        let key = (i as i32).to_le_bytes();
         builder.add_entry(&key, i as u64);
     }
 
@@ -161,15 +174,16 @@ fn test_large_tree() {
 
     // Find all values to ensure tree is correctly built
     for i in 0..N {
-        let key = i.to_le_bytes();
+        let key = (i as i32).to_le_bytes();
         let result = tree.find(&key).unwrap();
-        assert_eq!(result, Some(i as u64), "Failed to find key {}", i);
+        assert_eq!(result.len(), 1, "Failed to find key {}", i);
+        assert_eq!(result[0], i as u64, "Wrong value for key {}", i);
     }
 
-    // Check that non-existent keys return None
+    // Check that non-existent keys return empty vector
     let non_existent = (N + 100) as i32;
     let result = tree.find(&non_existent.to_le_bytes()).unwrap();
-    assert_eq!(result, None);
+    assert!(result.is_empty());
 }
 
 #[test]
@@ -179,7 +193,7 @@ fn test_tree_with_unsigned_keys() {
 
     // Add entries with u32 keys
     for i in 0..50 {
-        let key = (i * 2).to_le_bytes(); // Use even numbers
+        let key = ((i * 2) as u32).to_le_bytes(); // Use even numbers
         builder.add_entry(&key, i as u64);
     }
 
@@ -187,15 +201,16 @@ fn test_tree_with_unsigned_keys() {
 
     // Find values
     for i in 0..50 {
-        let key = (i * 2).to_le_bytes();
+        let key = ((i * 2) as u32).to_le_bytes();
         let result = tree.find(&key).unwrap();
-        assert_eq!(result, Some(i as u64));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], i as u64);
     }
 
     // Check that odd numbers are not in the tree
     for i in 0..25 {
-        let key = (i * 2 + 1).to_le_bytes();
+        let key = ((i * 2 + 1) as u32).to_le_bytes();
         let result = tree.find(&key).unwrap();
-        assert_eq!(result, None);
+        assert!(result.is_empty());
     }
 }

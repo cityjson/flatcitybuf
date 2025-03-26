@@ -6,7 +6,6 @@
 
 use crate::entry::Entry;
 use crate::errors::{NodeError, Result};
-use std::mem::size_of;
 
 /// Type of node in the static B+tree
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,4 +297,10 @@ pub fn parent_index(node_index: usize, branching_factor: usize) -> Option<(usize
 /// The maximum number of entries per node (equal to branching_factor)
 pub fn max_entries_per_node(branching_factor: usize) -> usize {
     branching_factor
+}
+
+pub fn max_node_size(branching_factor: usize, entry_size: usize) -> usize {
+    let header_size = 4; // node_type(1) + entry_count(2) + reserved(1)
+    let max_entries = max_entries_per_node(branching_factor);
+    header_size + max_entries * entry_size
 }
