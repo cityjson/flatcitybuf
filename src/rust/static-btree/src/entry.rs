@@ -7,28 +7,26 @@ use std::io::{Read, Write};
 use std::mem;
 
 /// Represents a Key-Value pair. Stored in leaf nodes and used as input for building.
+// Remove the generic V, use the concrete Value type alias directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Entry<K: Key, V: Value> {
+pub struct Entry<K: Key> {
     /// The key part of the entry.
     pub key: K,
-    /// The value part of the entry (typically a u64 offset).
-    pub value: V,
+    /// The value part of the entry (u64 offset).
+    pub value: Value, // Use the Value type alias directly
 }
 
-impl<K: Key, V: Value> Entry<K, V> {
-    /// The size of the value part in bytes (assuming `Value = u64`).
-    const VALUE_SIZE: usize = mem::size_of::<Value>(); // Use the constant from lib.rs? No, keep it local for clarity.
+// Update the impl block to only use the K generic parameter
+impl<K: Key> Entry<K> {
+    /// The size of the value part in bytes (u64).
+    const VALUE_SIZE: usize = mem::size_of::<Value>();
     /// The total size of the entry when serialized.
     pub const SERIALIZED_SIZE: usize = K::SERIALIZED_SIZE + Self::VALUE_SIZE;
 
     /// Serializes the entire entry (key followed by value) to a writer.
     /// Assumes little-endian encoding for the `Value`.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        // Write the key first using its trait implementation.
         self.key.write_to(writer)?;
-        // Write the value as little-endian bytes.
-        // Note: The spec uses V: Value, but Value is u64. We assume V is always u64 here.
-        // If V could be something else implementing a hypothetical 'Value' trait, this would need adjustment.
         writer.write_all(&self.value.to_le_bytes())?;
         Ok(())
     }
@@ -36,26 +34,22 @@ impl<K: Key, V: Value> Entry<K, V> {
     /// Deserializes an entire entry from a reader.
     /// Assumes little-endian encoding for the `Value`.
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
-        // Read the key using its trait implementation.
         let key = K::read_from(reader)?;
-        // Read the exact number of bytes for the value.
         let mut value_bytes = [0u8; Self::VALUE_SIZE];
         reader.read_exact(&mut value_bytes)?;
-        // Convert bytes to the Value type (u64).
         let value = Value::from_le_bytes(value_bytes);
         Ok(Entry { key, value })
     }
 }
 
-// Implement ordering based *only* on the key. This is essential for sorting
-// input entries before building and for searching within leaf nodes.
-impl<K: Key, V: Value> PartialOrd for Entry<K, V> {
+// Update ordering implementations
+impl<K: Key> PartialOrd for Entry<K> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.key.partial_cmp(&other.key)
     }
 }
 
-impl<K: Key, V: Value> Ord for Entry<K, V> {
+impl<K: Key> Ord for Entry<K> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.key.cmp(&other.key)
     }
@@ -64,7 +58,7 @@ impl<K: Key, V: Value> Ord for Entry<K, V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::Key; // Need a concrete Key implementation for testing
+    use crate::key::Key;
     use std::io::Cursor;
 
     // Define a simple Key implementation for testing purposes
@@ -88,6 +82,7 @@ mod tests {
     #[test]
     fn test_entry_serialization_deserialization() {
         let entry = Entry {
+            // No V generic needed here
             key: TestKey(12345),
             value: 9876543210,
         };
@@ -99,11 +94,11 @@ mod tests {
             buffer.len(),
             TestKey::SERIALIZED_SIZE + mem::size_of::<Value>()
         );
-        assert_eq!(buffer.len(), Entry::<TestKey, Value>::SERIALIZED_SIZE);
+        assert_eq!(buffer.len(), Entry::<TestKey>::SERIALIZED_SIZE); // Update const access
 
         let mut cursor = Cursor::new(buffer);
         let deserialized_entry =
-            Entry::<TestKey, Value>::read_from(&mut cursor).expect("read should succeed");
+            Entry::<TestKey>::read_from(&mut cursor).expect("read should succeed"); // Update type
 
         assert_eq!(entry, deserialized_entry);
     }
@@ -111,16 +106,19 @@ mod tests {
     #[test]
     fn test_entry_ordering() {
         let entry1 = Entry {
+            // No V generic
             key: TestKey(10),
             value: 100,
         };
         let entry2 = Entry {
+            // No V generic
             key: TestKey(20),
-            value: 50, // Value should not affect comparison
+            value: 50,
         };
         let entry3 = Entry {
+            // No V generic
             key: TestKey(10),
-            value: 200, // Value should not affect comparison
+            value: 200,
         };
 
         assert!(entry1 < entry2);
@@ -131,9 +129,9 @@ mod tests {
 
     #[test]
     fn test_entry_read_error_short_read() {
-        let mut short_buffer = vec![0u8; Entry::<TestKey, Value>::SERIALIZED_SIZE - 1]; // One byte too short
+        let mut short_buffer = vec![0u8; Entry::<TestKey>::SERIALIZED_SIZE - 1]; // Update const access
         let mut cursor = Cursor::new(&mut short_buffer);
-        let result = Entry::<TestKey, Value>::read_from(&mut cursor);
+        let result = Entry::<TestKey>::read_from(&mut cursor); // Update type
         assert!(result.is_err());
         match result.err().unwrap() {
             Error::IoError(e) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),
