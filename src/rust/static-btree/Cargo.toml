@@ -9,7 +9,6 @@ repository = "https://github.com/hideba/flatcitybuf"
 readme = "README.md"
 
 [dependencies]
-# Error handling
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 
