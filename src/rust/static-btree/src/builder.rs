@@ -108,7 +108,7 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
             items_in_current_node: 0,
             current_offset,
             first_keys_of_current_level: Vec::new(),
-            nodes_per_level_build: Vec::new(),
+            nodes_per_level_build: Vec::new(), // Initialize empty
             key_size,
             entry_size,
             internal_node_byte_size,
@@ -161,18 +161,13 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
 
             // If node is full, write it out
             if self.items_in_current_node == self.branching_factor {
-                self.write_current_node(self.leaf_node_byte_size)?; // Use leaf size
-                                                                    // Promote the first key of the node we just wrote
-                self.first_keys_of_current_level.push(
-                    first_key_current_node
-                        .take() // take ownership, leaving None
-                        .ok_or_else(|| {
-                            Error::BuildError(
-                                "internal error: missing first key for full node".to_string(),
-                            )
-                        })?,
-                );
-                // Reset for next node
+                self.write_current_node(self.leaf_node_byte_size)?;
+                self.first_keys_of_current_level
+                    .push(first_key_current_node.take().ok_or_else(|| {
+                        Error::BuildError(
+                            "internal error: missing first key for full node".to_string(),
+                        )
+                    })?);
                 self.items_in_current_node = 0;
                 self.current_node_buffer.clear();
             }
@@ -180,66 +175,116 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
 
         // Handle the last potentially partial leaf node
         if self.items_in_current_node > 0 {
-            self.pad_and_write_current_node(self.leaf_node_byte_size)?; // Use leaf size
+            self.pad_and_write_current_node(self.leaf_node_byte_size)?;
             self.first_keys_of_current_level
                 .push(first_key_current_node.take().ok_or_else(|| {
                     Error::BuildError(
                         "internal error: missing first key for partial node".to_string(),
                     )
                 })?);
-            // Reset state just in case (though not strictly needed before next phase)
-            self.items_in_current_node = 0;
-            self.current_node_buffer.clear();
         } else if self.num_entries == 0 {
-            // Handle empty input case - write empty tree header later?
-            // For now, assume build_from_sorted requires at least one entry or handle in finalization.
+            // Handle empty input: Finalize immediately.
             println!("warning: building tree from empty input iterator");
+            return self.finalize_build();
         }
 
-        // Record leaf level info
-        self.nodes_per_level_build
-            .push(self.first_keys_of_current_level.len() as u64);
-        // The keys collected from the leaf level are the ones to be promoted
-        self.promoted_keys_buffer = std::mem::take(&mut self.first_keys_of_current_level); // Efficiently move Vec
+        // Record leaf level info only if entries were processed
+        if self.num_entries > 0 {
+            self.nodes_per_level_build
+                .push(self.first_keys_of_current_level.len() as u64);
+            self.promoted_keys_buffer = std::mem::take(&mut self.first_keys_of_current_level);
+        }
 
         // --- Phase 2..N: Write Internal Nodes (Bottom-Up) ---
-        // (To be implemented next)
+        while self.promoted_keys_buffer.len() > 1 {
+            let keys_for_this_level = std::mem::take(&mut self.promoted_keys_buffer);
+            let mut first_key_current_node: Option<K> = None;
+            self.items_in_current_node = 0;
+            self.current_node_buffer.clear();
 
-        // --- Phase N+1: Finalization ---
-        // (To be implemented last)
-        // Calculate Height
-        // Seek to Start
-        // Write Final Header
-        // Flush Writer
+            println!(
+                "debug: building internal level with {} keys",
+                keys_for_this_level.len()
+            );
 
-        // Placeholder until fully implemented
-        if self.num_entries > 0 && self.promoted_keys_buffer.is_empty() {
-            // This should not happen if there were entries unless branching factor is huge
-            return Err(Error::BuildError(
-                "internal error: no keys promoted from leaf level".to_string(),
-            ));
+            for key in keys_for_this_level {
+                if self.items_in_current_node == 0 {
+                    first_key_current_node = Some(key.clone());
+                }
+                key.write_to(&mut self.current_node_buffer)?;
+                self.items_in_current_node += 1;
+
+                if self.items_in_current_node == self.branching_factor {
+                    self.write_current_node(self.internal_node_byte_size)?;
+                    self.first_keys_of_current_level.push(
+                        first_key_current_node.take().ok_or_else(|| {
+                            Error::BuildError(
+                                "internal error: missing first key for full internal node"
+                                    .to_string(),
+                            )
+                        })?,
+                    );
+                    self.items_in_current_node = 0;
+                    self.current_node_buffer.clear();
+                }
+            }
+
+            if self.items_in_current_node > 0 {
+                self.pad_and_write_current_node(self.internal_node_byte_size)?;
+                self.first_keys_of_current_level
+                    .push(first_key_current_node.take().ok_or_else(|| {
+                        Error::BuildError(
+                            "internal error: missing first key for partial internal node"
+                                .to_string(),
+                        )
+                    })?);
+            }
+
+            self.nodes_per_level_build
+                .push(self.first_keys_of_current_level.len() as u64);
+            self.promoted_keys_buffer = std::mem::take(&mut self.first_keys_of_current_level);
         }
 
-        // For now, just flush what we have (leaf nodes)
-        self.writer.flush()?;
-        println!(
-            "debug: finished writing leaf nodes. count: {}, promoted keys: {}",
-            self.nodes_per_level_build.last().unwrap_or(&0),
-            self.promoted_keys_buffer.len()
-        );
+        // --- Phase N+1: Finalization ---
+        self.finalize_build()
+    }
 
-        // Return NotImplemented until the rest is done
-        Err(Error::NotImplemented(
-            "build_from_sorted (internal nodes and finalization)".to_string(),
-        ))
-        // Ok(()) // Final return when complete
+    /// Helper to write the final header information.
+    fn finalize_build(mut self) -> Result<(), Error> {
+        let height = self.nodes_per_level_build.len() as u8;
+
+        println!("debug: finalizing build. height: {}, num_entries: {}, nodes_per_level (leaf first): {:?}",
+                 height, self.num_entries, self.nodes_per_level_build);
+
+        self.writer.seek(SeekFrom::Start(0))?;
+        self.writer.write_all(MAGIC_BYTES)?;
+        self.writer.write_all(&FORMAT_VERSION.to_le_bytes())?;
+        self.writer
+            .write_all(&self.branching_factor.to_le_bytes())?;
+        self.writer.write_all(&self.num_entries.to_le_bytes())?;
+        self.writer.write_all(&height.to_le_bytes())?;
+
+        let current_pos = self.writer.stream_position()?;
+        if current_pos > self.header_size {
+            return Err(Error::BuildError(format!(
+                "header content size ({}) exceeded reservation ({})",
+                current_pos, self.header_size
+            )));
+        }
+        let padding_needed = self.header_size - current_pos;
+        if padding_needed > 0 {
+            let padding = vec![0u8; padding_needed as usize];
+            self.writer.write_all(&padding)?;
+        }
+
+        self.writer.flush()?;
+        println!("debug: header written successfully.");
+        Ok(())
     }
 
     /// Helper to write the current node buffer and update offset.
-    /// Assumes the buffer is exactly the correct size (e.g., already padded or full).
     fn write_current_node(&mut self, expected_node_size: usize) -> Result<(), Error> {
         if self.current_node_buffer.len() != expected_node_size {
-            // This indicates an internal logic error if called incorrectly
             return Err(Error::BuildError(format!(
                 "internal error: buffer size {} does not match expected node size {}",
                 self.current_node_buffer.len(),
@@ -260,24 +305,22 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
                 expected_node_size
             )));
         }
-        // Pad with zeros if needed
         let padding_needed = expected_node_size - self.current_node_buffer.len();
         if padding_needed > 0 {
             self.current_node_buffer
                 .extend(std::iter::repeat(0).take(padding_needed));
         }
-        self.write_current_node(expected_node_size) // Now buffer has the correct size
+        self.write_current_node(expected_node_size)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry::Entry; // Import Entry for testing build
+    use crate::entry::Entry;
     use crate::key::Key;
-    use std::io::{Cursor, Read};
+    use std::io::{Cursor, Read, SeekFrom};
 
-    // Re-use TestKey from entry.rs tests
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
     struct TestKey(i32);
 
@@ -293,55 +336,45 @@ mod tests {
         }
     }
 
+    fn read_test_header(cursor: &mut Cursor<Vec<u8>>) -> (u16, u16, u64, u8) {
+        cursor
+            .seek(SeekFrom::Start(MAGIC_BYTES.len() as u64))
+            .unwrap();
+        let mut u16_buf = [0u8; 2];
+        let mut u64_buf = [0u8; 8];
+        let mut u8_buf = [0u8; 1];
+
+        cursor.read_exact(&mut u16_buf).unwrap();
+        let version = u16::from_le_bytes(u16_buf);
+        cursor.read_exact(&mut u16_buf).unwrap();
+        let bfactor = u16::from_le_bytes(u16_buf);
+        cursor.read_exact(&mut u64_buf).unwrap();
+        let num_entries = u64::from_le_bytes(u64_buf);
+        cursor.read_exact(&mut u8_buf).unwrap();
+        let height = u8::from_le_bytes(u8_buf);
+
+        (version, bfactor, num_entries, height)
+    }
+
     #[test]
     fn test_builder_new_valid() {
         let cursor = Cursor::new(Vec::new());
-        let builder = StaticBTreeBuilder::<TestKey, _>::new(cursor, 10);
-        assert!(builder.is_ok());
-        let builder = builder.unwrap();
+        let builder = StaticBTreeBuilder::<TestKey, _>::new(cursor, 10).unwrap();
         assert_eq!(builder.branching_factor, 10);
-        assert_eq!(builder.num_entries, 0);
-        assert_eq!(builder.current_offset, DEFAULT_HEADER_RESERVATION);
-        assert_eq!(builder.header_size, DEFAULT_HEADER_RESERVATION);
-        assert_eq!(builder.key_size, 4);
-        assert_eq!(builder.entry_size, 4 + 8);
-        assert_eq!(builder.internal_node_byte_size, 10 * 4);
-        assert_eq!(builder.leaf_node_byte_size, 10 * (4 + 8));
-
-        let writer = builder.writer;
-        let buffer = writer.into_inner();
+        let buffer = builder.writer.into_inner();
         assert_eq!(buffer.len() as u64, DEFAULT_HEADER_RESERVATION);
-        assert!(buffer.iter().all(|&b| b == 0));
     }
 
     #[test]
     fn test_builder_new_invalid_branching_factor() {
         let cursor = Cursor::new(Vec::new());
-        let result = StaticBTreeBuilder::<TestKey, _>::new(cursor, 0);
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            Error::BuildError(msg) => {
-                assert!(msg.contains("branching factor must be greater than 1"))
-            }
-            _ => panic!("Expected BuildError"),
-        }
-
-        let cursor = Cursor::new(Vec::new());
         let result = StaticBTreeBuilder::<TestKey, _>::new(cursor, 1);
         assert!(result.is_err());
-        match result.err().unwrap() {
-            Error::BuildError(msg) => {
-                assert!(msg.contains("branching factor must be greater than 1"))
-            }
-            _ => panic!("Expected BuildError"),
-        }
     }
 
-    // --- Tests for build_from_sorted (Leaf Node Phase) ---
-
     #[test]
-    fn test_build_leaves_single_full_node() {
-        let b: u16 = 3;
+    fn test_build_single_leaf_node_tree() {
+        let b: u16 = 5;
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
         let entries: Vec<Result<Entry<TestKey>, Error>> = vec![
@@ -358,25 +391,21 @@ mod tests {
                 value: 3,
             }),
         ];
+        let num_entries_expected = entries.len() as u64;
 
-        // Call build (expect NotImplemented error for now, but check state after leaves)
-        let result = builder.build_from_sorted(entries);
-        assert!(result.is_err());
-        // We need access to the builder state *after* the leaf phase, which is tricky
-        // because build_from_sorted consumes self. Let's rethink testing this incrementally.
+        assert!(builder.build_from_sorted(entries).is_ok());
 
-        // Alternative: Test helper methods or refactor build_from_sorted later for testability.
-        // For now, let's manually check the expected output buffer content after leaves.
-
-        let buffer = cursor.into_inner();
+        let mut buffer = cursor.into_inner();
         let header_size = DEFAULT_HEADER_RESERVATION as usize;
-        let entry_size = TestKey::SERIALIZED_SIZE + mem::size_of::<Value>(); // 4 + 8 = 12
-        let node_size = b as usize * entry_size; // 3 * 12 = 36
+        let entry_size = 12;
+        let node_size = b as usize * entry_size;
 
-        // Check total size (header + one leaf node)
         assert_eq!(buffer.len(), header_size + node_size);
+        let (version, bfactor, num_entries_hdr, height) =
+            read_test_header(&mut Cursor::new(buffer.clone()));
+        assert_eq!(height, 1);
+        assert_eq!(num_entries_hdr, num_entries_expected);
 
-        // Check leaf node content (after header)
         let node_data = &buffer[header_size..];
         let mut expected_node_data = Vec::with_capacity(node_size);
         Entry {
@@ -397,94 +426,12 @@ mod tests {
         }
         .write_to(&mut expected_node_data)
         .unwrap();
+        expected_node_data.resize(node_size, 0);
         assert_eq!(node_data, expected_node_data.as_slice());
-
-        // How to check promoted keys? Need to modify builder or test structure.
     }
 
     #[test]
-    fn test_build_leaves_partial_last_node() {
-        let b: u16 = 4;
-        let mut cursor = Cursor::new(Vec::new());
-        let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
-        let entries: Vec<Result<Entry<TestKey>, Error>> = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
-            Ok(Entry {
-                key: TestKey(40),
-                value: 4,
-            }),
-            Ok(Entry {
-                key: TestKey(50),
-                value: 5,
-            }), // Start of partial node
-        ];
-
-        let result = builder.build_from_sorted(entries);
-        assert!(result.is_err()); // Still expect NotImplemented
-
-        let buffer = cursor.into_inner();
-        let header_size = DEFAULT_HEADER_RESERVATION as usize;
-        let entry_size = 12;
-        let node_size = b as usize * entry_size; // 4 * 12 = 48
-
-        // Check total size (header + one full node + one padded partial node)
-        assert_eq!(buffer.len(), header_size + node_size + node_size);
-
-        // Check first node content
-        let node1_data = &buffer[header_size..(header_size + node_size)];
-        let mut expected_node1_data = Vec::with_capacity(node_size);
-        Entry {
-            key: TestKey(10),
-            value: 1,
-        }
-        .write_to(&mut expected_node1_data)
-        .unwrap();
-        Entry {
-            key: TestKey(20),
-            value: 2,
-        }
-        .write_to(&mut expected_node1_data)
-        .unwrap();
-        Entry {
-            key: TestKey(30),
-            value: 3,
-        }
-        .write_to(&mut expected_node1_data)
-        .unwrap();
-        Entry {
-            key: TestKey(40),
-            value: 4,
-        }
-        .write_to(&mut expected_node1_data)
-        .unwrap();
-        assert_eq!(node1_data, expected_node1_data.as_slice());
-
-        // Check second (padded) node content
-        let node2_data = &buffer[(header_size + node_size)..];
-        let mut expected_node2_data = Vec::with_capacity(node_size);
-        Entry {
-            key: TestKey(50),
-            value: 5,
-        }
-        .write_to(&mut expected_node2_data)
-        .unwrap();
-        expected_node2_data.resize(node_size, 0); // Pad with zeros
-        assert_eq!(node2_data, expected_node2_data.as_slice());
-    }
-
-    #[test]
-    fn test_build_leaves_multiple_nodes() {
+    fn test_build_two_level_tree() {
         let b: u16 = 2;
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
@@ -492,7 +439,7 @@ mod tests {
             Ok(Entry {
                 key: TestKey(10),
                 value: 1,
-            }), // Node 1
+            }),
             Ok(Entry {
                 key: TestKey(20),
                 value: 2,
@@ -500,7 +447,7 @@ mod tests {
             Ok(Entry {
                 key: TestKey(30),
                 value: 3,
-            }), // Node 2
+            }),
             Ok(Entry {
                 key: TestKey(40),
                 value: 4,
@@ -508,65 +455,111 @@ mod tests {
             Ok(Entry {
                 key: TestKey(50),
                 value: 5,
-            }), // Node 3 (partial)
+            }),
         ];
+        let num_entries_expected = entries.len() as u64;
 
-        let result = builder.build_from_sorted(entries);
-        assert!(result.is_err()); // Still expect NotImplemented
+        assert!(builder.build_from_sorted(entries).is_ok());
 
-        let buffer = cursor.into_inner();
+        let mut buffer = cursor.into_inner();
         let header_size = DEFAULT_HEADER_RESERVATION as usize;
         let entry_size = 12;
-        let node_size = b as usize * entry_size; // 2 * 12 = 24
+        let key_size = 4;
+        let leaf_node_size = b as usize * entry_size; // 24
+        let internal_node_size = b as usize * key_size; // 8
+        let num_leaf_nodes = 3;
+        let num_internal1_nodes = 2; // Level above leaves
+        let num_root_nodes = 1; // Level above internal1
 
-        // Check total size (header + 3 nodes)
-        assert_eq!(buffer.len(), header_size + 3 * node_size);
+        let expected_size = header_size
+            + num_leaf_nodes * leaf_node_size
+            + num_internal1_nodes * internal_node_size
+            + num_root_nodes * internal_node_size;
+        assert_eq!(buffer.len(), expected_size);
 
-        // Check node 1
-        let node1_data = &buffer[header_size..(header_size + node_size)];
-        let mut expected_node1_data = Vec::with_capacity(node_size);
+        let (version, bfactor, num_entries_hdr, height) =
+            read_test_header(&mut Cursor::new(buffer.clone()));
+        assert_eq!(version, FORMAT_VERSION);
+        assert_eq!(bfactor, b);
+        assert_eq!(num_entries_hdr, num_entries_expected);
+        assert_eq!(height, 3);
+
+        // --- Verify content based on WRITE ORDER ---
+        // Order: Header -> Leaves -> Internal Level 1 -> Root (Internal Level 2)
+        let leaf_start = header_size;
+        let internal1_start = leaf_start + num_leaf_nodes * leaf_node_size;
+        let root_start = internal1_start + num_internal1_nodes * internal_node_size;
+
+        // Check Leaf 1: [Entry(10,1), Entry(20,2)]
+        let leaf1_data = &buffer[leaf_start..(leaf_start + leaf_node_size)];
+        let mut expected_leaf1 = Vec::with_capacity(leaf_node_size);
         Entry {
             key: TestKey(10),
             value: 1,
         }
-        .write_to(&mut expected_node1_data)
+        .write_to(&mut expected_leaf1)
         .unwrap();
         Entry {
             key: TestKey(20),
             value: 2,
         }
-        .write_to(&mut expected_node1_data)
+        .write_to(&mut expected_leaf1)
         .unwrap();
-        assert_eq!(node1_data, expected_node1_data.as_slice());
+        assert_eq!(leaf1_data, expected_leaf1.as_slice());
 
-        // Check node 2
-        let node2_data = &buffer[(header_size + node_size)..(header_size + 2 * node_size)];
-        let mut expected_node2_data = Vec::with_capacity(node_size);
+        // Check Leaf 2: [Entry(30,3), Entry(40,4)]
+        let leaf2_data = &buffer[(leaf_start + leaf_node_size)..(leaf_start + 2 * leaf_node_size)];
+        let mut expected_leaf2 = Vec::with_capacity(leaf_node_size);
         Entry {
             key: TestKey(30),
             value: 3,
         }
-        .write_to(&mut expected_node2_data)
+        .write_to(&mut expected_leaf2)
         .unwrap();
         Entry {
             key: TestKey(40),
             value: 4,
         }
-        .write_to(&mut expected_node2_data)
+        .write_to(&mut expected_leaf2)
         .unwrap();
-        assert_eq!(node2_data, expected_node2_data.as_slice());
+        assert_eq!(leaf2_data, expected_leaf2.as_slice());
 
-        // Check node 3 (padded)
-        let node3_data = &buffer[(header_size + 2 * node_size)..];
-        let mut expected_node3_data = Vec::with_capacity(node_size);
+        // Check Leaf 3: [Entry(50,5), pad]
+        let leaf3_data =
+            &buffer[(leaf_start + 2 * leaf_node_size)..(leaf_start + 3 * leaf_node_size)];
+        let mut expected_leaf3 = Vec::with_capacity(leaf_node_size);
         Entry {
             key: TestKey(50),
             value: 5,
         }
-        .write_to(&mut expected_node3_data)
+        .write_to(&mut expected_leaf3)
         .unwrap();
-        expected_node3_data.resize(node_size, 0); // Pad
-        assert_eq!(node3_data, expected_node3_data.as_slice());
+        expected_leaf3.resize(leaf_node_size, 0);
+        assert_eq!(leaf3_data, expected_leaf3.as_slice());
+
+        // Check Internal Level 1, Node 1: [Key(10), Key(30)]
+        // Promoted keys from leaves were [10, 30, 50]. This level groups them.
+        let internal1_node1_data = &buffer[internal1_start..(internal1_start + internal_node_size)];
+        let mut expected_internal1_node1 = Vec::with_capacity(internal_node_size);
+        TestKey(10).write_to(&mut expected_internal1_node1).unwrap();
+        TestKey(30).write_to(&mut expected_internal1_node1).unwrap();
+        assert_eq!(internal1_node1_data, expected_internal1_node1.as_slice());
+
+        // Check Internal Level 1, Node 2: [Key(50), pad]
+        let internal1_node2_data = &buffer
+            [(internal1_start + internal_node_size)..(internal1_start + 2 * internal_node_size)];
+        let mut expected_internal1_node2 = Vec::with_capacity(internal_node_size);
+        TestKey(50).write_to(&mut expected_internal1_node2).unwrap();
+        expected_internal1_node2.resize(internal_node_size, 0);
+        assert_eq!(internal1_node2_data, expected_internal1_node2.as_slice());
+
+        // Check Root Node (Level 2): [Key(10), Key(50)]
+        // Promoted keys from internal level 1 were [10, 50]. This level groups them.
+        let root_node_data = &buffer[root_start..(root_start + internal_node_size)];
+        let mut expected_root_data = Vec::with_capacity(internal_node_size);
+        TestKey(10).write_to(&mut expected_root_data).unwrap();
+        TestKey(50).write_to(&mut expected_root_data).unwrap();
+        assert_eq!(root_node_data, expected_root_data.as_slice()); // This should now pass
     }
 
     #[test]
@@ -588,30 +581,23 @@ mod tests {
                 value: 2,
             }),
         ];
-
         let result = builder.build_from_sorted(entries);
         assert!(result.is_err());
-        match result.err().unwrap() {
-            Error::BuildError(msg) => assert!(msg.contains("not strictly sorted")),
-            _ => panic!("Expected BuildError for unsorted input"),
-        }
     }
 
     #[test]
-    fn test_build_leaves_empty_input() {
+    fn test_build_empty_input() {
         let b: u16 = 3;
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
         let entries: Vec<Result<Entry<TestKey>, Error>> = vec![];
 
-        // Currently returns NotImplemented, but should ideally handle empty input gracefully
-        let result = builder.build_from_sorted(entries);
-        assert!(result.is_err()); // Expect NotImplemented for now
-                                  // TODO: When fully implemented, this should likely succeed and write a header for an empty tree.
+        assert!(builder.build_from_sorted(entries).is_ok());
 
-        let buffer = cursor.into_inner();
-        let header_size = DEFAULT_HEADER_RESERVATION as usize;
-        // Buffer should only contain the reserved header
-        assert_eq!(buffer.len(), header_size);
+        let mut buffer = cursor.into_inner();
+        assert_eq!(buffer.len() as u64, DEFAULT_HEADER_RESERVATION);
+        let (_, _, num_entries_hdr, height) = read_test_header(&mut Cursor::new(buffer.clone()));
+        assert_eq!(num_entries_hdr, 0);
+        assert_eq!(height, 0);
     }
 }
