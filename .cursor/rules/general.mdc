@@ -73,7 +73,7 @@ flowchart TD
 flowchart TD
     Start[Start] --> Context[Check Memory Bank]
     Context --> Update[Update Documentation]
-    Update --> Rules[Update .clinerules if needed]
+    Update --> Rules[Update .cursor/rules if needed]
     Rules --> Execute[Execute Task]
     Execute --> Document[Document Changes]
 ```

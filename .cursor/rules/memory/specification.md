@@ -38,6 +38,7 @@ table Header {
 ```
 
 key components include:
+
 - **transform**: stores scale and translation vectors for vertex coordinates
 - **appearance**: contains materials and textures information
 - **columns**: schema for attribute data
@@ -71,6 +72,7 @@ table CityObject {
 ```
 
 key components include:
+
 - **cityfeature**: the root object containing city objects and shared vertices
 - **cityobject**: individual 3d features with type, geometry, and attributes
 - **geometry**: complex structure for 3d geometries with boundaries and semantics
@@ -103,7 +105,7 @@ graph TD
     C --> C1[4 bytes uint32]
     D --> D1[FlatBuffers Header]
     E --> E1[Packed R-tree]
-    F --> F1[Sorted Array Index]
+    F --> F1[Static B+tree Index]
     G --> G1[FlatBuffers Features]
 ```
 
@@ -111,7 +113,7 @@ graph TD
 2. **header size**: 4 bytes uint32 indicating the size of the header in bytes
 3. **header**: flatbuffers-encoded header containing metadata, schema, and index information
 4. **r-tree index**: packed r-tree for spatial indexing
-5. **attribute index**: sorted array-based index for attribute queries
+5. **attribute index**: static b+tree indices for attribute queries
 6. **features**: the actual city objects encoded as flatbuffers
 
 each section is aligned to facilitate efficient http range requests, allowing clients to fetch only the parts they need.
@@ -138,6 +140,7 @@ graph TD
 ```
 
 each node entry contains:
+
 - **min_x, min_y**: minimum coordinates of 2d bounding box
 - **max_x, max_y**: maximum coordinates of 2d bounding box
 - **offset**: byte offset to the feature in the features section
@@ -169,6 +172,7 @@ this approach ensures that spatially close objects are also close in the file, i
 ### query algorithm
 
 to query the r-tree:
+
 1. start at the root node
 2. for each entry in the node, check if the query intersects the 2d bounding box
 3. if it's a leaf node, return the feature offsets
@@ -182,22 +186,13 @@ flatcitybuf implements a b-tree-based index for efficient attribute queries:
 
 ### encoding structure
 
-the attribute index is organized as a hierarchical b-tree structure:
+the attribute index is organized as a static/implicit b-tree structure:
 
-```
-┌─────────────────┐
-│ b-tree header   │ metadata about the index (key size, root offset, etc.)
-├─────────────────┤
-│ internal nodes  │ non-leaf nodes containing routing keys and child pointers
-├─────────────────┤
-│ leaf nodes      │ leaf nodes containing keys and feature offsets
-└─────────────────┘
-```
+Entries in the index are stored and they have fixed size of key + pointer. The byte size of the key is dependent on the attribute type. .e.g. for i32, the key is 4 bytes.
 
-each node in the b-tree is stored as a fixed-size block (typically 4kb):
 - **internal nodes**: contain keys and pointers to child nodes
 - **leaf nodes**: contain keys and offsets to features
-- **node structure**: each node includes a type identifier, entry count, and next-node pointer (for leaf nodes)
+- **node structure**: each node includes a entry count, and next-node pointer (for leaf nodes)
 
 this block-based structure aligns with typical page sizes and efficient http range requests, significantly improving i/o performance compared to the previous sorted array approach.
 
@@ -233,6 +228,7 @@ the b-tree structure offers significant advantages for http range requests:
 4. **progressive loading**: loads only the nodes needed for a query
 
 future optimizations include:
+
 1. **batch processing**: grouping feature requests based on spatial proximity
 2. **prefetching**: predicting which nodes might be needed and fetching them proactively
 3. **advanced caching**: implementing ttl and size-based cache management
@@ -267,6 +263,7 @@ the encoding strategy follows a dimensional hierarchy:
 5. **solids**: each element represents the number of shells in a solid
 
 example encoding for a simple triangle:
+
 ```
 boundaries: [0, 1, 2]  // vertex indices
 strings: [3]           // 3 vertices in the string
@@ -274,6 +271,7 @@ surfaces: [1]          // 1 string in the surface
 ```
 
 example encoding for a cube:
+
 ```
 boundaries: [0, 1, 2, 3, 0, 3, 7, 4, 1, 5, 6, 2, 4, 7, 6, 5, 0, 4, 5, 1, 2, 6, 7, 3]  // vertex indices
 strings: [4, 4, 4, 4, 4, 4]  // 6 strings with 4 vertices each
@@ -299,6 +297,7 @@ graph TD
 ```
 
 each semantic object contains:
+
 - type (e.g., wallsurface, roofsurface)
 - attributes (specific to the semantic type)
 - parent/children relationships (for hierarchical semantics)
@@ -336,6 +335,7 @@ attributes in flatcitybuf are encoded as binary data with a schema defined in th
 ### column schema
 
 each attribute has a column definition:
+
 ```flatbuffers
 table Column {
   index: ushort;                // Column index
@@ -348,6 +348,7 @@ table Column {
 ### binary encoding
 
 attributes are stored as a binary blob with values encoded according to their type:
+
 - **numeric types**: native binary representation
 - **string**: length-prefixed utf-8 string
 - **boolean**: single byte (0 or 1)
@@ -357,6 +358,7 @@ attributes are stored as a binary blob with values encoded according to their ty
 ### attribute access
 
 to access an attribute:
+
 1. find the column definition in the header
 2. locate the attribute data in the feature's attributes array
 3. deserialize according to the column type

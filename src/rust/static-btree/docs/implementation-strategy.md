@@ -52,6 +52,53 @@ This layout offers several advantages:
 - More efficient memory usage
 - Simplified serialization/deserialization
 
+Example layout for a tree with branching factor B=3:
+
+```mermaid
+graph TD
+    %% Logical Tree Structure
+    subgraph "Logical Tree Structure"
+        Root["Root Node (Node 0)<br/>K1 | K2"] --> N1["Node 1<br/>N1|N2|N3"]
+        Root --> N2["Node 2<br/>N4|N5|N6"]
+        Root --> N3["Node 3<br/>N7|N8|"]
+
+        N1 --> L1["Leaf 4"]
+        N1 --> L2["Leaf 5"]
+        N1 --> L3["Leaf 6"]
+        N2 --> L4["Leaf 7"]
+        N2 --> L5["Leaf 8"]
+        N2 --> L6["Leaf 9"]
+        N3 --> L7["Leaf 10"]
+        N3 --> L8["Leaf 11"]
+        N3 --> L9["Leaf 12"]
+    end
+
+    %% Physical Memory Layout
+    subgraph "Physical Memory Layout"
+        direction LR
+        M0["Node 0<br/>(Root)"] --> M1["Node 1"] --> M2["Node 2"] --> M3["Node 3"] --> M4["Node 4"] --> M5["..."]
+
+        style M0 fill:#f9f,stroke:#333,stroke-width:2px
+        style M1 fill:#bbf,stroke:#333,stroke-width:2px
+        style M2 fill:#bbf,stroke:#333,stroke-width:2px
+        style M3 fill:#bbf,stroke:#333,stroke-width:2px
+        style M4 fill:#dfd,stroke:#333,stroke-width:2px
+        style M5 fill:#dfd,stroke:#333,stroke-width:2px
+    end
+
+    %% Node Structure
+    subgraph "64-byte Node Structure"
+        direction LR
+        K1["Key 1"] --> K2["Key 2"] --> K3["Key 3"]
+
+        style K1 fill:#eee,stroke:#333,stroke-width:2px
+        style K2 fill:#eee,stroke:#333,stroke-width:2px
+        style K3 fill:#eee,stroke:#333,stroke-width:2px
+    end
+
+    classDef default fill:#fff,stroke:#333,stroke-width:1px;
+```
+
 ## Node Structure
 
 Each node in our static B+tree consists of:
@@ -62,8 +109,6 @@ Each node in our static B+tree consists of:
 The physical structure of a node is optimized for cache line efficiency:
 
 - For a branching factor of 16, each node contains 16 fixed-width keys
-- Total node size is typically 64 bytes (standard cache line size)
-- Keys are stored in a format that facilitates SIMD comparisons
 
 ## Search Algorithm
 
@@ -72,39 +117,9 @@ The search algorithm leverages the implicit structure:
 1. Start at the root node (index 0)
 2. Within each node, find the appropriate branch using:
    - Binary search for basic implementation
-   - SIMD-accelerated search for optimized implementation
 3. Compute the child node index using the formula
 4. Continue until reaching a leaf node
 5. In the leaf node, find the exact match for the key
-
-The SIMD-accelerated version uses:
-
-- Vector instructions to compare multiple keys simultaneously
-- Optimized branching based on bitmasks
-- Techniques to minimize branch mispredictions
-
-### SIMD Search Details
-
-For a 16-key node (which fits in a 64-byte cache line):
-
-1. Load 16 keys into SIMD registers
-2. Compare all keys with the search key in parallel
-3. Generate a bitmask of comparison results
-4. Use bit manipulation to find the correct branch
-
-```rust
-// Pseudo-code for SIMD search
-fn simd_search_node(node: &Node, key: &[u8]) -> usize {
-    // Load keys into SIMD registers
-    let keys_vector = load_keys_simd(node);
-
-    // Compare with search key
-    let compare_mask = compare_simd(keys_vector, key);
-
-    // Find position of first key not less than search key
-    find_first_set_bit(compare_mask)
-}
-```
 
 ## Construction Algorithm
 
@@ -117,26 +132,6 @@ Building the static B+tree involves:
    - Fill leaf nodes first
    - Then fill internal nodes with keys that represent the smallest key in each child subtree
 
-```rust
-// Pseudo-code for tree construction
-fn build_tree(entries: &[Entry], branch_factor: usize) -> StaticBTree {
-    // Calculate tree dimensions
-    let total_entries = entries.len();
-    let height = calculate_height(total_entries, branch_factor);
-
-    // Allocate space for all nodes
-    let mut nodes = allocate_nodes(total_entries, branch_factor);
-
-    // Fill the tree bottom-up
-    fill_leaf_level(&mut nodes, entries, branch_factor);
-    for level in (0..height-1).rev() {
-        fill_internal_level(&mut nodes, level, branch_factor);
-    }
-
-    StaticBTree { nodes, branch_factor, height }
-}
-```
-
 ## Range Queries
 
 Unlike traditional B+trees which use a linked list of leaf nodes, our implementation:
@@ -146,20 +141,6 @@ Unlike traditional B+trees which use a linked list of leaf nodes, our implementa
 3. Scans contiguous leaf nodes until reaching the end key
 
 This approach maintains the cache efficiency advantages while supporting efficient range queries.
-
-## Storage Integration
-
-The static B+tree can be used with different storage backends:
-
-1. **In-Memory**: The entire tree is loaded in memory for maximum performance
-2. **File-Based**: The tree is mapped to a file and accessed via paging
-3. **HTTP-Based**: The tree is stored remotely and accessed via HTTP range requests
-
-For each storage backend, we:
-
-- Maintain the same implicit layout
-- Optimize access patterns for the specific medium
-- Implement prefetching and caching strategies
 
 ## Configurable Branching Factor
 
@@ -176,23 +157,12 @@ The optimal branching factor depends on:
 - Total number of entries
 - Access patterns
 
-## Performance Considerations
-
-Our implementation focuses on maximizing performance through:
-
-1. **Cache Efficiency**: Aligning node size with cache lines
-2. **SIMD Utilization**: Using vector instructions for parallel comparisons
-3. **Branch Prediction**: Minimizing branch mispredictions
-4. **Prefetching**: Strategic prefetching of nodes
-5. **Memory Layout**: Contiguous memory layout for better spatial locality
-
 ## Comparison with Existing Implementation
 
 Compared to the current btree crate, our static-btree implementation:
 
 1. Offers significantly faster search (up to 15x for large datasets)
-2. Uses less memory due to elimination of pointers and better space utilization
-3. Has better cache efficiency due to optimized memory layout
-4. Does not support modifications after construction
+2. Has better cache efficiency due to optimized memory layout
+3. Does not support modifications after construction
 
 These tradeoffs make it ideal for read-heavy workloads with static data.

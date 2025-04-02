@@ -1,6 +1,7 @@
 # **Cloud-Optimized CityJSON**
 
 ## **1. Introduction**
+
 - **Motivation & Project Context**:
   - Standardizing **3D city model data formats** is crucial for long-term semantic storage of urban environments.
   - **CityJSON**, a widely adopted **OGC standard**, provides a structured JSON-based format for 3D city models.
@@ -25,6 +26,7 @@
 ---
 
 ## **2. Design Goals and Requirements**
+
 - **Performance & Efficiency**:
   - Reduce **processing overhead** using **FlatBuffers' zero-copy access**.
   - **Optimize storage** via **binary encoding**, reducing file sizes.
@@ -44,7 +46,9 @@
 ---
 
 ## **3. Data Model and Encoding Structure**
+
 ### **3.1 Enhancements to CityJSON**
+
 - **CityJSON 2.0**:
   - **JSON-based format** for 3D city models.
   - Uses **shared vertex lists** to improve storage efficiency.
@@ -54,6 +58,7 @@
   - Still **text-based**, leading to **higher memory usage**.
 
 ### **3.2 FlatBuffers-Based Encoding**
+
 - **Schema Definition**:
   - Stores **CityObjects as FlatBuffers tables**.
   - Implements **hierarchical storage** with **efficient geometry encoding**.
@@ -63,34 +68,44 @@
   - **Avoids nested JSON objects**, leading to **faster parsing**.
 
 ### **3.3 File Structure**
+
 | **Component** | **Description** |
 |--------------|---------------|
 | **Magic Bytes** | File identifier for format validation. |
 | **Header** | Stores **metadata, CRS, transformations**. |
-| **Index** | **Byte offsets** for fast random access. |
+| **Spatial Index** | **Byte offsets** for fast random access. |
+| **Attribute Index** | **Byte offsets** for fast random access. |
 | **Features** | Encodes **CityJSON objects as FlatBuffers tables**. |
 
 ---
 
 ## **4. Data Organization and Storage Mechanism**
+
 ### **4.1 Spatial Indexing**
-- Implements a **Hilbert R-tree** to:
-  - **Speed up spatial queries**.
-  - Enable **selective data retrieval**.
 
-- **Optimized Query Performance**:
-  - **Attribute-Based Indexing** (e.g., find buildings taller than 50m).
-  - **Spatial Queries** (e.g., find objects within a bounding box).
+- Implements a **Packed Hilbert R-tree** to:
+  - Maximally fill the available space in the node.
+  - Enable **selective data retrieval** within a bounding box.
 
-### **4.2 HTTP Range Requests**
+### **4.2 Attribute Indexing**
+
+- Implements a **Static(Implicit) B+tree** to:
+  - Enable **efficient attribute-based querying**.
+  - Support **range queries** and **Exact Match queries**.
+  - Maximally fill the available space in the node except for the rightmost leaf node.
+
+### **4.3 HTTP Range Requests**
+
 - Enables **partial fetching**:
   - Download **only required city features**, reducing data transfer.
-  - Improves **cloud storage efficiency**.
+  - Spatial index and attribute index are used to determine the range of features to download.
 
 ---
 
 ## **5. Performance Optimizations**
+
 ### **5.1 Benchmarked Results**
+
 | **Dataset** | **CityJSONSeq (Time)** | **FlatBuffers (Time)** | **Size Reduction** |
 |------------|----------------------|----------------------|------------------|
 | 3DBAG | 154ms | 69ms | 48% |
@@ -104,6 +119,7 @@
 ---
 
 ## **6. Streaming and Partial Fetching**
+
 - **HTTP Range Requests**:
   - Supports **on-demand downloading** of CityJSON objects.
   - **Eliminates need to load entire datasets in memory**.
@@ -115,7 +131,9 @@
 ---
 
 ## **7. Implementation Details**
+
 ### **7.1 FlatBuffers Schema**
+
 ```flatbuffers
 table CityJSONFeature {
     id: string;
@@ -126,6 +144,7 @@ table CityJSONFeature {
 ```
 
 ### **7.2 Rust-Based Implementation**
+
 - Developed as a **Rust library** for:
   - **Encoding and decoding FlatBuffers-based CityJSON**.
   - **Integrating with GIS workflows**.
@@ -134,17 +153,21 @@ table CityJSONFeature {
 ---
 
 ## **8. Use Cases and Applications**
+
 ### **8.1 Urban Planning & Smart Cities**
+
 - **Faster, interactive 3D city analysis** in smart city applications.
 - **Real-time urban simulations**.
 
 ### **8.2 Cloud GIS Integration**
+
 - **Optimized for cloud storage platforms** (AWS S3, Google Cloud).
 - **Seamless web-based access**.
 
 ---
 
 ## **9. Comparison with Other Formats**
+
 | **Format** | **Encoding Type** | **Spatial Indexing** | **Partial Fetching** | **Optimized for 3D Models** |
 |-----------|-----------------|-----------------|------------------|-------------------|
 | CityJSON | JSON | No | No | Yes |
@@ -154,11 +177,15 @@ table CityJSONFeature {
 ---
 
 ## **10. Implementation Guide**
+
 ### **10.1 Conversion from CityJSON to FlatCityBuf**
+
 ```bash
-./convert --input cityjson.json --output city.fbuf
+./fcb_cli --input cityjson.city.jsonl --output city.fcb
 ```
+
 ### **10.2 Developer Best Practices**
+
 - **Use HTTP Range Requests** to improve query speeds.
 - **Precompute spatial indices** to optimize large datasets.
 - **Leverage B-tree attribute indices** for efficient filtering.
@@ -166,122 +193,23 @@ table CityJSONFeature {
 ---
 
 ## **11. Future Work and Extensions**
-- **Support for textures/materials** in FlatBuffers.
-- **Adaptive tiling for large datasets**.
+
 - **Cloud GIS standardization** for CityJSON.
+- **Support for other programming languages** such as Python, TypeScript, etc.
 - **Advanced B-tree optimizations** like node compression.
 
 ---
 
 ## **12. Implementation Examples**
+
 ### **12.1 Converting CityJSON to FlatCityBuf (Rust)**
-```rust
-use fcb_core::{reader, writer};
-use anyhow::Result;
 
-async fn convert_cityjson_to_flatcitybuf(input_path: &str, output_path: &str) -> Result<()> {
-    // Read CityJSON file
-    let cityjson = std::fs::read_to_string(input_path)?;
-
-    // Convert to FlatCityBuf
-    let writer = writer::Writer::new();
-    writer.write_to_file(&cityjson, output_path).await?;
-
-    println!("successfully converted {} to {}", input_path, output_path);
-    Ok(())
-}
-```
-
-### **12.2 Spatial Query (Rust)**
-```rust
-use fcb_core::reader::Reader;
-use packed_rtree::NodeItem;
-use anyhow::Result;
-
-async fn query_by_bbox(fcb_path: &str, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Result<Vec<String>> {
-    // Create reader
-    let mut reader = Reader::from_file(fcb_path).await?;
-
-    // Perform spatial query
-    let features = reader.query_bbox(min_x, min_y, max_x, max_y).await?;
-
-    // Extract feature IDs
-    let ids: Vec<String> = features.iter().map(|f| f.id.clone()).collect();
-    println!("found {} features in bounding box", ids.len());
-
-    Ok(ids)
-}
-```
-
-### **12.3 Attribute Query with B-tree (Rust)**
-```rust
-use fcb_core::reader::Reader;
-use btree::{QueryBuilder, conditions};
-use anyhow::Result;
-
-async fn query_by_attribute(fcb_path: &str, field: &str, value: &str) -> Result<Vec<String>> {
-    // Create reader
-    let mut reader = Reader::from_file(fcb_path).await?;
-
-    // Create query using the QueryBuilder
-    let query = QueryBuilder::new()
-        .attribute(field, conditions::eq(value), None)
-        .build()?;
-
-    // Execute query
-    let features = reader.query_attributes(&query).await?;
-
-    // Extract feature IDs
-    let ids: Vec<String> = features.iter().map(|f| f.id.clone()).collect();
-    println!("found {} features with {}={}", ids.len(), field, value);
-
-    Ok(ids)
-}
-```
-
-### **12.4 HTTP Range Requests with B-tree (JavaScript via WASM)**
-```javascript
-import init, { HttpFcbReader, WasmQueryBuilder } from './fcb_wasm.js';
-
-async function loadFeaturesFromUrl(url) {
-  // Initialize WASM module
-  await init();
-
-  // Create HTTP reader
-  const reader = await new HttpFcbReader(url);
-  console.log('httpfcbreader instance created.');
-
-  // Get header information
-  const header = await reader.header();
-  console.log(`loaded file with ${header.features_count} features`);
-
-  // Build combined spatial and attribute query
-  const queryBuilder = new WasmQueryBuilder();
-  
-  // Add spatial filter (only downloads necessary parts using R-tree)
-  queryBuilder.addSpatialFilter(4.3, 52.0, 4.4, 52.1);
-  
-  // Add attribute filter (uses B-tree index for efficiency)
-  queryBuilder.addAttributeFilter("building_height", "greaterThan", 50);
-  
-  // Execute query
-  const iter = await reader.executeQuery(queryBuilder.build());
-
-  // Iterate through features
-  let features = [];
-  let feature;
-  while ((feature = await iter.next()) !== null) {
-    features.push(feature);
-  }
-
-  console.log(`downloaded ${features.length} features using range requests`);
-  return features;
-}
-```
+TODO: add example
 
 ---
 
 ## **15. Conclusion**
+
 - **FlatBuffers-based CityJSON significantly improves query performance, storage efficiency, and cloud compatibility**.
 - **Bridges the gap between CityJSONSeq and optimized binary formats**.
 - **Enables scalable, real-time urban data processing**.
@@ -289,6 +217,7 @@ async function loadFeaturesFromUrl(url) {
 ---
 
 ## **16. Success Metrics**
+
 - **50-70% reduction in storage size**.
 - **10-20× faster retrieval** vs. CityJSONSeq.
 - **Adoption in GIS software & cloud platforms**.
