@@ -3,8 +3,8 @@ use std::mem;
 pub mod error;
 pub mod key;
 // Declare other modules later as they are created
+pub mod builder;
 pub mod entry;
-// pub mod builder;
 // pub mod tree;
 
 /// The type associated with each key in the tree.
