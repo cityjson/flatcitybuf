@@ -39,13 +39,6 @@ tempfile = { workspace = true }
 # name = "search_benchmark"
 # harness = false
 
-[[example]]
-name = "basic_usage"
-path = "examples/basic_usage.rs"
-
-[[example]]
-name = "http_usage"
-path = "examples/http_usage.rs"
 
 [lib]
 name = "static_btree"

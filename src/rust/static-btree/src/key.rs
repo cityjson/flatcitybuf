@@ -166,11 +166,8 @@ impl<const N: usize> FixedStringKey<N> {
     /// let key2 = FixedStringKey::<5>::from_str("example"); // truncated to "examp"
     /// assert_eq!(key2.to_string_lossy(), "examp");
     ///
-    /// let mut bytes = [0u8; 8];
-    /// bytes[0..4].copy_from_slice(b"null");
-    /// bytes[4] = 0; // Add a null byte
-    /// bytes[5..7].copy_from_slice(b"xy");
-    /// let key3 = FixedStringKey(bytes);
+    /// let s_with_null = "null\0xy"; // String containing null byte
+    /// let key3 = FixedStringKey::<8>::from_str(s_with_null);
     /// assert_eq!(key3.to_string_lossy(), "null"); // Stops at null byte
     /// ```
     pub fn to_string_lossy(&self) -> String {
