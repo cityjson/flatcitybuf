@@ -5,7 +5,7 @@ pub mod key;
 // Declare other modules later as they are created
 pub mod builder;
 pub mod entry;
-// pub mod tree;
+pub mod tree;
 
 /// The type associated with each key in the tree.
 /// Currently fixed to u64, assuming byte offsets as values.

@@ -7,9 +7,9 @@ use std::marker::PhantomData;
 use std::mem;
 
 // Constants for the header structure (adjust size as needed)
-const MAGIC_BYTES: &[u8; 8] = b"STREE01\0";
-const FORMAT_VERSION: u16 = 1;
-const DEFAULT_HEADER_RESERVATION: u64 = 64; // Placeholder size, can be calculated more precisely
+pub const MAGIC_BYTES: &[u8; 8] = b"STREE01\0"; // Made public
+pub const FORMAT_VERSION: u16 = 1; // Made public
+pub const DEFAULT_HEADER_RESERVATION: u64 = 64; // Made public
 
 /// Builder structure for creating a StaticBTree file/data structure.
 /// Writes to a `Write + Seek` target using a bottom-up approach.
@@ -378,18 +378,9 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
         let entries: Vec<Result<Entry<TestKey>, Error>> = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
+            Ok(Entry { key: TestKey(10), value: 1 }),
+            Ok(Entry { key: TestKey(20), value: 2 }),
+            Ok(Entry { key: TestKey(30), value: 3 }),
         ];
         let num_entries_expected = entries.len() as u64;
 
@@ -408,24 +399,9 @@ mod tests {
 
         let node_data = &buffer[header_size..];
         let mut expected_node_data = Vec::with_capacity(node_size);
-        Entry {
-            key: TestKey(10),
-            value: 1,
-        }
-        .write_to(&mut expected_node_data)
-        .unwrap();
-        Entry {
-            key: TestKey(20),
-            value: 2,
-        }
-        .write_to(&mut expected_node_data)
-        .unwrap();
-        Entry {
-            key: TestKey(30),
-            value: 3,
-        }
-        .write_to(&mut expected_node_data)
-        .unwrap();
+        Entry { key: TestKey(10), value: 1 }.write_to(&mut expected_node_data).unwrap();
+        Entry { key: TestKey(20), value: 2 }.write_to(&mut expected_node_data).unwrap();
+        Entry { key: TestKey(30), value: 3 }.write_to(&mut expected_node_data).unwrap();
         expected_node_data.resize(node_size, 0);
         assert_eq!(node_data, expected_node_data.as_slice());
     }
@@ -436,26 +412,9 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
         let entries: Vec<Result<Entry<TestKey>, Error>> = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
-            Ok(Entry {
-                key: TestKey(40),
-                value: 4,
-            }),
-            Ok(Entry {
-                key: TestKey(50),
-                value: 5,
-            }),
+            Ok(Entry { key: TestKey(10), value: 1 }), Ok(Entry { key: TestKey(20), value: 2 }),
+            Ok(Entry { key: TestKey(30), value: 3 }), Ok(Entry { key: TestKey(40), value: 4 }),
+            Ok(Entry { key: TestKey(50), value: 5 }),
         ];
         let num_entries_expected = entries.len() as u64;
 
@@ -493,47 +452,22 @@ mod tests {
         // Check Leaf 1: [Entry(10,1), Entry(20,2)]
         let leaf1_data = &buffer[leaf_start..(leaf_start + leaf_node_size)];
         let mut expected_leaf1 = Vec::with_capacity(leaf_node_size);
-        Entry {
-            key: TestKey(10),
-            value: 1,
-        }
-        .write_to(&mut expected_leaf1)
-        .unwrap();
-        Entry {
-            key: TestKey(20),
-            value: 2,
-        }
-        .write_to(&mut expected_leaf1)
-        .unwrap();
+        Entry { key: TestKey(10), value: 1 }.write_to(&mut expected_leaf1).unwrap();
+        Entry { key: TestKey(20), value: 2 }.write_to(&mut expected_leaf1).unwrap();
         assert_eq!(leaf1_data, expected_leaf1.as_slice());
 
         // Check Leaf 2: [Entry(30,3), Entry(40,4)]
         let leaf2_data = &buffer[(leaf_start + leaf_node_size)..(leaf_start + 2 * leaf_node_size)];
         let mut expected_leaf2 = Vec::with_capacity(leaf_node_size);
-        Entry {
-            key: TestKey(30),
-            value: 3,
-        }
-        .write_to(&mut expected_leaf2)
-        .unwrap();
-        Entry {
-            key: TestKey(40),
-            value: 4,
-        }
-        .write_to(&mut expected_leaf2)
-        .unwrap();
+        Entry { key: TestKey(30), value: 3 }.write_to(&mut expected_leaf2).unwrap();
+        Entry { key: TestKey(40), value: 4 }.write_to(&mut expected_leaf2).unwrap();
         assert_eq!(leaf2_data, expected_leaf2.as_slice());
 
         // Check Leaf 3: [Entry(50,5), pad]
         let leaf3_data =
             &buffer[(leaf_start + 2 * leaf_node_size)..(leaf_start + 3 * leaf_node_size)];
         let mut expected_leaf3 = Vec::with_capacity(leaf_node_size);
-        Entry {
-            key: TestKey(50),
-            value: 5,
-        }
-        .write_to(&mut expected_leaf3)
-        .unwrap();
+        Entry { key: TestKey(50), value: 5 }.write_to(&mut expected_leaf3).unwrap();
         expected_leaf3.resize(leaf_node_size, 0);
         assert_eq!(leaf3_data, expected_leaf3.as_slice());
 
@@ -559,7 +493,7 @@ mod tests {
         let mut expected_root_data = Vec::with_capacity(internal_node_size);
         TestKey(10).write_to(&mut expected_root_data).unwrap();
         TestKey(50).write_to(&mut expected_root_data).unwrap();
-        assert_eq!(root_node_data, expected_root_data.as_slice()); // This should now pass
+        assert_eq!(root_node_data, expected_root_data.as_slice()); // Corrected assertion target
     }
 
     #[test]
@@ -568,18 +502,9 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
         let entries: Vec<Result<Entry<TestKey>, Error>> = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }), // Out of order
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
+            Ok(Entry { key: TestKey(10), value: 1 }),
+            Ok(Entry { key: TestKey(30), value: 3 }), // Out of order
+            Ok(Entry { key: TestKey(20), value: 2 }),
         ];
         let result = builder.build_from_sorted(entries);
         assert!(result.is_err());
