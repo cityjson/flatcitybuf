@@ -1,4 +1,5 @@
 use crate::error::Error;
+use chrono::{DateTime, TimeZone, Utc};
 use ordered_float::OrderedFloat; // Import OrderedFloat
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -98,6 +99,56 @@ impl Key for OrderedFloat<f64> {
         let mut bytes = [0u8; Self::SERIALIZED_SIZE];
         reader.read_exact(&mut bytes)?;
         Ok(OrderedFloat::from(f64::from_le_bytes(bytes)))
+    }
+}
+
+// Implement Key for bool
+impl Key for bool {
+    const SERIALIZED_SIZE: usize = 1;
+
+    #[inline]
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        writer.write_all(&[*self as u8]).map_err(Error::from)
+    }
+
+    #[inline]
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+        let mut byte = [0u8];
+        reader.read_exact(&mut byte)?;
+        Ok(byte[0] != 0)
+    }
+}
+
+// Implement Key for DateTime<Utc>
+impl Key for DateTime<Utc> {
+    const SERIALIZED_SIZE: usize = 12; // 8 bytes for seconds + 4 bytes for nanoseconds
+
+    #[inline]
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        // Write timestamp seconds (i64)
+        writer.write_all(&self.timestamp().to_le_bytes())?;
+        // Write nanoseconds (u32)
+        writer.write_all(&(self.timestamp_subsec_nanos().to_le_bytes()))?;
+        Ok(())
+    }
+
+    #[inline]
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+        let mut secs_bytes = [0u8; 8];
+        let mut nanos_bytes = [0u8; 4];
+
+        reader.read_exact(&mut secs_bytes)?;
+        reader.read_exact(&mut nanos_bytes)?;
+
+        let secs = i64::from_le_bytes(secs_bytes);
+        let nanos = u32::from_le_bytes(nanos_bytes);
+
+        Ok(Utc.timestamp_opt(secs, nanos).single().ok_or_else(|| {
+            Error::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid datetime value",
+            ))
+        })?)
     }
 }
 
@@ -325,5 +376,36 @@ mod tests {
         assert!(key1 < key3);
         assert_eq!(key1.cmp(&key4), Ordering::Equal);
         assert!(key5 < key1); // "app\0..." < "apple..."
+    }
+
+    #[test]
+    fn test_bool_keys() {
+        test_key_impl(true);
+        test_key_impl(false);
+    }
+
+    #[test]
+    fn test_datetime_keys() {
+        // Test current time
+        test_key_impl(Utc::now());
+
+        // Test epoch
+        test_key_impl(Utc.timestamp_opt(0, 0).single().unwrap());
+
+        // Test future date
+        test_key_impl(Utc.timestamp_opt(32503680000, 999999999).single().unwrap()); // Year 3000
+
+        // Test past date
+        test_key_impl(Utc.timestamp_opt(-62135596800, 0).single().unwrap()); // Year 0
+
+        // Test ordering
+        let dt1 = Utc.timestamp_opt(1000, 0).single().unwrap();
+        let dt2 = Utc.timestamp_opt(2000, 0).single().unwrap();
+        assert!(dt1 < dt2);
+
+        // Test subsecond precision
+        let dt3 = Utc.timestamp_opt(1000, 500).single().unwrap();
+        let dt4 = Utc.timestamp_opt(1000, 1000).single().unwrap();
+        assert!(dt3 < dt4);
     }
 }
