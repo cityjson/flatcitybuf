@@ -131,11 +131,12 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
             if self.items_in_current_node == self.branching_factor {
                 // No padding needed for full node
                 current_level_nodes.push(self.current_node_buffer.clone()); // Add node data to level buffer
-                self.first_keys_of_current_level.push(
-                    first_key_current_node.take().ok_or_else(|| {
-                        Error::BuildError("internal error: missing first key for full node".to_string())
-                    })?,
-                );
+                self.first_keys_of_current_level
+                    .push(first_key_current_node.take().ok_or_else(|| {
+                        Error::BuildError(
+                            "internal error: missing first key for full node".to_string(),
+                        )
+                    })?);
                 self.items_in_current_node = 0;
                 self.current_node_buffer.clear();
             }
@@ -143,21 +144,24 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
 
         // Handle the last potentially partial leaf node
         if self.items_in_current_node > 0 {
-             self.pad_current_node_buffer(self.leaf_node_byte_size)?; // Pad before buffering
-             current_level_nodes.push(self.current_node_buffer.clone()); // Add padded node data
-             self.first_keys_of_current_level
+            self.pad_current_node_buffer(self.leaf_node_byte_size)?; // Pad before buffering
+            current_level_nodes.push(self.current_node_buffer.clone()); // Add padded node data
+            self.first_keys_of_current_level
                 .push(first_key_current_node.take().ok_or_else(|| {
-                    Error::BuildError("internal error: missing first key for partial node".to_string())
+                    Error::BuildError(
+                        "internal error: missing first key for partial node".to_string(),
+                    )
                 })?);
         } else if self.num_entries == 0 {
-             println!("warning: building tree from empty input iterator");
-             // No nodes to buffer, finalize will handle empty case
-             return self.finalize_build();
+            println!("warning: building tree from empty input iterator");
+            // No nodes to buffer, finalize will handle empty case
+            return self.finalize_build();
         }
 
         // Record leaf level info
         if !current_level_nodes.is_empty() {
-            self.nodes_per_level_build.push(current_level_nodes.len() as u64);
+            self.nodes_per_level_build
+                .push(current_level_nodes.len() as u64);
             self.buffered_levels.push(current_level_nodes); // Add leaf level nodes to main buffer
             self.promoted_keys_buffer = std::mem::take(&mut self.first_keys_of_current_level);
         }
@@ -170,7 +174,10 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
             self.items_in_current_node = 0;
             self.current_node_buffer.clear();
 
-            println!("debug: buffering internal level with {} keys", keys_for_this_level.len());
+            println!(
+                "debug: buffering internal level with {} keys",
+                keys_for_this_level.len()
+            );
 
             for key in keys_for_this_level {
                 if self.items_in_current_node == 0 {
@@ -184,7 +191,10 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
                     current_level_nodes.push(self.current_node_buffer.clone());
                     self.first_keys_of_current_level.push(
                         first_key_current_node.take().ok_or_else(|| {
-                            Error::BuildError("internal error: missing first key for full internal node".to_string())
+                            Error::BuildError(
+                                "internal error: missing first key for full internal node"
+                                    .to_string(),
+                            )
                         })?,
                     );
                     self.items_in_current_node = 0;
@@ -197,17 +207,23 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
                 current_level_nodes.push(self.current_node_buffer.clone()); // Add padded node
                 self.first_keys_of_current_level
                     .push(first_key_current_node.take().ok_or_else(|| {
-                        Error::BuildError("internal error: missing first key for partial internal node".to_string())
+                        Error::BuildError(
+                            "internal error: missing first key for partial internal node"
+                                .to_string(),
+                        )
                     })?);
             }
 
             if !current_level_nodes.is_empty() {
-                self.nodes_per_level_build.push(current_level_nodes.len() as u64);
+                self.nodes_per_level_build
+                    .push(current_level_nodes.len() as u64);
                 self.buffered_levels.push(current_level_nodes); // Add internal level nodes
                 self.promoted_keys_buffer = std::mem::take(&mut self.first_keys_of_current_level);
             } else {
-                 // Should not happen if promoted_keys > 1
-                 return Err(Error::BuildError("internal error: generated empty internal level".to_string()));
+                // Should not happen if promoted_keys > 1
+                return Err(Error::BuildError(
+                    "internal error: generated empty internal level".to_string(),
+                ));
             }
         }
 
@@ -228,7 +244,11 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
 
         // Iterate through buffered levels in reverse order (root first)
         for level_data in self.buffered_levels.iter().rev() {
-            println!("debug: writing level with {} nodes at offset {}", level_data.len(), current_write_offset);
+            println!(
+                "debug: writing level with {} nodes at offset {}",
+                level_data.len(),
+                current_write_offset
+            );
             for node_data in level_data {
                 self.writer.write_all(node_data)?;
                 current_write_offset += node_data.len() as u64; // Use actual node data length
@@ -239,7 +259,8 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
         self.writer.seek(SeekFrom::Start(0))?;
         self.writer.write_all(MAGIC_BYTES)?;
         self.writer.write_all(&FORMAT_VERSION.to_le_bytes())?;
-        self.writer.write_all(&self.branching_factor.to_le_bytes())?;
+        self.writer
+            .write_all(&self.branching_factor.to_le_bytes())?;
         self.writer.write_all(&self.num_entries.to_le_bytes())?;
         self.writer.write_all(&height.to_le_bytes())?;
 
@@ -277,9 +298,10 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
         }
         // Ensure buffer is exactly the expected size after padding
         if self.current_node_buffer.len() != expected_node_size {
-             return Err(Error::BuildError(format!(
+            return Err(Error::BuildError(format!(
                 "internal error: padding failed, buffer size {} != expected {}",
-                self.current_node_buffer.len(), expected_node_size
+                self.current_node_buffer.len(),
+                expected_node_size
             )));
         }
         Ok(())
@@ -311,7 +333,9 @@ mod tests {
     }
 
     fn read_test_header(cursor: &mut Cursor<Vec<u8>>) -> (u16, u16, u64, u8) {
-        cursor.seek(SeekFrom::Start(MAGIC_BYTES.len() as u64)).unwrap();
+        cursor
+            .seek(SeekFrom::Start(MAGIC_BYTES.len() as u64))
+            .unwrap();
         let mut u16_buf = [0u8; 2];
         let mut u64_buf = [0u8; 8];
         let mut u8_buf = [0u8; 1];
@@ -350,9 +374,18 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
         let entries: Vec<Result<Entry<TestKey>, Error>> = vec![
-            Ok(Entry { key: TestKey(10), value: 1 }),
-            Ok(Entry { key: TestKey(20), value: 2 }),
-            Ok(Entry { key: TestKey(30), value: 3 }),
+            Ok(Entry {
+                key: TestKey(10),
+                value: 1,
+            }),
+            Ok(Entry {
+                key: TestKey(20),
+                value: 2,
+            }),
+            Ok(Entry {
+                key: TestKey(30),
+                value: 3,
+            }),
         ];
         let num_entries_expected = entries.len() as u64;
 
@@ -372,22 +405,54 @@ mod tests {
         // Check node data (should be written after header)
         let node_data = &buffer[header_size..];
         let mut expected_node_data = Vec::with_capacity(node_size);
-        Entry { key: TestKey(10), value: 1 }.write_to(&mut expected_node_data).unwrap();
-        Entry { key: TestKey(20), value: 2 }.write_to(&mut expected_node_data).unwrap();
-        Entry { key: TestKey(30), value: 3 }.write_to(&mut expected_node_data).unwrap();
+        Entry {
+            key: TestKey(10),
+            value: 1,
+        }
+        .write_to(&mut expected_node_data)
+        .unwrap();
+        Entry {
+            key: TestKey(20),
+            value: 2,
+        }
+        .write_to(&mut expected_node_data)
+        .unwrap();
+        Entry {
+            key: TestKey(30),
+            value: 3,
+        }
+        .write_to(&mut expected_node_data)
+        .unwrap();
         expected_node_data.resize(node_size, 0);
         assert_eq!(node_data, expected_node_data.as_slice());
     }
 
-     #[test]
+    #[test]
     fn test_build_two_level_tree() {
         let b: u16 = 2;
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
         let entries: Vec<Result<Entry<TestKey>, Error>> = vec![
-            Ok(Entry { key: TestKey(10), value: 1 }), Ok(Entry { key: TestKey(20), value: 2 }),
-            Ok(Entry { key: TestKey(30), value: 3 }), Ok(Entry { key: TestKey(40), value: 4 }),
-            Ok(Entry { key: TestKey(50), value: 5 }),
+            Ok(Entry {
+                key: TestKey(10),
+                value: 1,
+            }),
+            Ok(Entry {
+                key: TestKey(20),
+                value: 2,
+            }),
+            Ok(Entry {
+                key: TestKey(30),
+                value: 3,
+            }),
+            Ok(Entry {
+                key: TestKey(40),
+                value: 4,
+            }),
+            Ok(Entry {
+                key: TestKey(50),
+                value: 5,
+            }),
         ];
         let num_entries_expected = entries.len() as u64;
 
@@ -447,22 +512,47 @@ mod tests {
         // Check Leaf 1: [Entry(10,1), Entry(20,2)]
         let leaf1_data = &buffer[leaf_start..(leaf_start + leaf_node_size)];
         let mut expected_leaf1 = Vec::with_capacity(leaf_node_size);
-        Entry { key: TestKey(10), value: 1 }.write_to(&mut expected_leaf1).unwrap();
-        Entry { key: TestKey(20), value: 2 }.write_to(&mut expected_leaf1).unwrap();
+        Entry {
+            key: TestKey(10),
+            value: 1,
+        }
+        .write_to(&mut expected_leaf1)
+        .unwrap();
+        Entry {
+            key: TestKey(20),
+            value: 2,
+        }
+        .write_to(&mut expected_leaf1)
+        .unwrap();
         assert_eq!(leaf1_data, expected_leaf1.as_slice());
 
         // Check Leaf 2: [Entry(30,3), Entry(40,4)]
         let leaf2_data = &buffer[(leaf_start + leaf_node_size)..(leaf_start + 2 * leaf_node_size)];
         let mut expected_leaf2 = Vec::with_capacity(leaf_node_size);
-        Entry { key: TestKey(30), value: 3 }.write_to(&mut expected_leaf2).unwrap();
-        Entry { key: TestKey(40), value: 4 }.write_to(&mut expected_leaf2).unwrap();
+        Entry {
+            key: TestKey(30),
+            value: 3,
+        }
+        .write_to(&mut expected_leaf2)
+        .unwrap();
+        Entry {
+            key: TestKey(40),
+            value: 4,
+        }
+        .write_to(&mut expected_leaf2)
+        .unwrap();
         assert_eq!(leaf2_data, expected_leaf2.as_slice());
 
         // Check Leaf 3: [Entry(50,5), pad]
         let leaf3_data =
             &buffer[(leaf_start + 2 * leaf_node_size)..(leaf_start + 3 * leaf_node_size)];
         let mut expected_leaf3 = Vec::with_capacity(leaf_node_size);
-        Entry { key: TestKey(50), value: 5 }.write_to(&mut expected_leaf3).unwrap();
+        Entry {
+            key: TestKey(50),
+            value: 5,
+        }
+        .write_to(&mut expected_leaf3)
+        .unwrap();
         expected_leaf3.resize(leaf_node_size, 0);
         assert_eq!(leaf3_data, expected_leaf3.as_slice());
     }
@@ -473,9 +563,18 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b).unwrap();
         let entries: Vec<Result<Entry<TestKey>, Error>> = vec![
-            Ok(Entry { key: TestKey(10), value: 1 }),
-            Ok(Entry { key: TestKey(30), value: 3 }), // Out of order
-            Ok(Entry { key: TestKey(20), value: 2 }),
+            Ok(Entry {
+                key: TestKey(10),
+                value: 1,
+            }),
+            Ok(Entry {
+                key: TestKey(30),
+                value: 3,
+            }), // Out of order
+            Ok(Entry {
+                key: TestKey(20),
+                value: 2,
+            }),
         ];
         let result = builder.build_from_sorted(entries);
         assert!(result.is_err());
