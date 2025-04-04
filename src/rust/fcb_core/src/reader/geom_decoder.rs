@@ -839,9 +839,14 @@ pub(crate) fn decode_textures(
 #[cfg(test)]
 mod tests {
     use crate::{
-        fb::feature_generated::{
-            root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
-            GeometryType, MaterialMapping, MaterialMappingArgs, TextureMapping, TextureMappingArgs,
+        fb::{
+            feature_generated::{
+                root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
+            },
+            geometry_generated::{
+                GeometryType, MaterialMapping, MaterialMappingArgs, TextureMapping,
+                TextureMappingArgs,
+            },
         },
         serializer::to_geometry,
     };

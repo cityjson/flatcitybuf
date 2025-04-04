@@ -98,11 +98,17 @@ struct TransformationMatrix {
   m13:double;
   m20:double;
   m21:double;
+  m22:double;
+  m23:double;
+  m30:double;
+  m31:double;
+  m32:double;
+  m33:double;
 }
 
 table GeometryInstance {
   // "type": "GeometryInstance" isn't written in the file as it's obvious
   transformation: TransformationMatrix;
   template: uint;
-  boundaries: [uint];
+  boundaries: [uint]; //contains only one vertex index of vertices. "referencePoint" of CityGML
 }
