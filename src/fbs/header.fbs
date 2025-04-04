@@ -3,6 +3,7 @@
 // Reference: https://github.com/Ylannl/CityBuf/blob/main/CityBufHeader.fbs
 // Reference: https://github.com/flatgeobuf/flatgeobuf/blob/master/src/fbs/header.fbs
 
+include "geometry.fbs";
 
 enum ColumnType: ubyte {
   Byte,                         // Signed 8-bit integer
@@ -118,6 +119,12 @@ table Appearance {
   default_theme_material: string; // Default theme name for materials when multiple themes exist
 }
 
+struct DoubleVertex {
+  x: double;
+  y: double;
+  z: double;
+}
+
 table Header {
   transform: Transform;                     // Transformation vectors
   appearance: Appearance;                   // Appearance object for materials and textures
@@ -131,6 +138,9 @@ table Header {
   identifier: string;                       // Dataset identifier
   reference_date: string;                   // Reference date
   title: string;                            // Dataset title
+  templates: [Geometry];
+  templates_verteces: [DoubleVertex];
+  // Point of contact
   poc_contact_name: string;                 // Point of contact name
   poc_contact_type: string;                 // Point of contact type
   poc_role: string;                         // Point of contact role
