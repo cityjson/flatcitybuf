@@ -40,6 +40,10 @@ impl<K: Key> Entry<K> {
         let value = Value::from_le_bytes(value_bytes);
         Ok(Entry { key, value })
     }
+
+    pub fn key_size() -> usize {
+        K::SERIALIZED_SIZE
+    }
 }
 
 // Update ordering implementations
