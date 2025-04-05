@@ -1,13 +1,15 @@
 use cjseq::{
-    Boundaries as CjBoundaries, GeometryType as CjGeometryType,
+    Boundaries as CjBoundaries, Geometry as CjGeometry, GeometryType as CjGeometryType,
     MaterialReference as CjMaterialReference, MaterialValues as CjMaterialValues, Semantics,
     SemanticsSurface, SemanticsValues, TextureReference as CjTextureReference,
     TextureValues as CjTextureValues,
 };
 
 use crate::fb::{
-    GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType, TextureMapping,
+    GeometryInstance, GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType,
+    TextureMapping, TransformationMatrix,
 };
+use crate::Error;
 use std::collections::HashMap;
 
 /// For semantics decoding, we only care about solids and shells.
@@ -850,13 +852,15 @@ mod tests {
         },
         serializer::to_geometry,
     };
-    use pretty_assertions::assert_eq;
 
     use super::*;
     use anyhow::Result;
     use cjseq::Geometry as CjGeometry;
     use flatbuffers::FlatBufferBuilder;
     use serde_json::json;
+
+    #[cfg(test)]
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_decode_boundaries() -> Result<()> {
