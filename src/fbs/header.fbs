@@ -4,6 +4,7 @@
 // Reference: https://github.com/flatgeobuf/flatgeobuf/blob/master/src/fbs/header.fbs
 
 include "geometry.fbs";
+include "extension.fbs";
 
 enum ColumnType: ubyte {
   Byte,                         // Signed 8-bit integer
@@ -138,8 +139,11 @@ table Header {
   identifier: string;                       // Dataset identifier
   reference_date: string;                   // Reference date
   title: string;                            // Dataset title
+  // geometry templates
   templates: [Geometry];
   templates_vertices: [DoubleVertex];
+  // extensions
+  extensions: [Extension];
   // Point of contact
   poc_contact_name: string;                 // Point of contact name
   poc_contact_type: string;                 // Point of contact type

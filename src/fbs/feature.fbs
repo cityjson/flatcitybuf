@@ -47,6 +47,9 @@ enum CityObjectType:ubyte {
   TunnelFurniture,
 
   WaterBody
+
+  // Extension objects. Since we can't expect the extended city object type, just mark it as "ExtensionObject".
+  ExtensionObject
 }
 
 struct Vertex {
@@ -64,6 +67,7 @@ table CityFeature {
 
 table CityObject {
   type:CityObjectType;
+  extension_type: string = null; // extension type of the city object. e.g. +NoiseCityFurnitureSegment
   id:string (key, required);
   geographical_extent:GeographicalExtent;
   geometry:[Geometry];
