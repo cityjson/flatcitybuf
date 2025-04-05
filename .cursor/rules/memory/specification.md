@@ -38,6 +38,7 @@ table Header {
 ```
 
 key components include:
+
 - **transform**: stores scale and translation vectors for vertex coordinates
 - **appearance**: contains materials and textures information
 - **columns**: schema for attribute data
@@ -71,10 +72,73 @@ table CityObject {
 ```
 
 key components include:
+
 - **cityfeature**: the root object containing city objects and shared vertices
 - **cityobject**: individual 3d features with type, geometry, and attributes
 - **geometry**: complex structure for 3d geometries with boundaries and semantics
 - **semanticobject**: semantic classification of geometry parts
+
+### Geometry Template and Instance Encoding
+
+FlatCityBuf supports CityJSON's Geometry Templates for efficient representation of repeated geometries.
+
+**Template Definition (in `header.fbs`)**
+
+Geometry templates are defined globally within the `Header` table:
+
+```flatbuffers
+// Within header.fbs, inside the Header table:
+table Header {
+  // ... other fields ...
+  templates: [Geometry];             // Array of template Geometry definitions
+  templates_verteces: [DoubleVertex]; // Array of all vertices used by templates (f64 precision)
+  // ... other fields ...
+}
+
+struct DoubleVertex {
+  x: double;
+  y: double;
+  z: double;
+}
+```
+
+- `templates`: An array of standard `Geometry` tables (defined in `geometry.fbs`), each representing a reusable geometry shape. The encoding of boundaries, semantics, etc., within these template geometries follows the standard `Geometry` encoding rules.
+- `templates_verteces`: A single flat array containing all vertices for *all* templates. Vertices are stored as `DoubleVertex` (using `f64`) to maintain precision, as templates are often defined in a local coordinate system. The indices used within a template's `boundaries` refer to its specific block of vertices within this global array.
+
+**Instance Definition (in `feature.fbs` via `geometry.fbs`)**
+
+Individual CityObjects use `GeometryInstance` tables to reference and place templates:
+
+```flatbuffers
+// Within feature.fbs, inside the CityObject table:
+table CityObject {
+  // ... other fields ...
+  geometry_instances: [GeometryInstance]; // Array of instances using templates
+  // ... other fields ...
+}
+
+// Defined in geometry.fbs:
+table GeometryInstance {
+  transformation: TransformationMatrix; // 4x4 transformation matrix
+  template: uint;                     // 0-based index into Header.templates array
+  boundaries: [uint];                 // MUST contain exactly one index into the *feature's* vertices array (the reference point)
+}
+
+struct TransformationMatrix {
+  m00:double; m01:double; m02:double; m03:double; // Row 1
+  m10:double; m11:double; m12:double; m13:double; // Row 2
+  m20:double; m21:double; m22:double; m23:double; // Row 3
+  m30:double; m31:double; m32:double; m33:double; // Row 4
+}
+```
+
+- `geometry_instances`: An array within a `CityObject` holding references to templates.
+- `GeometryInstance`:
+  - `template`: The index of the template geometry in the `Header.templates` array.
+  - `boundaries`: Contains **exactly one** `uint` index. This index refers to a vertex within the *containing `CityFeature`'s* `vertices` array (which uses `int` coordinates). This vertex serves as the reference point for the instance.
+  - `transformation`: A `TransformationMatrix` struct defining the 4x4 matrix (rotation, translation, scaling) applied to the template geometry relative to the reference point. The 16 `f64` values are stored row-major.
+
+This separation allows defining complex shapes once in the header and instantiating them multiple times within features using only an index, a reference point index, and a transformation matrix.
 
 ### design rationale
 
@@ -138,6 +202,7 @@ graph TD
 ```
 
 each node entry contains:
+
 - **min_x, min_y**: minimum coordinates of 2d bounding box
 - **max_x, max_y**: maximum coordinates of 2d bounding box
 - **offset**: byte offset to the feature in the features section
@@ -169,6 +234,7 @@ this approach ensures that spatially close objects are also close in the file, i
 ### query algorithm
 
 to query the r-tree:
+
 1. start at the root node
 2. for each entry in the node, check if the query intersects the 2d bounding box
 3. if it's a leaf node, return the feature offsets
@@ -197,6 +263,7 @@ the attribute index is stored as a sorted array of key-value entries:
 ```
 
 each key-value entry contains:
+
 - **key length**: 8 bytes, length of the key in bytes
 - **key**: variable length, serialized key value
 - **offsets count**: 8 bytes, number of offsets
@@ -264,6 +331,7 @@ the encoding strategy follows a dimensional hierarchy:
 5. **solids**: each element represents the number of shells in a solid
 
 example encoding for a simple triangle:
+
 ```
 boundaries: [0, 1, 2]  // vertex indices
 strings: [3]           // 3 vertices in the string
@@ -271,6 +339,7 @@ surfaces: [1]          // 1 string in the surface
 ```
 
 example encoding for a cube:
+
 ```
 boundaries: [0, 1, 2, 3, 0, 3, 7, 4, 1, 5, 6, 2, 4, 7, 6, 5, 0, 4, 5, 1, 2, 6, 7, 3]  // vertex indices
 strings: [4, 4, 4, 4, 4, 4]  // 6 strings with 4 vertices each
@@ -296,6 +365,7 @@ graph TD
 ```
 
 each semantic object contains:
+
 - type (e.g., wallsurface, roofsurface)
 - attributes (specific to the semantic type)
 - parent/children relationships (for hierarchical semantics)
@@ -333,6 +403,7 @@ attributes in flatcitybuf are encoded as binary data with a schema defined in th
 ### column schema
 
 each attribute has a column definition:
+
 ```flatbuffers
 table Column {
   index: ushort;                // Column index
@@ -345,6 +416,7 @@ table Column {
 ### binary encoding
 
 attributes are stored as a binary blob with values encoded according to their type:
+
 - **numeric types**: native binary representation
 - **string**: length-prefixed utf-8 string
 - **boolean**: single byte (0 or 1)
@@ -354,6 +426,7 @@ attributes are stored as a binary blob with values encoded according to their ty
 ### attribute access
 
 to access an attribute:
+
 1. find the column definition in the header
 2. locate the attribute data in the feature's attributes array
 3. deserialize according to the column type
