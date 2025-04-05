@@ -139,7 +139,7 @@ table Header {
   reference_date: string;                   // Reference date
   title: string;                            // Dataset title
   templates: [Geometry];
-  templates_verteces: [DoubleVertex];
+  templates_vertices: [DoubleVertex];
   // Point of contact
   poc_contact_name: string;                 // Point of contact name
   poc_contact_type: string;                 // Point of contact type

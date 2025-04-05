@@ -75,7 +75,7 @@ pub(super) fn to_fcb_header<'a>(
 
     let appearance = cj.appearance.as_ref().map(|app| to_appearance(fbb, app));
 
-    let (templates, templates_verteces) = match &cj.geometry_templates {
+    let (templates, templates_vertices) = match &cj.geometry_templates {
         Some(gm) => {
             let templates_vertices = to_templates_vertices(fbb, &gm.vertices_templates);
 
@@ -168,7 +168,7 @@ pub(super) fn to_fcb_header<'a>(
                 version,
                 appearance,
                 templates,
-                templates_verteces,
+                templates_vertices,
             },
         )
     } else {

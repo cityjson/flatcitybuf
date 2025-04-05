@@ -2,20 +2,33 @@ use std::{collections::HashMap, mem::size_of};
 
 use crate::{
     fb::*,
-    geom_decoder::{decode_materials, decode_semantics, decode_textures},
+    geom_decoder::{decode, decode_materials, decode_semantics, decode_textures},
     Error,
 };
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
-    Address as CjAddress, Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON,
-    CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
-    GeometryType as CjGeometryType, MaterialObject as CjMaterial, Metadata as CjMetadata,
-    PointOfContact as CjPointOfContact, ReferenceSystem as CjReferenceSystem,
-    Semantics as CjSemantics, TextFormat as CjTextFormat, TextType as CjTextType,
-    TextureObject as CjTexture, Transform as CjTransform, WrapMode as CjWrapMode,
+    Address as CjAddress,
+    Appearance as CjAppearance,
+    Boundaries as CjBoundaries,
+    CityJSON,
+    CityJSONFeature,
+    CityObject as CjCityObject,
+    Geometry as CjGeometry,
+    GeometryTemplates as CjGeometryTemplates, // Added GeometryTemplates
+    GeometryType as CjGeometryType,
+    MaterialObject as CjMaterial,
+    Metadata as CjMetadata,
+    PointOfContact as CjPointOfContact,
+    ReferenceSystem as CjReferenceSystem,
+    Semantics as CjSemantics,
+    TextFormat as CjTextFormat,
+    TextType as CjTextType,
+    TextureObject as CjTexture,
+    Transform as CjTransform,
+    WrapMode as CjWrapMode,
 };
 
-use super::geom_decoder::decode;
+// Removed unused import: use super::geom_decoder::decode;
 
 pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
     let mut cj = CityJSON::new();
@@ -28,9 +41,14 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
         };
     }
 
-    let reference_system = header
-        .reference_system()
-        .ok_or(Error::MissingRequiredField("reference_system".to_string()))?;
+    let reference_system = header.reference_system().map(|rs| {
+        CjReferenceSystem::new(
+            None,
+            rs.authority().unwrap_or_default().to_string(),
+            rs.version().to_string(),
+            rs.code().to_string(),
+        )
+    });
     cj.version = header.version().to_string();
     cj.thetype = String::from("CityJSON");
 
@@ -48,19 +66,39 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
         })
         .unwrap_or_default();
 
+    let point_of_contact = match header.poc_contact_name() {
+        Some(_) => Some(to_cj_point_of_contact(header)?),
+        None => None,
+    };
+
     cj.metadata = Some(CjMetadata {
         geographical_extent: Some(geographical_extent),
         identifier: header.identifier().map(|i| i.to_string()),
-        point_of_contact: Some(to_cj_point_of_contact(header)?),
+        point_of_contact,
         reference_date: header.reference_date().map(|r| r.to_string()),
-        reference_system: Some(CjReferenceSystem::new(
-            None,
-            reference_system.authority().unwrap_or_default().to_string(),
-            reference_system.version().to_string(),
-            reference_system.code().to_string(),
-        )),
+        reference_system,
         title: header.title().map(|t| t.to_string()),
     });
+
+    // Decode Geometry Templates if present
+    if let (Some(fb_templates), Some(fb_vertices)) =
+        (header.templates(), header.templates_vertices())
+    {
+        let templates = fb_templates
+            .iter()
+            .map(|g| decode_geometry(g)) // Use local decode_geometry
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let vertices_templates = fb_vertices
+            .iter()
+            .map(|v| [v.x(), v.y(), v.z()])
+            .collect::<Vec<_>>();
+
+        cj.geometry_templates = Some(CjGeometryTemplates {
+            templates,
+            vertices_templates,
+        });
+    }
 
     Ok(cj)
 }
@@ -661,6 +699,142 @@ mod tests {
         assert_eq!(matrix[12], 10.0); // Translation X
         assert_eq!(matrix[13], 10.0); // Translation Y
         assert_eq!(matrix[14], 10.0); // Translation Z
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_geometry_instance_missing_boundaries() -> Result<()> {
+        let mut fbb = FlatBufferBuilder::new();
+
+        // Create test transformation matrix
+        let transformation = TransformationMatrix::new(
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        );
+
+        // Create a GeometryInstance WITHOUT boundaries
+        let geometry_instance = GeometryInstance::create(
+            &mut fbb,
+            &crate::fb::GeometryInstanceArgs {
+                template: 5,
+                transformation: Some(&transformation),
+                boundaries: None, // Missing boundaries
+            },
+        );
+
+        fbb.finish(geometry_instance, None);
+        let buf = fbb.finished_data();
+        let geometry_instance = flatbuffers::root::<GeometryInstance>(buf).unwrap();
+
+        // Decode and assert error
+        let result = decode_geometry_instance(&geometry_instance);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            Error::MissingRequiredField(field) => {
+                assert!(field.contains("geometryinstance boundaries"));
+            }
+            _ => panic!("Expected MissingRequiredField error"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_geometry_instance_missing_transformation() -> Result<()> {
+        let mut fbb = FlatBufferBuilder::new();
+
+        // Create boundary with a single vertex index
+        let boundaries_vec = vec![42u32];
+        let boundaries = fbb.create_vector(&boundaries_vec);
+
+        // Create a GeometryInstance WITHOUT transformation
+        let geometry_instance = GeometryInstance::create(
+            &mut fbb,
+            &crate::fb::GeometryInstanceArgs {
+                template: 5,
+                transformation: None, // Missing transformation
+                boundaries: Some(boundaries),
+            },
+        );
+
+        fbb.finish(geometry_instance, None);
+        let buf = fbb.finished_data();
+        let geometry_instance = flatbuffers::root::<GeometryInstance>(buf).unwrap();
+
+        // Decode and assert error
+        let result = decode_geometry_instance(&geometry_instance);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            Error::MissingRequiredField(field) => {
+                assert!(field.contains("geometryinstance transformation field"));
+            }
+            _ => panic!("Expected MissingRequiredField error"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_geometry_instance_invalid_boundaries() -> Result<()> {
+        let mut fbb = FlatBufferBuilder::new();
+
+        // Create test transformation matrix
+        let transformation = TransformationMatrix::new(
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        );
+
+        // --- Test Case 1: Zero boundaries ---
+        let boundaries_vec_zero: Vec<u32> = vec![];
+        let boundaries_zero = fbb.create_vector(&boundaries_vec_zero);
+        let geometry_instance_zero = GeometryInstance::create(
+            &mut fbb,
+            &crate::fb::GeometryInstanceArgs {
+                template: 5,
+                transformation: Some(&transformation),
+                boundaries: Some(boundaries_zero),
+            },
+        );
+        fbb.finish(geometry_instance_zero, None);
+        let buf_zero = fbb.finished_data();
+        let instance_zero = flatbuffers::root::<GeometryInstance>(buf_zero).unwrap();
+
+        let result_zero = decode_geometry_instance(&instance_zero);
+        assert!(result_zero.is_err());
+        match result_zero.err().unwrap() {
+            Error::InvalidAttributeValue { msg } => {
+                assert!(msg.contains("should contain exactly one vertex index, found 0"));
+            }
+            _ => panic!("Expected InvalidAttributeValue error for zero boundaries"),
+        }
+
+        // --- Test Case 2: Multiple boundaries ---
+        fbb.reset(); // Reset builder for the next case
+        let boundaries_vec_multi = vec![42u32, 43u32]; // Two indices
+        let boundaries_multi = fbb.create_vector(&boundaries_vec_multi);
+        // Recreate transformation as it's part of the buffer
+        let transformation_multi = TransformationMatrix::new(
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        );
+        let geometry_instance_multi = GeometryInstance::create(
+            &mut fbb,
+            &crate::fb::GeometryInstanceArgs {
+                template: 5,
+                transformation: Some(&transformation_multi),
+                boundaries: Some(boundaries_multi),
+            },
+        );
+        fbb.finish(geometry_instance_multi, None);
+        let buf_multi = fbb.finished_data();
+        let instance_multi = flatbuffers::root::<GeometryInstance>(buf_multi).unwrap();
+
+        let result_multi = decode_geometry_instance(&instance_multi);
+        assert!(result_multi.is_err());
+        match result_multi.err().unwrap() {
+            Error::InvalidAttributeValue { msg } => {
+                assert!(msg.contains("should contain exactly one vertex index, found 2"));
+            }
+            _ => panic!("Expected InvalidAttributeValue error for multiple boundaries"),
+        }
 
         Ok(())
     }

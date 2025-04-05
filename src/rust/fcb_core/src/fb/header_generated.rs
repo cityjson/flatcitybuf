@@ -2450,7 +2450,7 @@ impl<'a> Header<'a> {
     pub const VT_REFERENCE_DATE: flatbuffers::VOffsetT = 22;
     pub const VT_TITLE: flatbuffers::VOffsetT = 24;
     pub const VT_TEMPLATES: flatbuffers::VOffsetT = 26;
-    pub const VT_TEMPLATES_VERTECES: flatbuffers::VOffsetT = 28;
+    pub const VT_TEMPLATES_VERTICES: flatbuffers::VOffsetT = 28;
     pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 30;
     pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 32;
     pub const VT_POC_ROLE: flatbuffers::VOffsetT = 34;
@@ -2515,8 +2515,8 @@ impl<'a> Header<'a> {
         if let Some(x) = args.poc_contact_name {
             builder.add_poc_contact_name(x);
         }
-        if let Some(x) = args.templates_verteces {
-            builder.add_templates_verteces(x);
+        if let Some(x) = args.templates_vertices {
+            builder.add_templates_vertices(x);
         }
         if let Some(x) = args.templates {
             builder.add_templates(x);
@@ -2684,14 +2684,14 @@ impl<'a> Header<'a> {
         }
     }
     #[inline]
-    pub fn templates_verteces(&self) -> Option<flatbuffers::Vector<'a, DoubleVertex>> {
+    pub fn templates_vertices(&self) -> Option<flatbuffers::Vector<'a, DoubleVertex>> {
         // Safety:
         // Created from valid Table for this object
         // which contains a valid value in this slot
         unsafe {
             self._tab
                 .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, DoubleVertex>>>(
-                    Header::VT_TEMPLATES_VERTECES,
+                    Header::VT_TEMPLATES_VERTICES,
                     None,
                 )
         }
@@ -2885,8 +2885,8 @@ impl flatbuffers::Verifiable for Header<'_> {
                 flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Geometry>>,
             >>("templates", Self::VT_TEMPLATES, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, DoubleVertex>>>(
-                "templates_verteces",
-                Self::VT_TEMPLATES_VERTECES,
+                "templates_vertices",
+                Self::VT_TEMPLATES_VERTICES,
                 false,
             )?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
@@ -2971,7 +2971,7 @@ pub struct HeaderArgs<'a> {
     pub templates: Option<
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Geometry<'a>>>>,
     >,
-    pub templates_verteces: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, DoubleVertex>>>,
+    pub templates_vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, DoubleVertex>>>,
     pub poc_contact_name: Option<flatbuffers::WIPOffset<&'a str>>,
     pub poc_contact_type: Option<flatbuffers::WIPOffset<&'a str>>,
     pub poc_role: Option<flatbuffers::WIPOffset<&'a str>>,
@@ -3002,7 +3002,7 @@ impl Default for HeaderArgs<'_> {
             reference_date: None,
             title: None,
             templates: None,
-            templates_verteces: None,
+            templates_vertices: None,
             poc_contact_name: None,
             poc_contact_type: None,
             poc_role: None,
@@ -3114,13 +3114,13 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
             .push_slot_always::<flatbuffers::WIPOffset<_>>(Header::VT_TEMPLATES, templates);
     }
     #[inline]
-    pub fn add_templates_verteces(
+    pub fn add_templates_vertices(
         &mut self,
-        templates_verteces: flatbuffers::WIPOffset<flatbuffers::Vector<'b, DoubleVertex>>,
+        templates_vertices: flatbuffers::WIPOffset<flatbuffers::Vector<'b, DoubleVertex>>,
     ) {
         self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
-            Header::VT_TEMPLATES_VERTECES,
-            templates_verteces,
+            Header::VT_TEMPLATES_VERTICES,
+            templates_vertices,
         );
     }
     #[inline]
@@ -3251,7 +3251,7 @@ impl core::fmt::Debug for Header<'_> {
         ds.field("reference_date", &self.reference_date());
         ds.field("title", &self.title());
         ds.field("templates", &self.templates());
-        ds.field("templates_verteces", &self.templates_verteces());
+        ds.field("templates_vertices", &self.templates_vertices());
         ds.field("poc_contact_name", &self.poc_contact_name());
         ds.field("poc_contact_type", &self.poc_contact_type());
         ds.field("poc_role", &self.poc_role());

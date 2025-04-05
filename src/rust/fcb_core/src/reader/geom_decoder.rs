@@ -1,15 +1,13 @@
 use cjseq::{
-    Boundaries as CjBoundaries, Geometry as CjGeometry, GeometryType as CjGeometryType,
+    Boundaries as CjBoundaries, GeometryType as CjGeometryType,
     MaterialReference as CjMaterialReference, MaterialValues as CjMaterialValues, Semantics,
     SemanticsSurface, SemanticsValues, TextureReference as CjTextureReference,
     TextureValues as CjTextureValues,
 };
 
 use crate::fb::{
-    GeometryInstance, GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType,
-    TextureMapping, TransformationMatrix,
+    GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType, TextureMapping,
 };
-use crate::Error;
 use std::collections::HashMap;
 
 /// For semantics decoding, we only care about solids and shells.
