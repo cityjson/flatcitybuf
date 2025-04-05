@@ -839,19 +839,26 @@ pub(crate) fn decode_textures(
 #[cfg(test)]
 mod tests {
     use crate::{
-        fb::feature_generated::{
-            root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
-            GeometryType, MaterialMapping, MaterialMappingArgs, TextureMapping, TextureMappingArgs,
+        fb::{
+            feature_generated::{
+                root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
+            },
+            geometry_generated::{
+                GeometryType, MaterialMapping, MaterialMappingArgs, TextureMapping,
+                TextureMappingArgs,
+            },
         },
         serializer::to_geometry,
     };
-    use pretty_assertions::assert_eq;
 
     use super::*;
     use anyhow::Result;
     use cjseq::Geometry as CjGeometry;
     use flatbuffers::FlatBufferBuilder;
     use serde_json::json;
+
+    #[cfg(test)]
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_decode_boundaries() -> Result<()> {

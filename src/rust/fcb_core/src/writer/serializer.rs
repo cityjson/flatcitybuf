@@ -10,14 +10,16 @@ use crate::fb::{
 };
 use crate::geom_encoder::encode;
 use crate::{
-    AttributeIndex, Column, ColumnArgs, MaterialMapping, MaterialMappingArgs, TextureFormat,
-    TextureMapping, TextureMappingArgs,
+    AttributeIndex, Column, ColumnArgs, DoubleVertex, GeometryInstance, GeometryInstanceArgs,
+    MaterialMapping, MaterialMappingArgs, TextureFormat, TextureMapping, TextureMappingArgs,
+    TransformationMatrix,
 };
 use cjseq::{
-    CityJSON, CityJSONFeature, CityObject as CjCityObject, Geometry as CjGeometry,
-    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, TextFormat as CjTextFormat, TextType as CjTextType,
-    Transform as CjTransform, WrapMode as CjWrapMode,
+    Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON, CityJSONFeature,
+    CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
+    PointOfContact as CjPointOfContact, ReferenceSystem as CjReferenceSystem,
+    TextFormat as CjTextFormat, TextType as CjTextType, Transform as CjTransform,
+    WrapMode as CjWrapMode,
 };
 use flatbuffers::FlatBufferBuilder;
 use packed_rtree::NodeItem;
@@ -71,6 +73,22 @@ pub(super) fn to_fcb_header<'a>(
         .as_ref()
         .map(to_geographical_extent);
 
+    let appearance = cj.appearance.as_ref().map(|app| to_appearance(fbb, app));
+
+    let (templates, templates_vertices) = match &cj.geometry_templates {
+        Some(gm) => {
+            let templates_vertices = to_templates_vertices(fbb, &gm.vertices_templates);
+
+            let gm_vec = gm
+                .templates
+                .iter()
+                .map(|g| to_geometry(fbb, g))
+                .collect::<Vec<_>>();
+            (Some(fbb.create_vector(&gm_vec)), Some(templates_vertices))
+        }
+        None => (None, None),
+    };
+
     if let Some(meta) = cj.metadata.as_ref() {
         let reference_system = meta
             .reference_system
@@ -121,6 +139,7 @@ pub(super) fn to_fcb_header<'a>(
                 )
             },
         );
+
         Header::create(
             fbb,
             &HeaderArgs {
@@ -147,7 +166,9 @@ pub(super) fn to_fcb_header<'a>(
                 poc_address_country,
                 attributes: None,
                 version,
-                appearance: None, //TODO: add appearance
+                appearance,
+                templates,
+                templates_vertices,
             },
         )
     } else {
@@ -332,99 +353,10 @@ pub(super) fn to_fcb_city_feature<'a>(
     );
 
     // Handle appearance if present
-    let appearance = city_feature.appearance.as_ref().map(|app| {
-        let materials = app.materials.as_ref().map(|materials| {
-            let material_offsets: Vec<_> = materials
-                .iter()
-                .map(|m| {
-                    let name = fbb.create_string(&m.name);
-                    let diffuse_color = m.diffuse_color.map(|c| fbb.create_vector(&c));
-                    let emissive_color = m.emissive_color.map(|c| fbb.create_vector(&c));
-                    let specular_color = m.specular_color.map(|c| fbb.create_vector(&c));
-                    Material::create(
-                        fbb,
-                        &MaterialArgs {
-                            name: Some(name),
-                            ambient_intensity: m.ambient_intensity,
-                            diffuse_color,
-                            emissive_color,
-                            specular_color,
-                            shininess: m.shininess,
-                            transparency: m.transparency,
-                            is_smooth: m.is_smooth,
-                        },
-                    )
-                })
-                .collect();
-            fbb.create_vector(&material_offsets)
-        });
-
-        let textures = app.textures.as_ref().map(|textures| {
-            let texture_offsets: Vec<_> = textures
-                .iter()
-                .map(|t| {
-                    let image = fbb.create_string(&t.image);
-                    let border_color = t.border_color.map(|c| fbb.create_vector(&c));
-                    let texture_format = match t.texture_format {
-                        CjTextFormat::Png => TextureFormat::PNG,
-                        CjTextFormat::Jpg => TextureFormat::JPG,
-                    };
-                    let wrap_mode = t.wrap_mode.as_ref().map(|w| match w {
-                        CjWrapMode::None => WrapMode::None,
-                        CjWrapMode::Wrap => WrapMode::Wrap,
-                        CjWrapMode::Mirror => WrapMode::Mirror,
-                        CjWrapMode::Clamp => WrapMode::Clamp,
-                        CjWrapMode::Border => WrapMode::Border,
-                    });
-                    let texture_type = t.texture_type.as_ref().map(|t| match t {
-                        CjTextType::Unknown => TextureType::Unknown,
-                        CjTextType::Specific => TextureType::Specific,
-                        CjTextType::Typical => TextureType::Typical,
-                    });
-                    Texture::create(
-                        fbb,
-                        &TextureArgs {
-                            type_: texture_format,
-                            image: Some(image),
-                            wrap_mode,
-                            texture_type,
-                            border_color,
-                        },
-                    )
-                })
-                .collect();
-            fbb.create_vector(&texture_offsets)
-        });
-
-        let vertices_texture = app.vertices_texture.as_ref().map(|vertices| {
-            fbb.create_vector(
-                &vertices
-                    .iter()
-                    .map(|v| Vec2::new(v[0], v[1]))
-                    .collect::<Vec<_>>(),
-            )
-        });
-
-        let default_theme_texture = app
-            .default_theme_texture
-            .as_ref()
-            .map(|t| fbb.create_string(t));
-        let default_theme_material = app
-            .default_theme_material
-            .as_ref()
-            .map(|m| fbb.create_string(m));
-
-        Appearance::create(
-            fbb,
-            &AppearanceArgs {
-                materials,
-                textures,
-                vertices_texture,
-                default_theme_texture,
-                default_theme_material,
-            },
-        )
-    });
+    let appearance = city_feature
+        .appearance
+        .as_ref()
+        .map(|app| to_appearance(fbb, app));
     let min_x = city_feature
         .vertices
         .iter()
@@ -465,6 +397,105 @@ pub(super) fn to_fcb_city_feature<'a>(
     )
 }
 
+pub(super) fn to_appearance<'a>(
+    fbb: &mut FlatBufferBuilder<'a>,
+    appearance: &CjAppearance,
+) -> flatbuffers::WIPOffset<Appearance<'a>> {
+    // Handle appearance if present
+
+    let materials = appearance.materials.as_ref().map(|materials| {
+        let material_offsets: Vec<_> = materials
+            .iter()
+            .map(|m| {
+                let name = fbb.create_string(&m.name);
+                let diffuse_color = m.diffuse_color.map(|c| fbb.create_vector(&c));
+                let emissive_color = m.emissive_color.map(|c| fbb.create_vector(&c));
+                let specular_color = m.specular_color.map(|c| fbb.create_vector(&c));
+                Material::create(
+                    fbb,
+                    &MaterialArgs {
+                        name: Some(name),
+                        ambient_intensity: m.ambient_intensity,
+                        diffuse_color,
+                        emissive_color,
+                        specular_color,
+                        shininess: m.shininess,
+                        transparency: m.transparency,
+                        is_smooth: m.is_smooth,
+                    },
+                )
+            })
+            .collect();
+        fbb.create_vector(&material_offsets)
+    });
+
+    let textures = appearance.textures.as_ref().map(|textures| {
+        let texture_offsets: Vec<_> = textures
+            .iter()
+            .map(|t| {
+                let image = fbb.create_string(&t.image);
+                let border_color = t.border_color.map(|c| fbb.create_vector(&c));
+                let texture_format = match t.texture_format {
+                    CjTextFormat::Png => TextureFormat::PNG,
+                    CjTextFormat::Jpg => TextureFormat::JPG,
+                };
+                let wrap_mode = t.wrap_mode.as_ref().map(|w| match w {
+                    CjWrapMode::None => WrapMode::None,
+                    CjWrapMode::Wrap => WrapMode::Wrap,
+                    CjWrapMode::Mirror => WrapMode::Mirror,
+                    CjWrapMode::Clamp => WrapMode::Clamp,
+                    CjWrapMode::Border => WrapMode::Border,
+                });
+                let texture_type = t.texture_type.as_ref().map(|t| match t {
+                    CjTextType::Unknown => TextureType::Unknown,
+                    CjTextType::Specific => TextureType::Specific,
+                    CjTextType::Typical => TextureType::Typical,
+                });
+                Texture::create(
+                    fbb,
+                    &TextureArgs {
+                        type_: texture_format,
+                        image: Some(image),
+                        wrap_mode,
+                        texture_type,
+                        border_color,
+                    },
+                )
+            })
+            .collect();
+        fbb.create_vector(&texture_offsets)
+    });
+
+    let vertices_texture = appearance.vertices_texture.as_ref().map(|vertices| {
+        fbb.create_vector(
+            &vertices
+                .iter()
+                .map(|v| Vec2::new(v[0], v[1]))
+                .collect::<Vec<_>>(),
+        )
+    });
+
+    let default_theme_texture = appearance
+        .default_theme_texture
+        .as_ref()
+        .map(|t| fbb.create_string(t));
+    let default_theme_material = appearance
+        .default_theme_material
+        .as_ref()
+        .map(|m| fbb.create_string(m));
+
+    Appearance::create(
+        fbb,
+        &AppearanceArgs {
+            materials,
+            textures,
+            vertices_texture,
+            default_theme_texture,
+            default_theme_material,
+        },
+    )
+}
+
 /// Converts CityJSON city object to FlatBuffers format
 ///
 /// # Arguments
@@ -482,12 +513,29 @@ pub(super) fn to_city_object<'a>(
 
     let type_ = to_co_type(&co.thetype);
     let geographical_extent = co.geographical_extent.as_ref().map(to_geographical_extent);
+    let geometry_without_instances = co.geometry.as_ref().map(|gs| {
+        gs.iter()
+            .filter(|g| g.thetype != CjGeometryType::GeometryInstance)
+            .collect::<Vec<_>>()
+    });
+    let geometry_instances = co.geometry.as_ref().map(|gs| {
+        gs.iter()
+            .filter(|g| g.thetype == CjGeometryType::GeometryInstance)
+            .collect::<Vec<_>>()
+    });
     let geometries = {
-        let geometries = co
-            .geometry
-            .as_ref()
+        let geometries = geometry_without_instances
             .map(|gs| gs.iter().map(|g| to_geometry(fbb, g)).collect::<Vec<_>>());
         geometries.map(|geometries| fbb.create_vector(&geometries))
+    };
+
+    let geometry_instances = {
+        let geometry_instances = geometry_instances.map(|gs| {
+            gs.iter()
+                .map(|g| to_geometry_instance(fbb, g))
+                .collect::<Vec<_>>()
+        });
+        geometry_instances.map(|geometry_instances| fbb.create_vector(&geometry_instances))
     };
 
     let attributes_and_columns = co
@@ -536,6 +584,7 @@ pub(super) fn to_city_object<'a>(
             type_,
             geographical_extent: geographical_extent.as_ref(),
             geometry: geometries,
+            geometry_instances,
             attributes,
             columns,
             children,
@@ -785,6 +834,52 @@ pub(crate) fn to_geometry<'a>(
             texture: texture_mappings,
         },
     )
+}
+
+pub(super) fn to_geometry_instance<'a>(
+    fbb: &mut FlatBufferBuilder<'a>,
+    geometry: &CjGeometry,
+) -> flatbuffers::WIPOffset<GeometryInstance<'a>> {
+    if geometry.template.is_none() || geometry.transformation_matrix.is_none() {
+        panic!("Geometry instance must have a template and transformation matrix.");
+    }
+    if let CjBoundaries::Nested(_) = &geometry.boundaries {
+        panic!("Nested boundaries are not valid for geometry instances. "); //TODO: don't use panic, instead, return Result type
+    }
+
+    let template = geometry.template.unwrap_or(0) as u32;
+    let boundaries = match &geometry.boundaries {
+        CjBoundaries::Indices(indices) => Some(fbb.create_vector(indices)), //This expect the given CityJSON has only one vertex index.
+        CjBoundaries::Nested(_) => {
+            panic!("Nested boundaries are not valid for geometry instances. "); //TODO: don't use panic, instead, return Result type
+        }
+    };
+    let transformation = {
+        let m = geometry.transformation_matrix.unwrap();
+        Some(TransformationMatrix::new(
+            m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13],
+            m[14], m[15],
+        ))
+    };
+    GeometryInstance::create(
+        fbb,
+        &GeometryInstanceArgs {
+            template,
+            transformation: transformation.as_ref(),
+            boundaries,
+        },
+    )
+}
+
+pub(super) fn to_templates_vertices<'a>(
+    fbb: &mut FlatBufferBuilder<'a>,
+    vertices: &[[f64; 3]],
+) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, DoubleVertex>> {
+    let vertices_vec = vertices
+        .iter()
+        .map(|v| DoubleVertex::new(v[0], v[1], v[2]))
+        .collect::<Vec<_>>();
+    fbb.create_vector(&vertices_vec)
 }
 
 pub(super) fn to_columns<'a>(
