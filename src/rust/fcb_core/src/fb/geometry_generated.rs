@@ -2,7 +2,6 @@
 
 // @generated
 
-
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
@@ -349,7 +348,6 @@ impl<'a> flatbuffers::Verifiable for TransformationMatrix {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -975,7 +973,6 @@ impl flatbuffers::Verifiable for MaterialMapping<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
@@ -1215,7 +1212,6 @@ impl flatbuffers::Verifiable for TextureMapping<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
@@ -1553,7 +1549,6 @@ impl flatbuffers::Verifiable for Geometry<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<GeometryType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("lod", Self::VT_LOD, false)?
@@ -1860,7 +1855,6 @@ impl flatbuffers::Verifiable for SemanticObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<SemanticSurfaceType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(
@@ -2040,7 +2034,6 @@ impl flatbuffers::Verifiable for GeometryInstance<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<TransformationMatrix>("transformation", Self::VT_TRANSFORMATION, false)?
             .visit_field::<u32>("template", Self::VT_TEMPLATE, false)?

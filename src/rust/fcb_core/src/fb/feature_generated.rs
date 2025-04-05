@@ -229,8 +229,7 @@ impl<'a> flatbuffers::Verifiable for CityObjectType {
 impl flatbuffers::SimpleToVerifyInSlice for CityObjectType {}
 // struct Vertex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vertex(pub [u8; 12]);
 impl core::fmt::Debug for Vertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -272,7 +271,6 @@ impl<'a> flatbuffers::Verifiable for Vertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.in_buffer::<Self>(pos)
     }
 }
@@ -488,7 +486,6 @@ impl flatbuffers::Verifiable for CityFeature<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
             .visit_field::<flatbuffers::ForwardsUOffset<
@@ -805,7 +802,6 @@ impl flatbuffers::Verifiable for CityObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        
         v.visit_table(pos)?
             .visit_field::<CityObjectType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
