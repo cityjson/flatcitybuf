@@ -15,12 +15,13 @@ wasm = [
   "js-sys",
   "getrandom",
 ]
+extension = ["cjseq/extension"]
 
 [dependencies]
 bytes = { workspace = true, optional = true }
 flatbuffers = { workspace = true }
 byteorder = { workspace = true }
-cjseq = { workspace = true }
+cjseq = { workspace = true, features = [] }
 tempfile = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

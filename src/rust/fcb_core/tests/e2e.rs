@@ -460,3 +460,205 @@ fn test_geometry_template_cycle() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+#[cfg(feature = "extension")]
+fn test_extension_serialization_cycle() -> Result<()> {
+    // Setup paths
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let input_file = manifest_dir
+        .join("tests")
+        .join("data")
+        .join("noise_extension.city.jsonl");
+
+    let temp_fcb = NamedTempFile::new()?;
+
+    // Read original CityJSONSeq with extensions
+    let input_file = File::open(input_file)?;
+    let input_reader = BufReader::new(input_file);
+    let original_cj_seq = match read_cityjson_from_reader(input_reader, CJTypeKind::Seq)? {
+        CJType::Seq(seq) => seq,
+        _ => panic!("Expected CityJSONSeq"),
+    };
+
+    // Write to FCB
+    {
+        let output_file = File::create(&temp_fcb)?;
+        let output_writer = BufWriter::new(output_file);
+
+        let mut attr_schema = AttributeSchema::new();
+        for feature in original_cj_seq.features.iter() {
+            for (_, co) in feature.city_objects.iter() {
+                if let Some(attributes) = &co.attributes {
+                    attr_schema.add_attributes(attributes);
+                }
+            }
+        }
+        let mut fcb = FcbWriter::new(
+            original_cj_seq.cj.clone(),
+            Some(HeaderWriterOptions {
+                write_index: false,
+                feature_count: original_cj_seq.features.len() as u64,
+                index_node_size: 16,
+                attribute_indices: None,
+                geographical_extent: None,
+            }),
+            Some(attr_schema),
+        )?;
+        for feature in original_cj_seq.features.iter() {
+            fcb.add_feature(feature)?;
+        }
+        fcb.write(output_writer)?;
+    }
+
+    // Read back from FCB
+    let fcb_file = File::open(&temp_fcb)?;
+    let fcb_reader = BufReader::new(fcb_file);
+    let mut reader = FcbReader::open(fcb_reader)?.select_all()?;
+
+    // Get header and convert to CityJSON
+    let header = reader.header();
+    let deserialized_cj = deserializer::to_cj_metadata(&header)?;
+
+    // Compare extensions
+    if let (Some(orig_ext), Some(des_ext)) =
+        (&original_cj_seq.cj.extensions, &deserialized_cj.extensions)
+    {
+        assert_eq!(orig_ext.len(), des_ext.len(), "Extension count mismatch");
+
+        for (name, orig_ext_data) in orig_ext {
+            let des_ext_data = des_ext.get(name).expect(&format!(
+                "Extension {} not found in deserialized data",
+                name
+            ));
+
+            assert_eq!(
+                orig_ext_data.url, des_ext_data.url,
+                "URL mismatch for extension {}",
+                name
+            );
+            assert_eq!(
+                orig_ext_data.version, des_ext_data.version,
+                "Version mismatch for extension {}",
+                name
+            );
+        }
+    } else if original_cj_seq.cj.extensions.is_some() {
+        panic!("Extensions present in original but missing in deserialized");
+    }
+
+    // Read all features
+    let mut deserialized_features = Vec::new();
+    let feat_count = header.features_count();
+    let mut feat_num = 0;
+    while let Ok(Some(feat_buf)) = reader.next() {
+        let feature = feat_buf.cur_cj_feature()?;
+        deserialized_features.push(feature);
+        feat_num += 1;
+        if feat_num >= feat_count {
+            break;
+        }
+    }
+
+    // Test for extended city objects
+    for (orig_feat, des_feat) in original_cj_seq
+        .features
+        .iter()
+        .zip(deserialized_features.iter())
+    {
+        for (id, orig_co) in orig_feat.city_objects.iter() {
+            if orig_co.thetype.starts_with("+") {
+                let des_co = des_feat.city_objects.get(id).expect(&format!(
+                    "Extended city object {} not found in deserialized data",
+                    id
+                ));
+
+                println!(
+                    "Found extended city object {} with type {}",
+                    id, orig_co.thetype
+                );
+                assert_eq!(
+                    orig_co.thetype, des_co.thetype,
+                    "Extended city object type mismatch for {}",
+                    id
+                );
+
+                // Check attributes particularly for extended objects
+                if let (Some(orig_attrs), Some(des_attrs)) =
+                    (&orig_co.attributes, &des_co.attributes)
+                {
+                    for (key, value) in orig_attrs.as_object().unwrap() {
+                        if key.starts_with("+") {
+                            println!("Found extended attribute: {}", key);
+                            let des_value = des_attrs.get(key);
+                            assert!(
+                                des_value.is_some(),
+                                "Extended attribute {} not found in deserialized data",
+                                key
+                            );
+                            assert_eq!(
+                                value,
+                                des_value.unwrap(),
+                                "Extended attribute value mismatch for {}",
+                                key
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check for extended semantic surfaces
+    for (orig_feat, des_feat) in original_cj_seq
+        .features
+        .iter()
+        .zip(deserialized_features.iter())
+    {
+        for (id, orig_co) in orig_feat.city_objects.iter() {
+            if let Some(orig_geoms) = &orig_co.geometry {
+                for orig_geom in orig_geoms {
+                    if let Some(orig_semantics) = &orig_geom.semantics {
+                        for (i, orig_surface) in orig_semantics.surfaces.iter().enumerate() {
+                            if orig_surface.thetype.starts_with("+") {
+                                println!(
+                                    "Found extended semantic surface: {}",
+                                    orig_surface.thetype
+                                );
+
+                                // Find the corresponding surface in deserialized data
+                                let des_co = des_feat.city_objects.get(id).unwrap();
+                                let des_geom = des_co
+                                    .geometry
+                                    .as_ref()
+                                    .and_then(|geoms| geoms.iter().find(|g| g.lod == orig_geom.lod))
+                                    .expect(&format!(
+                                        "Geometry with LOD {:?} not found in deserialized data",
+                                        orig_geom.lod
+                                    ));
+
+                                let des_semantics = des_geom
+                                    .semantics
+                                    .as_ref()
+                                    .expect("Semantics not found in deserialized data");
+
+                                // Try to find the matching surface
+                                if i < des_semantics.surfaces.len() {
+                                    let des_surface = &des_semantics.surfaces[i];
+                                    assert_eq!(
+                                        orig_surface.thetype, des_surface.thetype,
+                                        "Extended semantic surface type mismatch"
+                                    );
+                                } else {
+                                    panic!("Extended semantic surface index out of bounds");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}

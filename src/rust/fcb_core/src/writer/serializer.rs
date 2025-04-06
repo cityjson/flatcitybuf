@@ -675,8 +675,8 @@ pub(super) fn to_co_type(co_type: &str) -> (CityObjectType, Option<String>) {
     };
 
     let obj_type = if extension_type.is_some() {
-        // If an extension type, use GenericCityObject
-        CityObjectType::GenericCityObject
+        // If an extension type, use ExtensionObject
+        CityObjectType::ExtensionObject
     } else {
         match co_type {
             "Bridge" => CityObjectType::Bridge,
@@ -743,44 +743,39 @@ pub(super) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
 ///
 /// * `ss_type` - String representation of semantic surface type
 pub(super) fn to_semantic_surface_type(ss_type: &str) -> (SemanticSurfaceType, Option<String>) {
-    let extension_type = if ss_type.starts_with('+') {
-        Some(ss_type.to_string())
-    } else {
-        None
-    };
-    match ss_type {
-        "RoofSurface" => (SemanticSurfaceType::RoofSurface, extension_type),
-        "GroundSurface" => (SemanticSurfaceType::GroundSurface, extension_type),
-        "WallSurface" => (SemanticSurfaceType::WallSurface, extension_type),
-        "ClosureSurface" => (SemanticSurfaceType::ClosureSurface, extension_type),
-        "OuterCeilingSurface" => (SemanticSurfaceType::OuterCeilingSurface, None),
-        "OuterFloorSurface" => (SemanticSurfaceType::OuterFloorSurface, None),
-        "Window" => (SemanticSurfaceType::Window, None),
-        "Door" => (SemanticSurfaceType::Door, None),
-        "InteriorWallSurface" => (SemanticSurfaceType::InteriorWallSurface, None),
-        "CeilingSurface" => (SemanticSurfaceType::CeilingSurface, None),
-        "FloorSurface" => (SemanticSurfaceType::FloorSurface, None),
-        "WaterSurface" => (SemanticSurfaceType::WaterSurface, None),
-        "WaterGroundSurface" => (SemanticSurfaceType::WaterGroundSurface, None),
-        "WaterClosureSurface" => (SemanticSurfaceType::WaterClosureSurface, None),
-        "TrafficArea" => (SemanticSurfaceType::TrafficArea, None),
-        "AuxiliaryTrafficArea" => (SemanticSurfaceType::AuxiliaryTrafficArea, None),
-        "TransportationMarking" => (SemanticSurfaceType::TransportationMarking, None),
-        "TransportationHole" => (SemanticSurfaceType::TransportationHole, None),
-        s if s.starts_with("+") => {
-            // This is an extended semantic surface type
-            println!("handling extended semantic surface type: {}", s);
-            // Use a generic type for extended types
-            (
-                SemanticSurfaceType::ExtraSemanticSurface,
-                Some(s.to_string()),
-            )
-        }
-        _ => {
-            println!("warning: unknown semantic surface type: {}", ss_type);
-            (SemanticSurfaceType::WallSurface, None) // Use WallSurface as fallback
-        }
+    // Handle extension types (starting with +)
+    if ss_type.starts_with('+') {
+        return (
+            SemanticSurfaceType::ExtraSemanticSurface,
+            Some(ss_type.to_string()),
+        );
     }
+
+    // Handle standard surface types
+    let surface_type = match ss_type {
+        "RoofSurface" => SemanticSurfaceType::RoofSurface,
+        "GroundSurface" => SemanticSurfaceType::GroundSurface,
+        "WallSurface" => SemanticSurfaceType::WallSurface,
+        "ClosureSurface" => SemanticSurfaceType::ClosureSurface,
+        "OuterCeilingSurface" => SemanticSurfaceType::OuterCeilingSurface,
+        "OuterFloorSurface" => SemanticSurfaceType::OuterFloorSurface,
+        "Window" => SemanticSurfaceType::Window,
+        "Door" => SemanticSurfaceType::Door,
+        "InteriorWallSurface" => SemanticSurfaceType::InteriorWallSurface,
+        "CeilingSurface" => SemanticSurfaceType::CeilingSurface,
+        "FloorSurface" => SemanticSurfaceType::FloorSurface,
+        "WaterSurface" => SemanticSurfaceType::WaterSurface,
+        "WaterGroundSurface" => SemanticSurfaceType::WaterGroundSurface,
+        "WaterClosureSurface" => SemanticSurfaceType::WaterClosureSurface,
+        "TrafficArea" => SemanticSurfaceType::TrafficArea,
+        "AuxiliaryTrafficArea" => SemanticSurfaceType::AuxiliaryTrafficArea,
+        "TransportationMarking" => SemanticSurfaceType::TransportationMarking,
+        "TransportationHole" => SemanticSurfaceType::TransportationHole,
+        _ => SemanticSurfaceType::ExtraSemanticSurface,
+    };
+
+    // Standard types don't have extension_type
+    (surface_type, None)
 }
 
 /// Converts CityJSON geometry to FlatBuffers format
@@ -1107,7 +1102,7 @@ mod tests {
                 .find(|co| co.id() == id)
                 .unwrap();
             assert_eq!(id, fb_city_object.id());
-            assert_eq!(cjco.thetype, to_cj_co_type(fb_city_object.type_()));
+            assert_eq!(cjco.thetype, to_cj_co_type(fb_city_object.type_(), None));
 
             //TODO: check attributes later
 
