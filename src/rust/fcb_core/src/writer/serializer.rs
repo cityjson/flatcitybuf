@@ -345,22 +345,19 @@ pub fn to_extension<'a>(
     let version_cityjson = fbb.create_string(&extension.version_city_json);
 
     // Stringified JSON for extension components
-    let extra_attributes = serde_json::to_string(&extension.extra_attributes).unwrap_or_default();
+    let extra_attributes = serde_json::to_string(&extension.extra_attributes)?;
     let extra_attributes = fbb.create_string(&extra_attributes);
 
-    let extra_city_objects =
-        serde_json::to_string(&extension.extra_city_objects).unwrap_or_default();
+    let extra_city_objects = serde_json::to_string(&extension.extra_city_objects)?;
     let extra_city_objects = fbb.create_string(&extra_city_objects);
 
-    let extra_root_properties =
-        serde_json::to_string(&extension.extra_root_properties).unwrap_or_default();
+    let extra_root_properties = serde_json::to_string(&extension.extra_root_properties)?;
     let extra_root_properties = fbb.create_string(&extra_root_properties);
 
-    let extra_semantic_surfaces =
-        serde_json::to_string(&extension.extra_semantic_surfaces).unwrap_or_default();
+    let extra_semantic_surfaces = serde_json::to_string(&extension.extra_semantic_surfaces)?;
     let extra_semantic_surfaces = fbb.create_string(&extra_semantic_surfaces);
 
-    Extension::create(
+    Ok(Extension::create(
         fbb,
         &ExtensionArgs {
             name: Some(name),
