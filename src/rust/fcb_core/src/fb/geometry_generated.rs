@@ -2,6 +2,9 @@
 
 // @generated
 
+use core::cmp::Ordering;
+use core::mem;
+
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
@@ -14,13 +17,13 @@ pub const ENUM_MIN_SEMANTIC_SURFACE_TYPE: u8 = 0;
     since = "2.0.0",
     note = "Use associated constants instead. This will no longer be generated in 2021."
 )]
-pub const ENUM_MAX_SEMANTIC_SURFACE_TYPE: u8 = 17;
+pub const ENUM_MAX_SEMANTIC_SURFACE_TYPE: u8 = 18;
 #[deprecated(
     since = "2.0.0",
     note = "Use associated constants instead. This will no longer be generated in 2021."
 )]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_SEMANTIC_SURFACE_TYPE: [SemanticSurfaceType; 18] = [
+pub const ENUM_VALUES_SEMANTIC_SURFACE_TYPE: [SemanticSurfaceType; 19] = [
     SemanticSurfaceType::RoofSurface,
     SemanticSurfaceType::GroundSurface,
     SemanticSurfaceType::WallSurface,
@@ -39,6 +42,7 @@ pub const ENUM_VALUES_SEMANTIC_SURFACE_TYPE: [SemanticSurfaceType; 18] = [
     SemanticSurfaceType::AuxiliaryTrafficArea,
     SemanticSurfaceType::TransportationMarking,
     SemanticSurfaceType::TransportationHole,
+    SemanticSurfaceType::ExtraSemanticSurface,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -64,9 +68,10 @@ impl SemanticSurfaceType {
     pub const AuxiliaryTrafficArea: Self = Self(15);
     pub const TransportationMarking: Self = Self(16);
     pub const TransportationHole: Self = Self(17);
+    pub const ExtraSemanticSurface: Self = Self(18);
 
     pub const ENUM_MIN: u8 = 0;
-    pub const ENUM_MAX: u8 = 17;
+    pub const ENUM_MAX: u8 = 18;
     pub const ENUM_VALUES: &'static [Self] = &[
         Self::RoofSurface,
         Self::GroundSurface,
@@ -86,6 +91,7 @@ impl SemanticSurfaceType {
         Self::AuxiliaryTrafficArea,
         Self::TransportationMarking,
         Self::TransportationHole,
+        Self::ExtraSemanticSurface,
     ];
     /// Returns the variant's name or "" if unknown.
     pub fn variant_name(self) -> Option<&'static str> {
@@ -108,6 +114,7 @@ impl SemanticSurfaceType {
             Self::AuxiliaryTrafficArea => Some("AuxiliaryTrafficArea"),
             Self::TransportationMarking => Some("TransportationMarking"),
             Self::TransportationHole => Some("TransportationHole"),
+            Self::ExtraSemanticSurface => Some("ExtraSemanticSurface"),
             _ => None,
         }
     }
@@ -348,6 +355,7 @@ impl<'a> flatbuffers::Verifiable for TransformationMatrix {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -973,6 +981,7 @@ impl flatbuffers::Verifiable for MaterialMapping<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
@@ -1002,7 +1011,7 @@ pub struct MaterialMappingArgs<'a> {
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub value: Option<u32>,
 }
-impl Default for MaterialMappingArgs<'_> {
+impl<'a> Default for MaterialMappingArgs<'a> {
     #[inline]
     fn default() -> Self {
         MaterialMappingArgs {
@@ -1212,6 +1221,7 @@ impl flatbuffers::Verifiable for TextureMapping<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
@@ -1251,7 +1261,7 @@ pub struct TextureMappingArgs<'a> {
     pub strings: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
 }
-impl Default for TextureMappingArgs<'_> {
+impl<'a> Default for TextureMappingArgs<'a> {
     #[inline]
     fn default() -> Self {
         TextureMappingArgs {
@@ -1549,6 +1559,7 @@ impl flatbuffers::Verifiable for Geometry<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<GeometryType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("lod", Self::VT_LOD, false)?
@@ -1620,7 +1631,7 @@ pub struct GeometryArgs<'a> {
         >,
     >,
 }
-impl Default for GeometryArgs<'_> {
+impl<'a> Default for GeometryArgs<'a> {
     #[inline]
     fn default() -> Self {
         GeometryArgs {
@@ -1776,6 +1787,7 @@ impl<'a> SemanticObject<'a> {
     pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 6;
     pub const VT_CHILDREN: flatbuffers::VOffsetT = 8;
     pub const VT_PARENT: flatbuffers::VOffsetT = 10;
+    pub const VT_EXTENSION_TYPE: flatbuffers::VOffsetT = 12;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -1787,6 +1799,9 @@ impl<'a> SemanticObject<'a> {
         args: &'args SemanticObjectArgs<'args>,
     ) -> flatbuffers::WIPOffset<SemanticObject<'bldr>> {
         let mut builder = SemanticObjectBuilder::new(_fbb);
+        if let Some(x) = args.extension_type {
+            builder.add_extension_type(x);
+        }
         if let Some(x) = args.parent {
             builder.add_parent(x);
         }
@@ -1847,6 +1862,16 @@ impl<'a> SemanticObject<'a> {
         // which contains a valid value in this slot
         unsafe { self._tab.get::<u32>(SemanticObject::VT_PARENT, None) }
     }
+    #[inline]
+    pub fn extension_type(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<&str>>(SemanticObject::VT_EXTENSION_TYPE, None)
+        }
+    }
 }
 
 impl flatbuffers::Verifiable for SemanticObject<'_> {
@@ -1855,6 +1880,7 @@ impl flatbuffers::Verifiable for SemanticObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<SemanticSurfaceType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(
@@ -1868,6 +1894,11 @@ impl flatbuffers::Verifiable for SemanticObject<'_> {
                 false,
             )?
             .visit_field::<u32>("parent", Self::VT_PARENT, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
+                "extension_type",
+                Self::VT_EXTENSION_TYPE,
+                false,
+            )?
             .finish();
         Ok(())
     }
@@ -1877,8 +1908,9 @@ pub struct SemanticObjectArgs<'a> {
     pub attributes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
     pub children: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub parent: Option<u32>,
+    pub extension_type: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for SemanticObjectArgs<'_> {
+impl<'a> Default for SemanticObjectArgs<'a> {
     #[inline]
     fn default() -> Self {
         SemanticObjectArgs {
@@ -1886,6 +1918,7 @@ impl Default for SemanticObjectArgs<'_> {
             attributes: None,
             children: None,
             parent: None,
+            extension_type: None,
         }
     }
 }
@@ -1924,6 +1957,13 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SemanticObjectBuilder<'a, 'b, A
             .push_slot_always::<u32>(SemanticObject::VT_PARENT, parent);
     }
     #[inline]
+    pub fn add_extension_type(&mut self, extension_type: flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            SemanticObject::VT_EXTENSION_TYPE,
+            extension_type,
+        );
+    }
+    #[inline]
     pub fn new(
         _fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
     ) -> SemanticObjectBuilder<'a, 'b, A> {
@@ -1947,6 +1987,7 @@ impl core::fmt::Debug for SemanticObject<'_> {
         ds.field("attributes", &self.attributes());
         ds.field("children", &self.children());
         ds.field("parent", &self.parent());
+        ds.field("extension_type", &self.extension_type());
         ds.finish()
     }
 }
@@ -2034,6 +2075,7 @@ impl flatbuffers::Verifiable for GeometryInstance<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<TransformationMatrix>("transformation", Self::VT_TRANSFORMATION, false)?
             .visit_field::<u32>("template", Self::VT_TEMPLATE, false)?
@@ -2051,7 +2093,7 @@ pub struct GeometryInstanceArgs<'a> {
     pub template: u32,
     pub boundaries: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
 }
-impl Default for GeometryInstanceArgs<'_> {
+impl<'a> Default for GeometryInstanceArgs<'a> {
     #[inline]
     fn default() -> Self {
         GeometryInstanceArgs {

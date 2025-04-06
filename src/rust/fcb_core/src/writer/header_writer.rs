@@ -1,3 +1,4 @@
+use crate::error::Result;
 use crate::serializer::to_fcb_header;
 use cjseq::CityJSON;
 use flatbuffers::FlatBufferBuilder;
@@ -92,7 +93,7 @@ impl<'a> HeaderWriter<'a> {
     /// # Returns
     ///
     /// A size-prefixed FlatBuffer containing the serialized header
-    pub(super) fn finish_to_header(mut self) -> Vec<u8> {
+    pub(super) fn finish_to_header(mut self) -> Result<Vec<u8>> {
         let header = to_fcb_header(
             &mut self.fbb,
             &self.cj,
@@ -102,8 +103,8 @@ impl<'a> HeaderWriter<'a> {
                 .as_ref()
                 .filter(|info| !info.is_empty())
                 .map(|info| info.as_slice()),
-        );
+        )?;
         self.fbb.finish_size_prefixed(header, None);
-        self.fbb.finished_data().to_vec()
+        Ok(self.fbb.finished_data().to_vec())
     }
 }

@@ -2,8 +2,11 @@
 
 // @generated
 
+use crate::extension_generated::*;
 use crate::geometry_generated::*;
 use crate::header_generated::*;
+use core::cmp::Ordering;
+use core::mem;
 
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
@@ -17,13 +20,13 @@ pub const ENUM_MIN_CITY_OBJECT_TYPE: u8 = 0;
     since = "2.0.0",
     note = "Use associated constants instead. This will no longer be generated in 2021."
 )]
-pub const ENUM_MAX_CITY_OBJECT_TYPE: u8 = 32;
+pub const ENUM_MAX_CITY_OBJECT_TYPE: u8 = 33;
 #[deprecated(
     since = "2.0.0",
     note = "Use associated constants instead. This will no longer be generated in 2021."
 )]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_CITY_OBJECT_TYPE: [CityObjectType; 33] = [
+pub const ENUM_VALUES_CITY_OBJECT_TYPE: [CityObjectType; 34] = [
     CityObjectType::Bridge,
     CityObjectType::BridgePart,
     CityObjectType::BridgeInstallation,
@@ -57,6 +60,7 @@ pub const ENUM_VALUES_CITY_OBJECT_TYPE: [CityObjectType; 33] = [
     CityObjectType::TunnelHollowSpace,
     CityObjectType::TunnelFurniture,
     CityObjectType::WaterBody,
+    CityObjectType::ExtensionObject,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -97,9 +101,10 @@ impl CityObjectType {
     pub const TunnelHollowSpace: Self = Self(30);
     pub const TunnelFurniture: Self = Self(31);
     pub const WaterBody: Self = Self(32);
+    pub const ExtensionObject: Self = Self(33);
 
     pub const ENUM_MIN: u8 = 0;
-    pub const ENUM_MAX: u8 = 32;
+    pub const ENUM_MAX: u8 = 33;
     pub const ENUM_VALUES: &'static [Self] = &[
         Self::Bridge,
         Self::BridgePart,
@@ -134,6 +139,7 @@ impl CityObjectType {
         Self::TunnelHollowSpace,
         Self::TunnelFurniture,
         Self::WaterBody,
+        Self::ExtensionObject,
     ];
     /// Returns the variant's name or "" if unknown.
     pub fn variant_name(self) -> Option<&'static str> {
@@ -171,6 +177,7 @@ impl CityObjectType {
             Self::TunnelHollowSpace => Some("TunnelHollowSpace"),
             Self::TunnelFurniture => Some("TunnelFurniture"),
             Self::WaterBody => Some("WaterBody"),
+            Self::ExtensionObject => Some("ExtensionObject"),
             _ => None,
         }
     }
@@ -229,8 +236,13 @@ impl<'a> flatbuffers::Verifiable for CityObjectType {
 impl flatbuffers::SimpleToVerifyInSlice for CityObjectType {}
 // struct Vertex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Vertex(pub [u8; 12]);
+impl Default for Vertex {
+    fn default() -> Self {
+        Self([0; 12])
+    }
+}
 impl core::fmt::Debug for Vertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("Vertex")
@@ -271,6 +283,7 @@ impl<'a> flatbuffers::Verifiable for Vertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -486,6 +499,7 @@ impl flatbuffers::Verifiable for CityFeature<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
             .visit_field::<flatbuffers::ForwardsUOffset<
@@ -515,7 +529,7 @@ pub struct CityFeatureArgs<'a> {
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Vertex>>>,
     pub appearance: Option<flatbuffers::WIPOffset<Appearance<'a>>>,
 }
-impl Default for CityFeatureArgs<'_> {
+impl<'a> Default for CityFeatureArgs<'a> {
     #[inline]
     fn default() -> Self {
         CityFeatureArgs {
@@ -610,15 +624,16 @@ impl<'a> flatbuffers::Follow<'a> for CityObject<'a> {
 
 impl<'a> CityObject<'a> {
     pub const VT_TYPE_: flatbuffers::VOffsetT = 4;
-    pub const VT_ID: flatbuffers::VOffsetT = 6;
-    pub const VT_GEOGRAPHICAL_EXTENT: flatbuffers::VOffsetT = 8;
-    pub const VT_GEOMETRY: flatbuffers::VOffsetT = 10;
-    pub const VT_GEOMETRY_INSTANCES: flatbuffers::VOffsetT = 12;
-    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 14;
-    pub const VT_COLUMNS: flatbuffers::VOffsetT = 16;
-    pub const VT_CHILDREN: flatbuffers::VOffsetT = 18;
-    pub const VT_CHILDREN_ROLES: flatbuffers::VOffsetT = 20;
-    pub const VT_PARENTS: flatbuffers::VOffsetT = 22;
+    pub const VT_EXTENSION_TYPE: flatbuffers::VOffsetT = 6;
+    pub const VT_ID: flatbuffers::VOffsetT = 8;
+    pub const VT_GEOGRAPHICAL_EXTENT: flatbuffers::VOffsetT = 10;
+    pub const VT_GEOMETRY: flatbuffers::VOffsetT = 12;
+    pub const VT_GEOMETRY_INSTANCES: flatbuffers::VOffsetT = 14;
+    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 16;
+    pub const VT_COLUMNS: flatbuffers::VOffsetT = 18;
+    pub const VT_CHILDREN: flatbuffers::VOffsetT = 20;
+    pub const VT_CHILDREN_ROLES: flatbuffers::VOffsetT = 22;
+    pub const VT_PARENTS: flatbuffers::VOffsetT = 24;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -657,6 +672,9 @@ impl<'a> CityObject<'a> {
         if let Some(x) = args.id {
             builder.add_id(x);
         }
+        if let Some(x) = args.extension_type {
+            builder.add_extension_type(x);
+        }
         builder.add_type_(args.type_);
         builder.finish()
     }
@@ -670,6 +688,16 @@ impl<'a> CityObject<'a> {
             self._tab
                 .get::<CityObjectType>(CityObject::VT_TYPE_, Some(CityObjectType::Bridge))
                 .unwrap()
+        }
+    }
+    #[inline]
+    pub fn extension_type(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<&str>>(CityObject::VT_EXTENSION_TYPE, None)
         }
     }
     #[inline]
@@ -802,8 +830,14 @@ impl flatbuffers::Verifiable for CityObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<CityObjectType>("type_", Self::VT_TYPE_, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
+                "extension_type",
+                Self::VT_EXTENSION_TYPE,
+                false,
+            )?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
             .visit_field::<GeographicalExtent>(
                 "geographical_extent",
@@ -839,6 +873,7 @@ impl flatbuffers::Verifiable for CityObject<'_> {
 }
 pub struct CityObjectArgs<'a> {
     pub type_: CityObjectType,
+    pub extension_type: Option<flatbuffers::WIPOffset<&'a str>>,
     pub id: Option<flatbuffers::WIPOffset<&'a str>>,
     pub geographical_extent: Option<&'a GeographicalExtent>,
     pub geometry: Option<
@@ -863,11 +898,12 @@ pub struct CityObjectArgs<'a> {
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>,
     >,
 }
-impl Default for CityObjectArgs<'_> {
+impl<'a> Default for CityObjectArgs<'a> {
     #[inline]
     fn default() -> Self {
         CityObjectArgs {
             type_: CityObjectType::Bridge,
+            extension_type: None,
             id: None, // required field
             geographical_extent: None,
             geometry: None,
@@ -890,6 +926,13 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> CityObjectBuilder<'a, 'b, A> {
     pub fn add_type_(&mut self, type_: CityObjectType) {
         self.fbb_
             .push_slot::<CityObjectType>(CityObject::VT_TYPE_, type_, CityObjectType::Bridge);
+    }
+    #[inline]
+    pub fn add_extension_type(&mut self, extension_type: flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            CityObject::VT_EXTENSION_TYPE,
+            extension_type,
+        );
     }
     #[inline]
     pub fn add_id(&mut self, id: flatbuffers::WIPOffset<&'b str>) {
@@ -997,6 +1040,7 @@ impl core::fmt::Debug for CityObject<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut ds = f.debug_struct("CityObject");
         ds.field("type_", &self.type_());
+        ds.field("extension_type", &self.extension_type());
         ds.field("id", &self.id());
         ds.field("geographical_extent", &self.geographical_extent());
         ds.field("geometry", &self.geometry());

@@ -13,6 +13,8 @@ use cjseq::{
     CityJSON,
     CityJSONFeature,
     CityObject as CjCityObject,
+    Extension as CjExtension,
+    ExtensionFile as CjExtensionFile,
     Geometry as CjGeometry,
     GeometryTemplates as CjGeometryTemplates, // Added GeometryTemplates
     GeometryType as CjGeometryType,
@@ -39,6 +41,26 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
             scale: vec![scale.x(), scale.y(), scale.z()],
             translate: vec![translate.x(), translate.y(), translate.z()],
         };
+    }
+
+    // Extract extensions if present
+    if let Some(extensions_vec) = header.extensions() {
+        let mut extensions_map = HashMap::new();
+        for extension in extensions_vec.iter() {
+            if let Some(name) = extension.name() {
+                let url = extension.url().unwrap_or_default().to_string();
+                let version = extension.version().unwrap_or_default().to_string();
+
+                // Create a CityJSONExtension with metadata
+                let cj_extension = CjExtension { url, version };
+
+                extensions_map.insert(name.to_string(), cj_extension);
+            }
+        }
+
+        if !extensions_map.is_empty() {
+            cj.extensions = Some(extensions_map);
+        }
     }
 
     let reference_system = header.reference_system().map(|rs| {
@@ -139,7 +161,14 @@ pub(crate) fn to_cj_address(header: &Header) -> Option<CjAddress> {
     })
 }
 
-pub(crate) fn to_cj_co_type(co_type: CityObjectType) -> String {
+pub(crate) fn to_cj_co_type(co_type: CityObjectType, extension_type: Option<&str>) -> String {
+    // If this is an extension type and extension_type is available, use it
+    if co_type == CityObjectType::ExtensionObject {
+        if let Some(extension_type) = extension_type {
+            return extension_type.to_string();
+        }
+    }
+    // Otherwise use the standard mapping
     match co_type {
         CityObjectType::Bridge => "Bridge".to_string(),
         CityObjectType::BridgePart => "BridgePart".to_string(),
@@ -174,6 +203,7 @@ pub(crate) fn to_cj_co_type(co_type: CityObjectType) -> String {
         CityObjectType::TunnelHollowSpace => "TunnelHollowSpace".to_string(),
         CityObjectType::TunnelFurniture => "TunnelFurniture".to_string(),
         CityObjectType::WaterBody => "WaterBody".to_string(),
+        CityObjectType::ExtensionObject => "Unknown".to_string(), // Fallback if extension_type is None
         _ => "Unknown".to_string(),
     }
 }
@@ -377,7 +407,7 @@ pub fn to_cj_feature(
                     .map(|c| c.iter().map(|s| s.to_string()).collect());
 
                 let cjco = CjCityObject::new(
-                    to_cj_co_type(co.type_()).to_string(),
+                    to_cj_co_type(co.type_(), co.extension_type()),
                     geographical_extent,
                     attributes,
                     final_geometries, // Use the combined list
@@ -638,6 +668,77 @@ pub(crate) fn to_cj_vertices(vertices: Vec<&Vertex>) -> Vec<Vec<i64>> {
         .iter()
         .map(|v| vec![v.x() as i64, v.y() as i64, v.z() as i64])
         .collect()
+}
+
+/// Convert a FlatBuffer Extension to a CityJSON ExtensionFile
+///
+/// # Arguments
+///
+/// * `extension` - The FlatBuffer Extension object to convert
+///
+/// # Returns
+///
+/// A Result containing the converted CityJSON ExtensionFile
+pub(crate) fn to_cj_extension_file(extension: &Extension) -> Result<CjExtensionFile, Error> {
+    let name = extension.name().unwrap_or_default().to_string();
+    let description = extension.description().unwrap_or_default().to_string();
+    let url = extension.url().unwrap_or_default().to_string();
+    let version = extension.version().unwrap_or_default().to_string();
+    let version_city_json = extension.version_cityjson().unwrap_or_default().to_string();
+
+    // Parse the stringified JSON components
+    let extra_attributes = if let Some(attr_str) = extension.extra_attributes() {
+        if attr_str.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(attr_str).unwrap_or(serde_json::Value::Null)
+        }
+    } else {
+        serde_json::Value::Null
+    };
+
+    let extra_city_objects = if let Some(objs_str) = extension.extra_city_objects() {
+        if objs_str.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(objs_str).unwrap_or(serde_json::Value::Null)
+        }
+    } else {
+        serde_json::Value::Null
+    };
+
+    let extra_root_properties = if let Some(props_str) = extension.extra_root_properties() {
+        if props_str.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(props_str).unwrap_or(serde_json::Value::Null)
+        }
+    } else {
+        serde_json::Value::Null
+    };
+
+    let extra_semantic_surfaces = if let Some(surfaces_str) = extension.extra_semantic_surfaces() {
+        if surfaces_str.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(surfaces_str).unwrap_or(serde_json::Value::Null)
+        }
+    } else {
+        serde_json::Value::Null
+    };
+
+    Ok(CjExtensionFile {
+        thetype: "CityJSONExtension".to_string(),
+        name,
+        description,
+        url,
+        version,
+        version_city_json,
+        extra_attributes,
+        extra_city_objects,
+        extra_root_properties,
+        extra_semantic_surfaces,
+    })
 }
 
 #[cfg(test)]

@@ -10,16 +10,16 @@ use crate::fb::{
 };
 use crate::geom_encoder::encode;
 use crate::{
-    AttributeIndex, Column, ColumnArgs, DoubleVertex, GeometryInstance, GeometryInstanceArgs,
-    MaterialMapping, MaterialMappingArgs, TextureFormat, TextureMapping, TextureMappingArgs,
-    TransformationMatrix,
+    AttributeIndex, Column, ColumnArgs, DoubleVertex, Extension, ExtensionArgs, GeometryInstance,
+    GeometryInstanceArgs, MaterialMapping, MaterialMappingArgs, TextureFormat, TextureMapping,
+    TextureMappingArgs, TransformationMatrix,
 };
 use cjseq::{
     Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON, CityJSONFeature,
-    CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
-    PointOfContact as CjPointOfContact, ReferenceSystem as CjReferenceSystem,
-    TextFormat as CjTextFormat, TextType as CjTextType, Transform as CjTransform,
-    WrapMode as CjWrapMode,
+    CityObject as CjCityObject, Extension as CjExtension, ExtensionFile as CjExtensionFile,
+    Geometry as CjGeometry, GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
+    ReferenceSystem as CjReferenceSystem, TextFormat as CjTextFormat, TextType as CjTextType,
+    Transform as CjTransform, WrapMode as CjWrapMode,
 };
 use flatbuffers::FlatBufferBuilder;
 use packed_rtree::NodeItem;
@@ -27,6 +27,7 @@ use serde_json::Value;
 
 use super::geom_encoder::{GMBoundaries, GMSemantics, MaterialMapping as GMMaterialMapping};
 use super::header_writer::HeaderWriterOptions;
+use crate::error::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub(super) struct AttributeIndexInfo {
@@ -49,7 +50,7 @@ pub(super) fn to_fcb_header<'a>(
     header_options: HeaderWriterOptions,
     attr_schema: &AttributeSchema,
     attribute_indices_info: Option<&[AttributeIndexInfo]>,
-) -> flatbuffers::WIPOffset<Header<'a>> {
+) -> Result<flatbuffers::WIPOffset<Header<'a>>> {
     let version = Some(fbb.create_string(&cj.version));
     let transform = to_transform(&cj.transform);
     let features_count: u64 = header_options.feature_count;
@@ -65,6 +66,23 @@ pub(super) fn to_fcb_header<'a>(
         } else {
             None
         }
+    };
+
+    // Handle extensions, if present
+    let extensions = if let Some(extensions) = &cj.extensions {
+        let mut extension_files = Vec::new();
+        for (name, ext) in extensions.iter() {
+            let extension_file = ext.fetch_extension_file(name.clone())?;
+            extension_files.push(extension_file);
+        }
+
+        let extensions = extension_files
+            .iter()
+            .map(|ext| to_extension(fbb, ext))
+            .collect::<Vec<_>>();
+        Some(fbb.create_vector(&extensions))
+    } else {
+        None
     };
 
     // Use the geographical_extent from the HeaderWriterOptions if provided
@@ -140,7 +158,7 @@ pub(super) fn to_fcb_header<'a>(
             },
         );
 
-        Header::create(
+        Ok(Header::create(
             fbb,
             &HeaderArgs {
                 transform: Some(transform).as_ref(),
@@ -169,10 +187,12 @@ pub(super) fn to_fcb_header<'a>(
                 appearance,
                 templates,
                 templates_vertices,
+                extensions,
+                ..Default::default()
             },
-        )
+        ))
     } else {
-        Header::create(
+        Ok(Header::create(
             fbb,
             &HeaderArgs {
                 transform: Some(transform).as_ref(),
@@ -182,9 +202,10 @@ pub(super) fn to_fcb_header<'a>(
                 geographical_extent: geographical_extent_from_options.as_ref(),
                 version,
                 attribute_index,
+                extensions,
                 ..Default::default()
             },
-        )
+        ))
     }
 }
 
@@ -310,6 +331,46 @@ fn to_point_of_contact<'a>(
         poc_address_postcode,
         poc_address_country,
     }
+}
+
+/// Converts the ExtensionSchema to a FlatBuffers Extension table
+pub fn to_extension<'a>(
+    fbb: &mut FlatBufferBuilder<'a>,
+    extension: &CjExtensionFile,
+) -> flatbuffers::WIPOffset<Extension<'a>> {
+    let name = fbb.create_string(&extension.name);
+    let description = fbb.create_string(&extension.description);
+    let url = fbb.create_string(&extension.url);
+    let version = fbb.create_string(&extension.version);
+    let version_cityjson = fbb.create_string(&extension.version_city_json);
+
+    // Stringified JSON for extension components
+    let extra_attributes = serde_json::to_string(&extension.extra_attributes)?;
+    let extra_attributes = fbb.create_string(&extra_attributes);
+
+    let extra_city_objects = serde_json::to_string(&extension.extra_city_objects)?;
+    let extra_city_objects = fbb.create_string(&extra_city_objects);
+
+    let extra_root_properties = serde_json::to_string(&extension.extra_root_properties)?;
+    let extra_root_properties = fbb.create_string(&extra_root_properties);
+
+    let extra_semantic_surfaces = serde_json::to_string(&extension.extra_semantic_surfaces)?;
+    let extra_semantic_surfaces = fbb.create_string(&extra_semantic_surfaces);
+
+    Ok(Extension::create(
+        fbb,
+        &ExtensionArgs {
+            name: Some(name),
+            description: Some(description),
+            url: Some(url),
+            version: Some(version),
+            version_cityjson: Some(version_cityjson),
+            extra_attributes: Some(extra_attributes),
+            extra_city_objects: Some(extra_city_objects),
+            extra_root_properties: Some(extra_root_properties),
+            extra_semantic_surfaces: Some(extra_semantic_surfaces),
+        },
+    )
 }
 
 /// -----------------------------------
@@ -496,13 +557,14 @@ pub(super) fn to_appearance<'a>(
     )
 }
 
-/// Converts CityJSON city object to FlatBuffers format
+/// Converts CityJSON object to FlatBuffers
 ///
 /// # Arguments
 ///
 /// * `fbb` - FlatBuffers builder instance
-/// * `id` - Object identifier
-/// * `co` - CityJSON city object
+/// * `id` - City object ID
+/// * `co` - CityJSON object
+/// * `attr_schema` - Attribute schema
 pub(super) fn to_city_object<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     id: &str,
@@ -511,7 +573,8 @@ pub(super) fn to_city_object<'a>(
 ) -> flatbuffers::WIPOffset<CityObject<'a>> {
     let id = Some(fbb.create_string(id));
 
-    let type_ = to_co_type(&co.thetype);
+    let (type_, extension_type) = to_co_type(&co.thetype);
+    let extension_type = extension_type.as_ref().map(|et| fbb.create_string(et));
     let geographical_extent = co.geographical_extent.as_ref().map(to_geographical_extent);
     let geometry_without_instances = co.geometry.as_ref().map(|gs| {
         gs.iter()
@@ -582,6 +645,7 @@ pub(super) fn to_city_object<'a>(
         &CityObjectArgs {
             id,
             type_,
+            extension_type,
             geographical_extent: geographical_extent.as_ref(),
             geometry: geometries,
             geometry_instances,
@@ -599,48 +663,57 @@ pub(super) fn to_city_object<'a>(
 /// # Arguments
 ///
 /// * `co_type` - String representation of CityJSON object type
-pub(super) fn to_co_type(co_type: &str) -> CityObjectType {
-    match co_type {
-        "Bridge" => CityObjectType::Bridge,
-        "BridgePart" => CityObjectType::BridgePart,
-        "BridgeInstallation" => CityObjectType::BridgeInstallation,
-        "BridgeConstructiveElement" => CityObjectType::BridgeConstructiveElement,
-        "BridgeRoom" => CityObjectType::BridgeRoom,
-        "BridgeFurniture" => CityObjectType::BridgeFurniture,
+pub(super) fn to_co_type(co_type: &str) -> (CityObjectType, Option<String>) {
+    // If it starts with a '+', it's an extension type
+    let extension_type = if co_type.starts_with('+') {
+        Some(co_type.to_string())
+    } else {
+        None
+    };
 
-        "Building" => CityObjectType::Building,
-        "BuildingPart" => CityObjectType::BuildingPart,
-        "BuildingInstallation" => CityObjectType::BuildingInstallation,
-        "BuildingConstructiveElement" => CityObjectType::BuildingConstructiveElement,
-        "BuildingFurniture" => CityObjectType::BuildingFurniture,
-        "BuildingStorey" => CityObjectType::BuildingStorey,
-        "BuildingRoom" => CityObjectType::BuildingRoom,
-        "BuildingUnit" => CityObjectType::BuildingUnit,
+    let obj_type = if extension_type.is_some() {
+        // If an extension type, use ExtensionObject
+        CityObjectType::ExtensionObject
+    } else {
+        match co_type {
+            "Bridge" => CityObjectType::Bridge,
+            "BridgePart" => CityObjectType::BridgePart,
+            "BridgeInstallation" => CityObjectType::BridgeInstallation,
+            "BridgeConstructiveElement" => CityObjectType::BridgeConstructiveElement,
+            "BridgeRoom" => CityObjectType::BridgeRoom,
+            "BridgeFurniture" => CityObjectType::BridgeFurniture,
+            "Building" => CityObjectType::Building,
+            "BuildingPart" => CityObjectType::BuildingPart,
+            "BuildingInstallation" => CityObjectType::BuildingInstallation,
+            "BuildingConstructiveElement" => CityObjectType::BuildingConstructiveElement,
+            "BuildingFurniture" => CityObjectType::BuildingFurniture,
+            "BuildingStorey" => CityObjectType::BuildingStorey,
+            "BuildingRoom" => CityObjectType::BuildingRoom,
+            "BuildingUnit" => CityObjectType::BuildingUnit,
+            "CityFurniture" => CityObjectType::CityFurniture,
+            "CityObjectGroup" => CityObjectType::CityObjectGroup,
+            "LandUse" => CityObjectType::LandUse,
+            "OtherConstruction" => CityObjectType::OtherConstruction,
+            "PlantCover" => CityObjectType::PlantCover,
+            "SolitaryVegetationObject" => CityObjectType::SolitaryVegetationObject,
+            "TINRelief" => CityObjectType::TINRelief,
+            "Road" => CityObjectType::Road,
+            "Railway" => CityObjectType::Railway,
+            "Waterway" => CityObjectType::Waterway,
+            "TransportSquare" => CityObjectType::TransportSquare,
+            "Tunnel" => CityObjectType::Tunnel,
+            "TunnelPart" => CityObjectType::TunnelPart,
+            "TunnelInstallation" => CityObjectType::TunnelInstallation,
+            "TunnelConstructiveElement" => CityObjectType::TunnelConstructiveElement,
+            "TunnelHollowSpace" => CityObjectType::TunnelHollowSpace,
+            "TunnelFurniture" => CityObjectType::TunnelFurniture,
+            "WaterBody" => CityObjectType::WaterBody,
+            "GenericCityObject" => CityObjectType::GenericCityObject,
+            _ => CityObjectType::GenericCityObject,
+        }
+    };
 
-        "CityFurniture" => CityObjectType::CityFurniture,
-        "CityObjectGroup" => CityObjectType::CityObjectGroup,
-        "GenericCityObject" => CityObjectType::GenericCityObject,
-        "LandUse" => CityObjectType::LandUse,
-        "OtherConstruction" => CityObjectType::OtherConstruction,
-        "PlantCover" => CityObjectType::PlantCover,
-        "SolitaryVegetationObject" => CityObjectType::SolitaryVegetationObject,
-        "TINRelief" => CityObjectType::TINRelief,
-
-        "Road" => CityObjectType::Road,
-        "Railway" => CityObjectType::Railway,
-        "Waterway" => CityObjectType::Waterway,
-        "TransportSquare" => CityObjectType::TransportSquare,
-
-        "Tunnel" => CityObjectType::Tunnel,
-        "TunnelPart" => CityObjectType::TunnelPart,
-        "TunnelInstallation" => CityObjectType::TunnelInstallation,
-        "TunnelConstructiveElement" => CityObjectType::TunnelConstructiveElement,
-        "TunnelHollowSpace" => CityObjectType::TunnelHollowSpace,
-        "TunnelFurniture" => CityObjectType::TunnelFurniture,
-
-        "WaterBody" => CityObjectType::WaterBody,
-        _ => CityObjectType::GenericCityObject,
-    }
+    (obj_type, extension_type)
 }
 
 /// Converts CityJSON geometry type to FlatBuffers enum
@@ -666,8 +739,17 @@ pub(super) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
 /// # Arguments
 ///
 /// * `ss_type` - String representation of semantic surface type
-pub(super) fn to_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
-    match ss_type {
+pub(super) fn to_semantic_surface_type(ss_type: &str) -> (SemanticSurfaceType, Option<String>) {
+    // Handle extension types (starting with +)
+    if ss_type.starts_with('+') {
+        return (
+            SemanticSurfaceType::ExtraSemanticSurface,
+            Some(ss_type.to_string()),
+        );
+    }
+
+    // Handle standard surface types
+    let surface_type = match ss_type {
         "RoofSurface" => SemanticSurfaceType::RoofSurface,
         "GroundSurface" => SemanticSurfaceType::GroundSurface,
         "WallSurface" => SemanticSurfaceType::WallSurface,
@@ -679,17 +761,18 @@ pub(super) fn to_semantic_surface_type(ss_type: &str) -> SemanticSurfaceType {
         "InteriorWallSurface" => SemanticSurfaceType::InteriorWallSurface,
         "CeilingSurface" => SemanticSurfaceType::CeilingSurface,
         "FloorSurface" => SemanticSurfaceType::FloorSurface,
-
         "WaterSurface" => SemanticSurfaceType::WaterSurface,
         "WaterGroundSurface" => SemanticSurfaceType::WaterGroundSurface,
         "WaterClosureSurface" => SemanticSurfaceType::WaterClosureSurface,
-
         "TrafficArea" => SemanticSurfaceType::TrafficArea,
         "AuxiliaryTrafficArea" => SemanticSurfaceType::AuxiliaryTrafficArea,
         "TransportationMarking" => SemanticSurfaceType::TransportationMarking,
         "TransportationHole" => SemanticSurfaceType::TransportationHole,
-        _ => unreachable!(),
-    }
+        _ => SemanticSurfaceType::ExtraSemanticSurface,
+    };
+
+    // Standard types don't have extension_type
+    (surface_type, None)
 }
 
 /// Converts CityJSON geometry to FlatBuffers format
@@ -734,10 +817,15 @@ pub(crate) fn to_geometry<'a>(
                 .iter()
                 .map(|s| {
                     let children = s.children.as_ref().map(|c| fbb.create_vector(c));
+
+                    let (type_, extension_type) = to_semantic_surface_type(&s.thetype);
+                    let extension_type = extension_type.map(|s| fbb.create_string(&s));
+
                     SemanticObject::create(
                         fbb,
                         &SemanticObjectArgs {
-                            type_: to_semantic_surface_type(&s.thetype),
+                            type_,
+                            extension_type,
                             attributes: None,
                             children,
                             parent: s.parent,
@@ -1011,7 +1099,7 @@ mod tests {
                 .find(|co| co.id() == id)
                 .unwrap();
             assert_eq!(id, fb_city_object.id());
-            assert_eq!(cjco.thetype, to_cj_co_type(fb_city_object.type_()));
+            assert_eq!(cjco.thetype, to_cj_co_type(fb_city_object.type_(), None));
 
             //TODO: check attributes later
 

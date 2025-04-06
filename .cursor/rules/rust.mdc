@@ -1,6 +1,7 @@
 ---
 description: Coding rules for Rust implementation in FlatCityBuf
 globs: src/rust/**
+alwaysApply: false
 ---
 # Rust Coding Guidelines for Library Development
 
@@ -73,7 +74,7 @@ flatcitybuf/
 ---
 
 ## Error Handling
-- Use `anyhow` for application code and `thiserror` for package-level errors.
+- Use `thiserror` for package-level errors.
 - Avoid panics in library code; return errors instead.
 - Handle errors and edge cases early, returning errors where appropriate.
 

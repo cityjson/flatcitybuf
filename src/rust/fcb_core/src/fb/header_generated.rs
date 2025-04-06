@@ -2,7 +2,10 @@
 
 // @generated
 
+use crate::extension_generated::*;
 use crate::geometry_generated::*;
+use core::cmp::Ordering;
+use core::mem;
 
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
@@ -447,8 +450,13 @@ impl<'a> flatbuffers::Verifiable for TextureType {
 impl flatbuffers::SimpleToVerifyInSlice for TextureType {}
 // struct Vector, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Vector(pub [u8; 24]);
+impl Default for Vector {
+    fn default() -> Self {
+        Self([0; 24])
+    }
+}
 impl core::fmt::Debug for Vector {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("Vector")
@@ -489,6 +497,7 @@ impl<'a> flatbuffers::Verifiable for Vector {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -640,6 +649,7 @@ impl<'a> flatbuffers::Verifiable for Transform {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -729,6 +739,7 @@ impl<'a> flatbuffers::Verifiable for GeographicalExtent {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -769,8 +780,13 @@ impl<'a> GeographicalExtent {
 
 // struct AttributeIndex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct AttributeIndex(pub [u8; 8]);
+impl Default for AttributeIndex {
+    fn default() -> Self {
+        Self([0; 8])
+    }
+}
 impl core::fmt::Debug for AttributeIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("AttributeIndex")
@@ -811,6 +827,7 @@ impl<'a> flatbuffers::Verifiable for AttributeIndex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -885,8 +902,13 @@ impl<'a> AttributeIndex {
 
 // struct Vec2, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Vec2(pub [u8; 16]);
+impl Default for Vec2 {
+    fn default() -> Self {
+        Self([0; 16])
+    }
+}
 impl core::fmt::Debug for Vec2 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("Vec2")
@@ -926,6 +948,7 @@ impl<'a> flatbuffers::Verifiable for Vec2 {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -1000,8 +1023,13 @@ impl<'a> Vec2 {
 
 // struct DoubleVertex, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct DoubleVertex(pub [u8; 24]);
+impl Default for DoubleVertex {
+    fn default() -> Self {
+        Self([0; 24])
+    }
+}
 impl core::fmt::Debug for DoubleVertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("DoubleVertex")
@@ -1043,6 +1071,7 @@ impl<'a> flatbuffers::Verifiable for DoubleVertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -1325,6 +1354,7 @@ impl flatbuffers::Verifiable for Column<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<u16>("index", Self::VT_INDEX, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
@@ -1362,7 +1392,7 @@ pub struct ColumnArgs<'a> {
     pub primary_key: bool,
     pub metadata: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for ColumnArgs<'_> {
+impl<'a> Default for ColumnArgs<'a> {
     #[inline]
     fn default() -> Self {
         ColumnArgs {
@@ -1566,6 +1596,7 @@ impl flatbuffers::Verifiable for ReferenceSystem<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "authority",
@@ -1589,7 +1620,7 @@ pub struct ReferenceSystemArgs<'a> {
     pub code: i32,
     pub code_string: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for ReferenceSystemArgs<'_> {
+impl<'a> Default for ReferenceSystemArgs<'a> {
     #[inline]
     fn default() -> Self {
         ReferenceSystemArgs {
@@ -1807,6 +1838,7 @@ impl flatbuffers::Verifiable for Material<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
             .visit_field::<f64>("ambient_intensity", Self::VT_AMBIENT_INTENSITY, false)?
@@ -1842,7 +1874,7 @@ pub struct MaterialArgs<'a> {
     pub transparency: Option<f64>,
     pub is_smooth: Option<bool>,
 }
-impl Default for MaterialArgs<'_> {
+impl<'a> Default for MaterialArgs<'a> {
     #[inline]
     fn default() -> Self {
         MaterialArgs {
@@ -2055,6 +2087,7 @@ impl flatbuffers::Verifiable for Texture<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<TextureFormat>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("image", Self::VT_IMAGE, true)?
@@ -2076,7 +2109,7 @@ pub struct TextureArgs<'a> {
     pub texture_type: Option<TextureType>,
     pub border_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
 }
-impl Default for TextureArgs<'_> {
+impl<'a> Default for TextureArgs<'a> {
     #[inline]
     fn default() -> Self {
         TextureArgs {
@@ -2272,6 +2305,7 @@ impl flatbuffers::Verifiable for Appearance<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<
                 flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Material>>,
@@ -2309,7 +2343,7 @@ pub struct AppearanceArgs<'a> {
     pub default_theme_texture: Option<flatbuffers::WIPOffset<&'a str>>,
     pub default_theme_material: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for AppearanceArgs<'_> {
+impl<'a> Default for AppearanceArgs<'a> {
     #[inline]
     fn default() -> Self {
         AppearanceArgs {
@@ -2436,19 +2470,20 @@ impl<'a> Header<'a> {
     pub const VT_TITLE: flatbuffers::VOffsetT = 24;
     pub const VT_TEMPLATES: flatbuffers::VOffsetT = 26;
     pub const VT_TEMPLATES_VERTICES: flatbuffers::VOffsetT = 28;
-    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 30;
-    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 32;
-    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 34;
-    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 36;
-    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 38;
-    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 40;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 42;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 44;
-    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 46;
-    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 48;
-    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 50;
-    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 52;
-    pub const VT_VERSION: flatbuffers::VOffsetT = 54;
+    pub const VT_EXTENSIONS: flatbuffers::VOffsetT = 30;
+    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 32;
+    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 34;
+    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 36;
+    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 38;
+    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 40;
+    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 42;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 44;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 46;
+    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 48;
+    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 50;
+    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 52;
+    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 54;
+    pub const VT_VERSION: flatbuffers::VOffsetT = 56;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -2499,6 +2534,9 @@ impl<'a> Header<'a> {
         }
         if let Some(x) = args.poc_contact_name {
             builder.add_poc_contact_name(x);
+        }
+        if let Some(x) = args.extensions {
+            builder.add_extensions(x);
         }
         if let Some(x) = args.templates_vertices {
             builder.add_templates_vertices(x);
@@ -2682,6 +2720,19 @@ impl<'a> Header<'a> {
         }
     }
     #[inline]
+    pub fn extensions(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Extension<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Extension>>,
+            >>(Header::VT_EXTENSIONS, None)
+        }
+    }
+    #[inline]
     pub fn poc_contact_name(&self) -> Option<&'a str> {
         // Safety:
         // Created from valid Table for this object
@@ -2827,6 +2878,7 @@ impl flatbuffers::Verifiable for Header<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<Transform>("transform", Self::VT_TRANSFORM, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<Appearance>>(
@@ -2873,6 +2925,9 @@ impl flatbuffers::Verifiable for Header<'_> {
                 Self::VT_TEMPLATES_VERTICES,
                 false,
             )?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Extension>>,
+            >>("extensions", Self::VT_EXTENSIONS, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "poc_contact_name",
                 Self::VT_POC_CONTACT_NAME,
@@ -2956,6 +3011,11 @@ pub struct HeaderArgs<'a> {
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Geometry<'a>>>>,
     >,
     pub templates_vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, DoubleVertex>>>,
+    pub extensions: Option<
+        flatbuffers::WIPOffset<
+            flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Extension<'a>>>,
+        >,
+    >,
     pub poc_contact_name: Option<flatbuffers::WIPOffset<&'a str>>,
     pub poc_contact_type: Option<flatbuffers::WIPOffset<&'a str>>,
     pub poc_role: Option<flatbuffers::WIPOffset<&'a str>>,
@@ -2970,7 +3030,7 @@ pub struct HeaderArgs<'a> {
     pub attributes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
     pub version: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for HeaderArgs<'_> {
+impl<'a> Default for HeaderArgs<'a> {
     #[inline]
     fn default() -> Self {
         HeaderArgs {
@@ -2987,6 +3047,7 @@ impl Default for HeaderArgs<'_> {
             title: None,
             templates: None,
             templates_vertices: None,
+            extensions: None,
             poc_contact_name: None,
             poc_contact_type: None,
             poc_role: None,
@@ -3106,6 +3167,16 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
             Header::VT_TEMPLATES_VERTICES,
             templates_vertices,
         );
+    }
+    #[inline]
+    pub fn add_extensions(
+        &mut self,
+        extensions: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Extension<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Header::VT_EXTENSIONS, extensions);
     }
     #[inline]
     pub fn add_poc_contact_name(&mut self, poc_contact_name: flatbuffers::WIPOffset<&'b str>) {
@@ -3236,6 +3307,7 @@ impl core::fmt::Debug for Header<'_> {
         ds.field("title", &self.title());
         ds.field("templates", &self.templates());
         ds.field("templates_vertices", &self.templates_vertices());
+        ds.field("extensions", &self.extensions());
         ds.field("poc_contact_name", &self.poc_contact_name());
         ds.field("poc_contact_type", &self.poc_contact_type());
         ds.field("poc_role", &self.poc_role());
