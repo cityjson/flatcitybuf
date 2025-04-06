@@ -16,8 +16,8 @@ use crate::{
 };
 use cjseq::{
     Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON, CityJSONFeature,
-    CityObject as CjCityObject, Extension as CjExtension, ExtensionFile as CjExtensionFile,
-    Geometry as CjGeometry, GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
+    CityObject as CjCityObject, ExtensionFile as CjExtensionFile, Geometry as CjGeometry,
+    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
     ReferenceSystem as CjReferenceSystem, TextFormat as CjTextFormat, TextType as CjTextType,
     Transform as CjTransform, WrapMode as CjWrapMode,
 };
@@ -27,7 +27,7 @@ use serde_json::Value;
 
 use super::geom_encoder::{GMBoundaries, GMSemantics, MaterialMapping as GMMaterialMapping};
 use super::header_writer::HeaderWriterOptions;
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 #[derive(Debug, Clone)]
 pub(super) struct AttributeIndexInfo {
@@ -79,7 +79,7 @@ pub(super) fn to_fcb_header<'a>(
         let extensions = extension_files
             .iter()
             .map(|ext| to_extension(fbb, ext))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>>>()?;
         Some(fbb.create_vector(&extensions))
     } else {
         None
@@ -337,7 +337,7 @@ fn to_point_of_contact<'a>(
 pub fn to_extension<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     extension: &CjExtensionFile,
-) -> flatbuffers::WIPOffset<Extension<'a>> {
+) -> Result<flatbuffers::WIPOffset<Extension<'a>>> {
     let name = fbb.create_string(&extension.name);
     let description = fbb.create_string(&extension.description);
     let url = fbb.create_string(&extension.url);
@@ -370,7 +370,7 @@ pub fn to_extension<'a>(
             extra_root_properties: Some(extra_root_properties),
             extra_semantic_surfaces: Some(extra_semantic_surfaces),
         },
-    )
+    ))
 }
 
 /// -----------------------------------

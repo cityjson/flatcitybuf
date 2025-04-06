@@ -4,8 +4,6 @@
 
 use crate::extension_generated::*;
 use crate::geometry_generated::*;
-use core::cmp::Ordering;
-use core::mem;
 
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
@@ -450,13 +448,8 @@ impl<'a> flatbuffers::Verifiable for TextureType {
 impl flatbuffers::SimpleToVerifyInSlice for TextureType {}
 // struct Vector, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vector(pub [u8; 24]);
-impl Default for Vector {
-    fn default() -> Self {
-        Self([0; 24])
-    }
-}
 impl core::fmt::Debug for Vector {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("Vector")
@@ -497,7 +490,6 @@ impl<'a> flatbuffers::Verifiable for Vector {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -649,7 +641,6 @@ impl<'a> flatbuffers::Verifiable for Transform {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -739,7 +730,6 @@ impl<'a> flatbuffers::Verifiable for GeographicalExtent {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -780,13 +770,8 @@ impl<'a> GeographicalExtent {
 
 // struct AttributeIndex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct AttributeIndex(pub [u8; 8]);
-impl Default for AttributeIndex {
-    fn default() -> Self {
-        Self([0; 8])
-    }
-}
 impl core::fmt::Debug for AttributeIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("AttributeIndex")
@@ -827,7 +812,6 @@ impl<'a> flatbuffers::Verifiable for AttributeIndex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -902,13 +886,8 @@ impl<'a> AttributeIndex {
 
 // struct Vec2, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vec2(pub [u8; 16]);
-impl Default for Vec2 {
-    fn default() -> Self {
-        Self([0; 16])
-    }
-}
 impl core::fmt::Debug for Vec2 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("Vec2")
@@ -948,7 +927,6 @@ impl<'a> flatbuffers::Verifiable for Vec2 {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -1023,13 +1001,8 @@ impl<'a> Vec2 {
 
 // struct DoubleVertex, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct DoubleVertex(pub [u8; 24]);
-impl Default for DoubleVertex {
-    fn default() -> Self {
-        Self([0; 24])
-    }
-}
 impl core::fmt::Debug for DoubleVertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("DoubleVertex")
@@ -1071,7 +1044,6 @@ impl<'a> flatbuffers::Verifiable for DoubleVertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -1354,7 +1326,6 @@ impl flatbuffers::Verifiable for Column<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<u16>("index", Self::VT_INDEX, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
@@ -1392,7 +1363,7 @@ pub struct ColumnArgs<'a> {
     pub primary_key: bool,
     pub metadata: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for ColumnArgs<'a> {
+impl Default for ColumnArgs<'_> {
     #[inline]
     fn default() -> Self {
         ColumnArgs {
@@ -1596,7 +1567,6 @@ impl flatbuffers::Verifiable for ReferenceSystem<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "authority",
@@ -1620,7 +1590,7 @@ pub struct ReferenceSystemArgs<'a> {
     pub code: i32,
     pub code_string: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for ReferenceSystemArgs<'a> {
+impl Default for ReferenceSystemArgs<'_> {
     #[inline]
     fn default() -> Self {
         ReferenceSystemArgs {
@@ -1838,7 +1808,6 @@ impl flatbuffers::Verifiable for Material<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
             .visit_field::<f64>("ambient_intensity", Self::VT_AMBIENT_INTENSITY, false)?
@@ -1874,7 +1843,7 @@ pub struct MaterialArgs<'a> {
     pub transparency: Option<f64>,
     pub is_smooth: Option<bool>,
 }
-impl<'a> Default for MaterialArgs<'a> {
+impl Default for MaterialArgs<'_> {
     #[inline]
     fn default() -> Self {
         MaterialArgs {
@@ -2087,7 +2056,6 @@ impl flatbuffers::Verifiable for Texture<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<TextureFormat>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("image", Self::VT_IMAGE, true)?
@@ -2109,7 +2077,7 @@ pub struct TextureArgs<'a> {
     pub texture_type: Option<TextureType>,
     pub border_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
 }
-impl<'a> Default for TextureArgs<'a> {
+impl Default for TextureArgs<'_> {
     #[inline]
     fn default() -> Self {
         TextureArgs {
@@ -2305,7 +2273,6 @@ impl flatbuffers::Verifiable for Appearance<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<
                 flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Material>>,
@@ -2343,7 +2310,7 @@ pub struct AppearanceArgs<'a> {
     pub default_theme_texture: Option<flatbuffers::WIPOffset<&'a str>>,
     pub default_theme_material: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for AppearanceArgs<'a> {
+impl Default for AppearanceArgs<'_> {
     #[inline]
     fn default() -> Self {
         AppearanceArgs {
@@ -2878,7 +2845,6 @@ impl flatbuffers::Verifiable for Header<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<Transform>("transform", Self::VT_TRANSFORM, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<Appearance>>(
@@ -3030,7 +2996,7 @@ pub struct HeaderArgs<'a> {
     pub attributes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
     pub version: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for HeaderArgs<'a> {
+impl Default for HeaderArgs<'_> {
     #[inline]
     fn default() -> Self {
         HeaderArgs {

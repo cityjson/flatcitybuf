@@ -2,11 +2,8 @@
 
 // @generated
 
-use crate::extension_generated::*;
 use crate::geometry_generated::*;
 use crate::header_generated::*;
-use core::cmp::Ordering;
-use core::mem;
 
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
@@ -236,13 +233,8 @@ impl<'a> flatbuffers::Verifiable for CityObjectType {
 impl flatbuffers::SimpleToVerifyInSlice for CityObjectType {}
 // struct Vertex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vertex(pub [u8; 12]);
-impl Default for Vertex {
-    fn default() -> Self {
-        Self([0; 12])
-    }
-}
 impl core::fmt::Debug for Vertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("Vertex")
@@ -283,7 +275,6 @@ impl<'a> flatbuffers::Verifiable for Vertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -499,7 +490,6 @@ impl flatbuffers::Verifiable for CityFeature<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
             .visit_field::<flatbuffers::ForwardsUOffset<
@@ -529,7 +519,7 @@ pub struct CityFeatureArgs<'a> {
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Vertex>>>,
     pub appearance: Option<flatbuffers::WIPOffset<Appearance<'a>>>,
 }
-impl<'a> Default for CityFeatureArgs<'a> {
+impl Default for CityFeatureArgs<'_> {
     #[inline]
     fn default() -> Self {
         CityFeatureArgs {
@@ -830,7 +820,6 @@ impl flatbuffers::Verifiable for CityObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<CityObjectType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
@@ -898,7 +887,7 @@ pub struct CityObjectArgs<'a> {
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>,
     >,
 }
-impl<'a> Default for CityObjectArgs<'a> {
+impl Default for CityObjectArgs<'_> {
     #[inline]
     fn default() -> Self {
         CityObjectArgs {

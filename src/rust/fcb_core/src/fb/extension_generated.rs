@@ -2,11 +2,7 @@
 
 // @generated
 
-use core::cmp::Ordering;
-use core::mem;
-
 extern crate flatbuffers;
-use self::flatbuffers::{EndianScalar, Follow};
 
 pub enum ExtensionOffset {}
 #[derive(Copy, Clone, PartialEq)]
@@ -178,7 +174,6 @@ impl flatbuffers::Verifiable for Extension<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
@@ -228,7 +223,7 @@ pub struct ExtensionArgs<'a> {
     pub extra_root_properties: Option<flatbuffers::WIPOffset<&'a str>>,
     pub extra_semantic_surfaces: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for ExtensionArgs<'a> {
+impl Default for ExtensionArgs<'_> {
     #[inline]
     fn default() -> Self {
         ExtensionArgs {
