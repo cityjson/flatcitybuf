@@ -38,10 +38,6 @@ pub struct StaticBTreeBuilder<K: Key, W: Write + Seek> {
     nodes_per_level_build: Vec<u64>,
     /// Stores serialized node data per level (leaf level first). Vec<LevelData>, LevelData = Vec<NodeData>
     buffered_levels: Vec<Vec<Vec<u8>>>,
-    /// Cached size of a key.
-    key_size: usize,
-    /// Cached size of an entry.
-    entry_size: usize,
     /// Cached byte size of a fully packed internal node.
     internal_node_byte_size: usize,
     /// Cached byte size of a fully packed leaf node.
@@ -88,8 +84,6 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
             first_keys_of_current_level: Vec::new(),
             nodes_per_level_build: Vec::new(),
             buffered_levels: Vec::new(), // Initialize buffer for levels
-            key_size,
-            entry_size,
             internal_node_byte_size,
             leaf_node_byte_size,
             _phantom_key: PhantomData,

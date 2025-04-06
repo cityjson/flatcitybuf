@@ -545,28 +545,13 @@ mod tests {
     use crate::key::Key;
     use std::io::{Cursor, Read, Write};
 
-    // Re-use TestKey
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-    struct TestKey(i32);
-    impl Key for TestKey {
-        const SERIALIZED_SIZE: usize = 4;
-        fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-            writer.write_all(&self.0.to_le_bytes()).map_err(Error::from)
-        }
-        fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
-            let mut bytes = [0u8; Self::SERIALIZED_SIZE];
-            reader.read_exact(&mut bytes)?;
-            Ok(TestKey(i32::from_le_bytes(bytes)))
-        }
-    }
-
     // Helper to build a test tree in memory
     fn build_test_tree(
-        entries: Vec<Result<Entry<TestKey>, Error>>,
+        entries: Vec<Result<Entry<i32>, Error>>,
         b: u16,
     ) -> Result<Cursor<Vec<u8>>, Error> {
         let mut cursor = Cursor::new(Vec::new());
-        let builder = StaticBTreeBuilder::<TestKey, _>::new(&mut cursor, b)?;
+        let builder = StaticBTreeBuilder::<i32, _>::new(&mut cursor, b)?;
         builder.build_from_sorted(entries)?;
         cursor.seek(SeekFrom::Start(0))?;
         Ok(cursor)
@@ -575,7 +560,7 @@ mod tests {
     #[test]
     fn test_open_empty_tree() {
         let cursor = build_test_tree(vec![], 3).unwrap();
-        let tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
+        let tree = StaticBTree::<i32, _>::open(cursor).unwrap();
         assert_eq!(tree.height(), 0);
         assert_eq!(tree.len(), 0);
     }
@@ -584,21 +569,12 @@ mod tests {
     fn test_open_single_leaf_node_tree() {
         let b = 5;
         let entries = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
+            Ok(Entry { key: 10, value: 1 }),
+            Ok(Entry { key: 20, value: 2 }),
+            Ok(Entry { key: 30, value: 3 }),
         ];
         let cursor = build_test_tree(entries, b).unwrap();
-        let tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
+        let tree = StaticBTree::<i32, _>::open(cursor).unwrap();
         assert_eq!(tree.height(), 1);
         assert_eq!(tree.len(), 3);
         assert_eq!(tree.num_nodes_per_level, vec![1]);
@@ -609,29 +585,14 @@ mod tests {
     fn test_open_two_level_tree() {
         let b = 2;
         let entries = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
-            Ok(Entry {
-                key: TestKey(40),
-                value: 4,
-            }),
-            Ok(Entry {
-                key: TestKey(50),
-                value: 5,
-            }),
+            Ok(Entry { key: 10, value: 1 }),
+            Ok(Entry { key: 20, value: 2 }),
+            Ok(Entry { key: 30, value: 3 }),
+            Ok(Entry { key: 40, value: 4 }),
+            Ok(Entry { key: 50, value: 5 }),
         ];
         let cursor = build_test_tree(entries, b).unwrap();
-        let tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
+        let tree = StaticBTree::<i32, _>::open(cursor).unwrap();
         assert_eq!(tree.height(), 3);
         assert_eq!(tree.len(), 5);
         assert_eq!(tree.num_nodes_per_level, vec![1, 2, 3]);
@@ -643,7 +604,7 @@ mod tests {
         data[0..8].copy_from_slice(b"WRONGSIG");
         let cursor = Cursor::new(data);
         assert!(matches!(
-            StaticBTree::<TestKey, _>::open(cursor),
+            StaticBTree::<i32, _>::open(cursor),
             Err(Error::InvalidFormat(_))
         ));
     }
@@ -655,7 +616,7 @@ mod tests {
         data[8..10].copy_from_slice(&9999u16.to_le_bytes());
         let cursor = Cursor::new(data);
         assert!(matches!(
-            StaticBTree::<TestKey, _>::open(cursor),
+            StaticBTree::<i32, _>::open(cursor),
             Err(Error::InvalidFormat(_))
         ));
     }
@@ -668,7 +629,7 @@ mod tests {
         data[10..12].copy_from_slice(&1u16.to_le_bytes());
         let cursor = Cursor::new(data);
         assert!(matches!(
-            StaticBTree::<TestKey, _>::open(cursor),
+            StaticBTree::<i32, _>::open(cursor),
             Err(Error::InvalidFormat(_))
         ));
     }
@@ -679,29 +640,14 @@ mod tests {
     fn test_calculate_node_offset() {
         let b = 2;
         let entries = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
-            Ok(Entry {
-                key: TestKey(40),
-                value: 4,
-            }),
-            Ok(Entry {
-                key: TestKey(50),
-                value: 5,
-            }),
+            Ok(Entry { key: 10, value: 1 }),
+            Ok(Entry { key: 20, value: 2 }),
+            Ok(Entry { key: 30, value: 3 }),
+            Ok(Entry { key: 40, value: 4 }),
+            Ok(Entry { key: 50, value: 5 }),
         ];
         let cursor = build_test_tree(entries, b).unwrap();
-        let tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
+        let tree = StaticBTree::<i32, _>::open(cursor).unwrap();
 
         let leaf_node_size = tree.leaf_node_byte_size as u64;
         let internal_node_size = tree.internal_node_byte_size as u64;
@@ -741,118 +687,58 @@ mod tests {
     fn test_read_leaf_node_entries() {
         let b = 2;
         let entries_vec = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }), // Node 3
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
-            Ok(Entry {
-                key: TestKey(40),
-                value: 4,
-            }), // Node 4
-            Ok(Entry {
-                key: TestKey(50),
-                value: 5,
-            }), // Node 5 (partial)
+            Ok(Entry { key: 10, value: 1 }),
+            Ok(Entry { key: 20, value: 2 }), // Node 3
+            Ok(Entry { key: 30, value: 3 }),
+            Ok(Entry { key: 40, value: 4 }), // Node 4
+            Ok(Entry { key: 50, value: 5 }), // Node 5 (partial)
         ];
         let cursor = build_test_tree(entries_vec, b).unwrap();
-        let mut tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
+        let mut tree = StaticBTree::<i32, _>::open(cursor).unwrap();
 
         // Leaf nodes are indices 3, 4, 5
         let entries3 = tree.read_leaf_node_entries(3).unwrap();
         assert_eq!(entries3.len(), 2);
-        assert_eq!(
-            entries3[0],
-            Entry {
-                key: TestKey(10),
-                value: 1
-            }
-        );
-        assert_eq!(
-            entries3[1],
-            Entry {
-                key: TestKey(20),
-                value: 2
-            }
-        );
+        assert_eq!(entries3[0], Entry { key: 10, value: 1 });
+        assert_eq!(entries3[1], Entry { key: 20, value: 2 });
         let entries4 = tree.read_leaf_node_entries(4).unwrap();
         assert_eq!(entries4.len(), 2);
-        assert_eq!(
-            entries4[0],
-            Entry {
-                key: TestKey(30),
-                value: 3
-            }
-        );
-        assert_eq!(
-            entries4[1],
-            Entry {
-                key: TestKey(40),
-                value: 4
-            }
-        );
+        assert_eq!(entries4[0], Entry { key: 30, value: 3 });
+        assert_eq!(entries4[1], Entry { key: 40, value: 4 });
         let entries5 = tree.read_leaf_node_entries(5).unwrap();
         assert_eq!(entries5.len(), 1);
-        assert_eq!(
-            entries5[0],
-            Entry {
-                key: TestKey(50),
-                value: 5
-            }
-        );
+        assert_eq!(entries5[0], Entry { key: 50, value: 5 });
     }
 
     #[test]
     fn test_read_internal_node_keys() {
         let b = 2;
         let entries_vec = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
-            Ok(Entry {
-                key: TestKey(40),
-                value: 4,
-            }),
-            Ok(Entry {
-                key: TestKey(50),
-                value: 5,
-            }),
+            Ok(Entry { key: 10, value: 1 }),
+            Ok(Entry { key: 20, value: 2 }),
+            Ok(Entry { key: 30, value: 3 }),
+            Ok(Entry { key: 40, value: 4 }),
+            Ok(Entry { key: 50, value: 5 }),
         ];
         let cursor = build_test_tree(entries_vec, b).unwrap();
-        let mut tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
+        let mut tree = StaticBTree::<i32, _>::open(cursor).unwrap();
 
         // Node 1 (Internal Level 1) - Keys [10, 30]
         let keys1 = tree.read_internal_node_keys(1).unwrap();
         assert_eq!(keys1.len(), 2);
-        assert_eq!(keys1[0], TestKey(10));
-        assert_eq!(keys1[1], TestKey(30));
+        assert_eq!(keys1[0], 10);
+        assert_eq!(keys1[1], 30);
 
         // Node 2 (Internal Level 1) - Keys [50] (last node, points to 1 child)
         let keys2 = tree.read_internal_node_keys(2).unwrap();
         assert_eq!(keys2.len(), 1); // Corrected expectation
-        assert_eq!(keys2[0], TestKey(50));
+        assert_eq!(keys2[0], 50);
 
         // Node 0 (Root) - Keys [10, 50]
         let keys0 = tree.read_internal_node_keys(0).unwrap();
         assert_eq!(keys0.len(), 2);
-        assert_eq!(keys0[0], TestKey(10));
-        assert_eq!(keys0[1], TestKey(50));
+        assert_eq!(keys0[0], 10);
+        assert_eq!(keys0[1], 50);
     }
 
     // --- Tests for find ---
@@ -862,61 +748,52 @@ mod tests {
         let entries = (1..=20)
             .map(|i| {
                 Ok(Entry {
-                    key: TestKey(i * 10),
+                    key: i * 10,
                     value: i as u64,
                 })
             })
             .collect();
         let cursor = build_test_tree(entries, b).unwrap();
-        let mut tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
+        let mut tree = StaticBTree::<i32, _>::open(cursor).unwrap();
 
         // Test keys present
-        assert_eq!(tree.find(&TestKey(10)).unwrap(), Some(1));
-        assert_eq!(tree.find(&TestKey(50)).unwrap(), Some(5));
-        assert_eq!(tree.find(&TestKey(100)).unwrap(), Some(10));
-        assert_eq!(tree.find(&TestKey(200)).unwrap(), Some(20));
+        assert_eq!(tree.find(&10).unwrap(), Some(1));
+        assert_eq!(tree.find(&50).unwrap(), Some(5));
+        assert_eq!(tree.find(&100).unwrap(), Some(10));
+        assert_eq!(tree.find(&200).unwrap(), Some(20));
 
         // Test keys absent (between existing keys)
-        assert_eq!(tree.find(&TestKey(15)).unwrap(), None);
-        assert_eq!(tree.find(&TestKey(95)).unwrap(), None);
-        assert_eq!(tree.find(&TestKey(155)).unwrap(), None);
+        assert_eq!(tree.find(&15).unwrap(), None);
+        assert_eq!(tree.find(&95).unwrap(), None);
+        assert_eq!(tree.find(&155).unwrap(), None);
 
         // Test keys absent (outside range)
-        assert_eq!(tree.find(&TestKey(5)).unwrap(), None);
-        assert_eq!(tree.find(&TestKey(210)).unwrap(), None);
-        assert_eq!(tree.find(&TestKey(0)).unwrap(), None);
-        assert_eq!(tree.find(&TestKey(-10)).unwrap(), None);
+        assert_eq!(tree.find(&5).unwrap(), None);
+        assert_eq!(tree.find(&210).unwrap(), None);
+        assert_eq!(tree.find(&0).unwrap(), None);
+        assert_eq!(tree.find(&-10).unwrap(), None);
     }
 
     #[test]
     fn test_find_in_empty_tree() {
         let cursor = build_test_tree(vec![], 3).unwrap();
-        let mut tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
-        assert_eq!(tree.find(&TestKey(10)).unwrap(), None);
+        let mut tree = StaticBTree::<i32, _>::open(cursor).unwrap();
+        assert_eq!(tree.find(&10).unwrap(), None);
     }
 
     #[test]
     fn test_find_in_single_leaf_tree() {
         let b = 5;
         let entries = vec![
-            Ok(Entry {
-                key: TestKey(10),
-                value: 1,
-            }),
-            Ok(Entry {
-                key: TestKey(20),
-                value: 2,
-            }),
-            Ok(Entry {
-                key: TestKey(30),
-                value: 3,
-            }),
+            Ok(Entry { key: 10, value: 1 }),
+            Ok(Entry { key: 20, value: 2 }),
+            Ok(Entry { key: 30, value: 3 }),
         ];
         let cursor = build_test_tree(entries, b).unwrap();
-        let mut tree = StaticBTree::<TestKey, _>::open(cursor).unwrap();
-        assert_eq!(tree.find(&TestKey(20)).unwrap(), Some(2));
-        assert_eq!(tree.find(&TestKey(15)).unwrap(), None);
-        assert_eq!(tree.find(&TestKey(30)).unwrap(), Some(3));
-        assert_eq!(tree.find(&TestKey(40)).unwrap(), None);
+        let mut tree = StaticBTree::<i32, _>::open(cursor).unwrap();
+        assert_eq!(tree.find(&20).unwrap(), Some(2));
+        assert_eq!(tree.find(&15).unwrap(), None);
+        assert_eq!(tree.find(&30).unwrap(), Some(3));
+        assert_eq!(tree.find(&40).unwrap(), None);
     }
 }
