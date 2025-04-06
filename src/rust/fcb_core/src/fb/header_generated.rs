@@ -3,8 +3,8 @@
 
 // @generated
 
-use crate::geometry_generated::*;
 use crate::extension_generated::*;
+use crate::geometry_generated::*;
 use core::mem;
 use core::cmp::Ordering;
 

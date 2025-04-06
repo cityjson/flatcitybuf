@@ -21,7 +21,7 @@ enum SemanticSurfaceType:ubyte {
   TrafficArea,
   AuxiliaryTrafficArea,
   TransportationMarking,
-  TransportationHole
+  TransportationHole,
 
   // Extension objects. In the JSON data, it's written like "+ThermalSurface". However as we can't expect the extended semantic surface type, just mark it as "ExtraSemanticSurface".
   ExtraSemanticSurface
@@ -88,7 +88,7 @@ table SemanticObject {
   attributes:[ubyte];
   children:[uint];
   parent:uint = null;       // default is null, important to be able to check if this field is set
-  extension_type: string = null; // extension type of the semantic object. e.g. "+ThermalSurface"
+  extension_type: string; // extension type of the semantic object. e.g. "+ThermalSurface"
 }
 
 struct TransformationMatrix {
