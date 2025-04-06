@@ -2,7 +2,6 @@ use crate::MAGIC_BYTES;
 use attr_index::build_attribute_index_for_attr;
 use attribute::AttributeSchema;
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
-use error::Error;
 use feature_writer::{AttributeFeatureOffset, FeatureWriter};
 use header_writer::{HeaderWriter, HeaderWriterOptions};
 use packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};

@@ -2,9 +2,6 @@
 
 // @generated
 
-use core::cmp::Ordering;
-use core::mem;
-
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
@@ -355,7 +352,6 @@ impl<'a> flatbuffers::Verifiable for TransformationMatrix {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -981,7 +977,6 @@ impl flatbuffers::Verifiable for MaterialMapping<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
@@ -1011,7 +1006,7 @@ pub struct MaterialMappingArgs<'a> {
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub value: Option<u32>,
 }
-impl<'a> Default for MaterialMappingArgs<'a> {
+impl Default for MaterialMappingArgs<'_> {
     #[inline]
     fn default() -> Self {
         MaterialMappingArgs {
@@ -1221,7 +1216,6 @@ impl flatbuffers::Verifiable for TextureMapping<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
@@ -1261,7 +1255,7 @@ pub struct TextureMappingArgs<'a> {
     pub strings: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
 }
-impl<'a> Default for TextureMappingArgs<'a> {
+impl Default for TextureMappingArgs<'_> {
     #[inline]
     fn default() -> Self {
         TextureMappingArgs {
@@ -1559,7 +1553,6 @@ impl flatbuffers::Verifiable for Geometry<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<GeometryType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("lod", Self::VT_LOD, false)?
@@ -1631,7 +1624,7 @@ pub struct GeometryArgs<'a> {
         >,
     >,
 }
-impl<'a> Default for GeometryArgs<'a> {
+impl Default for GeometryArgs<'_> {
     #[inline]
     fn default() -> Self {
         GeometryArgs {
@@ -1880,7 +1873,6 @@ impl flatbuffers::Verifiable for SemanticObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<SemanticSurfaceType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(
@@ -1910,7 +1902,7 @@ pub struct SemanticObjectArgs<'a> {
     pub parent: Option<u32>,
     pub extension_type: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl<'a> Default for SemanticObjectArgs<'a> {
+impl Default for SemanticObjectArgs<'_> {
     #[inline]
     fn default() -> Self {
         SemanticObjectArgs {
@@ -2075,7 +2067,6 @@ impl flatbuffers::Verifiable for GeometryInstance<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<TransformationMatrix>("transformation", Self::VT_TRANSFORMATION, false)?
             .visit_field::<u32>("template", Self::VT_TEMPLATE, false)?
@@ -2093,7 +2084,7 @@ pub struct GeometryInstanceArgs<'a> {
     pub template: u32,
     pub boundaries: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
 }
-impl<'a> Default for GeometryInstanceArgs<'a> {
+impl Default for GeometryInstanceArgs<'_> {
     #[inline]
     fn default() -> Self {
         GeometryInstanceArgs {

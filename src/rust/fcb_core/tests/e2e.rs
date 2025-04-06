@@ -527,10 +527,9 @@ fn test_extension_serialization_cycle() -> Result<()> {
         assert_eq!(orig_ext.len(), des_ext.len(), "Extension count mismatch");
 
         for (name, orig_ext_data) in orig_ext {
-            let des_ext_data = des_ext.get(name).expect(&format!(
-                "Extension {} not found in deserialized data",
-                name
-            ));
+            let des_ext_data = des_ext
+                .get(name)
+                .unwrap_or_else(|| panic!("Extension {} not found in deserialized data", name));
 
             assert_eq!(
                 orig_ext_data.url, des_ext_data.url,
@@ -568,10 +567,9 @@ fn test_extension_serialization_cycle() -> Result<()> {
     {
         for (id, orig_co) in orig_feat.city_objects.iter() {
             if orig_co.thetype.starts_with("+") {
-                let des_co = des_feat.city_objects.get(id).expect(&format!(
-                    "Extended city object {} not found in deserialized data",
-                    id
-                ));
+                let des_co = des_feat.city_objects.get(id).unwrap_or_else(|| {
+                    panic!("Extended city object {} not found in deserialized data", id)
+                });
 
                 println!(
                     "Found extended city object {} with type {}",
@@ -632,10 +630,12 @@ fn test_extension_serialization_cycle() -> Result<()> {
                                     .geometry
                                     .as_ref()
                                     .and_then(|geoms| geoms.iter().find(|g| g.lod == orig_geom.lod))
-                                    .expect(&format!(
-                                        "Geometry with LOD {:?} not found in deserialized data",
-                                        orig_geom.lod
-                                    ));
+                                    .unwrap_or_else(|| {
+                                        panic!(
+                                            "Geometry with LOD {:?} not found in deserialized data",
+                                            orig_geom.lod
+                                        )
+                                    });
 
                                 let des_semantics = des_geom
                                     .semantics
