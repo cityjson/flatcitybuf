@@ -1,3 +1,4 @@
+use cjseq::error::CjseqError;
 use flatbuffers::InvalidFlatbuffer;
 use serde_json;
 use thiserror::Error;
@@ -70,6 +71,12 @@ pub enum Error {
         #[from]
         source: crate::cjerror::CjError,
     },
+
+    #[error("Cjseq error: {source}")]
+    CjseqError {
+        #[from]
+        source: CjseqError,
+    },
 }
 
 impl Error {
@@ -102,3 +109,5 @@ impl Error {
         )
     }
 }
+
+pub type Result<T> = std::result::Result<T, Error>;

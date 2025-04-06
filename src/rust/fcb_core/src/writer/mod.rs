@@ -8,6 +8,7 @@ use header_writer::{HeaderWriter, HeaderWriterOptions};
 use packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use serializer::AttributeIndexInfo;
 
+use crate::error::Result;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
@@ -64,7 +65,7 @@ impl<'a> FcbWriter<'a> {
         cj: CityJSON,
         header_option: Option<HeaderWriterOptions>,
         attr_schema: Option<AttributeSchema>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         let attr_schema = attr_schema.unwrap_or_default();
         let transform = cj.transform.clone();
         let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone());
@@ -85,7 +86,7 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the write operation
-    fn write_feature(&mut self) -> Result<(), Error> {
+    fn write_feature(&mut self) -> Result<()> {
         let transform = &self.transform;
 
         if let Some(feat_writer) = &mut self.feat_writer {
@@ -140,7 +141,7 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the operation
-    pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<(), Error> {
+    pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<()> {
         if self.feat_writer.is_none() {
             self.feat_writer = Some(FeatureWriter::new(
                 feature,
@@ -171,7 +172,7 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the write operation
-    pub fn write(mut self, mut out: impl Write) -> Result<(), Error> {
+    pub fn write(mut self, mut out: impl Write) -> Result<()> {
         let attr_indices = self.header_writer.header_options.attribute_indices.clone();
 
         out.write_all(&MAGIC_BYTES)?;
@@ -238,7 +239,7 @@ impl<'a> FcbWriter<'a> {
         }
         //write attribute index buf to out
         self.header_writer.attribute_indices_info = Some(attr_index_info);
-        let header_buf = self.header_writer.finish_to_header();
+        let header_buf = self.header_writer.finish_to_header()?;
         out.write_all(&header_buf)?;
 
         out.write_all(&rtree_buf)?;
