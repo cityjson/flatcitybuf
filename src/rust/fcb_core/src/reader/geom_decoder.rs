@@ -174,25 +174,31 @@ pub(crate) fn decode_semantics_surfaces(
 ) -> Vec<SemanticsSurface> {
     let surfaces = semantics_objects.iter().map(|s| {
         let surface_type_str = match s.type_() {
-            SemanticSurfaceType::RoofSurface => "RoofSurface",
-            SemanticSurfaceType::GroundSurface => "GroundSurface",
-            SemanticSurfaceType::WallSurface => "WallSurface",
-            SemanticSurfaceType::ClosureSurface => "ClosureSurface",
-            SemanticSurfaceType::OuterCeilingSurface => "OuterCeilingSurface",
-            SemanticSurfaceType::OuterFloorSurface => "OuterFloorSurface",
-            SemanticSurfaceType::Window => "Window",
-            SemanticSurfaceType::Door => "Door",
-            SemanticSurfaceType::InteriorWallSurface => "InteriorWallSurface",
-            SemanticSurfaceType::CeilingSurface => "CeilingSurface",
-            SemanticSurfaceType::FloorSurface => "FloorSurface",
-            SemanticSurfaceType::WaterSurface => "WaterSurface",
-            SemanticSurfaceType::WaterGroundSurface => "WaterGroundSurface",
-            SemanticSurfaceType::WaterClosureSurface => "WaterClosureSurface",
-            SemanticSurfaceType::TrafficArea => "TrafficArea",
-            SemanticSurfaceType::AuxiliaryTrafficArea => "AuxiliaryTrafficArea",
-            SemanticSurfaceType::TransportationMarking => "TransportationMarking",
-            SemanticSurfaceType::TransportationHole => "TransportationHole",
-            _ => unreachable!(),
+            // For extended semantic surfaces, use the extension_type
+            SemanticSurfaceType::ExtraSemanticSurface => {
+                // Return the extension_type if present, otherwise use a default
+                s.extension_type().unwrap_or("GenericSurface").to_string()
+            }
+            // Standard types mapping
+            SemanticSurfaceType::RoofSurface => "RoofSurface".to_string(),
+            SemanticSurfaceType::GroundSurface => "GroundSurface".to_string(),
+            SemanticSurfaceType::WallSurface => "WallSurface".to_string(),
+            SemanticSurfaceType::ClosureSurface => "ClosureSurface".to_string(),
+            SemanticSurfaceType::OuterCeilingSurface => "OuterCeilingSurface".to_string(),
+            SemanticSurfaceType::OuterFloorSurface => "OuterFloorSurface".to_string(),
+            SemanticSurfaceType::Window => "Window".to_string(),
+            SemanticSurfaceType::Door => "Door".to_string(),
+            SemanticSurfaceType::InteriorWallSurface => "InteriorWallSurface".to_string(),
+            SemanticSurfaceType::CeilingSurface => "CeilingSurface".to_string(),
+            SemanticSurfaceType::FloorSurface => "FloorSurface".to_string(),
+            SemanticSurfaceType::WaterSurface => "WaterSurface".to_string(),
+            SemanticSurfaceType::WaterGroundSurface => "WaterGroundSurface".to_string(),
+            SemanticSurfaceType::WaterClosureSurface => "WaterClosureSurface".to_string(),
+            SemanticSurfaceType::TrafficArea => "TrafficArea".to_string(),
+            SemanticSurfaceType::AuxiliaryTrafficArea => "AuxiliaryTrafficArea".to_string(),
+            SemanticSurfaceType::TransportationMarking => "TransportationMarking".to_string(),
+            SemanticSurfaceType::TransportationHole => "TransportationHole".to_string(),
+            _ => "Unknown".to_string(), // Fallback for unhandled types
         };
 
         let children = s.children().map(|c| c.iter().collect::<Vec<_>>());
@@ -200,7 +206,7 @@ pub(crate) fn decode_semantics_surfaces(
         // let attributes = None; // FIXME
 
         SemanticsSurface {
-            thetype: surface_type_str.to_string(),
+            thetype: surface_type_str,
             parent: s.parent(),
             children,
             // TODO: Think how to handle `other`
@@ -839,19 +845,26 @@ pub(crate) fn decode_textures(
 #[cfg(test)]
 mod tests {
     use crate::{
-        fb::feature_generated::{
-            root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
-            GeometryType, MaterialMapping, MaterialMappingArgs, TextureMapping, TextureMappingArgs,
+        fb::{
+            feature_generated::{
+                root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
+            },
+            geometry_generated::{
+                GeometryType, MaterialMapping, MaterialMappingArgs, TextureMapping,
+                TextureMappingArgs,
+            },
         },
         serializer::to_geometry,
     };
-    use pretty_assertions::assert_eq;
 
     use super::*;
     use anyhow::Result;
     use cjseq::Geometry as CjGeometry;
     use flatbuffers::FlatBufferBuilder;
     use serde_json::json;
+
+    #[cfg(test)]
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_decode_boundaries() -> Result<()> {

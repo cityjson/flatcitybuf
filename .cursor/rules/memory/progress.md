@@ -220,3 +220,36 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 - Completed initial benchmarking against CityJSON and CityJSONSeq.
 - Created preliminary documentation for the file format specification.
 - Implemented complete B-tree implementation for local file system and in-memory storage with caching optimizations.
+
+## progress status
+
+- [x] basic flatbuffers schema for cityjson - completed
+- [x] spatial indexing implementation (hilbert r-tree) - completed
+- [x] encoding of geoms with shared vertices - completed
+- [x] encoding of materials - completed
+- [x] encoding of textures - completed
+- [x] encoding of appearance - completed
+- [x] encoding of semantics - completed
+- [x] encoding of attributes - completed
+- [x] extension support - completed
+- [ ] js/wasm query engine - in progress
+- [ ] python wrapper - in progress
+- [ ] web-based query optimizer - in progress
+- [ ] partial geom retrieval - planned
+- [ ] versioning support - planned
+
+## what's next
+
+- **query engine refinement:** optimize the query engine for more complex spatial and attribute queries
+- **python wrapper:** complete the python interface for broader ecosystem integration
+- **web-based query optimizer:** finish the visualization tool for query plan optimization
+- **partial geometry retrieval:** implement efficient retrieval of partial geometries for large objects
+- **extension documentation:** create more comprehensive documentation and examples for utilizing extensions
+- **benchmarking extensions:** measure performance impact of different extension usage patterns
+
+## known issues
+
+- performance bottlenecks in attribute indexing with large datasets
+- memory usage spikes during encoding of complex geometries
+- limitations in the current implementation of lod switching
+- extension attributes may impact query performance for complex filter operations

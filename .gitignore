@@ -59,8 +59,8 @@ __pycache__/
 temp/
 
 benchmark_data/
-src/rust/fcb_core/tests/data/
-!src/rust/fcb_core/tests/data/.gitkeep
+src/rust/fcb_core/tests/data/*.fcb
+src/rust/fcb_core/tests/data/*.json
 .cursorrules
 
 *.fcb

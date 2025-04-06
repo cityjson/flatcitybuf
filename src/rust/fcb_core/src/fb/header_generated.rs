@@ -2,6 +2,9 @@
 
 // @generated
 
+use crate::extension_generated::*;
+use crate::geometry_generated::*;
+
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
@@ -990,6 +993,153 @@ impl<'a> Vec2 {
             core::ptr::copy_nonoverlapping(
                 &x_le as *const _ as *const u8,
                 self.0[8..].as_mut_ptr(),
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+}
+
+// struct DoubleVertex, aligned to 8
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct DoubleVertex(pub [u8; 24]);
+impl core::fmt::Debug for DoubleVertex {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.debug_struct("DoubleVertex")
+            .field("x", &self.x())
+            .field("y", &self.y())
+            .field("z", &self.z())
+            .finish()
+    }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for DoubleVertex {}
+impl<'a> flatbuffers::Follow<'a> for DoubleVertex {
+    type Inner = &'a DoubleVertex;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        <&'a DoubleVertex>::follow(buf, loc)
+    }
+}
+impl<'a> flatbuffers::Follow<'a> for &'a DoubleVertex {
+    type Inner = &'a DoubleVertex;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        flatbuffers::follow_cast_ref::<DoubleVertex>(buf, loc)
+    }
+}
+impl<'b> flatbuffers::Push for DoubleVertex {
+    type Output = DoubleVertex;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        let src =
+            ::core::slice::from_raw_parts(self as *const DoubleVertex as *const u8, Self::size());
+        dst.copy_from_slice(src);
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for DoubleVertex {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        v.in_buffer::<Self>(pos)
+    }
+}
+
+impl<'a> DoubleVertex {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(x: f64, y: f64, z: f64) -> Self {
+        let mut s = Self([0; 24]);
+        s.set_x(x);
+        s.set_y(y);
+        s.set_z(z);
+        s
+    }
+
+    pub fn x(&self) -> f64 {
+        let mut mem = core::mem::MaybeUninit::<<f64 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[0..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_x(&mut self, x: f64) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[0..].as_mut_ptr(),
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+
+    pub fn y(&self) -> f64 {
+        let mut mem = core::mem::MaybeUninit::<<f64 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[8..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_y(&mut self, x: f64) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[8..].as_mut_ptr(),
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+
+    pub fn z(&self) -> f64 {
+        let mut mem = core::mem::MaybeUninit::<<f64 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[16..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_z(&mut self, x: f64) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[16..].as_mut_ptr(),
                 core::mem::size_of::<<f64 as EndianScalar>::Scalar>(),
             );
         }
@@ -2285,19 +2435,22 @@ impl<'a> Header<'a> {
     pub const VT_IDENTIFIER: flatbuffers::VOffsetT = 20;
     pub const VT_REFERENCE_DATE: flatbuffers::VOffsetT = 22;
     pub const VT_TITLE: flatbuffers::VOffsetT = 24;
-    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 26;
-    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 28;
-    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 30;
-    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 32;
-    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 34;
-    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 36;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 38;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 40;
-    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 42;
-    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 44;
-    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 46;
-    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 48;
-    pub const VT_VERSION: flatbuffers::VOffsetT = 50;
+    pub const VT_TEMPLATES: flatbuffers::VOffsetT = 26;
+    pub const VT_TEMPLATES_VERTICES: flatbuffers::VOffsetT = 28;
+    pub const VT_EXTENSIONS: flatbuffers::VOffsetT = 30;
+    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 32;
+    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 34;
+    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 36;
+    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 38;
+    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 40;
+    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 42;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 44;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 46;
+    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 48;
+    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 50;
+    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 52;
+    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 54;
+    pub const VT_VERSION: flatbuffers::VOffsetT = 56;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -2348,6 +2501,15 @@ impl<'a> Header<'a> {
         }
         if let Some(x) = args.poc_contact_name {
             builder.add_poc_contact_name(x);
+        }
+        if let Some(x) = args.extensions {
+            builder.add_extensions(x);
+        }
+        if let Some(x) = args.templates_vertices {
+            builder.add_templates_vertices(x);
+        }
+        if let Some(x) = args.templates {
+            builder.add_templates(x);
         }
         if let Some(x) = args.title {
             builder.add_title(x);
@@ -2496,6 +2658,45 @@ impl<'a> Header<'a> {
         unsafe {
             self._tab
                 .get::<flatbuffers::ForwardsUOffset<&str>>(Header::VT_TITLE, None)
+        }
+    }
+    #[inline]
+    pub fn templates(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Geometry<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Geometry>>,
+            >>(Header::VT_TEMPLATES, None)
+        }
+    }
+    #[inline]
+    pub fn templates_vertices(&self) -> Option<flatbuffers::Vector<'a, DoubleVertex>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, DoubleVertex>>>(
+                    Header::VT_TEMPLATES_VERTICES,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn extensions(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Extension<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Extension>>,
+            >>(Header::VT_EXTENSIONS, None)
         }
     }
     #[inline]
@@ -2682,6 +2883,17 @@ impl flatbuffers::Verifiable for Header<'_> {
                 false,
             )?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("title", Self::VT_TITLE, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Geometry>>,
+            >>("templates", Self::VT_TEMPLATES, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, DoubleVertex>>>(
+                "templates_vertices",
+                Self::VT_TEMPLATES_VERTICES,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Extension>>,
+            >>("extensions", Self::VT_EXTENSIONS, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "poc_contact_name",
                 Self::VT_POC_CONTACT_NAME,
@@ -2761,6 +2973,15 @@ pub struct HeaderArgs<'a> {
     pub identifier: Option<flatbuffers::WIPOffset<&'a str>>,
     pub reference_date: Option<flatbuffers::WIPOffset<&'a str>>,
     pub title: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub templates: Option<
+        flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Geometry<'a>>>>,
+    >,
+    pub templates_vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, DoubleVertex>>>,
+    pub extensions: Option<
+        flatbuffers::WIPOffset<
+            flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Extension<'a>>>,
+        >,
+    >,
     pub poc_contact_name: Option<flatbuffers::WIPOffset<&'a str>>,
     pub poc_contact_type: Option<flatbuffers::WIPOffset<&'a str>>,
     pub poc_role: Option<flatbuffers::WIPOffset<&'a str>>,
@@ -2790,6 +3011,9 @@ impl Default for HeaderArgs<'_> {
             identifier: None,
             reference_date: None,
             title: None,
+            templates: None,
+            templates_vertices: None,
+            extensions: None,
             poc_contact_name: None,
             poc_contact_type: None,
             poc_role: None,
@@ -2889,6 +3113,36 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
     pub fn add_title(&mut self, title: flatbuffers::WIPOffset<&'b str>) {
         self.fbb_
             .push_slot_always::<flatbuffers::WIPOffset<_>>(Header::VT_TITLE, title);
+    }
+    #[inline]
+    pub fn add_templates(
+        &mut self,
+        templates: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Geometry<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Header::VT_TEMPLATES, templates);
+    }
+    #[inline]
+    pub fn add_templates_vertices(
+        &mut self,
+        templates_vertices: flatbuffers::WIPOffset<flatbuffers::Vector<'b, DoubleVertex>>,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Header::VT_TEMPLATES_VERTICES,
+            templates_vertices,
+        );
+    }
+    #[inline]
+    pub fn add_extensions(
+        &mut self,
+        extensions: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Extension<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Header::VT_EXTENSIONS, extensions);
     }
     #[inline]
     pub fn add_poc_contact_name(&mut self, poc_contact_name: flatbuffers::WIPOffset<&'b str>) {
@@ -3017,6 +3271,9 @@ impl core::fmt::Debug for Header<'_> {
         ds.field("identifier", &self.identifier());
         ds.field("reference_date", &self.reference_date());
         ds.field("title", &self.title());
+        ds.field("templates", &self.templates());
+        ds.field("templates_vertices", &self.templates_vertices());
+        ds.field("extensions", &self.extensions());
         ds.field("poc_contact_name", &self.poc_contact_name());
         ds.field("poc_contact_type", &self.poc_contact_type());
         ds.field("poc_role", &self.poc_role());

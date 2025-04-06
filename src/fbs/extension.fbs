@@ -1,0 +1,17 @@
+
+
+// Extension is a struct that contains schema of the extension.
+// To simplify FlatBuffers schema, we just store stringified JSON schema.
+// This Extension can be derived from ExtensionMeta's url.
+table Extension {
+  // "type": "CityJSONExtension" isn't written in the file as it's obvious
+  name: string; // name of the extension. It's the same as ExtensionMeta's name.
+  description: string; // description of the extension. It's the same as ExtensionMeta's description.
+  url: string; // url of the extension. It's the same as ExtensionMeta's url.
+  version: string; // version of the extension. It's the same as ExtensionMeta's version.
+  version_cityjson: string; // version of the extension in CityJSON format.
+  extra_attributes: string; // extra attributes of the extension. stringified JSON object.
+  extra_city_objects: string; // extra city objects of the extension. stringified JSON object.
+  extra_root_properties: string; // extra root properties of the extension. stringified JSON object.
+  extra_semantic_surfaces: string; // extra semantic surfaces of the extension. stringified JSON object.
+}
