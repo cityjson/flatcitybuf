@@ -225,9 +225,44 @@ impl<K: Key, W: Write + Seek> StaticBTreeBuilder<K, W> {
         self.finalize_build()
     }
 
+    // start Debug functions------------------------------------------------
+    // the keys of the node number k on layer h start with btree[offset(h) + k * B], and its i-th child will at btree[offset(h - 1) + (k * (B + 1) + i) * B].
+    fn blocks(&self, n: u64) -> u64 {
+        (n + self.branching_factor as u64 - 1) / self.branching_factor as u64
+    }
+    fn prev_keys(&self, n: u64) -> u64 {
+        (self.blocks(n) + self.branching_factor as u64) / (self.branching_factor as u64 + 1)
+            * self.branching_factor as u64
+    }
+    fn height(&self, n: u64) -> u64 {
+        if n <= self.branching_factor as u64 {
+            1
+        } else {
+            self.height(self.prev_keys(n)) + 1
+        }
+    }
+
+    fn offset(&self, level: u64) -> u64 {
+        let mut level = level;
+        let mut k = 0;
+        let mut n = self.num_entries;
+        while level > 0 {
+            k += self.blocks(n) * self.branching_factor as u64;
+            n = self.prev_keys(n);
+            level -= 1;
+        }
+        k
+    }
+    // end Debug functions------------------------------------------------
+
     /// Helper to write the final header and buffered nodes.
     fn finalize_build(mut self) -> Result<(), Error> {
         let height = self.nodes_per_level_build.len() as u8;
+
+        let debug_height = self.height(self.num_entries);
+
+        println!("debug: height: {}", debug_height);
+        println!("height: {}", height);
 
         println!("debug: finalizing build. height: {}, num_entries: {}, nodes_per_level (leaf first): {:?}",
                  height, self.num_entries, self.nodes_per_level_build);
@@ -404,7 +439,77 @@ mod tests {
 
         assert!(builder.build_from_sorted(entries).is_ok());
 
+        // Get the buffer and create a read-only clone for testing
         let buffer = cursor.into_inner();
+        let buffer_clone = buffer.clone();
+
+        // Print tree structure for debugging
+        println!("\n===== DEBUG: TREE STRUCTURE =====");
+        let header_size = DEFAULT_HEADER_RESERVATION as usize;
+        let entry_size = 12;
+        let key_size = 4;
+        let leaf_node_size = b as usize * entry_size; // 24
+        let internal_node_size = b as usize * key_size; // 8
+        let num_leaf_nodes = 3;
+        let num_internal1_nodes = 2;
+        let num_root_nodes = 1;
+
+        let root_start = header_size;
+        let internal1_start = root_start + num_root_nodes * internal_node_size;
+        let leaf_start = internal1_start + num_internal1_nodes * internal_node_size;
+
+        // Debug print root level (Level 0)
+        println!("--- Level 0 (Root) ---");
+        let root_node_data = &buffer[root_start..(root_start + internal_node_size)];
+        let mut cursor = Cursor::new(root_node_data);
+        for i in 0..b {
+            if let Ok(key) = i32::read_from(&mut cursor) {
+                println!("  Root Key {}: {}", i, key);
+            } else {
+                println!("  Root Key {}: <error reading>", i);
+                break;
+            }
+        }
+
+        // Debug print internal level (Level 1)
+        println!("\n--- Level 1 (Internal) ---");
+        for node in 0..num_internal1_nodes {
+            let node_start = internal1_start + node * internal_node_size;
+            let node_end = node_start + internal_node_size;
+            println!("  Node {} [{}:{}]:", node, node_start, node_end);
+
+            let node_data = &buffer[node_start..node_end];
+            let mut cursor = Cursor::new(node_data);
+            for i in 0..b {
+                if let Ok(key) = i32::read_from(&mut cursor) {
+                    println!("    Key {}: {}", i, key);
+                } else {
+                    println!("    Key {}: <padding or error>", i);
+                    break;
+                }
+            }
+        }
+
+        // Debug print leaf level (Level 2)
+        println!("\n--- Level 2 (Leaves) ---");
+        for node in 0..num_leaf_nodes {
+            let node_start = leaf_start + node * leaf_node_size;
+            let node_end = node_start + leaf_node_size;
+            println!("  Node {} [{}:{}]:", node, node_start, node_end);
+
+            let node_data = &buffer[node_start..node_end];
+            let mut cursor = Cursor::new(node_data);
+            for i in 0..b {
+                if let Ok(entry) = Entry::<i32>::read_from(&mut cursor) {
+                    println!("    Entry {}: Key={}, Value={}", i, entry.key, entry.value);
+                } else {
+                    println!("    Entry {}: <padding or error>", i);
+                    break;
+                }
+            }
+        }
+        println!("===== END DEBUG =====\n");
+
         let header_size = DEFAULT_HEADER_RESERVATION as usize;
         let entry_size = 12;
         let key_size = 4;
@@ -486,6 +591,22 @@ mod tests {
             .unwrap();
         expected_leaf3.resize(leaf_node_size, 0);
         assert_eq!(leaf3_data, expected_leaf3.as_slice());
+
+        // Optional: Try read operations on the tree as well
+        let mut tree_reader = Cursor::new(buffer_clone);
+        if let Ok(mut tree) = crate::tree::StaticBTree::<i32, _>::open(tree_reader) {
+            println!("\n===== DEBUG: TREE LOOKUP =====");
+            for key in &[10, 20, 30, 40, 50, 25, 45, 55] {
+                match tree.find(key) {
+                    Ok(Some(value)) => println!("Found key {} -> value {}", key, value),
+                    Ok(None) => println!("Key {} not found", key),
+                    Err(e) => println!("Error finding key {}: {:?}", key, e),
+                }
+            }
+            println!("===== END DEBUG =====\n");
+        } else {
+            println!("Could not open tree for reading");
+        }
     }
 
     #[test]

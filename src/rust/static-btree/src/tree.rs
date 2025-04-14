@@ -82,6 +82,7 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
 
         let mut u8_buf = [0u8; 1];
         reader.read_exact(&mut u8_buf)?;
+        //TODO: height can be derived from num_entries and branching_factor
         let height = u8::from_le_bytes(u8_buf);
 
         // 3. Calculate Sizes
@@ -209,79 +210,84 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
             return Ok(None);
         }
 
-        let mut current_node_absolute_index: u64 = 0; // Root node index
-        let b = self.branching_factor as u64;
-
+        // Print tree structure for debugging
         println!("find: starting search for key {:?}", search_key);
+        println!(
+            "find: tree has height {}, with nodes per level {:?}",
+            self.height, self.num_nodes_per_level
+        );
+        println!("find: level offsets {:?}", self.level_start_offsets);
 
-        // Descend internal nodes
-        for current_level in 0..(self.height - 1) as usize {
-            println!(
-                "find: level {}, node_idx {}",
-                current_level, current_node_absolute_index
-            );
-            let keys = self.read_internal_node_keys(current_node_absolute_index)?;
-            if keys.is_empty() && b > 0 {
-                // Empty internal node is invalid if branching factor > 0
-                return Err(Error::InvalidFormat(format!(
-                    "internal node {} at level {} is empty",
-                    current_node_absolute_index, current_level
-                )));
-            }
-            println!(
-                "find: level {}, node {}, keys {:?}",
-                current_level, current_node_absolute_index, keys
-            );
+        // First, search the first level to find which child to descend to
+        let mut current_level = 0;
+        let mut current_index_within_level = 0;
 
-            // Corrected logic: Find the index `i` of the first key strictly greater than search_key.
-            // The pointer/branch index to follow is `i`.
-            let branch_index = keys.partition_point(|k| k <= search_key);
-
-            println!(
-                "find: level {}, node {}, search_key {:?}, partition_point index (branch_index) {}",
-                current_level, current_node_absolute_index, search_key, branch_index
-            );
-
-            // Calculate absolute index of the child node
+        // Navigate down the tree
+        while current_level < self.height as usize - 1 {
+            // Calculate absolute node index
             let level_start_node_index: u64 =
                 self.num_nodes_per_level.iter().take(current_level).sum();
-            let node_index_in_level = current_node_absolute_index - level_start_node_index;
-            let child_level_start_node_index: u64 = self
-                .num_nodes_per_level
-                .iter()
-                .take(current_level + 1)
-                .sum();
+            let current_node_absolute_index = level_start_node_index + current_index_within_level;
 
-            let child_index_within_next_level = node_index_in_level * b + branch_index as u64;
-            current_node_absolute_index =
-                child_level_start_node_index + child_index_within_next_level;
             println!(
-                "find: level {}, descending to child node_idx {}",
-                current_level, current_node_absolute_index
+                "find: at level {}, node {} (absolute index {})",
+                current_level, current_index_within_level, current_node_absolute_index
             );
 
-            // Bounds check (ensure child exists)
-            let total_nodes_in_next_level = self.num_nodes_per_level[current_level + 1];
-            let next_level_start_index = child_level_start_node_index;
-            if current_node_absolute_index >= next_level_start_index + total_nodes_in_next_level {
+            // Read keys from current node
+            let keys = self.read_internal_node_keys(current_node_absolute_index)?;
+            println!("find: keys at this node: {:?}", keys);
+
+            // Find the correct child index by comparing with keys
+            // In a B-tree, if we have keys K1, K2, K3, then:
+            // - Values < K1 go to child 0
+            // - Values >= K1 && < K2 go to child 1
+            // - Values >= K2 && < K3 go to child 2
+            // - Values >= K3 go to child 3
+            let mut child_index = 0;
+            while child_index < keys.len() && search_key >= &keys[child_index] {
+                child_index += 1;
+            }
+
+            println!(
+                "find: determined child_index {} for search_key {:?}",
+                child_index, search_key
+            );
+
+            // Move to the next level down
+            current_level += 1;
+            current_index_within_level =
+                current_index_within_level * self.branching_factor as u64 + child_index as u64;
+
+            // Verify this is a valid node
+            let level_start_node_index: u64 =
+                self.num_nodes_per_level.iter().take(current_level).sum();
+            let max_node_index =
+                level_start_node_index + self.num_nodes_per_level[current_level] - 1;
+            let next_absolute_index = level_start_node_index + current_index_within_level;
+
+            if next_absolute_index > max_node_index {
                 println!(
-                    "find: error! calculated child index {} out of bounds for level {} (max {})",
-                    current_node_absolute_index,
-                    current_level + 1,
-                    next_level_start_index + total_nodes_in_next_level - 1
+                    "find: calculated node index {} is out of bounds (max {} at level {})",
+                    next_absolute_index, max_node_index, current_level
                 );
-                // If the branch index points past the last valid child for this node, the key is not present.
                 return Ok(None);
             }
         }
 
-        // Search Leaf Node
-        println!("find: searching leaf node {}", current_node_absolute_index);
-        let entries = self.read_leaf_node_entries(current_node_absolute_index)?;
+        // Now we're at the leaf level
+        let level_start_node_index: u64 = self.num_nodes_per_level.iter().take(current_level).sum();
+        let current_node_absolute_index = level_start_node_index + current_index_within_level;
+
         println!(
-            "find: leaf node {}, entries {:?}",
-            current_node_absolute_index, entries
+            "find: reached leaf level, searching node {}",
+            current_node_absolute_index
         );
+
+        // Read leaf entries and search for the key
+        let entries = self.read_leaf_node_entries(current_node_absolute_index)?;
+        println!("find: leaf entries: {:?}", entries);
+
         match entries.binary_search_by(|entry| entry.key.cmp(search_key)) {
             Ok(index) => {
                 println!("find: key found at index {} in leaf", index);
@@ -542,7 +548,6 @@ mod tests {
     use super::*;
     use crate::builder::StaticBTreeBuilder;
     use crate::entry::Entry;
-    use crate::key::Key;
     use std::io::{Cursor, Read, Write};
 
     // Helper to build a test tree in memory
