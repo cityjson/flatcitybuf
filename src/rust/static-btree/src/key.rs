@@ -1,6 +1,7 @@
 use crate::error::Error;
 use chrono::{DateTime, TimeZone, Utc};
-use ordered_float::OrderedFloat; // Import OrderedFloat
+use ordered_float::OrderedFloat;
+
 use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem;
@@ -10,7 +11,7 @@ use std::mem;
 /// Keys must support ordering (`Ord`), cloning (`Clone`), debugging (`Debug`),
 /// and have a fixed serialized size (`SERIALIZED_SIZE`). Variable-length types
 /// like `String` must be adapted (e.g., using fixed-size prefixes) to conform.
-pub trait Key: Sized + Ord + Clone + Debug {
+pub trait Key: Sized + Ord + Clone + Debug + Default {
     /// The exact size of the key in bytes when serialized.
     /// This is crucial for calculating node sizes and offsets.
     const SERIALIZED_SIZE: usize;
@@ -160,6 +161,12 @@ impl Key for DateTime<Utc> {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FixedStringKey<const N: usize>([u8; N]);
 
+impl<const N: usize> Default for FixedStringKey<N> {
+    fn default() -> Self {
+        Self([0u8; N])
+    }
+}
+
 impl<const N: usize> Key for FixedStringKey<N> {
     const SERIALIZED_SIZE: usize = N;
 
@@ -231,6 +238,7 @@ impl<const N: usize> FixedStringKey<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cmp::Ordering;
     use std::f32;
     use std::f64;
     use std::io::Cursor;
