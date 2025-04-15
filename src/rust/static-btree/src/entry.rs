@@ -1,10 +1,18 @@
 use crate::error::Error;
 use crate::key::Key;
-use crate::Value; // Import the type alias from lib.rs
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem;
+
+/// The type associated with each key in the tree.
+/// Currently fixed to u64, assuming byte offsets as values.
+/// For leaf nodes except the last one, the offset is the byte offset of actual data. For the last entry of a leaf node, the offset is the byte offset of the next leaf node as it's B+Tree.
+/// For internal nodes, the offset is the byte offset of the first key of the child node.
+pub type Offset = u64;
+
+/// Constant for the size of the Value type in bytes.
+pub const OFFSET_SIZE: usize = mem::size_of::<Offset>();
 
 /// Represents a Key-Value pair. Stored in leaf nodes and used as input for building.
 // Remove the generic V, use the concrete Value type alias directly.
@@ -13,21 +21,21 @@ pub struct Entry<K: Key> {
     /// The key part of the entry.
     pub key: K,
     /// The value part of the entry (u64 offset).
-    pub value: Value, // Use the Value type alias directly
+    pub offset: Offset, // Use the Value type alias directly
 }
 
 // Update the impl block to only use the K generic parameter
 impl<K: Key> Entry<K> {
     /// The size of the value part in bytes (u64).
-    const VALUE_SIZE: usize = mem::size_of::<Value>();
+    const OFFSET_SIZE: usize = mem::size_of::<Offset>();
     /// The total size of the entry when serialized.
-    pub const SERIALIZED_SIZE: usize = K::SERIALIZED_SIZE + Self::VALUE_SIZE;
+    pub const SERIALIZED_SIZE: usize = K::SERIALIZED_SIZE + Self::OFFSET_SIZE;
 
     /// Serializes the entire entry (key followed by value) to a writer.
     /// Assumes little-endian encoding for the `Value`.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         self.key.write_to(writer)?;
-        writer.write_all(&self.value.to_le_bytes())?;
+        writer.write_all(&self.offset.to_le_bytes())?;
         Ok(())
     }
 
@@ -35,10 +43,10 @@ impl<K: Key> Entry<K> {
     /// Assumes little-endian encoding for the `Value`.
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
         let key = K::read_from(reader)?;
-        let mut value_bytes = [0u8; Self::VALUE_SIZE];
-        reader.read_exact(&mut value_bytes)?;
-        let value = Value::from_le_bytes(value_bytes);
-        Ok(Entry { key, value })
+        let mut offset_bytes = [0u8; Self::OFFSET_SIZE];
+        reader.read_exact(&mut offset_bytes)?;
+        let offset = Offset::from_le_bytes(offset_bytes);
+        Ok(Entry { key, offset })
     }
 
     pub fn key_size() -> usize {
@@ -88,7 +96,7 @@ mod tests {
         let entry = Entry {
             // No V generic needed here
             key: TestKey(12345),
-            value: 9876543210,
+            offset: 9876543210,
         };
 
         let mut buffer = Vec::new();
@@ -96,7 +104,7 @@ mod tests {
 
         assert_eq!(
             buffer.len(),
-            TestKey::SERIALIZED_SIZE + mem::size_of::<Value>()
+            TestKey::SERIALIZED_SIZE + mem::size_of::<Offset>()
         );
         assert_eq!(buffer.len(), Entry::<TestKey>::SERIALIZED_SIZE); // Update const access
 
@@ -112,17 +120,17 @@ mod tests {
         let entry1 = Entry {
             // No V generic
             key: TestKey(10),
-            value: 100,
+            offset: 100,
         };
         let entry2 = Entry {
             // No V generic
             key: TestKey(20),
-            value: 50,
+            offset: 50,
         };
         let entry3 = Entry {
             // No V generic
             key: TestKey(10),
-            value: 200,
+            offset: 200,
         };
 
         assert!(entry1 < entry2);

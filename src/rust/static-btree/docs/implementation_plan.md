@@ -65,22 +65,3 @@
         * Add explanatory comments for complex sections of the code.
         * Go back through `task.md` and add `:check:` markers for completed items (or we can do this collaboratively).
     * **Review Point 5:** Final review of the entire crate, integration tests, documentation, code quality, and readiness.
-
-**Diagram (Illustrating Build Process - Simplified):**
-
-```mermaid
-graph TD
-    subgraph Build Process (Bottom-Up)
-        A[Sorted Entries Iterator] --> B(Process Leaves);
-        B --> C[Write Leaf Nodes (Size B, Pad Last)];
-        C --> D[Collect First Key per Leaf Node];
-        D --> E{Current Level Keys};
-        E -- More than 1 key --> F(Process Internal Nodes);
-        F --> G[Write Internal Nodes (Size B, Pad Last)];
-        G --> H[Collect First Key per Internal Node];
-        H --> E; // Loop back with keys for the next level up
-        E -- 1 key (Root Reached) --> J[Finalize];
-        J --> K[Calculate Metadata (Height, Counts)];
-        K --> L[Seek to Start];
-        L --> M[Write Final Header];
-    end

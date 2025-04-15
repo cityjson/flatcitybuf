@@ -1,6 +1,6 @@
 # Implicit B+Tree (S+Tree) Implementation Strategy
 
-This document outlines the implementation strategy for our static B+tree, based on the S+tree concept described in the [Algorithmica article](https://en.algorithmica.org/hpc/data-structures/s-tree/).
+This document outlines the implementation strategy for our static B+tree, based on the S+tree concept described in the [Algorithmica article](https://en.algorithmica.org/hpc/data-structures/s-tree/) and [this article](https://curiouscoding.nl/posts/static-search-tree/#s-trees-and-b-trees).
 
 ## Core Concepts
 
@@ -15,7 +15,7 @@ Traditional B-trees use a node structure with:
 
 Our static B+tree (S+tree) implementation differs in several key ways:
 
-- No explicit pointers between nodes
+- No explicit pointers between nodes.
 - Complete filling of nodes (except possibly the last node at each level)
 - Implicit relationship between parent and child nodes based on array indices
 - Nearly 100% space utilization
