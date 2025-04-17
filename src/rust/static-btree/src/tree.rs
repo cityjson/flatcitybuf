@@ -1,124 +1,256 @@
 use crate::entry::{Entry, Offset};
-use crate::error::Error;
+use crate::error::{Error, Error as BTreeError};
 use crate::key::Key;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
 use std::marker::PhantomData;
 use std::mem;
+
+/// Helper utilities to compute layer statistics for a static B+Tree.
+#[derive(Debug, Clone)]
+struct Layout {
+    branching_factor: usize,
+    num_entries: usize,
+    height: usize,
+    /// starting entry index (not bytes) for each layer 0..height-1 (root=0)
+    layer_offsets: Vec<usize>,
+}
+
+impl Layout {
+    fn new(num_entries: usize, branching_factor: usize) -> Self {
+        assert!(branching_factor >= 2, "branching factor must be >=2");
+        // compute height and layer offsets top‑down (root layer = 0)
+        let mut layer_offsets = Vec::new();
+        let mut offset = 0usize;
+        let mut n = num_entries;
+        let b = branching_factor;
+        loop {
+            layer_offsets.push(offset);
+            if n <= b {
+                // leaves will be next layer; stop after pushing internal nodes later
+                break;
+            }
+            let blocks = Self::blocks(n, b);
+            offset += blocks * b; // each block has b keys (internal nodes)
+            n = Self::prev_keys(n, b);
+        }
+        // finally, push offset for leaf layer
+        if *layer_offsets.last().unwrap() != offset {
+            layer_offsets.push(offset);
+        } else {
+            // the last push already root? ensure height at least 1
+        }
+        let height = layer_offsets.len();
+        Layout {
+            branching_factor: b,
+            num_entries,
+            height,
+            layer_offsets,
+        }
+    }
+
+    #[inline]
+    fn blocks(n: usize, b: usize) -> usize {
+        (n + b - 1) / b
+    }
+    #[inline]
+    fn prev_keys(n: usize, b: usize) -> usize {
+        // (blocks(n) + b) / (b+1) * b
+        let blocks = Self::blocks(n, b);
+        ((blocks + b) / (b + 1)) * b
+    }
+    /// start index (in entries) of layer h (0‑based). h==height‑1 is leaf layer
+    #[inline]
+    fn layer_offset(&self, h: usize) -> usize {
+        self.layer_offsets[h]
+    }
+}
 
 /// Represents the static B+Tree structure, providing read access.
 /// `K` is the Key type, `R` is the underlying readable and seekable data source.
 #[derive(Debug)]
 pub struct StaticBTree<K: Key, R: Read + Seek> {
-    /// The underlying data source (e.g., file, memory buffer).
     reader: R,
-    /// The branching factor B (number of keys/entries per node). Fixed at creation.
-    branching_factor: u16,
-    /// Total number of key-value entries stored in the tree.
-    num_entries: u64,
-    /// Height of the tree. 0 for empty, 1 for root-only leaf, etc.
-    height: u8,
-    /// The size of the header section in bytes at the beginning of the data source.
+    layout: Layout,
     entry_size: usize,
-
-    nodes: Vec<Vec<Entry<K>>>,
-    /// Marker for the generic Key type.
     _phantom_key: PhantomData<K>,
 }
 
 impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
-    pub fn from_reader(reader: R, branching_factor: u16, num_entries: u64) -> Result<Self, Error> {
-        let height = 0; // TODO: height can be derived from the number of entries and branching factor
+    /// Create a new tree given a reader pointing at the beginning of the serialized entries.
+    pub fn new(mut reader: R, branching_factor: u16, num_entries: u64) -> Result<Self, Error> {
+        let layout = Layout::new(num_entries as usize, branching_factor as usize);
 
-        let key_size = K::SERIALIZED_SIZE;
-        let offset_size = mem::size_of::<Offset>();
-        let entry_size = key_size + offset_size;
+        // quick sanity check: seek to end to see size? optional.
+        let entry_size = K::SERIALIZED_SIZE + mem::size_of::<Offset>();
 
-        Ok(StaticBTree::<K, R> {
+        // Ensure reader is at start
+        reader.seek(SeekFrom::Start(0))?;
+
+        Ok(Self {
             reader,
-            branching_factor,
-            num_entries,
-            height,
+            layout,
             entry_size,
-            nodes: Vec::new(),
             _phantom_key: PhantomData,
         })
     }
 
-    /// This will be implemented in the future.
-    // pub fn from_http_reader<T: AsyncHttpRangeClient>(
-    //     client: &mut AsyncBufferedHttpRangeClient<T>,
-    //     index_begin: usize,
-    //     num_entries: usize,
-    //     branching_factor: u16,
-    // ) -> Result<Self, Error> {
+    /// Height of the tree (number of layers). 1 means leaf‑only (root==leaf).
+    pub fn height(&self) -> usize {
+        self.layout.height
+    }
 
-    // }
+    pub fn len(&self) -> usize {
+        self.layout.num_entries
+    }
 
-    /// Finds the value associated with a given key.
+    /// Read a node (array of `B` entries) for given layer `h` and node index `k`.
+    fn read_node(&mut self, layer: usize, node_idx: usize) -> Result<Vec<Entry<K>>, Error> {
+        let b = self.layout.branching_factor;
+        let entry_start_idx = self.layout.layer_offset(layer) + node_idx * b;
+        let byte_offset = (entry_start_idx * self.entry_size) as u64;
+        self.reader.seek(SeekFrom::Start(byte_offset))?;
 
-    pub fn find(&mut self, search_key: &K) -> Result<Option<Vec<Value>>, Error> {
-        if self.height == 0 {
-            println!("find: empty tree");
-            return Ok(None);
+        let mut entries = Vec::with_capacity(b);
+        for _ in 0..b {
+            let e = Entry::<K>::read_from(&mut self.reader)?;
+            entries.push(e);
         }
-
-        // find lower_bound of search_key in the root node
-        // Read bytes corresponding to the root node and read children nodes recursively when it's necessary.
-        // Here we can use `read_from` of Entry struct to read the node.
-        // To avoid reading big amount of data, this will read only the necessary nodes. To optimize the performance, prefetch the nodes when it's necessary.
-
-        // if it finds the key, check the neighboring keys since there might be duplicates. If the found key is the first or last, check the next or previous node respectively.
-
-        // TODO: implement
-        Err(Error::QueryError("not implemented".to_string()))
+        Ok(entries)
     }
 
-    // --- range ---
-    pub fn range(&mut self, min_key: &K, max_key: &K) -> Result<Vec<Value>, Error> {
-        // TODO: implement
-        Err(Error::QueryError("not implemented".to_string()))
-
-        // find the lower_bound of min_key in the root node
-
-        // find the upper_bound of max_key in the root node
-
-        // iterate through the nodes between the lower_bound and upper_bound
+    /// Internal search that returns the *absolute entry index* of lower bound.
+    fn lower_bound_index(&mut self, key: &K) -> Result<usize, Error> {
+        let b = self.layout.branching_factor;
+        let mut node_idx = 0usize; // multiplied by b implicitly per formula
+                                   // iterate internal layers (root .. height‑2) if height>1
+        for h in 0..(self.layout.height - 1) {
+            let node = self.read_node(h, node_idx)?;
+            // linear scan
+            let mut pos = 0;
+            while pos < b && &node[pos].key < key {
+                pos += 1;
+            }
+            node_idx = node_idx * (b + 1) + pos;
+        }
+        // leaf layer calculations
+        let leaf_layer = self.layout.height - 1;
+        let leaf_node_start_idx = node_idx * b;
+        let leaf_entries = self.read_node(leaf_layer, node_idx)?;
+        let mut pos = 0;
+        while pos < b && &leaf_entries[pos].key < key {
+            pos += 1;
+        }
+        Ok(self.layout.layer_offset(leaf_layer) + leaf_node_start_idx + pos)
     }
 
-    fn prefetch_nodes(&mut self, node_index: usize) -> Result<(), Error> {
-        // read the node from the reader and store it in the nodes vector. This is to optimize the performance.
-        // TODO: implement
-        Err(Error::QueryError("not implemented".to_string()))
+    /// like lower_bound_index but first key > query (upper bound)
+    fn upper_bound_index(&mut self, key: &K) -> Result<usize, Error> {
+        let b = self.layout.branching_factor;
+        let mut node_idx = 0usize;
+        for h in 0..(self.layout.height - 1) {
+            let node = self.read_node(h, node_idx)?;
+            let mut pos = 0;
+            while pos < b && &node[pos].key <= key {
+                pos += 1;
+            }
+            node_idx = node_idx * (b + 1) + pos;
+        }
+        let leaf_layer = self.layout.height - 1;
+        let leaf_node_start_idx = node_idx * b;
+        let leaf_entries = self.read_node(leaf_layer, node_idx)?;
+        let mut pos = 0;
+        while pos < b && &leaf_entries[pos].key <= key {
+            pos += 1;
+        }
+        Ok(self.layout.layer_offset(leaf_layer) + leaf_node_start_idx + pos)
     }
 
-    // --- Accessors ---
-    pub fn branching_factor(&self) -> u16 {
-        self.branching_factor
+    /// return all offsets whose key equals `search_key`
+    pub fn lower_bound(&mut self, search_key: &K) -> Result<Vec<Offset>, Error> {
+        let start_idx = self.lower_bound_index(search_key)?;
+        // gather duplicates to right until key!=search_key
+        let mut result = Vec::new();
+        let mut idx = start_idx;
+        loop {
+            let entry = self.read_entry(idx)?;
+            if &entry.key == search_key {
+                result.push(entry.offset);
+                idx += 1;
+            } else {
+                break;
+            }
+        }
+        // also gather duplicates to the left
+        let mut left_idx = if start_idx == 0 { 0 } else { start_idx - 1 };
+        while left_idx < start_idx {
+            let entry = self.read_entry(left_idx)?;
+            if &entry.key == search_key {
+                result.insert(0, entry.offset); // maintain order
+                if left_idx == 0 {
+                    break;
+                }
+                left_idx -= 1;
+            } else {
+                break;
+            }
+        }
+        Ok(result)
     }
-    pub fn len(&self) -> u64 {
-        self.num_entries
+
+    /// Range query inclusive [min, max]
+    pub fn range(&mut self, min_key: &K, max_key: &K) -> Result<Vec<Offset>, Error> {
+        if min_key > max_key {
+            return Err(Error::QueryError("min_key > max_key".into()));
+        }
+        let start_idx = self.lower_bound_index(min_key)?;
+        let end_idx = self.upper_bound_index(max_key)?;
+        let mut offsets = Vec::new();
+        for idx in start_idx..end_idx {
+            let entry = self.read_entry(idx)?;
+            offsets.push(entry.offset);
+        }
+        Ok(offsets)
     }
-    pub fn is_empty(&self) -> bool {
-        self.num_entries == 0
-    }
-    pub fn height(&self) -> u8 {
-        self.height
+
+    /// helper to read a single entry by absolute index
+    fn read_entry(&mut self, entry_idx: usize) -> Result<Entry<K>, Error> {
+        let byte_offset = (entry_idx * self.entry_size) as u64;
+        self.reader.seek(SeekFrom::Start(byte_offset))?;
+        Entry::<K>::read_from(&mut self.reader)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entry::Entry;
 
-    // test1: test with a simple example such as u64 key and 3 items and find the key.
+    type TestKey = i32;
 
-    // test2: test with a simple example such as u64 key and 3 items and range query.
+    fn build_simple_tree(entries: &[(i32, Offset)], b: usize) -> Vec<u8> {
+        // naive builder: assume entries.len() == b, so root==leaf
+        let mut buf = Vec::new();
+        for (k, off) in entries {
+            let e = Entry {
+                key: *k,
+                offset: *off,
+            };
+            e.write_to(&mut buf).unwrap();
+        }
+        buf
+    }
 
-    // test3: test with more entries such as 20 with branching factor 3 and find the key.
+    #[test]
+    fn test_lb_single_leaf() {
+        let data = vec![(10, 100), (20, 200), (30, 300), (40, 400)];
+        let serialized = build_simple_tree(&data, 4);
+        let cursor = std::io::Cursor::new(serialized);
+        let mut tree: StaticBTree<i32, _> =
+            StaticBTree::new(cursor, 4, data.len() as u64).expect("init");
 
-    // test4: test with more entries such as 20 with branching factor 3 and range query.
-
-    // test5: test with other types such as f32 and string and find the key.
-
-    // test6: test with other types such as f32 and string and range query.
+        let res = tree.lower_bound(&20).unwrap();
+        assert_eq!(res, vec![200]);
+        let res_none = tree.lower_bound(&25).unwrap();
+        assert_eq!(res_none, vec![300]);
+    }
 }
