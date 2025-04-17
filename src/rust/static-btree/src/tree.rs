@@ -165,16 +165,26 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
         Ok(self.layout.layer_offset(leaf_layer) + leaf_node_start_idx + pos)
     }
 
-    /// return all offsets whose key equals `search_key`
+    /// Return offsets whose key equals `search_key`.
+    /// If the key is **not present**, returns a single‑element vec containing the offset of the
+    /// first key greater than `search_key` (the classic lower‑bound semantics).
     pub fn lower_bound(&mut self, search_key: &K) -> Result<Vec<Offset>, Error> {
         let start_idx = self.lower_bound_index(search_key)?;
+        let entry = self.read_entry(start_idx)?;
+
+        if &entry.key != search_key {
+            // key not present, return offset of first key > search_key
+            return Ok(vec![entry.offset]);
+        }
+
         // gather duplicates to right until key!=search_key
         let mut result = Vec::new();
         let mut idx = start_idx;
+        let b_key_equal = |e: &Entry<K>| &e.key == search_key;
         loop {
-            let entry = self.read_entry(idx)?;
-            if &entry.key == search_key {
-                result.push(entry.offset);
+            let ent = self.read_entry(idx)?;
+            if b_key_equal(&ent) {
+                result.push(ent.offset);
                 idx += 1;
             } else {
                 break;
@@ -183,9 +193,9 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
         // also gather duplicates to the left
         let mut left_idx = if start_idx == 0 { 0 } else { start_idx - 1 };
         while left_idx < start_idx {
-            let entry = self.read_entry(left_idx)?;
-            if &entry.key == search_key {
-                result.insert(0, entry.offset); // maintain order
+            let ent = self.read_entry(left_idx)?;
+            if b_key_equal(&ent) {
+                result.insert(0, ent.offset);
                 if left_idx == 0 {
                     break;
                 }
