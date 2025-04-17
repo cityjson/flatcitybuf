@@ -4,20 +4,20 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 fn main() -> Result<(), Error> {
     // Create a tree with branching factor 2
     let b: u16 = 2;
-    let mut cursor = Cursor::new(Vec::new());
-    let builder = StaticBTreeBuilder::<i32, _>::new(&mut cursor, b)?;
+    let cursor = Cursor::new(Vec::new());
+    let builder = StaticBTreeBuilder::<i32, _>::new(cursor, b)?;
 
     // Define some test entries
     let entries = vec![
-        Ok(Entry { key: 10, value: 1 }),
-        Ok(Entry { key: 20, value: 2 }),
-        Ok(Entry { key: 30, value: 3 }),
-        Ok(Entry { key: 40, value: 4 }),
-        Ok(Entry { key: 50, value: 5 }),
+        Ok(Entry { key: 10, offset: 1 }),
+        Ok(Entry { key: 20, offset: 2 }),
+        Ok(Entry { key: 30, offset: 3 }),
+        Ok(Entry { key: 40, offset: 4 }),
+        Ok(Entry { key: 50, offset: 5 }),
     ];
 
     // Build the tree
-    builder.build_from_sorted(entries)?;
+    let tree = builder.build_from_sorted(entries)?;
 
     // Get the buffer for analysis
     let buffer = cursor.into_inner();
@@ -35,35 +35,39 @@ fn print_tree_structure(buffer: &[u8], b: u16) -> Result<(), Error> {
     // Constants
     let header_size = static_btree::builder::DEFAULT_HEADER_RESERVATION as usize;
     let key_size = std::mem::size_of::<i32>();
-    let value_size = std::mem::size_of::<u64>();
-    let entry_size = key_size + value_size;
+    let offset_size = std::mem::size_of::<u64>();
+    let entry_size = key_size + offset_size;
     let leaf_node_size = b as usize * entry_size;
     let internal_node_size = b as usize * key_size;
 
     // Read header to get metadata
     let mut reader = Cursor::new(buffer);
-    reader.seek(SeekFrom::Start(8))?; // Skip magic bytes
+    reader.seek(SeekFrom::Start(6))?; // Skip magic bytes
 
     let mut u16_buf = [0u8; 2];
     reader.read_exact(&mut u16_buf)?;
     let version = u16::from_le_bytes(u16_buf);
 
-    reader.read_exact(&mut u16_buf)?;
-    let branching_factor = u16::from_le_bytes(u16_buf);
-
     let mut u64_buf = [0u8; 8];
     reader.read_exact(&mut u64_buf)?;
-    let num_entries = u64::from_le_bytes(u64_buf);
+    let root_offset = u64::from_le_bytes(u64_buf);
 
     let mut u8_buf = [0u8; 1];
     reader.read_exact(&mut u8_buf)?;
     let height = u8::from_le_bytes(u8_buf);
 
+    reader.read_exact(&mut u16_buf)?;
+    let node_size = u16::from_le_bytes(u16_buf);
+
+    reader.read_exact(&mut u64_buf)?;
+    let num_entries = u64::from_le_bytes(u64_buf);
+
     println!("===== STATIC B-TREE STRUCTURE =====");
     println!("Version: {}", version);
-    println!("Branching Factor: {}", branching_factor);
-    println!("Entries: {}", num_entries);
+    println!("Root Offset: {}", root_offset);
     println!("Height: {}", height);
+    println!("Node Size: {}", node_size);
+    println!("Entries: {}", num_entries);
 
     // Calculate layout
     let num_leaf_nodes = (num_entries + b as u64 - 1) / b as u64;
@@ -112,21 +116,43 @@ fn print_tree_structure(buffer: &[u8], b: u16) -> Result<(), Error> {
                 println!("  Leaf Node {} (offset {})", node, node_offset);
                 let mut reader = Cursor::new(&buffer[node_offset as usize..]);
 
-                for i in 0..b {
+                // Skip node type
+                let mut type_buf = [0u8; 1];
+                if reader.read_exact(&mut type_buf).is_err() {
+                    println!("    Error reading node type");
+                    continue;
+                }
+
+                // Read count
+                let mut count_buf = [0u8; 2];
+                if reader.read_exact(&mut count_buf).is_err() {
+                    println!("    Error reading count");
+                    continue;
+                }
+                let count = u16::from_le_bytes(count_buf);
+
+                // Read next leaf pointer
+                let mut next_leaf_buf = [0u8; 8];
+                if reader.read_exact(&mut next_leaf_buf).is_err() {
+                    println!("    Error reading next leaf pointer");
+                    continue;
+                }
+                let next_leaf = u64::from_le_bytes(next_leaf_buf);
+
+                println!("    Count: {}, Next Leaf: {}", count, next_leaf);
+
+                // Read entries
+                for i in 0..count {
                     let mut key_buf = [0u8; 4]; // i32
-                    let mut value_buf = [0u8; 8]; // u64
+                    let mut offset_buf = [0u8; 8]; // u64
 
                     if reader.read_exact(&mut key_buf).is_ok()
-                        && reader.read_exact(&mut value_buf).is_ok()
+                        && reader.read_exact(&mut offset_buf).is_ok()
                     {
                         let key = i32::from_le_bytes(key_buf);
-                        let value = u64::from_le_bytes(value_buf);
+                        let offset = u64::from_le_bytes(offset_buf);
 
-                        if key != 0 || value != 0 || i == 0 {
-                            println!("    Entry {}: Key={}, Value={}", i, key, value);
-                        } else {
-                            println!("    Entry {}: <padding>", i);
-                        }
+                        println!("    Entry {}: Key={}, Offset={}", i, key, offset);
                     } else {
                         println!("    Entry {}: <error reading>", i);
                         break;
@@ -137,17 +163,35 @@ fn print_tree_structure(buffer: &[u8], b: u16) -> Result<(), Error> {
                 println!("  Internal Node {} (offset {})", node, node_offset);
                 let mut reader = Cursor::new(&buffer[node_offset as usize..]);
 
-                for i in 0..b {
+                // Skip node type
+                let mut type_buf = [0u8; 1];
+                if reader.read_exact(&mut type_buf).is_err() {
+                    println!("    Error reading node type");
+                    continue;
+                }
+
+                // Read count
+                let mut count_buf = [0u8; 2];
+                if reader.read_exact(&mut count_buf).is_err() {
+                    println!("    Error reading count");
+                    continue;
+                }
+                let count = u16::from_le_bytes(count_buf);
+
+                println!("    Count: {}", count);
+
+                // Read keys and child pointers
+                for i in 0..count {
                     let mut key_buf = [0u8; 4]; // i32
+                    let mut child_buf = [0u8; 8]; // u64
 
-                    if reader.read_exact(&mut key_buf).is_ok() {
+                    if reader.read_exact(&mut key_buf).is_ok()
+                        && reader.read_exact(&mut child_buf).is_ok()
+                    {
                         let key = i32::from_le_bytes(key_buf);
+                        let child = u64::from_le_bytes(child_buf);
 
-                        if key != 0 || i == 0 {
-                            println!("    Key {}: {}", i, key);
-                        } else {
-                            println!("    Key {}: <padding>", i);
-                        }
+                        println!("    Key {}: {}, Child: {}", i, key, child);
                     } else {
                         println!("    Key {}: <error reading>", i);
                         break;
@@ -165,12 +209,19 @@ fn test_lookups(buffer: &[u8]) -> Result<(), Error> {
     println!("\n===== TESTING LOOKUPS =====");
 
     let mut reader = Cursor::new(buffer);
-    let mut tree = static_btree::StaticBTree::<i32, _>::open(reader)?;
+    let tree = static_btree::StaticBTree::deserialize(&mut reader)?;
 
     for key in &[10, 20, 30, 40, 50, 25, 45, 55] {
-        match tree.find(key) {
-            Ok(Some(value)) => println!("Found key {} -> value {}", key, value),
-            Ok(None) => println!("Key {} not found", key),
+        match tree.find(key, &mut Cursor::new(buffer)) {
+            Ok(offsets) => {
+                if offsets.is_empty() {
+                    println!("Key {} not found", key);
+                } else {
+                    for offset in offsets {
+                        println!("Found key {} -> offset {}", key, offset);
+                    }
+                }
+            }
             Err(e) => println!("Error finding key {}: {:?}", key, e),
         }
     }

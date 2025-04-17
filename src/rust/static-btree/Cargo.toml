@@ -23,6 +23,8 @@ bytemuck = { workspace = true }
 lru = { version = "0.13" }
 chrono = { workspace = true }
 
+byteorder = { workspace = true }
+
 # Async support
 tokio = { workspace = true }
 

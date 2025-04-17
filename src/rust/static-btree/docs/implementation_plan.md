@@ -2,325 +2,524 @@
 
 This guide outlines the implementation approach for the Static B+Tree index structure in our FlatCityBuf project. This immutable, balanced tree structure will enable efficient attribute-based queries with minimal I/O operations, making it ideal for cloud-based 3D city model data retrieval.
 
-## Prerequisites
+For detailed explanations of implicit B-tree concepts, refer to:
 
-We already have implemented:
+- [Algorithmica: Implicit B-tree](https://en.algorithmica.org/hpc/data-structures/s-tree/#implicit-b-tree-1)
+- [Curious Coding: Static Search Tree](https://curiouscoding.nl/posts/static-search-tree/#s-trees-and-b-trees)
 
-- `Key` structure for different attribute types
-- `Entry` structure representing key-value pairs in leaf nodes
+## 1. Overview
 
-## Core Implementation Requirements
+The Static B+Tree (also known as an Implicit B+Tree) provides efficient attribute indexing with optimized performance for cloud-based access patterns. This implementation will be immutable after construction, have a fixed structure, and optimize for read-only access patterns with efficient HTTP Range Request support.
 
-### 1. Static B+Tree Structure
+Key differences from a traditional B+Tree:
 
-The Static B+Tree is an immutable B+Tree where:
+- Immutable after construction
+- Fixed, predetermined structure
+- Optimized for read-only access patterns
+- Efficient access via HTTP Range Requests
 
-- All nodes have a fixed size
-- Node positions are implicitly calculated rather than using explicit pointers
-- The entire structure is stored as a contiguous array of nodes
-- Nodes are arranged in level order (root, then level 1, level 2, etc.)
+## 2. Core Components
 
-#### Node Structure
+### 2.1 Node Structure
 
-Implement two types of nodes:
+We'll implement two types of nodes:
+
+#### 2.1.1 Internal Node
 
 ```rust
-struct InternalNode {
-    // Number of keys actually stored
-    count: u16,
-
-    // Fixed-size array of keys and child node references
-    entries: [Entry; MAX_KEYS_PER_NODE],
-}
-
-struct LeafNode {
-    // Number of keys actually stored
-    count: u16,
-
-    // Fixed-size array of key-value entries
-    entries: [Entry; MAX_KEYS_PER_NODE],
-
-    // Offset to the next leaf node (for range queries)
-    next_leaf: Option<u32>,
+pub struct InternalNode<K: Key> {
+    /// Keys for guiding the search
+    pub keys: Vec<K>,
+    /// Offsets to child nodes
+    pub child_offsets: Vec<u64>,
 }
 ```
 
-### 2. Streaming Implementation
+Memory layout:
 
-**Critical requirement**: The tree must be accessed in a streaming fashion:
+```
+[count: u16][key1][ptr1][key2][ptr2]...[keyN][ptrN]
+```
 
-- Read nodes only when necessary during traversal
-- Don't load the entire tree into memory
-- Implement a node cache to avoid re-reading frequently accessed nodes
+#### 2.1.2 Leaf Node
 
 ```rust
-struct BTreeReader<R: Read + Seek> {
-    reader: R,
-    tree_offset: u64,
-    node_size: usize,
-    height: u8,
-    branching_factor: u16,
-    node_cache: LruCache<usize, Vec<u8>>,
+pub struct LeafNode<K: Key> {
+    /// Entries (key-value pairs)
+    pub entries: Vec<Entry<K>>,
+    /// Pointer to the next leaf node (for range queries)
+    pub next_leaf_offset: Option<u64>,
 }
+```
 
-impl<R: Read + Seek> BTreeReader<R> {
-    fn read_node(&mut self, node_index: usize) -> Result<Vec<u8>> {
-        // Check if node is in cache first
-        if let Some(cached_node) = self.node_cache.get(&node_index) {
-            return Ok(cached_node.clone());
+Memory layout:
+
+```
+[count: u16][next_leaf_ptr: u64][entry1][entry2]...[entryN]
+```
+
+### 2.2 Tree Structure
+
+```rust
+pub struct StaticBTree<K: Key> {
+    /// Offset to the root node
+    root_offset: u64,
+    /// Height of the tree
+    height: u8,
+    /// Node size in bytes (power of 2)
+    node_size: u16,
+    /// Total number of entries
+    num_entries: u64,
+    /// Phantom data for key type
+    _phantom: PhantomData<K>,
+}
+```
+
+### 2.3 Builder
+
+```rust
+pub struct StaticBTreeBuilder<K: Key> {
+    /// Entries to be inserted into the tree
+    entries: Vec<Entry<K>>,
+    /// Node size in bytes (power of 2)
+    node_size: u16,
+    /// Branching factor (default: 16)
+    branching_factor: u16,
+}
+```
+
+### 2.4 Node Reader Interface
+
+```rust
+pub trait NodeReader<K: Key> {
+    /// Read a node from storage
+    fn read_node(&self, offset: u64) -> Result<Box<dyn Node<K>>>;
+
+    /// Prefetch a node (optional optimization)
+    fn prefetch_node(&self, offset: u64);
+}
+```
+
+## 3. Node Size Calculation
+
+We'll use a dynamic approach to calculate the optimal node size based on key size, branching factor, and offset byte size:
+
+```rust
+fn calculate_optimal_node_size<K: Key>(branching_factor: u16) -> u16 {
+    let key_size = K::SERIALIZED_SIZE;
+    let entry_size = Entry::<K>::SERIALIZED_SIZE;
+
+    // Calculate sizes for leaf and internal nodes
+    let leaf_header_size = 10; // count(2) + next_ptr(8)
+    let leaf_node_size = leaf_header_size + (branching_factor as usize * entry_size);
+
+    let internal_header_size = 2; // count(2)
+    let internal_entry_size = key_size + 8; // key + child ptr
+    let internal_node_size = internal_header_size + (branching_factor as usize * internal_entry_size);
+
+    // Use the larger of the two sizes
+    let node_size = leaf_node_size.max(internal_node_size);
+
+    // Round up to the next power of 2
+    let mut power_of_2 = 1;
+    while power_of_2 < node_size {
+        power_of_2 *= 2;
+    }
+
+    power_of_2 as u16
+}
+```
+
+This approach ensures:
+
+- Nodes are sized appropriately for the key type
+- Node size is a power of 2 for alignment with disk and memory pages
+- Both leaf and internal nodes fit within the same size
+
+## 4. Tree Construction (Bottom-Up)
+
+We'll use a bottom-up approach to construct the tree:
+
+1. Sort all entries by key
+2. Create leaf nodes by grouping sorted entries
+3. Build internal nodes recursively upward
+4. Ensure all nodes except possibly the rightmost at each level are full
+
+```rust
+impl<K: Key> StaticBTreeBuilder<K> {
+    pub fn build(&self) -> Result<StaticBTree<K>> {
+        // 1. Sort entries
+        let mut sorted_entries = self.entries.clone();
+        sorted_entries.sort_by(|a, b| a.key.cmp(&b.key));
+
+        // 2. Calculate node parameters
+        let node_size = self.node_size;
+        let entries_per_leaf = self.calculate_entries_per_leaf();
+
+        // 3. Create leaf nodes
+        let leaf_nodes = self.create_leaf_nodes(&sorted_entries, entries_per_leaf);
+
+        // 4. Build internal nodes bottom-up
+        let (root_offset, height) = self.build_internal_levels(leaf_nodes);
+
+        // 5. Create the tree
+        Ok(StaticBTree {
+            root_offset,
+            height,
+            node_size,
+            num_entries: sorted_entries.len() as u64,
+            _phantom: PhantomData,
+        })
+    }
+
+    fn create_leaf_nodes(&self, entries: &[Entry<K>], entries_per_leaf: usize) -> Vec<LeafNode<K>> {
+        let mut leaf_nodes = Vec::new();
+        let mut i = 0;
+
+        while i < entries.len() {
+            let mut leaf = LeafNode::new();
+            let end = (i + entries_per_leaf).min(entries.len());
+
+            for j in i..end {
+                leaf.entries.push(entries[j].clone());
+            }
+
+            leaf_nodes.push(leaf);
+            i = end;
         }
 
-        // Calculate node offset
-        let offset = self.tree_offset + (node_index * self.node_size) as u64;
+        // Link leaf nodes together
+        for i in 0..leaf_nodes.len() - 1 {
+            leaf_nodes[i].next_leaf_offset = Some((i + 1) as u64);
+        }
 
-        // Seek and read the node
-        self.reader.seek(SeekFrom::Start(offset))?;
-        let mut node_data = vec![0u8; self.node_size];
-        self.reader.read_exact(&mut node_data)?;
+        leaf_nodes
+    }
+
+    fn build_internal_levels(&self, leaf_nodes: Vec<LeafNode<K>>) -> (u64, u8) {
+        // Implementation details for building internal nodes
+        // ...
+    }
+}
+```
+
+## 5. Handling Duplicate Keys
+
+Our implementation will support duplicate keys with the following approach:
+
+### 5.1 Storage
+
+- Duplicate keys will be stored sequentially in leaf nodes
+- The original order of duplicate keys will be preserved during construction
+
+### 5.2 Exact Match Queries
+
+When performing an exact match query, we'll return all entries with matching keys:
+
+```rust
+fn find_all_matches(&self, node: &LeafNode<K>, key: &K) -> Vec<u64> {
+    let mut results = Vec::new();
+
+    // Binary search to find any match
+    match node.entries.binary_search_by(|e| e.key.cmp(key)) {
+        Ok(idx) => {
+            // Found a match, now collect all duplicates
+
+            // Scan backward
+            let mut i = idx;
+            while i > 0 && node.entries[i-1].key == *key {
+                i -= 1;
+            }
+
+            // Scan forward and collect all matches
+            while i < node.entries.len() && node.entries[i].key == *key {
+                results.push(node.entries[i].offset);
+                i += 1;
+            }
+        },
+        Err(_) => {} // No match found
+    }
+
+    results
+}
+```
+
+### 5.3 Range Queries
+
+For range queries, we'll ensure all duplicates at range boundaries are properly included:
+
+```rust
+fn collect_entries_in_range(
+    &self,
+    node: &LeafNode<K>,
+    start: &K,
+    end: &K,
+    include_start: bool,
+    include_end: bool
+) -> Vec<u64> {
+    let mut results = Vec::new();
+
+    for entry in &node.entries {
+        let in_range = match (include_start, include_end) {
+            (true, true) => entry.key >= *start && entry.key <= *end,
+            (true, false) => entry.key >= *start && entry.key < *end,
+            (false, true) => entry.key > *start && entry.key <= *end,
+            (false, false) => entry.key > *start && entry.key < *end,
+        };
+
+        if in_range {
+            results.push(entry.offset);
+        }
+    }
+
+    results
+}
+```
+
+## 6. Query Operations
+
+### 6.1 Exact Match Query
+
+```rust
+impl<K: Key> StaticBTree<K> {
+    pub fn find(&self, key: &K, reader: &dyn NodeReader<K>) -> Result<Vec<u64>> {
+        // Start at root node
+        let mut node_offset = self.root_offset;
+
+        // Traverse the tree
+        for _ in 0..self.height - 1 {
+            let node = reader.read_node(node_offset)?;
+            if let Some(internal) = node.as_internal() {
+                // Find child node to follow
+                let idx = internal.binary_search(key);
+                node_offset = internal.child_offsets[idx];
+            } else {
+                return Err(Error::InvalidNodeType);
+            }
+        }
+
+        // Search in leaf node
+        let node = reader.read_node(node_offset)?;
+        if let Some(leaf) = node.as_leaf() {
+            // Find all entries with matching key
+            Ok(self.find_all_matches(leaf, key))
+        } else {
+            Err(Error::InvalidNodeType)
+        }
+    }
+}
+```
+
+### 6.2 Range Query
+
+```rust
+impl<K: Key> StaticBTree<K> {
+    pub fn range(
+        &self,
+        start: &K,
+        end: &K,
+        include_start: bool,
+        include_end: bool,
+        reader: &dyn NodeReader<K>
+    ) -> Result<Vec<u64>> {
+        // Find leaf containing start key
+        let leaf_offset = self.find_leaf_containing(start, reader)?;
+        let mut results = Vec::new();
+
+        // Scan leaf nodes
+        let mut current_offset = Some(leaf_offset);
+        while let Some(offset) = current_offset {
+            let node = reader.read_node(offset)?;
+            if let Some(leaf) = node.as_leaf() {
+                // Add entries in range
+                let mut entries = self.collect_entries_in_range(
+                    leaf, start, end, include_start, include_end
+                );
+                results.append(&mut entries);
+
+                // Stop if we've passed the end
+                if leaf.entries.last().map_or(false, |e| e.key > *end) {
+                    break;
+                }
+
+                // Move to next leaf
+                current_offset = leaf.next_leaf_offset;
+            } else {
+                return Err(Error::InvalidNodeType);
+            }
+        }
+
+        Ok(results)
+    }
+}
+```
+
+## 7. Streaming Implementation
+
+### 7.1 File-Based Reader
+
+```rust
+pub struct FileNodeReader<K: Key> {
+    file: File,
+    cache: LruCache<u64, Box<dyn Node<K>>>,
+    node_size: u16,
+}
+
+impl<K: Key> NodeReader<K> for FileNodeReader<K> {
+    fn read_node(&self, offset: u64) -> Result<Box<dyn Node<K>>> {
+        // Check cache first
+        if let Some(node) = self.cache.get(&offset) {
+            return Ok(node.clone());
+        }
+
+        // Read from file
+        self.file.seek(SeekFrom::Start(offset))?;
+        let mut buffer = vec![0u8; self.node_size as usize];
+        self.file.read_exact(&mut buffer)?;
+
+        // Parse node
+        let node = Node::read_from(&mut Cursor::new(buffer))?;
 
         // Cache the node
-        self.node_cache.put(node_index, node_data.clone());
+        self.cache.insert(offset, node.clone());
 
-        Ok(node_data)
+        Ok(node)
+    }
+
+    fn prefetch_node(&self, offset: u64) {
+        // Simple implementation - just read the node into cache
+        let _ = self.read_node(offset);
     }
 }
 ```
 
-### 3. Prefetching Strategy
-
-Implement prefetching to improve performance:
-
-- When reading a node, prefetch its likely child nodes
-- For leaf nodes, prefetch the next leaf node for efficient range queries
-- Use asynchronous I/O when possible
+### 7.2 HTTP-Based Reader
 
 ```rust
-fn prefetch_node(&mut self, node_index: usize) {
-    // Don't block the main thread - use async or a thread pool
-    let reader = self.reader.clone();
-    let offset = self.tree_offset + (node_index * self.node_size) as u64;
-    let node_size = self.node_size;
-    let cache = self.node_cache.clone();
-
-    thread_pool.spawn(move || {
-        let mut node_data = vec![0u8; node_size];
-        if reader.seek(SeekFrom::Start(offset)).is_ok() &&
-           reader.read_exact(&mut node_data).is_ok() {
-            cache.put(node_index, node_data);
-        }
-    });
-}
-```
-
-### 4. Handling Duplicate Keys
-
-The B+Tree must properly handle duplicate keys:
-
-- When an exact match is found, check adjacent entries for the same key
-- For range queries, include all entries with matching keys at range boundaries
-- Ensure all queries return arrays of entries, not single values
-
-```rust
-fn find_exact(&mut self, key: &Key) -> Result<Vec<Entry>> {
-    let mut node_index = 0; // Start at root
-
-    // Navigate down the tree
-    while !self.is_leaf(node_index) {
-        let node_data = self.read_node(node_index)?;
-        let child = self.search_node(&node_data, key);
-        node_index = self.child_index(node_index, child);
-
-        // Prefetch the next likely node
-        self.prefetch_node(node_index);
-    }
-
-    // We're at a leaf node
-    let leaf_data = self.read_node(node_index)?;
-    let entries = self.extract_matching_entries(&leaf_data, key);
-
-    // If we found entries and there might be more in the next leaf
-    if !entries.is_empty() && self.get_next_leaf(&leaf_data).is_some() {
-        self.prefetch_node(self.get_next_leaf(&leaf_data).unwrap());
-    }
-
-    // Check next leaf nodes for more matches
-    let mut result = entries;
-    let mut current_leaf = self.get_next_leaf(&leaf_data);
-
-    while let Some(next_leaf_index) = current_leaf {
-        let next_leaf_data = self.read_node(next_leaf_index)?;
-        let more_entries = self.extract_matching_entries(&next_leaf_data, key);
-
-        if more_entries.is_empty() {
-            break;
-        }
-
-        result.extend(more_entries);
-        current_leaf = self.get_next_leaf(&next_leaf_data);
-
-        // Prefetch next leaf
-        if let Some(leaf_index) = current_leaf {
-            self.prefetch_node(leaf_index);
-        }
-    }
-
-    Ok(result)
-}
-```
-
-### 5. HTTP Streaming Support
-
-The implementation must eventually support HTTP streaming:
-
-- Replace file I/O with HTTP range requests
-- Optimize request batching to minimize HTTP overhead
-- Implement a connection pool and keepalive
-- Handle network errors gracefully with retries
-
-```rust
-struct HttpBTreeReader {
+pub struct HttpNodeReader<K: Key> {
+    client: HttpClient,
+    cache: LruCache<u64, Box<dyn Node<K>>>,
     base_url: String,
-    tree_offset: u64,
-    node_size: usize,
-    height: u8,
-    branching_factor: u16,
-    node_cache: LruCache<usize, Vec<u8>>,
-    http_client: Client,
+    node_size: u16,
 }
 
-impl HttpBTreeReader {
-    fn read_node(&mut self, node_index: usize) -> Result<Vec<u8>> {
+impl<K: Key> NodeReader<K> for HttpNodeReader<K> {
+    fn read_node(&self, offset: u64) -> Result<Box<dyn Node<K>>> {
         // Check cache first
-        if let Some(cached_node) = self.node_cache.get(&node_index) {
-            return Ok(cached_node.clone());
+        if let Some(node) = self.cache.get(&offset) {
+            return Ok(node.clone());
         }
 
-        // Calculate byte range
-        let start = self.tree_offset + (node_index * self.node_size) as u64;
-        let end = start + self.node_size as u64 - 1;
-        let range_header = format!("bytes={}-{}", start, end);
+        // Calculate range
+        let end = offset + self.node_size as u64 - 1;
+        let range = format!("bytes={}-{}", offset, end);
 
         // Make HTTP request
-        let response = self.http_client
-            .get(&self.base_url)
-            .header("Range", range_header)
+        let response = self.client.get(&self.base_url)
+            .header("Range", range)
             .send()?;
 
-        if !response.status().is_success() {
-            return Err(Error::HttpError(response.status().to_string()));
-        }
+        // Parse node
+        let node = Node::read_from(&mut Cursor::new(response.bytes()))?;
 
-        let node_data = response.bytes()?.to_vec();
+        // Cache the node
+        self.cache.insert(offset, node.clone());
 
-        // Cache the result
-        self.node_cache.put(node_index, node_data.clone());
+        Ok(node)
+    }
 
-        Ok(node_data)
+    fn prefetch_node(&self, offset: u64) {
+        // Simple implementation - just read the node into cache
+        let _ = self.read_node(offset);
     }
 }
 ```
 
-## Implementation Steps
+## 8. Performance Optimizations
 
-1. **Create the B+Tree structure**:
-   - Implement node serialization and deserialization
-   - Define implicit node addressing functions
-   - Create the tree builder for construction from sorted entries
-
-2. **Implement the streaming reader**:
-   - Create a node cache with LRU replacement policy
-   - Implement read_node with prefetching
-   - Add methods for tree traversal (find child, is_leaf, etc.)
-
-3. **Build query operations**:
-   - Exact match with duplicate key handling
-   - Range queries (>, >=, <, <=)
-   - Not-equal queries (!=)
-   - Handle special cases (null values, empty ranges)
-
-4. **Add HTTP support**:
-   - Replace file I/O with HTTP range requests
-   - Implement connection pooling and request batching
-   - Add retry logic for network errors
-   - Optimize request size for performance
-
-## Construction Algorithm
-
-The construction of the static B+Tree happens once, during the generation of the FlatCityBuf file:
+### 8.1 Binary Search Optimization
 
 ```rust
-fn build_static_btree<K: Key, V: Value>(
-    entries: Vec<Entry<K, V>>,
-    branching_factor: usize
-) -> Vec<u8> {
-    // 1. Sort entries by key
-    let mut sorted_entries = entries;
-    sorted_entries.sort_by(|a, b| a.key.cmp(&b.key));
+impl<K: Key> InternalNode<K> {
+    fn binary_search(&self, key: &K) -> usize {
+        let mut low = 0;
+        let mut high = self.keys.len();
 
-    // 2. Calculate tree dimensions
-    let leaf_count = (sorted_entries.len() + MAX_KEYS_PER_LEAF - 1) / MAX_KEYS_PER_LEAF;
-    let height = calculate_height(leaf_count, branching_factor);
-    let node_count = calculate_node_count(height, branching_factor);
+        while low < high {
+            let mid = low + (high - low) / 2;
+            match self.keys[mid].cmp(key) {
+                Ordering::Less => low = mid + 1,
+                _ => high = mid,
+            }
+        }
 
-    // 3. Allocate space for all nodes
-    let mut tree_data = Vec::with_capacity(node_count * NODE_SIZE);
-
-    // 4. Fill leaf nodes
-    distribute_entries_to_leaves(&sorted_entries, &mut tree_data);
-
-    // 5. Build internal nodes bottom-up
-    for level in (0..height-1).rev() {
-        build_internal_level(level, &mut tree_data, branching_factor);
+        low
     }
-
-    // 6. Add tree header with metadata
-    let header = BTreeHeader {
-        height,
-        branching_factor: branching_factor as u16,
-        node_size: NODE_SIZE as u16,
-        entry_count: sorted_entries.len() as u32,
-    };
-
-    let mut result = serialize_header(&header);
-    result.extend(tree_data);
-
-    result
 }
 ```
 
-## Search Performance Considerations
+### 8.2 Cache-Friendly Layout
 
-1. **Cache Efficiency**:
-   - Choose node size to align with common disk block sizes (4KB or 8KB)
-   - Keep the most frequently accessed nodes (upper levels) in cache
+Ensure node layout is optimized for CPU cache lines:
 
-2. **I/O Optimization**:
-   - Minimize the number of reads by prefetching
-   - Batch multiple node reads when possible
-   - Maintain a sensible cache size based on available memory
+```rust
+impl<K: Key> InternalNode<K> {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        // Write count
+        writer.write_u16::<LittleEndian>(self.keys.len() as u16)?;
 
-3. **HTTP Optimization**:
-   - Use HTTP/2 when possible for parallel requests
-   - Implement connection pooling and keepalive
-   - Consider larger node sizes for HTTP to reduce the number of requests
+        // Write interleaved keys and pointers for better cache locality
+        for i in 0..self.keys.len() {
+            self.keys[i].write_to(writer)?;
+            writer.write_u64::<LittleEndian>(self.child_offsets[i])?;
+        }
 
-## Testing Strategy
+        Ok(())
+    }
+}
+```
 
-1. **Unit Tests**:
-   - Test node serialization/deserialization
-   - Verify tree construction with various data sizes
-   - Test duplicate key handling
+## 9. Testing Strategy
 
-2. **Integration Tests**:
-   - Test all query types with real data
-   - Verify HTTP streaming works correctly
-   - Test with very large datasets
+### 9.1 Unit Tests
 
-3. **Performance Tests**:
-   - Benchmark query performance with different node sizes
-   - Measure impact of prefetching
-   - Compare with other index structures
+1. Test node serialization/deserialization
+2. Test binary search in nodes
+3. Test tree construction with various node sizes
+4. Test exact match queries
+5. Test range queries
+6. Test with different key types
+7. Test handling of duplicate keys
 
-## Conclusion
+### 9.2 Integration Tests
 
-This implementation approach balances performance with practical considerations for cloud-based operation. By streaming nodes on demand, prefetching strategically, and handling duplicate keys correctly, we can achieve efficient attribute-based querying for the FlatCityBuf format while minimizing both memory usage and network I/O.
+1. Test with large datasets
+2. Test with HTTP range requests
+3. Test with various access patterns
+
+### 9.3 Performance Tests
+
+1. Measure query latency
+2. Benchmark HTTP performance
+3. Compare with dynamic B-tree implementation
+
+## 10. Implementation Timeline
+
+1. **Week 1**: Implement node structures and serialization
+2. **Week 2**: Implement tree construction algorithm
+3. **Week 3**: Implement query operations
+4. **Week 4**: Implement streaming access and HTTP optimizations
+5. **Week 5**: Performance optimizations and testing
+
+## 11. Future Enhancements
+
+1. Implement compression for keys and nodes
+2. Add support for bulk loading from external sources
+3. Implement parallel construction for large datasets
+4. Add statistics collection for query optimization
+5. Implement more advanced HTTP optimizations:
+   - Multi-range requests
+   - Progressive loading
+   - Access pattern analysis
+   - Compression negotiation
+   - Connection pooling
