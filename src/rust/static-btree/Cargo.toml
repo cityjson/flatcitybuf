@@ -12,6 +12,7 @@ readme = "README.md"
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 ordered-float = { workspace = true }
+byteorder = { workspace = true }
 
 # SIMD support
 # packed_simd = { version = "0.3.9", optional = true }

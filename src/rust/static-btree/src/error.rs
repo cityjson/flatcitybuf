@@ -31,4 +31,8 @@ pub enum Error {
     /// Used when an operation requires a feature not yet implemented.
     #[error("not implemented: {0}")]
     NotImplemented(String),
+
+    /// Used when an operation fails due to an unexpected condition.
+    #[error("other error: {0}")]
+    Other(String),
 }

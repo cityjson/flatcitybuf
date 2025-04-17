@@ -31,6 +31,10 @@ impl<K: Key> Entry<K> {
     /// The total size of the entry when serialized.
     pub const SERIALIZED_SIZE: usize = K::SERIALIZED_SIZE + Self::OFFSET_SIZE;
 
+    pub fn new(key: K, offset: Offset) -> Self {
+        Self { key, offset }
+    }
+
     /// Serializes the entire entry (key followed by value) to a writer.
     /// Assumes little-endian encoding for the `Value`.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
@@ -73,29 +77,11 @@ mod tests {
     use crate::key::Key;
     use std::io::Cursor;
 
-    // Define a simple Key implementation for testing purposes
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-    struct TestKey(i32);
-
-    impl Key for TestKey {
-        const SERIALIZED_SIZE: usize = 4;
-
-        fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-            writer.write_all(&self.0.to_le_bytes()).map_err(Error::from)
-        }
-
-        fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
-            let mut bytes = [0u8; Self::SERIALIZED_SIZE];
-            reader.read_exact(&mut bytes)?;
-            Ok(TestKey(i32::from_le_bytes(bytes)))
-        }
-    }
-
     #[test]
     fn test_entry_serialization_deserialization() {
         let entry = Entry {
             // No V generic needed here
-            key: TestKey(12345),
+            key: 12345,
             offset: 9876543210,
         };
 
@@ -104,13 +90,12 @@ mod tests {
 
         assert_eq!(
             buffer.len(),
-            TestKey::SERIALIZED_SIZE + mem::size_of::<Offset>()
+            i32::SERIALIZED_SIZE + mem::size_of::<Offset>()
         );
-        assert_eq!(buffer.len(), Entry::<TestKey>::SERIALIZED_SIZE); // Update const access
+        assert_eq!(buffer.len(), Entry::<i32>::SERIALIZED_SIZE); // Update const access
 
         let mut cursor = Cursor::new(buffer);
-        let deserialized_entry =
-            Entry::<TestKey>::read_from(&mut cursor).expect("read should succeed"); // Update type
+        let deserialized_entry = Entry::<i32>::read_from(&mut cursor).expect("read should succeed"); // Update type
 
         assert_eq!(entry, deserialized_entry);
     }
@@ -119,17 +104,17 @@ mod tests {
     fn test_entry_ordering() {
         let entry1 = Entry {
             // No V generic
-            key: TestKey(10),
+            key: 10,
             offset: 100,
         };
         let entry2 = Entry {
             // No V generic
-            key: TestKey(20),
+            key: 20,
             offset: 50,
         };
         let entry3 = Entry {
             // No V generic
-            key: TestKey(10),
+            key: 10,
             offset: 200,
         };
 
@@ -141,9 +126,9 @@ mod tests {
 
     #[test]
     fn test_entry_read_error_short_read() {
-        let mut short_buffer = vec![0u8; Entry::<TestKey>::SERIALIZED_SIZE - 1]; // Update const access
+        let mut short_buffer = vec![0u8; Entry::<i32>::SERIALIZED_SIZE - 1]; // Update const access
         let mut cursor = Cursor::new(&mut short_buffer);
-        let result = Entry::<TestKey>::read_from(&mut cursor); // Update type
+        let result = Entry::<i32>::read_from(&mut cursor); // Update type
         assert!(result.is_err());
         match result.err().unwrap() {
             Error::IoError(e) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),
