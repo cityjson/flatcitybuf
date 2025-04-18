@@ -7,16 +7,16 @@ use std::mem;
 
 /// Helper utilities to compute layer statistics for a static B+Tree.
 #[derive(Debug, Clone)]
-struct Layout {
+pub(crate) struct Layout {
     branching_factor: usize,
     num_entries: usize,
     height: usize,
-    /// starting entry index (not bytes) for each layer 0..height-1 (root=0)
+    /// starting entry index (not bytes) for each layer root(height-1)..leaf(0)
     layer_offsets: Vec<usize>,
 }
 
 impl Layout {
-    fn new(num_entries: usize, branching_factor: usize) -> Self {
+    pub(crate) fn new(num_entries: usize, branching_factor: usize) -> Self {
         assert!(branching_factor >= 2, "branching factor must be >=2");
         // compute height and layer offsets top‑down (root layer = 0)
         let mut layer_offsets = Vec::new();
@@ -40,6 +40,7 @@ impl Layout {
             // the last push already root? ensure height at least 1
         }
         let height = layer_offsets.len();
+        layer_offsets.reverse(); // root layer (height-1) first, leaf layer (0) last
         Layout {
             branching_factor: b,
             num_entries,
@@ -59,9 +60,12 @@ impl Layout {
         ((blocks + b) / (b + 1)) * b
     }
     /// start index (in entries) of layer h (0‑based). h==height‑1 is leaf layer
-    #[inline]
-    fn layer_offset(&self, h: usize) -> usize {
+    pub(crate) fn layer_offset(&self, h: usize) -> usize {
         self.layer_offsets[h]
+    }
+
+    pub(crate) fn last_entry_index(&self) -> usize {
+        *self.layer_offsets.last().unwrap()
     }
 }
 
@@ -106,13 +110,20 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
     /// Read a node (array of `B` entries) for given layer `h` and node index `k`.
     fn read_node(&mut self, layer: usize, node_idx: usize) -> Result<Vec<Entry<K>>, Error> {
         let b = self.layout.branching_factor;
-        let entry_start_idx = self.layout.layer_offset(layer) + node_idx * b;
+        let layer_offset = self.layout.layer_offset(layer);
+        let entry_start_idx = layer_offset + node_idx * b;
         let byte_offset = (entry_start_idx * self.entry_size) as u64;
+        // Seek once then read entire node buffer in a single IO call.
         self.reader.seek(SeekFrom::Start(byte_offset))?;
 
+        let node_bytes = b * self.entry_size;
+        let mut buffer = vec![0u8; node_bytes];
+        self.reader.read_exact(&mut buffer)?;
+
+        let mut cursor = std::io::Cursor::new(buffer);
         let mut entries = Vec::with_capacity(b);
         for _ in 0..b {
-            let e = Entry::<K>::read_from(&mut self.reader)?;
+            let e = Entry::<K>::read_from(&mut cursor)?;
             entries.push(e);
         }
         Ok(entries)
@@ -123,7 +134,7 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
         let b = self.layout.branching_factor;
         let mut node_idx = 0usize; // multiplied by b implicitly per formula
                                    // iterate internal layers (root .. height‑2) if height>1
-        for h in 0..(self.layout.height - 1) {
+        for h in (0..(self.layout.height - 1)).rev() {
             let node = self.read_node(h, node_idx)?;
             // linear scan
             let mut pos = 0;
@@ -133,13 +144,14 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
             node_idx = node_idx * (b + 1) + pos;
         }
         // leaf layer calculations
-        let leaf_layer = self.layout.height - 1;
+        let leaf_layer = 0;
         let leaf_node_start_idx = node_idx * b;
         let leaf_entries = self.read_node(leaf_layer, node_idx)?;
         let mut pos = 0;
         while pos < b && &leaf_entries[pos].key < key {
             pos += 1;
         }
+        // TODO: check if this is correct
         Ok(self.layout.layer_offset(leaf_layer) + leaf_node_start_idx + pos)
     }
 
@@ -147,7 +159,7 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
     fn upper_bound_index(&mut self, key: &K) -> Result<usize, Error> {
         let b = self.layout.branching_factor;
         let mut node_idx = 0usize;
-        for h in 0..(self.layout.height - 1) {
+        for h in (0..(self.layout.height - 1)).rev() {
             let node = self.read_node(h, node_idx)?;
             let mut pos = 0;
             while pos < b && &node[pos].key <= key {
@@ -155,7 +167,7 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
             }
             node_idx = node_idx * (b + 1) + pos;
         }
-        let leaf_layer = self.layout.height - 1;
+        let leaf_layer = 0;
         let leaf_node_start_idx = node_idx * b;
         let leaf_entries = self.read_node(leaf_layer, node_idx)?;
         let mut pos = 0;
