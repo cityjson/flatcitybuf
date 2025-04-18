@@ -180,8 +180,9 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
         // gather duplicates to right until key!=search_key
         let mut result = Vec::new();
         let mut idx = start_idx;
+        let total = self.len();
         let b_key_equal = |e: &Entry<K>| &e.key == search_key;
-        loop {
+        while idx < total {
             let ent = self.read_entry(idx)?;
             if b_key_equal(&ent) {
                 result.push(ent.offset);
@@ -262,5 +263,78 @@ mod tests {
         assert_eq!(res, vec![200]);
         let res_none = tree.lower_bound(&25).unwrap();
         assert_eq!(res_none, vec![300]);
+    }
+
+    #[test]
+    fn test_duplicates_and_range() {
+        // branching factor 4
+        let data = vec![
+            (10, 100),
+            (15, 150),
+            (20, 201),
+            (20, 202),
+            (25, 250),
+            (30, 300),
+            (35, 350),
+            (40, 400),
+        ];
+        let serialized = build_simple_tree(&data, 8); // leaf only, b=8 (root==leaf)
+        let cursor = std::io::Cursor::new(serialized);
+        let mut tree: StaticBTree<i32, _> =
+            StaticBTree::new(cursor, 8, data.len() as u64).expect("init");
+
+        // duplicate lookup
+        let dup = tree.lower_bound(&20).unwrap();
+        assert_eq!(dup, vec![201, 202]);
+
+        // non‑existing lower bound returns first greater key
+        let lb = tree.lower_bound(&18).unwrap();
+        assert_eq!(lb, vec![201]);
+
+        // range query [15, 30]
+        let mut range = tree.range(&15, &30).unwrap();
+        range.sort();
+        let expected = vec![150, 201, 202, 250, 300];
+        assert_eq!(range, expected);
+
+        // range query [22, 30]. lower bound doesn't exist, so it returns all keys greater than 22 and less than 30
+        let mut range = tree.range(&22, &30).unwrap();
+        range.sort();
+        let expected = vec![250, 300];
+        assert_eq!(range, expected);
+
+        // range query [20, 32]. lower bound exists but upper bound doesn't, so it returns all keys greater than 20 and less than 32
+        let mut range = tree.range(&20, &32).unwrap();
+        range.sort();
+        let expected = vec![201, 202, 250, 300];
+        assert_eq!(range, expected);
+
+        // range query [20, 20]. When min and max are the same, it returns all keys equal to the min
+        let mut range = tree.range(&20, &20).unwrap();
+        range.sort();
+        let expected = vec![201, 202];
+        assert_eq!(range, expected);
+
+        // range query [-100, 100]. When min is less than all keys and max is greater than all keys, it returns all keys
+        let mut range = tree.range(&-100, &100).unwrap();
+        range.sort();
+        let expected = vec![100, 150, 201, 202, 250, 300, 350, 400];
+        assert_eq!(range, expected);
+
+        // range query [50, 60]. When min is greater than all keys it shouldn't return any keys
+        let mut range = tree.range(&50, &60).unwrap();
+        range.sort();
+        let expected = vec![];
+        assert_eq!(range, expected);
+
+        // range query [32, 38]. When max is less than all keys it shouldn't return any keys
+        let mut range = tree.range(&0, &5).unwrap();
+        range.sort();
+        let expected = vec![];
+        assert_eq!(range, expected);
+
+        // range query [38, 32]. When min is greater than max, it should return an error
+        let res = tree.range(&38, &32);
+        assert!(res.is_err());
     }
 }
