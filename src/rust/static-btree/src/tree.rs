@@ -11,39 +11,45 @@ pub(crate) struct Layout {
     branching_factor: usize,
     num_entries: usize,
     height: usize,
-    /// starting entry index (not bytes) for each layer root(height-1)..leaf(0)
+    /// starting entry index for each layer (0=leaf, height-1=root) in the serialized entries array
     layer_offsets: Vec<usize>,
 }
 
 impl Layout {
+    /// Create a layout describing the static B+Tree layers.
+    /// Layers are numbered from bottom (leaf = 0) up to root (height - 1).
+    /// `layer_offsets[h]` gives the starting entry index for layer `h` in the serialized array.
     pub(crate) fn new(num_entries: usize, branching_factor: usize) -> Self {
         assert!(branching_factor >= 2, "branching factor must be >=2");
-        // compute height and layer offsets top‑down (root layer = 0)
-        let mut layer_offsets = Vec::new();
-        let mut offset = 0usize;
-        let mut n = num_entries;
         let b = branching_factor;
-        loop {
-            layer_offsets.push(offset);
-            if n <= b {
-                // leaves will be next layer; stop after pushing internal nodes later
-                break;
+        let n = num_entries;
+        // Compute entry counts per layer (bottom-up), padding each to a multiple of b
+        let mut layer_counts: Vec<usize> = Vec::new();
+        // Leaf layer: pad total entries to multiple of b
+        let mut count = if n == 0 { 0 } else { ((n + b - 1) / b) * b };
+        layer_counts.push(count);
+        // Build internal layers until a layer fits in one node
+        while count > b {
+            // number of child nodes in the previous layer
+            let raw = (count + b - 1) / b;
+            // pad to multiple of b for node-aligned storage
+            count = ((raw + b - 1) / b) * b;
+            layer_counts.push(count);
+        }
+        let height = layer_counts.len();
+        // Compute starting offsets per layer: sum of counts of all higher layers
+        let mut layer_offsets = Vec::with_capacity(height);
+        for h in 0..height {
+            let mut offset = 0usize;
+            // layers > h are above (closer to root)
+            for j in (h + 1)..height {
+                offset += layer_counts[j];
             }
-            let blocks = Self::blocks(n, b);
-            offset += blocks * b; // each block has b keys (internal nodes)
-            n = Self::prev_keys(n, b);
-        }
-        // finally, push offset for leaf layer
-        if *layer_offsets.last().unwrap() != offset {
             layer_offsets.push(offset);
-        } else {
-            // the last push already root? ensure height at least 1
         }
-        let height = layer_offsets.len();
-        layer_offsets.reverse(); // root layer (height-1) first, leaf layer (0) last
         Layout {
             branching_factor: b,
-            num_entries,
+            num_entries: n,
             height,
             layer_offsets,
         }
@@ -133,8 +139,8 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
     fn lower_bound_index(&mut self, key: &K) -> Result<usize, Error> {
         let b = self.layout.branching_factor;
         let mut node_idx = 0usize; // multiplied by b implicitly per formula
-                                   // iterate internal layers (root .. height‑2) if height>1
-        for h in (0..(self.layout.height - 1)).rev() {
+        // iterate internal layers from root (height-1) down to layer 1, if height>1
+        for h in (1..self.layout.height).rev() {
             let node = self.read_node(h, node_idx)?;
             // linear scan
             let mut pos = 0;
@@ -159,7 +165,8 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
     fn upper_bound_index(&mut self, key: &K) -> Result<usize, Error> {
         let b = self.layout.branching_factor;
         let mut node_idx = 0usize;
-        for h in (0..(self.layout.height - 1)).rev() {
+        // iterate internal layers from root (height-1) down to layer 1
+        for h in (1..self.layout.height).rev() {
             let node = self.read_node(h, node_idx)?;
             let mut pos = 0;
             while pos < b && &node[pos].key <= key {
