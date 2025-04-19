@@ -14,15 +14,17 @@ This file tracks the incremental progress of the `static-btree` crate inside **F
 |---|-----------|-------|--------|
 | 1 | Core infrastructure | • Define `Key` trait<br>• Implement primitive + custom key types<br>• Implement `Entry` struct | `[x]` Done |
 | 2 | Implementation plan | • Draft initial policy<br>• Review feedback & iterate | `[x]` Updated  ✅ (see implementation_plan.md) |
-| 3 | Tree search API     | • Design `StaticBTree` struct & public API<br>• Lower‑bound & range search handling duplicates<br>• Streaming node reads | `[ ]` |
-| 4 | Builder             | • `StaticBTreeBuilder` to serialize trees<br>• Construction algorithm following policy | `[ ]` |
+| 3 | Tree search API     | • Design `StaticBTree` struct & public API<br>• Lower‑bound & range search handling duplicates<br>• Streaming node reads | `[~]` In progress |
+| 4 | Builder             | • `StaticBTreeBuilder` to serialize trees<br>• Construction algorithm following policy | `[x]` Done |
 | 5 | Async / HTTP query  | • `http_stream_query` mirroring packed_rtree<br>• Feature‑gated under `http` | `[ ]` |
-| 6 | Testing & Benchmarks| • Unit tests for all key types & duplicate cases<br>• Criterion benchmark suite | `[ ]` |
+| 6 | Testing & Benchmarks| • Unit tests for all key types & duplicate cases<br>• Criterion benchmark suite | `[~]` In progress |
 
 ## Recent Activity
 
-- **2024‑06‑10** – Added duplicate‑key semantics, streaming read policy, and HTTP query stub to `implementation_plan.md`.
-- **2024‑06‑10** – Created this `progress.md` to monitor Static B+Tree work.
+ - **2024‑06‑10** – Added duplicate‑key semantics, streaming read policy, and HTTP query stub to `implementation_plan.md`.
+ - **2025‑04‑19** – Implemented `StaticBTreeBuilder`, comprehensive builder tests, and updated `lower_bound` logic for exact and duplicate key handling.
+ - **2025‑04‑19** – Completed basic `StaticBTree` search API (`lower_bound`, `range`) and verified with integration tests.
+ - **2024‑06‑10** – Created this `progress.md` to monitor Static B+Tree work.
 
 ## Next Steps
 
