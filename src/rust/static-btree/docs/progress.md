@@ -14,7 +14,7 @@ This file tracks the incremental progress of the `static-btree` crate inside **F
 |---|-----------|-------|--------|
 | 1 | Core infrastructure | • Define `Key` trait<br>• Implement primitive + custom key types<br>• Implement `Entry` struct | `[x]` Done |
 | 2 | Implementation plan | • Draft initial policy<br>• Review feedback & iterate | `[x]` Updated  ✅ (see implementation_plan.md) |
-| 3 | Tree search API     | • Design `StaticBTree` struct & public API<br>• Lower‑bound & range search handling duplicates<br>• Streaming node reads | `[~]` In progress |
+| 3 | Tree search API     | • Design `StaticBTree` struct & public API<br>• Lower‑bound & range search handling duplicates<br>• Streaming node reads<br>• Extended comparison operators via `query.rs` (Eq, Ne, Gt, Ge, Lt, Le) | `[~]` In progress |
 | 4 | Builder             | • `StaticBTreeBuilder` to serialize trees<br>• Construction algorithm following policy | `[x]` Done |
 | 5 | Async / HTTP query  | • `http_stream_query` mirroring packed_rtree<br>• Feature‑gated under `http` | `[ ]` |
 | 6 | Testing & Benchmarks| • Unit tests for all key types & duplicate cases<br>• Criterion benchmark suite | `[~]` In progress |
@@ -28,11 +28,12 @@ This file tracks the incremental progress of the `static-btree` crate inside **F
 
 ## Next Steps
 
-1. Implement loop‑based `lower_bound` search loading nodes on‑demand.
-2. Add contiguous‑duplicate gathering logic across node boundaries.
-3. Integrate `StaticBTreeBuilder` construction following the layer‑by‑layer algorithm.
-4. Write unit tests (start with u32 and duplicate scenarios).
-5. Prototype `http_stream_query` using packed_rtree's client abstraction.
+1. Implement extended query API: add `query.rs` with `Comparison` enum and methods (`query`, `find_eq`, `find_ne`, `find_gt`, `find_ge`, `find_lt`, `find_le`).
+2. Implement loop‑based `lower_bound` search loading nodes on‑demand.
+3. Add contiguous‑duplicate gathering logic across node boundaries if necessary.
+4. Integrate `StaticBTreeBuilder` construction following the layer‑by‑layer algorithm.
+5. Write unit tests for all new operator methods.
+6. Prototype `http_stream_query` using packed_rtree's client abstraction.
 
 ## Task Guidelines for Contributors & LLMs
 
