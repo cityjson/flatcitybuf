@@ -139,7 +139,7 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
     fn lower_bound_index(&mut self, key: &K) -> Result<usize, Error> {
         let b = self.layout.branching_factor;
         let mut node_idx = 0usize; // multiplied by b implicitly per formula
-        // iterate internal layers from root (height-1) down to layer 1, if height>1
+                                   // iterate internal layers from root (height-1) down to layer 1, if height>1
         for h in (1..self.layout.height).rev() {
             let node = self.read_node(h, node_idx)?;
             // linear scan
@@ -157,7 +157,7 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
         while pos < b && &leaf_entries[pos].key < key {
             pos += 1;
         }
-        // TODO: check if this is correct
+
         Ok(self.layout.layer_offset(leaf_layer) + leaf_node_start_idx + pos)
     }
 
