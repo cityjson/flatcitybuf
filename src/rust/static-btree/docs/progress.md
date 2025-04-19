@@ -15,7 +15,7 @@ This file tracks the incremental progress of the `static-btree` crate inside **F
 | 1 | Core infrastructure | • Define `Key` trait<br>• Implement primitive + custom key types<br>• Implement `Entry` struct | `[x]` Done |
 | 2 | Implementation plan | • Draft initial policy<br>• Review feedback & iterate | `[x]` Updated  ✅ (see implementation_plan.md) |
 | 3 | Tree search API     | • Design `StaticBTree` struct & public API<br>• Lower‑bound & range search handling duplicates<br>• Streaming node reads<br>• Extended comparison operators via `query.rs` (Eq, Ne, Gt, Ge, Lt, Le) | `[~]` In progress (core search/builder complete; full operator support planned, not yet public) |
-| 4 | Builder             | • `StaticBTreeBuilder` to serialize trees<br>• Construction algorithm following policy | `[]`  |
+| 4 | Builder             | • `StaticBTreeBuilder` to serialize trees<br>• Construction algorithm following policy | `[~]` In progress |
 | 5 | Async / HTTP query  | • `http_stream_query` mirroring packed_rtree<br>• Feature‑gated under `http` | `[ ]` |
 | 6 | Testing & Benchmarks| • Unit tests for all key types & duplicate cases<br>• Criterion benchmark suite | `[~]` In progress |
 

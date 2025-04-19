@@ -5,10 +5,9 @@ use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem;
 
-/// The type associated with each key in the tree.
-/// Currently fixed to u64, assuming byte offsets as values.
-/// For leaf nodes except the last one, the offset is the byte offset of actual data. For the last entry of a leaf node, the offset is the byte offset of the next leaf node as it's B+Tree.
-/// For internal nodes, the offset is the byte offset of the first key of the child node.
+/// The 64-bit file offset type (u64).
+/// In index entries, this is the pointer to the first payload block for a key (block_ptr).
+/// In payload blocks, these are record offsets to data.
 pub type Offset = u64;
 
 /// Constant for the size of the Value type in bytes.
