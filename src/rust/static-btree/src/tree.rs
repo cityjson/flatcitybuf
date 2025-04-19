@@ -187,44 +187,42 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
     /// Return offsets whose key equals `search_key`.
     /// If the key is **not present**, returns a single‑element vec containing the offset of the
     /// first key greater than `search_key` (the classic lower‑bound semantics).
+    /// Return offsets whose key equals `search_key`, or the offset of the first key > `search_key` if not found.
+    /// Perform a linear scan over the leaf layer for correctness across node boundaries.
     pub fn lower_bound(&mut self, search_key: &K) -> Result<Vec<Offset>, Error> {
-        let start_idx = self.lower_bound_index(search_key)?;
-        let entry = self.read_entry(start_idx)?;
-
-        if &entry.key != search_key {
-            // key not present, return offset of first key > search_key
-            return Ok(vec![entry.offset]);
-        }
-
-        // gather duplicates to right until key!=search_key
-        let mut result = Vec::new();
-        let mut idx = start_idx;
-        let total = self.len();
-        let b_key_equal = |e: &Entry<K>| &e.key == search_key;
-        while idx < total {
-            let ent = self.read_entry(idx)?;
-            if b_key_equal(&ent) {
-                result.push(ent.offset);
-                idx += 1;
-            } else {
-                break;
+        // compute leaf layer start and total entries
+        let leaf_start = self.layout.layer_offset(0);
+        let total = self.layout.num_entries;
+        // scan for first key >= search_key
+        let mut i = 0;
+        while i < total {
+            let entry = self.read_entry(leaf_start + i)?;
+            if &entry.key < search_key {
+                i += 1;
+                continue;
             }
-        }
-        // also gather duplicates to the left
-        let mut left_idx = if start_idx == 0 { 0 } else { start_idx - 1 };
-        while left_idx < start_idx {
-            let ent = self.read_entry(left_idx)?;
-            if b_key_equal(&ent) {
-                result.insert(0, ent.offset);
-                if left_idx == 0 {
-                    break;
+            // found entry.key >= search_key
+            if &entry.key == search_key {
+                // collect all duplicates starting at this index
+                let mut result = Vec::new();
+                let mut j = i;
+                while j < total {
+                    let e2 = self.read_entry(leaf_start + j)?;
+                    if &e2.key == search_key {
+                        result.push(e2.offset);
+                        j += 1;
+                    } else {
+                        break;
+                    }
                 }
-                left_idx -= 1;
+                return Ok(result);
             } else {
-                break;
+                // first key greater than search_key
+                return Ok(vec![entry.offset]);
             }
         }
-        Ok(result)
+        // no key >= search_key
+        Ok(Vec::new())
     }
 
     /// Range query inclusive [min, max]
