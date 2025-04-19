@@ -5,6 +5,7 @@ pub mod entry;
 pub mod error;
 pub mod key;
 pub mod tree;
+pub mod query;
 
 pub use builder::StaticBTreeBuilder;
 pub use entry::Entry;
