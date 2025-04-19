@@ -15,26 +15,30 @@ This file tracks the incremental progress of the `static-btree` crate inside **F
 | 1 | Core infrastructure | • Define `Key` trait<br>• Implement primitive + custom key types<br>• Implement `Entry` struct | `[x]` Done |
 | 2 | Implementation plan | • Draft initial policy<br>• Review feedback & iterate | `[x]` Updated  ✅ (see implementation_plan.md) |
 | 3 | Tree search API     | • Design `StaticBTree` struct & public API<br>• Lower‑bound & range search handling duplicates<br>• Streaming node reads<br>• Extended comparison operators via `query.rs` (Eq, Ne, Gt, Ge, Lt, Le) | `[~]` In progress (core search/builder complete; full operator support planned, not yet public) |
-| 4 | Builder             | • `StaticBTreeBuilder` to serialize trees<br>• Construction algorithm following policy | `[x]` Done |
+| 4 | Builder             | • `StaticBTreeBuilder` to serialize trees<br>• Construction algorithm following policy | `[]`  |
 | 5 | Async / HTTP query  | • `http_stream_query` mirroring packed_rtree<br>• Feature‑gated under `http` | `[ ]` |
 | 6 | Testing & Benchmarks| • Unit tests for all key types & duplicate cases<br>• Criterion benchmark suite | `[~]` In progress |
 
 ## Recent Activity
 
-- **2024‑06‑10** – Added duplicate‑key semantics, streaming read policy, and HTTP query stub to `implementation_plan.md`.
+- **2025-04-19** – Realized that I need to change the implementation plan dramatically. This is because having duplicate keys in the tree makes the search logic much more complex. As articulated in the implementation plan, I will have another data layer to accomodate offsets for data payloads. The index will only contain unique keys and they accomodate pointer to the blocks which contains offsets for the actual data records.
+- **2025‑04‑19** – Added duplicate‑key semantics, streaming read policy, and HTTP query stub to `implementation_plan.md`.
 - **2025‑04‑19** – Implemented `StaticBTreeBuilder`, comprehensive builder tests, and updated `lower_bound` logic for exact and duplicate key handling.
 - **2025‑04‑19** – Completed basic `StaticBTree` search API (`lower_bound`, `range`) and verified with integration tests.
 - **2025‑04‑19** – Added `query.rs` stub for rich operator support (Eq, Ne, Gt, Ge, Lt, Le); not yet wired into public API.
-- **2024‑06‑10** – Created this `progress.md` to monitor Static B+Tree work.
+- **2025‑04‑19** – Created this `progress.md` to monitor Static B+Tree work.
 
 ## Next Steps
 
-1. Integrate extended query API: wire up `query.rs` (`Comparison` enum and methods) into the public API.
-2. Implement loop‑based `lower_bound` search loading nodes on‑demand.
-3. Add contiguous‑duplicate gathering logic across node boundaries if necessary.
-4. Integrate `StaticBTreeBuilder` construction following the layer‑by‑layer algorithm.
-5. Write unit tests for all new operator methods.
-6. Prototype `http_stream_query` using packed_rtree's client abstraction.
+1. Refactor `entry.rs` and `builder.rs` to use unique-key index entries (`block_ptr`) and chained payload blocks for duplicate record offsets.
+2. Update `tree.rs` to support payload-block reading: implement `read_block` and `read_all_offsets`, adjust `read_entry` and index lookups accordingly.
+3. Refactor `query.rs` to remove inline duplicate scanning and route comparison operators through the payload-chain API.
+4. Add comprehensive unit tests for:
+   - Raw index entry reads (key + `block_ptr`) via `read_entry` and `lower_bound_index`.
+   - Payload-chain reads (`read_all_offsets`) over single and multi-block cases.
+   - Comparison operators (`find_eq`, `find_ne`, `find_gt`, etc.) across various key/duplicate scenarios.
+5. Update documentation to reflect the new two-region design: revise `implementation_plan.md`, update `progress.md`, and add `instruction.md` with background and rationale.
+6. (Optional) Prototype `http_stream_query` under the `http` feature, mirroring `packed_rtree` semantics.
 
 ## Task Guidelines for Contributors & LLMs
 
