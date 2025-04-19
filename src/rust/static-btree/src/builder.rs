@@ -84,7 +84,7 @@ impl<K: Key> StaticBTreeBuilder<K> {
         for _ in 0..pad_needed {
             layer.push(Entry {
                 key: last.key.clone(),
-                offset: 0,
+                offset: last.offset,
             });
         }
     }

@@ -118,23 +118,33 @@ The structure **allows duplicate keys**.  `lower_bound` returns **all** offsets 
 All search routines keep **only a small, fixed number of nodes in memory**.  When descending, a node is fetched via `reader.seek()` + `reader.read_exact()` into a scratch buffer.  The maximum resident memory during search is therefore `(H + 2) × B × size_of<Entry<K>>`, typically a few kilobytes even for large trees.
 
 ### 3.9 Query Operators
+
 To support a richer query API, the static B+Tree will expose all common comparison operators on keys:
-  * **Eq**: exact match ⇒ all offsets where `key == target`.
-  * **Ne**: not equal ⇒ all offsets where `key != target`.
-  * **Gt**: greater than ⇒ all offsets where `key > target`.
-  * **Ge**: greater or equal ⇒ all offsets where `key >= target`.
-  * **Lt**: less than ⇒ all offsets where `key < target`.
-  * **Le**: less or equal ⇒ all offsets where `key <= target`.
+
+* **Eq**: exact match ⇒ all offsets where `key == target`.
+* **Ne**: not equal ⇒ all offsets where `key != target`.
+* **Gt**: greater than ⇒ all offsets where `key > target`.
+* **Ge**: greater or equal ⇒ all offsets where `key >= target`.
+* **Lt**: less than ⇒ all offsets where `key < target`.
+* **Le**: less or equal ⇒ all offsets where `key <= target`.
+
+**Status:**
+* `query.rs` and all operator methods are implemented and tested in isolation, but not yet exposed in the public API.
+* Full operator support is planned and pending integration.
+* Core search and builder functionality is complete and verified.
 
 #### Design
+
 1. Create `query.rs` defining:
+
    ```rust
    #[derive(Copy, Clone, Debug)]
    pub enum Comparison { Eq, Ne, Gt, Ge, Lt, Le }
    ```
+
 2. In `StaticBTree<K, R>` add:
-   - `fn query(&mut self, cmp: Comparison, key: &K) -> Result<Vec<Offset>>`
-   - Convenience methods: `find_eq`, `find_ne`, `find_gt`, `find_ge`, `find_lt`, `find_le`.
+   * `fn query(&mut self, cmp: Comparison, key: &K) -> Result<Vec<Offset>>`
+   * Convenience methods: `find_eq`, `find_ne`, `find_gt`, `find_ge`, `find_lt`, `find_le`.
 3. Implementation Strategy:
    * **Eq** → call `lower_bound`, return matching offsets or empty vec.
    * **Ne** → combine results of `<` and `>` scans.
