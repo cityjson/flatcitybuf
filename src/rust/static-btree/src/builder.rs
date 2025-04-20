@@ -55,12 +55,12 @@ impl<K: Key> StaticBTreeBuilder<K> {
         // Compute padded layer counts (leaf and internal)
         let mut layer_counts = Vec::new();
         // Leaf layer: pad unique to multiple of b
-        let mut count = ((unique + b - 1) / b) * b;
+        let mut count = unique.div_ceil(b) * b;
         layer_counts.push(count);
         // Internal layers until a layer fits in one node
         while count > b {
-            let raw = (count + b - 1) / b;
-            count = ((raw + b - 1) / b) * b;
+            let raw = count.div_ceil(b);
+            count = raw.div_ceil(b) * b;
             layer_counts.push(count);
         }
         // Total index entries across all layers
@@ -123,9 +123,12 @@ impl<K: Key> StaticBTreeBuilder<K> {
             }
             layers.push(parent);
         }
+
         // Serialize index region entries (root-to-leaf)
         let mut buf = Vec::with_capacity(total_index_entries * entry_size + payload_buf.len());
+        // println!("layers num: {:?}", layers.len());
         for layer in layers.iter().rev() {
+            // println!("layer: {:?}", layer);
             for entry in layer {
                 entry.write_to(&mut buf)?;
             }

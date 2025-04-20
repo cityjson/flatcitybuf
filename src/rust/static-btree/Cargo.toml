@@ -31,6 +31,7 @@ tokio = { workspace = true }
 criterion = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
+bst = { path = "../bst" }
 
 # [features]
 # default = []
@@ -39,8 +40,20 @@ tempfile = { workspace = true }
 # [[bench]]
 # name = "search_benchmark"
 # harness = false
+[[bench]]
+name = "bench_search"
+harness = false
+
+[[bin]]
+name = "read_btree"
+path = "read/main.rs"
+harness = false
 
 
 [lib]
 name = "static_btree"
 path = "src/lib.rs"
+
+[profile.release]
+debug = 1
+strip = "debuginfo"

@@ -49,3 +49,7 @@ build-fcb_core:
 wasm-build:
 	cd wasm && wasm-pack build --target web --debug --out-dir ../../ts
 # cargo build --target web --release
+
+.PHONY: sign
+sign: # sign the binary for macos profiler
+	codesign -s - -f --timestamp --entitlements ./debug.plist ./target/release/read_btree

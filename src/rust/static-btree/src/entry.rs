@@ -60,7 +60,7 @@ impl<K: Key> Entry<K> {
 // Update ordering implementations
 impl<K: Key> PartialOrd for Entry<K> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.key.partial_cmp(&other.key)
+        Some(self.key.cmp(&other.key))
     }
 }
 

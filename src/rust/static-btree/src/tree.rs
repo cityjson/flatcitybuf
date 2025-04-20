@@ -24,18 +24,19 @@ impl Layout {
     pub(crate) fn new(num_entries: usize, branching_factor: usize) -> Self {
         assert!(branching_factor >= 2, "branching factor must be >=2");
         let b = branching_factor;
+        /// Number of unique keys indexed.
         let n = num_entries;
         // Compute entry counts per layer (bottom-up), padding each to a multiple of b
         let mut layer_counts: Vec<usize> = Vec::new();
         // Leaf layer: pad total entries to multiple of b
-        let mut count = if n == 0 { 0 } else { ((n + b - 1) / b) * b };
+        let mut count = if n == 0 { 0 } else { n.div_ceil(b) * b };
         layer_counts.push(count);
         // Build internal layers until a layer fits in one node
         while count > b {
             // number of child nodes in the previous layer
-            let raw = (count + b - 1) / b;
+            let raw = count.div_ceil(b);
             // pad to multiple of b for node-aligned storage
-            count = ((raw + b - 1) / b) * b;
+            count = raw.div_ceil(b) * b;
             layer_counts.push(count);
         }
         let height = layer_counts.len();
@@ -49,6 +50,8 @@ impl Layout {
             }
             layer_offsets.push(offset);
         }
+        println!("layer_counts: {:?}", layer_counts);
+        println!("layer_offsets: {:?}", layer_offsets);
         Layout {
             branching_factor: b,
             num_entries: n,
@@ -60,13 +63,13 @@ impl Layout {
 
     #[inline]
     fn blocks(n: usize, b: usize) -> usize {
-        (n + b - 1) / b
+        n.div_ceil(b)
     }
     #[inline]
     fn prev_keys(n: usize, b: usize) -> usize {
         // (blocks(n) + b) / (b+1) * b
         let blocks = Self::blocks(n, b);
-        ((blocks + b) / (b + 1)) * b
+        (blocks + b).div_ceil(b + 1) * b
     }
     /// start index (in entries) of layer h (0‑based). h==height‑1 is leaf layer
     pub(crate) fn layer_offset(&self, h: usize) -> usize {
@@ -100,8 +103,9 @@ pub struct StaticBTree<K: Key, R: Read + Seek> {
 
 impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
     /// Initialize a StaticBTree over serialized index + payload data.
-    pub fn new(mut reader: R, branching_factor: u16, num_entries: u64) -> Result<Self, Error> {
+    pub fn new(reader: R, branching_factor: u16, num_entries: u64) -> Result<Self, Error> {
         let b = branching_factor as usize;
+        // The number of unique keys indexed.
         let n = num_entries as usize;
         // Build layout for index region
         let layout = Layout::new(n, b);
@@ -132,7 +136,6 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
         self.layout.leaf_count()
     }
 
-    /// Number of unique keys indexed.
     /// Number of unique keys indexed in the tree.
     pub fn len(&self) -> usize {
         self.layout.num_entries
@@ -170,13 +173,14 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
         while layer > 0 {
             let entries = self.read_node(layer, node)?;
             let idx = match entries.binary_search_by(|e| e.key.cmp(key)) {
-                Ok(mut i) => {
-                    // find first occurrence if duplicates exist
-                    while i > 0 && entries[i - 1].key == *key {
-                        i -= 1;
-                    }
-                    i
-                }
+                // Ok(mut i) => {
+                //     // find first occurrence if duplicates exist
+                //     while i > 0 && entries[i - 1].key == *key {
+                //         i -= 1;
+                //     }
+                //     i
+                // }
+                Ok(i) => i,
                 Err(i) => i,
             };
             node = idx;
@@ -194,6 +198,9 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
             }
             Err(i) => i,
         };
+        println!("idx: {:?}", idx);
+        println!("node: {:?}", node);
+        println!("branching factor: {:?}", self.layout.branching_factor);
         Ok(node * self.layout.branching_factor + idx)
     }
 
@@ -205,11 +212,11 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
         while layer > 0 {
             let entries = self.read_node(layer, node)?;
             let idx = match entries.binary_search_by(|e| e.key.cmp(key)) {
-                Ok(mut i) => {
+                Ok(i) => {
                     // move to last matching key
-                    while i + 1 < entries.len() && entries[i + 1].key == *key {
-                        i += 1;
-                    }
+                    // while i + 1 < entries.len() && entries[i + 1].key == *key {
+                    //     i += 1;
+                    // }
                     i + 1
                 }
                 Err(i) => i,
@@ -270,6 +277,9 @@ impl<K: Key, R: Read + Seek> StaticBTree<K, R> {
     fn read_index_entry(&mut self, abs_idx: usize) -> Result<Entry<K>, Error> {
         let pos = (abs_idx * self.entry_size) as u64;
         self.reader.seek(SeekFrom::Start(pos))?;
+        // current cursor
+        let current_pos = self.reader.stream_position()?;
+        println!("current pos: {:?}", current_pos);
         let entry = Entry::read_from(&mut self.reader)?;
         Ok(entry)
     }
@@ -290,9 +300,16 @@ mod tests {
         builder.push(2, 21);
         builder.push(2, 22);
         builder.push(3, 30);
+        builder.push(4, 40);
+        builder.push(5, 50);
+        builder.push(6, 60);
+        builder.push(7, 70);
+        builder.push(8, 80);
+        builder.push(9, 90);
+        builder.push(10, 100);
         let data = builder.build().expect("build should succeed");
         let cursor = Cursor::new(data);
-        let mut tree = StaticBTree::<u32, _>::new(cursor, 2, 3).expect("open tree failed");
+        let mut tree = StaticBTree::<u32, _>::new(cursor, 2, 10).expect("open tree failed");
         // Leaf entries padded to 4: [1,2,3,3]
         // Test key=1 at index 0
         let e1 = tree.read_entry(0).expect("read entry 0");
@@ -330,6 +347,40 @@ mod tests {
         let entry = tree.read_entry(1).unwrap();
         let offs = tree.read_all_offsets(entry.offset).unwrap();
         assert_eq!(offs, vec![1, 2, 3, 4]);
+    }
+    #[test]
+    fn test_hgoe() {
+        // branching factor 2 => payload blocks capacity 2; 5 offsets => 3 blocks
+        let mut builder = StaticBTreeBuilder::<u32>::new(2);
+        let entries = vec![
+            (0, 0),
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 5),
+            (6, 6),
+            (7, 7),
+            (8, 8),
+            (9, 9),
+            (10, 10),
+            (11, 11),
+            (12, 12),
+            (13, 13),
+            (14, 14),
+            (15, 15),
+            (16, 16),
+            (17, 17),
+        ];
+        for (k, o) in entries {
+            builder.push(k, o);
+        }
+        let data = builder.build().unwrap();
+        let cursor = Cursor::new(data);
+        let mut tree = StaticBTree::<u32, _>::new(cursor, 2, 18).unwrap();
+        // let entry = tree.read_entry(1).unwrap();
+        // let offs = tree.read_all_offsets(entry.offset).unwrap();
+        // assert_eq!(offs, vec![1, 2, 3, 4]);
     }
     #[test]
     fn test_bulk_read_node() {
