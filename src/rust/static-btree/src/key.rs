@@ -5,12 +5,21 @@ use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem;
 
+/// Trait for types that have a maximum representable value.
+///
+/// This trait allows retrieval of the maximum value for a type,
+/// which is useful for B-tree operations like range queries and bounds checking.
+pub trait Max {
+    /// Returns the maximum representable value for this type.
+    fn max_value() -> Self;
+}
+
 /// Trait defining requirements for keys used in the StaticBTree.
 ///
 /// Keys must support ordering (`Ord`), cloning (`Clone`), debugging (`Debug`),
 /// and have a fixed serialized size (`SERIALIZED_SIZE`). Variable-length types
 /// like `String` must be adapted (e.g., using fixed-size prefixes) to conform.
-pub trait Key: Sized + Ord + Clone + Debug + Default {
+pub trait Key: Sized + Ord + Clone + Debug + Default + Max {
     /// The exact size of the key in bytes when serialized.
     /// This is crucial for calculating node sizes and offsets.
     const SERIALIZED_SIZE: usize;
@@ -34,6 +43,69 @@ pub trait Key: Sized + Ord + Clone + Debug + Default {
     /// `Ok(Self)` containing the deserialized key on success.
     /// `Err(Error)` if reading fails or the implementation cannot read exactly `SERIALIZED_SIZE` bytes.
     fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error>;
+}
+
+// Implement Max for primitive integer types
+impl Max for i32 {
+    fn max_value() -> Self {
+        i32::MAX
+    }
+}
+
+impl Max for u32 {
+    fn max_value() -> Self {
+        u32::MAX
+    }
+}
+
+impl Max for i64 {
+    fn max_value() -> Self {
+        i64::MAX
+    }
+}
+
+impl Max for u64 {
+    fn max_value() -> Self {
+        u64::MAX
+    }
+}
+
+// Implement Max for OrderedFloat
+impl Max for OrderedFloat<f32> {
+    fn max_value() -> Self {
+        OrderedFloat(f32::INFINITY)
+    }
+}
+
+impl Max for OrderedFloat<f64> {
+    fn max_value() -> Self {
+        OrderedFloat(f64::INFINITY)
+    }
+}
+
+// Implement Max for bool
+impl Max for bool {
+    fn max_value() -> Self {
+        true
+    }
+}
+
+// Implement Max for DateTime<Utc>
+impl Max for DateTime<Utc> {
+    fn max_value() -> Self {
+        // A date far in the future (year 9999)
+        Utc.timestamp_opt(253402300799, 999_999_999)
+            .single()
+            .unwrap()
+    }
+}
+
+// Implement Max for FixedStringKey
+impl<const N: usize> Max for FixedStringKey<N> {
+    fn max_value() -> Self {
+        // For strings, a byte array filled with 0xFF represents the maximum lexicographical value
+        Self([0xFF; N])
+    }
 }
 
 // Macro to implement Key for primitive integer types easily
@@ -236,6 +308,8 @@ impl<const N: usize> FixedStringKey<N> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Datelike;
+
     use super::*;
     use std::cmp::Ordering;
     use std::f32;
@@ -263,6 +337,43 @@ mod tests {
                 _ => panic!("expected io error for short read"),
             }
         }
+    }
+
+    #[test]
+    fn test_max_values() {
+        // Test Max implementation for integers
+        assert_eq!(i32::max_value(), i32::MAX);
+        assert_eq!(u32::max_value(), u32::MAX);
+        assert_eq!(i64::max_value(), i64::MAX);
+        assert_eq!(u64::max_value(), u64::MAX);
+
+        // Test Max implementation for floats
+        assert_eq!(
+            OrderedFloat::<f32>::max_value(),
+            OrderedFloat(f32::INFINITY)
+        );
+        assert_eq!(
+            OrderedFloat::<f64>::max_value(),
+            OrderedFloat(f64::INFINITY)
+        );
+
+        // Test Max implementation for bool
+        assert_eq!(bool::max_value(), true);
+
+        // Test Max implementation for DateTime
+        let max_date = DateTime::<Utc>::max_value();
+        assert!(max_date.year() >= 9999); // Should be far in the future
+
+        // Test Max implementation for FixedStringKey
+        let max_str_key = FixedStringKey::<5>::max_value();
+        assert_eq!(max_str_key.0, [0xFF; 5]);
+
+        // Verify max values are actually maximum
+        assert!(5_i32 < i32::max_value());
+        assert!(OrderedFloat(1000.0f64) < OrderedFloat::<f64>::max_value());
+        assert!(false < bool::max_value());
+        assert!(Utc::now() < DateTime::<Utc>::max_value());
+        assert!(FixedStringKey::<5>::from_str("zzzzz") < FixedStringKey::<5>::max_value());
     }
 
     #[test]

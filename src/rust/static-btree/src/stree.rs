@@ -159,11 +159,28 @@ impl<K: Key> Stree<K> {
             n = n.div_ceil(branching_factor as usize);
             num_nodes += n;
             level_num_nodes.push(n);
-
-            if n == 1 {
+            if n < branching_factor as usize {
                 break;
             }
         }
+
+        // TODO: delete me
+        // loop {
+        //     if n < branching_factor as usize {
+        //         num_nodes += n;
+        //         level_num_nodes.push(n);
+        //         break;
+        //     } else {
+        //         n = n.div_ceil(branching_factor as usize);
+        //         println!("n: {n}");
+        //         num_nodes += n;
+        //         level_num_nodes.push(n);
+
+        //         if n < branching_factor as usize {
+        //             break;
+        //         }
+        //     };
+        // }
         println!("level_num_nodes: {level_num_nodes:?}");
         // bounds per level in reversed storage order (top-down)
         let mut level_offsets: Vec<usize> = Vec::with_capacity(level_num_nodes.len());
@@ -192,24 +209,6 @@ impl<K: Key> Stree<K> {
             // for nth_child in 0..self.branching_factor as usize {
             let mut child_idx = children_level.start;
 
-            // ---------old code
-            // while child_idx < children_level.end {
-            //     let mut parent_node = NodeItem::<K>::create(child_idx as u64);
-            //     // TODO: check this logic. the parent node's key is the minimum key of the right children. That is the leftmost key in the right child node
-            //     println!("child_idx: {child_idx}");
-            //     parent_node.set_key(
-            //         self.node_items[child_idx + self.branching_factor as usize - 1]
-            //             .key
-            //             .clone(),
-            //     );
-            //     println!("parent_node: {parent_node:?}");
-            //     child_idx += self.branching_factor as usize;
-
-            //     self.node_items[parent_idx] = parent_node;
-            //     parent_idx += 1;
-            // }
-            // ---------old code
-
             // Parent node's key is the minimum key of the right children node's leaf node
             // So, we need to find the minimum key of the right children node's leaf node
             // and set it as the parent node's key
@@ -223,19 +222,42 @@ impl<K: Key> Stree<K> {
                 let skip_size =
                     self.branching_factor as usize * (self.branching_factor as usize - 1);
 
-                if child_idx_diff % skip_size == 0 || child_idx_diff % skip_size == 1 {
+                let diff_to_next_leaf_node = skip_size - (child_idx_diff % skip_size);
+                let is_left_most_child =
+                    (child_idx_diff % skip_size) < (self.branching_factor as usize - 1);
+                // let has_right_node =
+                //     child_idx + self.branching_factor as usize - 1 < children_level.end;
+                let has_right_node =
+                    child_idx + self.branching_factor as usize - 1 < children_level.end;
+                let is_left_most_node_item = child_idx_diff % skip_size == 0; // if the current entry is the leftmost node item
+                                                                              // Skip the leftmost child node since it won't be used by the parent node
+                if is_left_most_child {
+                    // only when the leftmost child node doesn't have a right node, add a parent node with the maximum key
+                    if !has_right_node && is_left_most_node_item {
+                        let parent_node: Entry<K> = NodeItem::<K>::new_with_key(K::max_value());
+                        parent_min_key.insert(
+                            parent_idx,
+                            NodeItem::<K>::new_with_key(parent_node.key.clone()),
+                        );
+                        self.node_items[parent_idx] = parent_node.clone();
+                        parent_idx += 1;
+                    }
                     child_idx += 1;
                     continue;
                 } else {
-                    // only when level is 0, the parent node's key is the minimum key of the right children node's leaf node.
-                    // Otherwise, the parent node's key is the minimum key of the right children node's leaf node of the previous level
+                    if child_idx_diff % (self.branching_factor as usize - 1) == 0 {
+                        // only when level is 0, the parent node's key is the minimum key of the right children node's leaf node.
+                        // Otherwise, the parent node's key is the minimum key of the right children node's leaf node of the previous level
 
-                    //TODO: clean this up
-                    let parent_node = if level == 0 {
-                        NodeItem::<K>::new(self.node_items[child_idx].key.clone(), child_idx as u64)
-                    } else {
-                        // TODO: return error instead of panicking
-                        NodeItem::<K>::new(
+                        //TODO: clean this up
+                        let parent_node = if level == 0 {
+                            NodeItem::<K>::new(
+                                self.node_items[child_idx].key.clone(),
+                                child_idx as u64,
+                            )
+                        } else {
+                            // TODO: return error instead of panicking
+                            NodeItem::<K>::new(
                             parent_min_key
                                 .get(&child_idx)
                                 .expect("Parent node's key is the minimum key of the right children node's leaf node")
@@ -243,22 +265,24 @@ impl<K: Key> Stree<K> {
                                 .clone(),
                             child_idx as u64,
                         )
-                    };
-                    parent_min_key.insert(
-                        parent_idx,
-                        NodeItem::<K>::new_with_key(
-                            self.node_items[child_idx - (self.branching_factor as usize - 1)]
-                                .key
-                                .clone(),
-                        ),
-                    );
-                    self.node_items[parent_idx] = parent_node.clone();
-                    parent_idx += 1;
-                    child_idx += self.branching_factor as usize - 1; // -1 because the number of items in the node is branching_factor - 1
+                        };
+                        parent_min_key.insert(
+                            parent_idx,
+                            NodeItem::<K>::new_with_key(
+                                self.node_items[child_idx - (self.branching_factor as usize - 1)]
+                                    .key
+                                    .clone(),
+                            ),
+                        );
+                        self.node_items[parent_idx] = parent_node.clone();
+                        parent_idx += 1;
+                    }
+                    child_idx += 1;
+                    // child_idx += self.branching_factor as usize - 1; // -1 because the number of items in the node is branching_factor - 1
                 }
             }
         }
-        println!("nodes: {:#?}", self.node_items);
+        // println!("nodes: {:#?}", self.node_items);
         Ok(())
     }
 
@@ -384,154 +408,36 @@ impl<K: Key> Stree<K> {
                 node_index + self.branching_factor as usize,
                 self.level_bounds[level].end,
             );
+
+            let node_items = &self.node_items[node_index..end];
+            // binary search for the search_entry. If found, delve into the child node. If search key is less than the first item, delve into the leftmost child node. If search key is greater than the last item, delve into the rightmost child node.
+            let partition_point = node_items.partition_point(|item| item.key < search_entry.key);
+
+            // if partition_point is 0, search through the leftmost child node
+            // if partition_point is equal to the length of the node_items, search through the rightmost child node
+            // otherwise, search through the child node at partition_point
+
+            // if partition_point == 0 {
+            //     queue.push_back((node_index,
             println!("node_index: {node_index}, end: {end}");
             // search through child nodes
-            for pos in node_index..end {
-                println!("pos: {pos}");
-                let node_item = &self.node_items[pos];
+            // for pos in node_index..end {
+            //     println!("pos: {pos}");
+            //     let node_item = &self.node_items[pos];
 
-                match search_entry.cmp(node_item) {
-                    Ordering::Less => {
-                        queue.push_back((node_item.offset as usize, level - 1));
-                    }
-                    Ordering::Greater => {
-                        queue.push_back((node_item.offset as usize, level - 1));
-                    }
-                    Ordering::Equal => {}
-                }
-            }
+            //     match search_entry.cmp(node_item) {
+            //         Ordering::Less => {
+            //             queue.push_back((node_item.offset as usize, level - 1));
+            //         }
+            //         Ordering::Greater => {
+            //             queue.push_back((node_item.offset as usize, level - 1));
+            //         }
+            //         Ordering::Equal => {}
+            //     }
+            // }
         }
         Ok(results)
     }
-    // pub fn find_exact(&self, key: K) -> Result<Vec<SearchResultItem>, Error> {
-    //     let leaf_nodes_offset = self
-    //         .level_bounds
-    //         .first()
-    //         .expect("Btree has at least one level when node_size >= 2 and num_items > 0")
-    //         .start;
-    //     let search_entry = NodeItem::new_with_key(key);
-    //     let mut results = Vec::new();
-    //     let mut queue = VecDeque::new();
-    //     queue.push_back((0, self.level_bounds.len() - 1));
-
-    //     // Track visited leaf nodes to avoid duplicates when checking neighbors
-    //     let mut visited_leaf_nodes = std::collections::HashSet::new();
-
-    //     while let Some(next) = queue.pop_front() {
-    //         let node_index = next.0;
-    //         let level = next.1;
-    //         let is_leaf_node = node_index >= self.num_nodes() - self.num_leaf_nodes;
-
-    //         // Skip if we've already visited this leaf node
-    //         if is_leaf_node && !visited_leaf_nodes.insert(node_index) {
-    //             continue;
-    //         }
-
-    //         // Find the end index of the node
-    //         let end = min(
-    //             node_index + self.branching_factor as usize,
-    //             self.level_bounds[level].end,
-    //         );
-
-    //         // Track if we found a match in this node
-    //         let mut found_match = false;
-    //         let mut match_positions = Vec::new();
-
-    //         if is_leaf_node {
-    //             // For leaf nodes, find exact matches
-    //             for pos in node_index..end {
-    //                 let node_item = &self.node_items[pos];
-    //                 if search_entry.equals(node_item) {
-    //                     found_match = true;
-    //                     match_positions.push(pos);
-
-    //                     results.push(SearchResultItem {
-    //                         offset: node_item.offset as usize,
-    //                         index: pos - leaf_nodes_offset,
-    //                     });
-    //                 }
-    //             }
-
-    //             // If we found a match, check neighboring nodes
-    //             if found_match {
-    //                 // Check if leftmost match is at the start of the node
-    //                 // If so, check the previous node for matches at the end
-    //                 if match_positions.first() == Some(&node_index)
-    //                     && node_index > self.level_bounds[0].start
-    //                 {
-    //                     let prev_node_index = node_index - self.branching_factor as usize;
-    //                     if !visited_leaf_nodes.contains(&prev_node_index) {
-    //                         queue.push_back((prev_node_index, level));
-    //                     }
-    //                 }
-
-    //                 // Check if rightmost match is at the end of the node
-    //                 // If so, check the next node for matches at the beginning
-    //                 if match_positions.last() == Some(&(end - 1)) && end < self.level_bounds[0].end
-    //                 {
-    //                     let next_node_index = end;
-    //                     if !visited_leaf_nodes.contains(&next_node_index) {
-    //                         queue.push_back((next_node_index, level));
-    //                     }
-    //                 }
-    //             }
-    //         } else {
-    //             // For internal nodes, find the appropriate child node(s) to traverse
-    //             // Default to leftmost child
-    //             let mut chosen_child_pos = node_index;
-    //             let mut found_potential_path = false;
-
-    //             // Find all children that could contain the search key
-    //             for pos in node_index..end {
-    //                 let node_item = &self.node_items[pos];
-
-    //                 // If we find an exact match in an internal node, we need to check:
-    //                 // 1. The child node pointed to by this internal node
-    //                 // 2. Also potentially the child node of the next internal node
-    //                 if search_entry.equals(node_item) {
-    //                     found_potential_path = true;
-    //                     // Add this child's subtree to the search queue
-    //                     queue.push_back((node_item.offset as usize, level - 1));
-
-    //                     // If this is not the last entry in the node, we might need to check
-    //                     // the next child's subtree as well (depends on the B-tree implementation)
-    //                     if pos + 1 < end {
-    //                         let next_node_item = &self.node_items[pos + 1];
-    //                         queue.push_back((next_node_item.offset as usize, level - 1));
-    //                     }
-    //                 }
-    //                 // For keys less than the search key, update the potential path
-    //                 else if node_item.key < search_entry.key {
-    //                     chosen_child_pos = pos;
-    //                     found_potential_path = true;
-    //                 }
-    //                 // Once we find a key > search key, we've found the boundary
-    //                 else {
-    //                     // If we're at the first item and it's already > search_key,
-    //                     // we need to go to this child
-    //                     if pos == node_index {
-    //                         chosen_child_pos = pos;
-    //                         found_potential_path = true;
-    //                     }
-    //                     break;
-    //                 }
-    //             }
-
-    //             // If we didn't find an exact match but found a potential path,
-    //             // follow the chosen child
-    //             if !found_potential_path {
-    //                 // If all keys in the node are < search_key, go to the rightmost child
-    //                 chosen_child_pos = end - 1;
-    //                 queue.push_back((self.node_items[chosen_child_pos].offset as usize, level - 1));
-    //             } else if !found_match {
-    //                 // This handles the case where we found a child to traverse but no exact match
-    //                 queue.push_back((self.node_items[chosen_child_pos].offset as usize, level - 1));
-    //             }
-    //         }
-    //     }
-
-    //     Ok(results)
-    // }
 
     fn find_partition(&self, key: K) -> Result<SearchResultItem, Error> {
         let leaf_nodes_offset = self
@@ -1094,7 +1000,7 @@ mod tests {
             NodeItem::new(15_u64, 15_u64),
             NodeItem::new(16_u64, 16_u64),
             NodeItem::new(17_u64, 17_u64),
-            // NodeItem::new(18_u64, 18_u64),
+            NodeItem::new(18_u64, 18_u64),
         ];
 
         let mut offset = 0;
