@@ -232,15 +232,16 @@ impl<K: Key> Stree<K> {
 
                     //TODO: clean this up
                     let parent_node = if level == 0 {
-                        NodeItem::<K>::new_with_key(self.node_items[child_idx].key.clone())
+                        NodeItem::<K>::new(self.node_items[child_idx].key.clone(), child_idx as u64)
                     } else {
                         // TODO: return error instead of panicking
-                        NodeItem::<K>::new_with_key(
+                        NodeItem::<K>::new(
                             parent_min_key
                                 .get(&child_idx)
                                 .expect("Parent node's key is the minimum key of the right children node's leaf node")
                                 .key
                                 .clone(),
+                            child_idx as u64,
                         )
                     };
                     parent_min_key.insert(
@@ -389,9 +390,6 @@ impl<K: Key> Stree<K> {
                 println!("pos: {pos}");
                 let node_item = &self.node_items[pos];
 
-                // TODO: change here. For internal nodes, same as binary search, search where search key is greater than the current node key
-                // If search key is less than leftmost key, search left child. If search key is greater than rightmost key, search right child.
-                // Otherwise, search the middle child.
                 match search_entry.cmp(node_item) {
                     Ordering::Less => {
                         queue.push_back((node_item.offset as usize, level - 1));
@@ -401,15 +399,6 @@ impl<K: Key> Stree<K> {
                     }
                     Ordering::Equal => {}
                 }
-
-                // if is_leaf_node {
-                //     results.push(SearchResultItem {
-                //         offset: node_item.offset as usize,
-                //         index: pos - leaf_nodes_offset,
-                //     });
-                // } else {
-                //     queue.push_back((node_item.offset as usize, level - 1));
-                // }
             }
         }
         Ok(results)
