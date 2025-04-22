@@ -164,23 +164,6 @@ impl<K: Key> Stree<K> {
             }
         }
 
-        // TODO: delete me
-        // loop {
-        //     if n < branching_factor as usize {
-        //         num_nodes += n;
-        //         level_num_nodes.push(n);
-        //         break;
-        //     } else {
-        //         n = n.div_ceil(branching_factor as usize);
-        //         println!("n: {n}");
-        //         num_nodes += n;
-        //         level_num_nodes.push(n);
-
-        //         if n < branching_factor as usize {
-        //             break;
-        //         }
-        //     };
-        // }
         println!("level_num_nodes: {level_num_nodes:?}");
         // bounds per level in reversed storage order (top-down)
         let mut level_offsets: Vec<usize> = Vec::with_capacity(level_num_nodes.len());
@@ -199,86 +182,97 @@ impl<K: Key> Stree<K> {
     }
 
     fn generate_nodes(&mut self) -> Result<(), Error> {
-        let mut parent_min_key = HashMap::<usize, NodeItem<K>>::new(); // key is the parent node's index, value is the minimum key of the right children node's leaf node
+        let node_size = self.branching_factor as usize - 1;
+        let mut parent_min_key = HashMap::<usize, K>::new(); // key is the parent node's index, value is the minimum key of the right children node's leaf node
         for level in 0..self.level_bounds.len() - 1 {
             let children_level = &self.level_bounds[level];
             let parent_level = &self.level_bounds[level + 1];
 
             let mut parent_idx = parent_level.start;
 
-            // for nth_child in 0..self.branching_factor as usize {
             let mut child_idx = children_level.start;
 
             // Parent node's key is the minimum key of the right children node's leaf node
             // So, we need to find the minimum key of the right children node's leaf node
             // and set it as the parent node's key
-            // We can do this by iterating through the right children node's leaf nodes
-            // and finding the minimum key
+            // We keep the minimum key of the tree with its index in the parent_min_key map
 
             while child_idx < children_level.end {
+                if parent_idx >= parent_level.end {
+                    break;
+                }
                 let child_idx_diff = child_idx - children_level.start;
 
                 // e.g. when child_idx_diff is 0 or 1, the key won't be used by the parent node as it comes left
                 let skip_size =
                     self.branching_factor as usize * (self.branching_factor as usize - 1);
 
-                let diff_to_next_leaf_node = skip_size - (child_idx_diff % skip_size);
-                let is_left_most_child =
-                    (child_idx_diff % skip_size) < (self.branching_factor as usize - 1);
-                // let has_right_node =
-                //     child_idx + self.branching_factor as usize - 1 < children_level.end;
-                let has_right_node =
-                    child_idx + self.branching_factor as usize - 1 < children_level.end;
-                let is_left_most_node_item = child_idx_diff % skip_size == 0; // if the current entry is the leftmost node item
-                                                                              // Skip the leftmost child node since it won't be used by the parent node
-                if is_left_most_child {
-                    // only when the leftmost child node doesn't have a right node, add a parent node with the maximum key
-                    if !has_right_node && is_left_most_node_item {
-                        let parent_node: Entry<K> = NodeItem::<K>::new_with_key(K::max_value());
-                        parent_min_key.insert(
-                            parent_idx,
-                            NodeItem::<K>::new_with_key(parent_node.key.clone()),
-                        );
-                        self.node_items[parent_idx] = parent_node.clone();
-                        parent_idx += 1;
-                    }
-                    child_idx += 1;
+                let is_right_most_child = (node_size * node_size) <= (child_idx_diff % skip_size)
+                    && (child_idx_diff % skip_size)
+                        < (self.branching_factor * self.branching_factor) as usize;
+                let has_next_node = child_idx + node_size < children_level.end;
+
+                if is_right_most_child {
+                    child_idx += node_size;
+                    continue;
+                } else if !has_next_node {
+                    let parent_key = K::max_value();
+                    let parent_node = NodeItem::<K>::new(parent_key.clone(), child_idx as u64);
+                    self.node_items[parent_idx] = parent_node;
+
+                    let own_min = min(
+                        self.node_items[child_idx].key.clone(),
+                        parent_min_key
+                            .get(&child_idx)
+                            .unwrap_or(&K::max_value())
+                            .clone(),
+                    );
+                    parent_min_key.insert(parent_idx, own_min);
+                    parent_idx += 1;
+                    child_idx += node_size;
                     continue;
                 } else {
-                    if child_idx_diff % (self.branching_factor as usize - 1) == 0 {
-                        // only when level is 0, the parent node's key is the minimum key of the right children node's leaf node.
-                        // Otherwise, the parent node's key is the minimum key of the right children node's leaf node of the previous level
+                    let right_node_idx = child_idx + node_size;
 
-                        //TODO: clean this up
-                        let parent_node = if level == 0 {
-                            NodeItem::<K>::new(
-                                self.node_items[child_idx].key.clone(),
-                                child_idx as u64,
-                            )
+                    let is_leaf_node = child_idx >= self.num_nodes() - self.num_leaf_nodes;
+                    if is_leaf_node {
+                        let parent_key = if right_node_idx < children_level.end {
+                            self.node_items[right_node_idx].key.clone()
                         } else {
-                            // TODO: return error instead of panicking
-                            NodeItem::<K>::new(
-                            parent_min_key
-                                .get(&child_idx)
-                                .expect("Parent node's key is the minimum key of the right children node's leaf node")
-                                .key
-                                .clone(),
-                            child_idx as u64,
-                        )
+                            K::max_value()
                         };
-                        parent_min_key.insert(
-                            parent_idx,
-                            NodeItem::<K>::new_with_key(
-                                self.node_items[child_idx - (self.branching_factor as usize - 1)]
-                                    .key
-                                    .clone(),
-                            ),
-                        );
-                        self.node_items[parent_idx] = parent_node.clone();
+                        let parent_node = NodeItem::<K>::new(parent_key.clone(), child_idx as u64);
+                        self.node_items[parent_idx] = parent_node;
+                        parent_min_key.insert(parent_idx, self.node_items[child_idx].key.clone());
                         parent_idx += 1;
+                        child_idx += node_size;
+                        continue;
                     }
-                    child_idx += 1;
-                    // child_idx += self.branching_factor as usize - 1; // -1 because the number of items in the node is branching_factor - 1
+
+                    if child_idx == 1 {
+                        println!("child_idx: {child_idx}, right_node_idx: {right_node_idx}");
+                    }
+                    let parent_key = if right_node_idx < children_level.end {
+                        parent_min_key
+                            .get(&(child_idx + node_size))
+                            .expect("Parent node's key is the minimum key of the right children node's leaf node")
+                            .clone()
+                    } else {
+                        K::max_value()
+                    };
+                    let parent_node = NodeItem::<K>::new(parent_key.clone(), child_idx as u64);
+                    self.node_items[parent_idx] = parent_node;
+                    parent_min_key.insert(
+                        parent_idx,
+                        parent_min_key
+                            .get(&child_idx)
+                            .expect("Parent node's key is the minimum key of the right children node's leaf node")
+                            .clone(),
+                    );
+                    parent_idx += 1;
+                    child_idx += node_size;
+
+                    continue;
                 }
             }
         }
@@ -1008,11 +1002,81 @@ mod tests {
             node.offset = offset;
             offset += NodeItem::<u64>::SERIALIZED_SIZE as u64;
         }
-        let tree = Stree::build(&nodes, 3)?;
+        let tree = Stree::build(&nodes, 4)?;
         let list = tree.find_exact(10)?;
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].index, 10);
 
+        Ok(())
+    }
+    #[test]
+    fn tree_generate_nodes() -> Result<()> {
+        let mut nodes = vec![
+            NodeItem::new(0_u64, 0_u64),
+            NodeItem::new(1_u64, 1_u64),
+            NodeItem::new(2_u64, 2_u64),
+            NodeItem::new(3_u64, 3_u64),
+            NodeItem::new(4_u64, 4_u64),
+            NodeItem::new(5_u64, 5_u64),
+            NodeItem::new(6_u64, 6_u64),
+            NodeItem::new(7_u64, 7_u64),
+            NodeItem::new(8_u64, 8_u64),
+            NodeItem::new(9_u64, 9_u64),
+            NodeItem::new(10_u64, 10_u64),
+            NodeItem::new(11_u64, 11_u64),
+            NodeItem::new(12_u64, 12_u64),
+            NodeItem::new(13_u64, 13_u64),
+            NodeItem::new(14_u64, 14_u64),
+            NodeItem::new(15_u64, 15_u64),
+            NodeItem::new(16_u64, 16_u64),
+            NodeItem::new(17_u64, 17_u64),
+            NodeItem::new(18_u64, 18_u64),
+        ];
+
+        let mut offset = 0;
+        for node in &mut nodes {
+            node.offset = offset;
+            offset += NodeItem::<u64>::SERIALIZED_SIZE as u64;
+        }
+        let tree = Stree::build(&nodes, 3)?;
+        let keys = tree
+            .node_items
+            .into_iter()
+            .map(|nodes| nodes.key)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            18,
+            6,
+            12,
+            u64::MAX,
+            2,
+            4,
+            8,
+            10,
+            14,
+            16,
+            u64::MAX,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+        ];
+        assert_eq!(keys, expected);
         Ok(())
     }
     #[test]
