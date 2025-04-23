@@ -136,7 +136,6 @@ impl<K: Key> Stree<K> {
             .first()
             .expect("Btree has at least one level when node_size >= 2 and num_items > 0")
             .end;
-        println!("fn init(): num_nodes: {num_nodes}");
         self.node_items = vec![NodeItem::create(0); num_nodes]; // Quite slow!
         Ok(())
     }
@@ -273,7 +272,6 @@ impl<K: Key> Stree<K> {
                 }
             }
         }
-        // println!("nodes: {:#?}", self.node_items);
         Ok(())
     }
 
@@ -282,26 +280,26 @@ impl<K: Key> Stree<K> {
         Ok(())
     }
 
-    // #[cfg(feature = "http")]
-    // async fn read_http<T: AsyncHttpRangeClient>(
-    //     &mut self,
-    //     client: &mut AsyncBufferedHttpRangeClient<T>,
-    //     index_begin: usize,
-    // ) -> Result<(), Error> {
-    //     let min_req_size = self.size(); // read full index at once
-    //     let mut pos = index_begin;
-    //     for i in 0..self.num_nodes() {
-    //         let bytes = client
-    //             .min_req_size(min_req_size)
-    //             .get_range(pos, size_of::<NodeItem>())
-    //             .await?;
-    //         let n = NodeItem::from_bytes(bytes)?;
-    //         self.extent.expand(&n);
-    //         self.node_items[i] = n;
-    //         pos += size_of::<NodeItem>();
-    //     }
-    //     Ok(())
-    // }
+    #[cfg(feature = "http")]
+    async fn read_http<T: AsyncHttpRangeClient>(
+        &mut self,
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        index_begin: usize,
+    ) -> Result<(), Error> {
+        let min_req_size = self.size(); // read full index at once
+        let mut pos = index_begin;
+        for i in 0..self.num_nodes() {
+            let bytes = client
+                .min_req_size(min_req_size)
+                .get_range(pos, size_of::<NodeItem>())
+                .await?;
+            let n = NodeItem::from_bytes(bytes)?;
+            self.extent.expand(&n);
+            self.node_items[i] = n;
+            pos += size_of::<NodeItem>();
+        }
+        Ok(())
+    }
 
     fn num_nodes(&self) -> usize {
         self.node_items.len()
@@ -429,7 +427,7 @@ impl<K: Key> Stree<K> {
                     Ok(index) => {
                         results.push(SearchResultItem {
                             offset: node_items[index].offset as usize,
-                            index: node_items[index].offset as usize,
+                            index: node_items[index].offset as usize, //TODO: check if this is correct
                         });
                     }
                     Err(_) => {
@@ -441,259 +439,11 @@ impl<K: Key> Stree<K> {
         Ok(results)
     }
 
-    fn find_partition(&self, key: K) -> Result<SearchResultItem, Error> {
-        let leaf_nodes_offset = self
-            .level_bounds
-            .first()
-            .expect("Btree has at least one level when node_size >= 2 and num_items > 0")
-            .start;
-        let search_entry = NodeItem::new_with_key(key);
-        let mut queue = VecDeque::new();
-        queue.push_back((0, self.level_bounds.len() - 1));
-
-        while let Some(next) = queue.pop_front() {
-            let node_index = next.0;
-            let level = next.1;
-            let is_leaf_node = node_index >= self.num_nodes() - self.num_leaf_nodes;
-
-            // Find the end index of the node
-            let end = min(
-                node_index + self.branching_factor as usize,
-                self.level_bounds[level].end,
-            );
-
-            if is_leaf_node {
-                // We reached a leaf node - find partition point
-                // The partition point is where keys transition from < to >=
-
-                for pos in node_index..end {
-                    let node_item = &self.node_items[pos];
-
-                    // If we find a key greater than or equal to the search key,
-                    // this is our partition point
-                    if node_item >= &search_entry {
-                        return Ok(SearchResultItem {
-                            offset: node_item.offset as usize,
-                            index: pos - leaf_nodes_offset,
-                        });
-                    }
-                }
-
-                // If no partition found in this node (all keys are < search_key),
-                // the partition would be at the next node if any
-                if end < self.level_bounds[0].end {
-                    // Get the first item of the next node if it exists
-                    let next_node_index = end;
-                    if next_node_index < self.level_bounds[0].end {
-                        let next_node_item = &self.node_items[next_node_index];
-                        return Ok(SearchResultItem {
-                            offset: next_node_item.offset as usize,
-                            index: next_node_index - leaf_nodes_offset,
-                        });
-                    }
-                }
-
-                // If we reach here, it means all keys are less than the search key
-                // and there's no next node. Return the last item as the partition point.
-                if end > node_index {
-                    let last_pos = end - 1;
-                    let last_item = &self.node_items[last_pos];
-                    return Ok(SearchResultItem {
-                        offset: last_item.offset as usize,
-                        index: last_pos - leaf_nodes_offset,
-                    });
-                }
-
-                // This should never happen in a valid B-tree
-                return Err(Error::Other(
-                    "No partition point found in B-tree".to_string(),
-                ));
-            } else {
-                // For internal nodes, we want to find the child that would contain
-                // the partition point. We need to traverse to the rightmost child
-                // that has a key <= search_key
-
-                // Default to leftmost child
-                let mut chosen_child_pos = node_index;
-
-                // Find rightmost child with key <= search_key
-                for pos in node_index..end {
-                    let node_item = &self.node_items[pos];
-                    if node_item.key <= search_entry.key {
-                        chosen_child_pos = pos;
-                    } else {
-                        // Once we find a key > search_key, we've gone too far
-                        break;
-                    }
-                }
-
-                // Follow the chosen child
-                queue.push_back((self.node_items[chosen_child_pos].offset as usize, level - 1));
-            }
-        }
-
-        // This should never happen in a valid B-tree
-        Err(Error::Other(
-            "Failed to find partition point in B-tree".to_string(),
-        ))
-    }
-
     pub fn find_range(&self, lower: K, upper: K) -> Result<Vec<SearchResultItem>, Error> {
         let mut results = Vec::new();
-        let lower_bound = self.find_partition(lower)?;
-        let upper_bound = self.find_partition(upper)?;
-
-        // The result will be items between the lower and upper bounds
-        let leaf_nodes_offset = self
-            .level_bounds
-            .first()
-            .expect("Btree has at least one level when node_size >= 2 and num_items > 0")
-            .start;
-
-        // Get the starting and ending positions in the leaf nodes
-        let start_pos = lower_bound.index + leaf_nodes_offset;
-        let end_pos = upper_bound.index + leaf_nodes_offset;
-
-        // Collect all items in range
-        for pos in start_pos..end_pos {
-            let node_item = &self.node_items[pos];
-            results.push(SearchResultItem {
-                offset: node_item.offset as usize,
-                index: pos - leaf_nodes_offset,
-            });
-        }
 
         Ok(results)
     }
-
-    // #[cfg(feature = "http")]
-    // #[allow(clippy::too_many_arguments)]
-    // pub async fn http_stream_search<T: AsyncHttpRangeClient>(
-    //     client: &mut AsyncBufferedHttpRangeClient<T>,
-    //     index_begin: usize,
-    //     attr_index_size: usize,
-    //     num_items: usize,
-    //     branching_factor: u16,
-    //     min_x: f64,
-    //     min_y: f64,
-    //     max_x: f64,
-    //     max_y: f64,
-    //     combine_request_threshold: usize,
-    // ) -> Result<Vec<HttpSearchResultItem>, Error> {
-    //     use tracing::debug;
-
-    //     let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
-    //     if num_items == 0 {
-    //         return Ok(vec![]);
-    //     }
-    //     let level_bounds = Stree::generate_level_bounds(num_items, branching_factor);
-    //     let feature_begin =
-    //         index_begin + attr_index_size + Stree::index_size(num_items, branching_factor);
-    //     debug!("http_stream_search - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, GPS bounds:[({min_x}, {min_y}), ({max_x},{max_y})]");
-
-    //     #[derive(Debug, PartialEq, Eq)]
-    //     struct NodeRange {
-    //         level: usize,
-    //         nodes: Range<usize>,
-    //     }
-
-    //     let mut queue = VecDeque::new();
-    //     queue.push_back(NodeRange {
-    //         nodes: 0..1,
-    //         level: level_bounds.len() - 1,
-    //     });
-    //     let mut results = Vec::new();
-
-    //     while let Some(node_range) = queue.pop_front() {
-    //         debug!("next: {node_range:?}. {} items left in queue", queue.len());
-    //         let node_items = read_http_node_items(client, index_begin, &node_range.nodes).await?;
-    //         for (node_pos, node_item) in node_items.iter().enumerate() {
-    //             if !bounds.intersects(node_item) {
-    //                 continue;
-    //             }
-
-    //             if node_range.level == 0 {
-    //                 // leaf node
-    //                 let start = feature_begin + node_item.offset as usize;
-    //                 if let Some(next_node_item) = &node_items.get(node_pos + 1) {
-    //                     let end = feature_begin + next_node_item.offset as usize;
-    //                     results.push(HttpSearchResultItem {
-    //                         range: HttpRange::Range(start..end),
-    //                     });
-    //                 } else {
-    //                     debug_assert_eq!(node_pos, num_items - 1);
-    //                     results.push(HttpSearchResultItem {
-    //                         range: HttpRange::RangeFrom(start..),
-    //                     });
-    //                 }
-    //             } else {
-    //                 let children_level = node_range.level - 1;
-    //                 let mut children_nodes = node_item.offset as usize
-    //                     ..(node_item.offset + branching_factor as u64) as usize;
-    //                 if children_level == 0 {
-    //                     // These children are leaf nodes.
-    //                     //
-    //                     // We can right-size our feature requests if we know the size of each feature.
-    //                     //
-    //                     // To infer the length of *this* feature, we need the start of the *next*
-    //                     // feature, so we get an extra node here.
-    //                     children_nodes.end += 1;
-    //                 }
-    //                 // always stay within level's bounds
-    //                 children_nodes.end = min(children_nodes.end, level_bounds[children_level].end);
-
-    //                 let children_range = NodeRange {
-    //                     nodes: children_nodes,
-    //                     level: children_level,
-    //                 };
-
-    //                 let Some(tail) = queue.back_mut() else {
-    //                     debug!("Adding new request onto empty queue: {children_range:?}");
-    //                     queue.push_back(children_range);
-    //                     continue;
-    //                 };
-
-    //                 if tail.level != children_level {
-    //                     debug!("Adding new request for new level: {children_range:?} (existing queue tail: {tail:?})");
-    //                     queue.push_back(children_range);
-    //                     continue;
-    //                 }
-
-    //                 let wasted_bytes = {
-    //                     if children_range.nodes.start >= tail.nodes.end {
-    //                         (children_range.nodes.start - tail.nodes.end) * size_of::<NodeItem>()
-    //                     } else {
-    //                         // To compute feature size, we fetch an extra leaf node, but computing
-    //                         // wasted_bytes for adjacent ranges will overflow in that case, so
-    //                         // we skip that computation.
-    //                         //
-    //                         // But let's make sure we're in the state we think we are:
-    //                         debug_assert_eq!(
-    //                             children_range.nodes.start + 1,
-    //                             tail.nodes.end,
-    //                             "we only ever fetch one extra node"
-    //                         );
-    //                         debug_assert_eq!(
-    //                             children_level, 0,
-    //                             "extra node fetching only happens with leaf nodes"
-    //                         );
-    //                         0
-    //                     }
-    //                 };
-    //                 if wasted_bytes > combine_request_threshold {
-    //                     debug!("Adding new request for: {children_range:?} rather than merging with distant NodeRange: {tail:?} (would waste {wasted_bytes} bytes)");
-    //                     queue.push_back(children_range);
-    //                     continue;
-    //                 }
-
-    //                 // Merge the ranges to avoid an extra request
-    //                 debug!("Extending existing request {tail:?} with nearby children: {:?} (wastes {wasted_bytes} bytes)", &children_range.nodes);
-    //                 tail.nodes.end = children_range.nodes.end;
-    //             }
-    //         }
-    //     }
-    //     Ok(results)
-    // }
 
     pub fn size(&self) -> usize {
         self.num_nodes() * Entry::<K>::SERIALIZED_SIZE
