@@ -400,20 +400,27 @@ impl<K: Key> Stree<K> {
 
             let node_items = &self.node_items[node_index..end];
             // binary search for the search_entry. If found, delve into the child node. If search key is less than the first item, delve into the leftmost child node. If search key is greater than the last item, delve into the rightmost child node.
+
             if !is_leaf_node {
-                let partition_point =
-                    node_items.partition_point(|item| item.key < search_entry.key);
-                if partition_point == 0 {
-                    queue.push_back((node_items[0].offset as usize, level - 1));
-                } else if partition_point == node_items.len() {
-                    queue.push_back((
-                        node_items[node_items.len() - 1].offset as usize + node_size,
-                        level - 1,
-                    ));
-                } else {
-                    queue.push_back((node_items[partition_point].offset as usize, level - 1));
+                let search_result =
+                    node_items.binary_search_by(|item| item.key.cmp(&search_entry.key));
+                match search_result {
+                    Ok(index) => {
+                        queue.push_back((node_items[index].offset as usize + node_size, level - 1));
+                    }
+                    Err(index) => {
+                        if index == 0 {
+                            queue.push_back((node_items[0].offset as usize, level - 1));
+                        } else if index == node_items.len() {
+                            queue.push_back((
+                                node_items[node_items.len() - 1].offset as usize + node_size,
+                                level - 1,
+                            ));
+                        } else {
+                            queue.push_back((node_items[index].offset as usize, level - 1));
+                        }
+                    }
                 }
-                continue;
             }
 
             if is_leaf_node {
@@ -822,25 +829,25 @@ mod tests {
     #[test]
     fn tree_19items_roundtrip_stream_search() -> Result<()> {
         let mut nodes = vec![
-            NodeItem::new(0_u64, 0_u64),
-            NodeItem::new(1_u64, 1_u64),
-            NodeItem::new(2_u64, 2_u64),
-            NodeItem::new(3_u64, 3_u64),
-            NodeItem::new(4_u64, 4_u64),
-            NodeItem::new(5_u64, 5_u64),
-            NodeItem::new(6_u64, 6_u64),
-            NodeItem::new(7_u64, 7_u64),
-            NodeItem::new(8_u64, 8_u64),
-            NodeItem::new(9_u64, 9_u64),
-            NodeItem::new(10_u64, 10_u64),
-            NodeItem::new(11_u64, 11_u64),
-            NodeItem::new(12_u64, 12_u64),
-            NodeItem::new(13_u64, 13_u64),
-            NodeItem::new(14_u64, 14_u64),
-            NodeItem::new(15_u64, 15_u64),
-            NodeItem::new(16_u64, 16_u64),
-            NodeItem::new(17_u64, 17_u64),
-            NodeItem::new(18_u64, 18_u64),
+            NodeItem::new(0_i64, 0_u64),
+            NodeItem::new(1_i64, 1_u64),
+            NodeItem::new(2_i64, 2_u64),
+            NodeItem::new(3_i64, 3_u64),
+            NodeItem::new(4_i64, 4_u64),
+            NodeItem::new(5_i64, 5_u64),
+            NodeItem::new(6_i64, 6_u64),
+            NodeItem::new(7_i64, 7_u64),
+            NodeItem::new(8_i64, 8_u64),
+            NodeItem::new(9_i64, 9_u64),
+            NodeItem::new(10_i64, 10_u64),
+            NodeItem::new(11_i64, 11_u64),
+            NodeItem::new(12_i64, 12_u64),
+            NodeItem::new(13_i64, 13_u64),
+            NodeItem::new(14_i64, 14_u64),
+            NodeItem::new(15_i64, 15_u64),
+            NodeItem::new(16_i64, 16_u64),
+            NodeItem::new(17_i64, 17_u64),
+            NodeItem::new(18_i64, 18_u64),
         ];
 
         let mut offset = 0;
@@ -848,7 +855,7 @@ mod tests {
             node.offset = offset;
             offset += NodeItem::<u64>::SERIALIZED_SIZE as u64;
         }
-        let tree = Stree::build(&nodes, 3)?;
+        let tree = Stree::build(&nodes, 4)?;
         let list = tree.find_exact(10)?;
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].index, nodes[10].offset as usize);
@@ -857,18 +864,23 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].index, nodes[0].offset as usize);
 
-        // let list = tree.find_exact(18)?;
-        // assert_eq!(list.len(), 1);
-        // assert_eq!(list[0].index, nodes[18].offset as usize);
+        let list = tree.find_exact(18)?;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].index, nodes[18].offset as usize);
 
+        // Not exists
         let list = tree.find_exact(19)?;
+        assert_eq!(list.len(), 0);
+
+        // Negative key
+        let list = tree.find_exact(-1)?;
         assert_eq!(list.len(), 0);
 
         Ok(())
     }
     #[test]
     fn tree_generate_nodes() -> Result<()> {
-        let mut nodes = vec![
+        let nodes = vec![
             NodeItem::new(0_u64, 0_u64),
             NodeItem::new(1_u64, 1_u64),
             NodeItem::new(2_u64, 2_u64),
@@ -890,11 +902,7 @@ mod tests {
             NodeItem::new(18_u64, 18_u64),
         ];
 
-        let mut offset = 0;
-        for node in &mut nodes {
-            node.offset = offset;
-            offset += NodeItem::<u64>::SERIALIZED_SIZE as u64;
-        }
+        // test with branching factor 3
         let tree = Stree::build(&nodes, 3)?;
         let keys = tree
             .node_items
@@ -913,6 +921,43 @@ mod tests {
             14,
             16,
             u64::MAX,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+        ];
+        assert_eq!(keys, expected);
+
+        // test with branching factor 4
+        let tree = Stree::build(&nodes, 4)?;
+        let keys = tree
+            .node_items
+            .into_iter()
+            .map(|nodes| nodes.key)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            12,
+            u64::MAX, //TODO: check if this is correct
+            3,
+            6,
+            9,
+            15,
+            18,
             0,
             1,
             2,
