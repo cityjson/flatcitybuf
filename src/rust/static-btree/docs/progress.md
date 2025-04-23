@@ -14,23 +14,21 @@ This file tracks the incremental progress of the `static-btree` crate inside **F
 |---|-----------|-------|--------|
 | 1 | Core infrastructure | • Define `Key` trait<br>• Implement primitive + custom key types<br>• Implement `Entry` struct | `[x]` Done |
 | 2 | Implementation plan | • Draft initial policy<br>• Review feedback & iterate | `[x]` Updated  ✅ (see implementation_plan.md) |
-| 3 | Tree search API     | • Design `StaticBTree` struct & public API<br>• Lower‑bound & range search handling duplicates<br>• Streaming node reads | `[ ]` |
-| 4 | Builder             | • `StaticBTreeBuilder` to serialize trees<br>• Construction algorithm following policy | `[ ]` |
-| 5 | Async / HTTP query  | • `http_stream_query` mirroring packed_rtree<br>• Feature‑gated under `http` | `[ ]` |
+| 3 | Tree search API     | • Design `StaticBTree` struct & public API<br>• Lower‑bound & range search handling duplicates<br>• Streaming node reads | `[~]` `find_exact` has been implemented. `find_range` is not implemented yet. |
+| 4 | Payload handling    | • Implement payload handling<br>• Implement duplicate handling | `[ ]` |
+| 5 | Async / HTTP query  | • `http_find_exact`, `http_find_range` similar to packed_rtree<br>• Feature‑gated under `http` | `[ ]` |
 | 6 | Testing & Benchmarks| • Unit tests for all key types & duplicate cases<br>• Criterion benchmark suite | `[ ]` |
 
 ## Recent Activity
 
-- **2024‑06‑10** – Added duplicate‑key semantics, streaming read policy, and HTTP query stub to `implementation_plan.md`.
-- **2024‑06‑10** – Created this `progress.md` to monitor Static B+Tree work.
+- 2025-04-23: `find_exact` has been implemented. `find_range` is not implemented yet.
 
 ## Next Steps
 
-1. Implement loop‑based `lower_bound` search loading nodes on‑demand.
-2. Add contiguous‑duplicate gathering logic across node boundaries.
-3. Integrate `StaticBTreeBuilder` construction following the layer‑by‑layer algorithm.
-4. Write unit tests (start with u32 and duplicate scenarios).
-5. Prototype `http_stream_query` using packed_rtree's client abstraction.
+1. Implement `find_range` and add tests
+2. Add handling payloads and duplicates in the tree.
+3. Write unit tests (start with u32 and duplicate scenarios).
+4. Prototype `http_stream_query` using packed_rtree's client abstraction.
 
 ## Task Guidelines for Contributors & LLMs
 
@@ -53,30 +51,12 @@ static-btree
 ├── src
 │   ├── key.rs          # key trait & impls (✅ done)
 │   ├── entry.rs        # key‑offset pair (✅ done)
-│   ├── tree.rs         # StaticBTree search logic (��️ milestone 3)
-│   ├── builder.rs      # construction logic (🏗️ milestone 4)
+│   ├── stree.rs         # StaticBTree search logic (��️ milestone 3)
 │   └── error.rs        # crate::error::Error (✅ done)
 └── docs
     ├── implementation_plan.md
     └── progress.md
 ```
-
-### Coding Tasks Breakdown
-
-| Milestone | Module | Primary Functions | Notes |
-|-----------|--------|-------------------|-------|
-| 3 | `tree.rs` | `lower_bound`, `upper_bound`, `range`, `prefetch_node` | implement on‑demand node reading and duplicate handling |
-| 4 | `builder.rs` | `build(self) -> Vec<u8>` | implement layer‑by‑layer construction & padding logic |
-| 5 | `tree.rs` (feature="http") | `http_stream_query` | mirror semantics of `packed_rtree::http_stream_search` |
-| 6 | `tests/` | `duplicates`, `large_range`, `upper_bound` | criterion benches under `benches/` |
-
-### Testing Strategy
-
-- **Unit tests** live beside each module (`#[cfg(test)]`). Cover edge cases: empty tree, full node, duplicate keys across nodes.
-- **Integration tests** in `tests/` for range queries reading from an in‑memory `Cursor<Vec<u8>>`.
-- **Criterion benchmarks**: `benches/lb_vs_range.rs` measuring micro‑latency of `lower_bound` and `range`.
-
-To write test cases, you should add blackbox tests rather than whitebox tests. If the test case is complex, you can ask me to help you write test cases.
 
 ### PR Checklist
 
