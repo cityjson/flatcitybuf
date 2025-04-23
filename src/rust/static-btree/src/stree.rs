@@ -1,6 +1,7 @@
 use crate::entry::Offset;
 use crate::error::Error;
 use crate::{Entry, Key};
+use crate::payload::PayloadEntry;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use core::f64;
 // #[cfg(feature = "http")]
@@ -110,6 +111,7 @@ pub struct SearchResultItem {
     pub index: usize,
 }
 
+
 /// S-Tree
 pub struct Stree<K: Key> {
     node_items: Vec<NodeItem<K>>,
@@ -118,6 +120,10 @@ pub struct Stree<K: Key> {
     branching_factor: u16,
     level_bounds: Vec<Range<usize>>,
     payload_start: usize, // offset of the payload in the file. The payload is the buffer where actual data offsets are stored.
+    /// Raw serialized payload entries
+    payload_data: Vec<u8>,
+    /// Indicates if payload_data has been populated
+    payload_initialized: bool,
 }
 
 impl<K: Key> Stree<K> {
@@ -310,11 +316,13 @@ impl<K: Key> Stree<K> {
         println!("branching_factor: {branching_factor}");
         let mut tree = Stree::<K> {
             node_items: Vec::new(),
+            num_original_items: nodes.len(),
             num_leaf_nodes: nodes.len(),
             branching_factor,
             level_bounds: Vec::new(),
-            num_original_items: nodes.len(),
             payload_start: 0,
+            payload_data: Vec::new(),
+            payload_initialized: false,
         };
         tree.init(branching_factor)?;
         let num_nodes = tree.num_nodes();
@@ -353,6 +361,8 @@ impl<K: Key> Stree<K> {
             branching_factor,
             level_bounds,
             payload_start: 0,
+            payload_data: Vec::new(),
+            payload_initialized: false,
         };
         tree.read_data(data)?;
         Ok(tree)
@@ -538,7 +548,6 @@ impl<K: Key> Stree<K> {
             if node_items.is_empty() {
                 continue;
             }
-
             // Find the child node to traverse next using binary search
             match node_items.binary_search_by(|item| item.key.cmp(&key)) {
                 Ok(index) => {
