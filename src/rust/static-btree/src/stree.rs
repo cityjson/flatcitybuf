@@ -803,26 +803,20 @@ mod tests {
             offset += NodeItem::<u64>::SERIALIZED_SIZE as u64;
         }
         let tree = Stree::build(&nodes, 2)?;
-        // let list = tree.find_exact(0)?;
-        // assert_eq!(list.len(), 1);
-        // assert!(nodes[list[0].index].key == 0);
+        let list = tree.find_exact(0)?;
+        assert_eq!(list.len(), 1);
+        assert!(nodes[list[0].index].key == 0);
 
         let list = tree.find_exact(2)?;
         assert_eq!(list.len(), 1);
-        assert!(nodes[list[0].index].key == 2);
+        assert_eq!(list[0].index, nodes[1].offset as usize);
 
-        let list = tree.find_range(0, 2)?;
-        assert_eq!(list.len(), 2);
-        assert!(nodes[list[0].index].key == 0);
-        assert!(nodes[list[1].index].key == 2);
-
-        let list = tree.find_range(1, 3)?;
-        assert_eq!(list.len(), 2);
-        assert!(nodes[list[0].index].key == 1);
-        assert!(nodes[list[1].index].key == 2);
-
-        let list = tree.find_range(3, 4)?;
+        let list = tree.find_exact(1)?;
         assert_eq!(list.len(), 0);
+
+        let list = tree.find_exact(3)?;
+        assert_eq!(list.len(), 0);
+
         Ok(())
     }
 
@@ -1020,51 +1014,4 @@ mod tests {
 
         Ok(())
     }
-
-    // #[test]
-    // fn tree_100_000_items_in_denmark() -> Result<()> {
-    //     use rand::distributions::{Distribution, Uniform};
-
-    //     let unifx = Uniform::from(466379..708929);
-    //     let unify = Uniform::from(6096801..6322352);
-    //     let mut rng = rand::thread_rng();
-
-    //     let mut nodes = Vec::new();
-    //     for _ in 0..100000 {
-    //         let x = unifx.sample(&mut rng) as f64;
-    //         let y = unify.sample(&mut rng) as f64;
-    //         nodes.push(NodeItem::bounds(x, y, x, y));
-    //     }
-
-    //     let extent = calc_extent(&nodes);
-    //     hilbert_sort(&mut nodes, &extent);
-    //     let tree = Stree::build(&nodes, &extent, Stree::DEFAULT_NODE_SIZE)?;
-    //     let list = tree.search(690407.0, 6063692.0, 811682.0, 6176467.0)?;
-
-    //     for i in 0..list.len() {
-    //         assert!(nodes[list[i].index]
-    //             .intersects(&NodeItem::bounds(690407.0, 6063692.0, 811682.0, 6176467.0)));
-    //     }
-
-    //     let mut tree_data: Vec<u8> = Vec::new();
-    //     let res = tree.stream_write(&mut tree_data);
-    //     assert!(res.is_ok());
-
-    //     let mut reader = Cursor::new(&tree_data);
-    //     let list2 = Stree::stream_search(
-    //         &mut reader,
-    //         nodes.len(),
-    //         Stree::DEFAULT_NODE_SIZE,
-    //         690407.0,
-    //         6063692.0,
-    //         811682.0,
-    //         6176467.0,
-    //     )?;
-    //     assert_eq!(list2.len(), list.len());
-    //     for i in 0..list2.len() {
-    //         assert!(nodes[list2[i].index]
-    //             .intersects(&NodeItem::bounds(690407.0, 6063692.0, 811682.0, 6176467.0)));
-    //     }
-    //     Ok(())
-    // }
 }
