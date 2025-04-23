@@ -1,6 +1,6 @@
 use crate::entry::Offset;
 use crate::error::Error;
-use crate::payload::PayloadEntry;
+use crate::payload::{self, PayloadEntry};
 use crate::{Entry, Key};
 /// Marker bit in offset to indicate a payload reference (MSB).
 const PAYLOAD_TAG: Offset = 1u64 << 63;
@@ -479,7 +479,105 @@ impl<K: Key> Stree<K> {
                         // Check for payload reference
                         if self.payload_initialized && (off & PAYLOAD_TAG) != 0 {
                             let rel = (off & PAYLOAD_MASK) as usize;
-                            let (entry, _) = PayloadEntry::deserialize(&self.payload_data[rel..])?;
+                            let (entry, _) = PayloadEntry::deserialize(&mut Cursor::new(
+                                &self.payload_data[rel..],
+                            ))?;
+                            for o in entry.offsets {
+                                results.push(SearchResultItem {
+                                    offset: o as usize,
+                                    index: base_index,
+                                });
+                            }
+                        } else {
+                            results.push(SearchResultItem {
+                                offset: off as usize,
+                                index: base_index,
+                            });
+                        }
+                    }
+                    Err(_) => continue,
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    pub fn stream_find_exact<R: Read + Seek>(
+        data: &mut R,
+        num_items: usize, // number of items in the tree, not the number of entries of original data
+        branching_factor: u16,
+        key: K,
+    ) -> Result<Vec<SearchResultItem>, Error> {
+        let search_entry = NodeItem::new_with_key(key);
+        let mut results = Vec::new();
+        let mut queue = VecDeque::new();
+        let node_size = branching_factor as usize - 1;
+        let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
+
+        let Range {
+            start: leaf_nodes_offset,
+            end: num_nodes,
+        } = level_bounds
+            .first()
+            .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
+
+        let payload_data_start =
+            data.stream_position()? + (Entry::<K>::SERIALIZED_SIZE as u64) * (*num_nodes as u64);
+
+        let index_base: u64 = data.stream_position()?;
+
+        queue.push_back((0, level_bounds.len() - 1));
+        while let Some(next) = queue.pop_front() {
+            let node_index = next.0;
+            let level = next.1;
+
+            // A node is a leaf node if it's at level 0
+            let is_leaf_node = level == 0;
+
+            // find the end index of the node
+            let end = min(node_index + node_size, level_bounds[level].end);
+
+            let node_items = read_node_items(data, index_base, node_index, end - node_index)?;
+
+            if node_items.is_empty() {
+                continue;
+            }
+
+            // binary search for the search_entry. If found, delve into the child node. If search key is less than the first item, delve into the leftmost child node. If search key is greater than the last item, delve into the rightmost child node.
+
+            if !is_leaf_node {
+                let search_result =
+                    node_items.binary_search_by(|item: &Entry<K>| item.key.cmp(&search_entry.key));
+                match search_result {
+                    Ok(index) => {
+                        queue.push_back((node_items[index].offset as usize + node_size, level - 1));
+                    }
+                    Err(index) => {
+                        if index == 0 {
+                            queue.push_back((node_items[0].offset as usize, level - 1));
+                        } else if index == node_items.len() {
+                            queue.push_back((
+                                node_items[node_items.len() - 1].offset as usize + node_size,
+                                level - 1,
+                            ));
+                        } else {
+                            queue.push_back((node_items[index].offset as usize, level - 1));
+                        }
+                    }
+                }
+            }
+
+            if is_leaf_node {
+                let result = node_items.binary_search_by(|item| item.key.cmp(&search_entry.key));
+                match result {
+                    Ok(idx) => {
+                        let off = node_items[idx].offset;
+                        let base_index = node_index + idx - leaf_nodes_offset;
+                        // Check for payload reference
+                        if (off & PAYLOAD_TAG) != 0 {
+                            let rel = (off & PAYLOAD_MASK) as usize;
+                            data.seek(SeekFrom::Start(payload_data_start + rel as u64))?;
+                            let (entry, _) = PayloadEntry::deserialize(data)?;
                             for o in entry.offsets {
                                 results.push(SearchResultItem {
                                     offset: o as usize,
@@ -556,7 +654,8 @@ impl<K: Key> Stree<K> {
                     let idx = current_idx + i - leaf_nodes_offset;
                     if self.payload_initialized && (off & PAYLOAD_TAG) != 0 {
                         let rel = (off & PAYLOAD_MASK) as usize;
-                        let (entry, _) = PayloadEntry::deserialize(&self.payload_data[rel..])?;
+                        let (entry, _) =
+                            PayloadEntry::deserialize(&mut Cursor::new(&self.payload_data[rel..]))?;
                         for o in entry.offsets {
                             results.push(SearchResultItem {
                                 offset: o as usize,
@@ -564,6 +663,95 @@ impl<K: Key> Stree<K> {
                             });
                         }
                     } else {
+                        results.push(SearchResultItem {
+                            offset: off as usize,
+                            index: idx,
+                        });
+                    }
+                }
+            }
+
+            current_idx = node_end;
+        }
+
+        Ok(results)
+    }
+
+    pub fn stream_find_range<R: Read + Seek>(
+        data: &mut R,
+        num_items: usize, // number of items in the tree, not the number of entries of original data
+        branching_factor: u16,
+        lower: K,
+        upper: K,
+    ) -> Result<Vec<SearchResultItem>, Error> {
+        let node_size = branching_factor as usize - 1;
+        let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
+
+        let Range {
+            start: leaf_nodes_offset,
+            end: num_nodes,
+        } = level_bounds
+            .first()
+            .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
+
+        let payload_data_start =
+            data.stream_position()? + (Entry::<K>::SERIALIZED_SIZE as u64) * (*num_nodes as u64);
+
+        // Return empty result if lower > upper (invalid range)
+        if lower > upper {
+            return Ok(Vec::new());
+        }
+
+        // Special case for exact matches (when lower == upper)
+        // Use find_exact for single-item ranges to ensure consistent behavior
+        if lower == upper {
+            return Stree::stream_find_exact(data, num_items, branching_factor, lower);
+        }
+
+        let mut results = Vec::new();
+
+        // Find partition points for lower and upper bounds
+        let lower_idx =
+            Stree::stream_find_partition(data, num_items, branching_factor, lower.clone())?;
+        let upper_idx =
+            Stree::stream_find_partition(data, num_items, branching_factor, upper.clone())?;
+
+        // Get the leaf level bounds
+        let leaf_level = 0;
+        let leaf_start = level_bounds[leaf_level].start;
+        let leaf_end = level_bounds[leaf_level].end;
+
+        // Calculate the actual range within the leaf level
+        let start_idx = max(lower_idx, leaf_start);
+        let end_idx = min(upper_idx + node_size, leaf_end);
+
+        let index_base: u64 = data.stream_position()?;
+
+        // Process all leaf nodes from lower to upper bound
+        let mut current_idx = start_idx;
+        while current_idx < end_idx {
+            let node_end = min(current_idx + node_size, end_idx);
+            let node_items: Vec<NodeItem<K>> =
+                read_node_items(data, index_base, current_idx, node_end - current_idx)?;
+
+            // Add items that fall within the range
+            for (i, item) in node_items.iter().enumerate() {
+                if item.key >= lower && item.key <= upper {
+                    let off = item.offset;
+                    let idx = current_idx + i - leaf_nodes_offset;
+                    if (off & PAYLOAD_TAG) != 0 {
+                        println!(" find_partition--------");
+                        let rel = (off & PAYLOAD_MASK) as usize;
+                        data.seek(SeekFrom::Start(payload_data_start + rel as u64))?;
+                        let (entry, _) = PayloadEntry::deserialize(data)?;
+                        for o in entry.offsets {
+                            results.push(SearchResultItem {
+                                offset: o as usize,
+                                index: idx,
+                            });
+                        }
+                    } else {
+                        println!(" find_partition---111111-----");
                         results.push(SearchResultItem {
                             offset: off as usize,
                             index: idx,
@@ -601,6 +789,60 @@ impl<K: Key> Stree<K> {
             }
             // Find the child node to traverse next using binary search
             match node_items.binary_search_by(|item| item.key.cmp(&key)) {
+                Ok(index) => {
+                    // Exact match found, go to the corresponding child
+                    // For an exact match, we go to the child node pointed to by this entry
+                    node_index = node_items[index].offset as usize;
+                }
+                Err(index) => {
+                    // No exact match, determine appropriate child based on comparison
+                    if index == 0 {
+                        // Key is smaller than all keys in this node
+                        // Go to the leftmost child
+                        node_index = node_items[0].offset as usize;
+                    } else if index >= node_items.len() {
+                        // Key is larger than all keys in this node
+                        // Go to the rightmost child's right sibling
+                        node_index = node_items[node_items.len() - 1].offset as usize + node_size;
+                    } else {
+                        // Key is between keys in this node
+                        // Go to the child node that would contain this key
+                        node_index = node_items[index].offset as usize;
+                    }
+                }
+            }
+        }
+
+        // At this point, node_index is the position in the leaf level
+        // where the key would be inserted
+        Ok(node_index)
+    }
+
+    pub fn stream_find_partition<R: Read + Seek>(
+        data: &mut R,
+        num_items: usize, // number of items in the tree, not the number of entries of original data
+        branching_factor: u16,
+        key: K,
+    ) -> Result<usize, Error> {
+        let node_size = branching_factor as usize - 1;
+        let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
+
+        let mut node_index = 0;
+
+        let index_base = data.stream_position()?;
+
+        // Start at the root and navigate down to the leaf level
+        // This traversal is similar to find_exact but focuses on finding
+        // the insertion point rather than an exact match
+        for level in (1..level_bounds.len()).rev() {
+            let end = min(node_index + node_size, level_bounds[level].end);
+            let node_items = read_node_items(data, index_base, node_index, end - node_index)?;
+
+            if node_items.is_empty() {
+                continue;
+            }
+            // Find the child node to traverse next using binary search
+            match node_items.binary_search_by(|item: &Entry<K>| item.key.cmp(&key)) {
                 Ok(index) => {
                     // Exact match found, go to the corresponding child
                     // For an exact match, we go to the child node pointed to by this entry
@@ -1267,6 +1509,56 @@ mod tests {
         assert_eq!(offs3.len(), 2);
         assert!(offs3.contains(&400));
         assert!(offs3.contains(&500));
+        Ok(())
+    }
+
+    #[test]
+    /// Test stream_find_exact using cursor over serialized data
+    fn test_stream_find_exact() -> Result<()> {
+        let nodes = vec![
+            NodeItem::new(1, 11),
+            NodeItem::new(1, 22),
+            NodeItem::new(2, 33),
+        ];
+        let tree = Stree::build(&nodes, 2)?;
+        let mut buf = Vec::new();
+        tree.stream_write(&mut buf)?;
+        let mut cursor = std::io::Cursor::new(&buf);
+        let res = Stree::stream_find_exact(&mut cursor, tree.num_leaf_nodes, 2, 1)?;
+        assert_eq!(res.len(), 2);
+        let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
+        offs.sort_unstable();
+        assert_eq!(offs, vec![11, 22]);
+        Ok(())
+    }
+
+    #[test]
+    /// Test stream_find_range using cursor over serialized data
+    fn test_stream_find_range() -> Result<()> {
+        let nodes = vec![
+            NodeItem::new(1, 10),
+            NodeItem::new(1, 20),
+            NodeItem::new(2, 30),
+            NodeItem::new(2, 40),
+            NodeItem::new(3, 50),
+            NodeItem::new(4, 60),
+            NodeItem::new(4, 70),
+            NodeItem::new(5, 80),
+            NodeItem::new(5, 90),
+            NodeItem::new(6, 100),
+            NodeItem::new(6, 110),
+            NodeItem::new(7, 120),
+        ];
+        let tree = Stree::build(&nodes, 3)?;
+        let mut buf = Vec::new();
+        tree.stream_write(&mut buf)?;
+        let mut cursor = std::io::Cursor::new(&buf);
+        let res: Vec<SearchResultItem> =
+            Stree::stream_find_range(&mut cursor, tree.num_leaf_nodes, 3, 1, 2)?;
+        assert_eq!(res.len(), 3);
+        let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
+        offs.sort_unstable();
+        assert_eq!(offs, vec![10, 20, 30]);
         Ok(())
     }
 }
