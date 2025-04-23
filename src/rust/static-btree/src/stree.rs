@@ -249,9 +249,6 @@ impl<K: Key> Stree<K> {
                         continue;
                     }
 
-                    if child_idx == 1 {
-                        println!("child_idx: {child_idx}, right_node_idx: {right_node_idx}");
-                    }
                     let parent_key = if right_node_idx < children_level.end {
                         parent_min_key
                             .get(&(child_idx + node_size))
@@ -391,6 +388,7 @@ impl<K: Key> Stree<K> {
         let search_entry = NodeItem::new_with_key(key);
         let mut results = Vec::new();
         let mut queue = VecDeque::new();
+        let node_size = self.branching_factor as usize - 1;
 
         queue.push_back((0, self.level_bounds.len() - 1));
         while let Some(next) = queue.pop_front() {
@@ -398,37 +396,40 @@ impl<K: Key> Stree<K> {
             let level = next.1;
             let is_leaf_node = node_index >= self.num_nodes() - self.num_leaf_nodes;
             // find the end index of the node
-            let end = min(
-                node_index + self.branching_factor as usize,
-                self.level_bounds[level].end,
-            );
+            let end = min(node_index + node_size, self.level_bounds[level].end);
 
             let node_items = &self.node_items[node_index..end];
             // binary search for the search_entry. If found, delve into the child node. If search key is less than the first item, delve into the leftmost child node. If search key is greater than the last item, delve into the rightmost child node.
-            let partition_point = node_items.partition_point(|item| item.key < search_entry.key);
+            if !is_leaf_node {
+                let partition_point =
+                    node_items.partition_point(|item| item.key < search_entry.key);
+                if partition_point == 0 {
+                    queue.push_back((node_items[0].offset as usize, level - 1));
+                } else if partition_point == node_items.len() {
+                    queue.push_back((
+                        node_items[node_items.len() - 1].offset as usize + node_size,
+                        level - 1,
+                    ));
+                } else {
+                    queue.push_back((node_items[partition_point].offset as usize, level - 1));
+                }
+                continue;
+            }
 
-            // if partition_point is 0, search through the leftmost child node
-            // if partition_point is equal to the length of the node_items, search through the rightmost child node
-            // otherwise, search through the child node at partition_point
-
-            // if partition_point == 0 {
-            //     queue.push_back((node_index,
-            println!("node_index: {node_index}, end: {end}");
-            // search through child nodes
-            // for pos in node_index..end {
-            //     println!("pos: {pos}");
-            //     let node_item = &self.node_items[pos];
-
-            //     match search_entry.cmp(node_item) {
-            //         Ordering::Less => {
-            //             queue.push_back((node_item.offset as usize, level - 1));
-            //         }
-            //         Ordering::Greater => {
-            //             queue.push_back((node_item.offset as usize, level - 1));
-            //         }
-            //         Ordering::Equal => {}
-            //     }
-            // }
+            if is_leaf_node {
+                let result = node_items.binary_search_by(|item| item.key.cmp(&search_entry.key));
+                match result {
+                    Ok(index) => {
+                        results.push(SearchResultItem {
+                            offset: node_items[index].offset as usize,
+                            index: node_items[index].offset as usize,
+                        });
+                    }
+                    Err(_) => {
+                        continue;
+                    }
+                }
+            }
         }
         Ok(results)
     }
@@ -555,161 +556,6 @@ impl<K: Key> Stree<K> {
             });
         }
 
-        Ok(results)
-    }
-
-    pub fn stream_find_exact<R: Read + Seek>(
-        data: &mut R,
-        num_items: usize,
-        node_size: u16,
-        key: K,
-    ) -> Result<Vec<SearchResultItem>, Error> {
-        let search_entry = NodeItem::new_with_key(key);
-        let level_bounds = Stree::<K>::generate_level_bounds(num_items, node_size);
-        let Range {
-            start: leaf_nodes_offset,
-            end: num_nodes,
-        } = level_bounds
-            .first()
-            .expect("Btree has at least one level when node_size >= 2 and num_items > 0");
-
-        // current position must be start of index
-        let index_base = data.stream_position()?;
-
-        // use ordered search queue to make index traversal in sequential order
-        let mut queue = VecDeque::new();
-        queue.push_back((0, level_bounds.len() - 1));
-        let mut results = Vec::new();
-
-        // Track visited leaf nodes to avoid duplicates when checking neighbors
-        let mut visited_leaf_nodes = std::collections::HashSet::new();
-
-        while let Some(next) = queue.pop_front() {
-            let node_index = next.0;
-            let level = next.1;
-            // println!("popped next node_index: {node_index}, level: {level}");
-            let is_leaf_node = node_index >= num_nodes - num_items;
-
-            // Skip if we've already visited this leaf node
-            if is_leaf_node && !visited_leaf_nodes.insert(node_index) {
-                continue;
-            }
-
-            // find the end index of the node
-            let end = min(node_index + node_size as usize, level_bounds[level].end);
-            let length = end - node_index;
-            let node_items = read_node_items(data, index_base, node_index, length)?;
-
-            // Track if we found a match in this node and their positions
-            let mut found_match = false;
-            let mut match_positions = Vec::new();
-
-            if is_leaf_node {
-                // For leaf nodes, we're looking for exact matches
-                for pos in node_index..end {
-                    let node_pos = pos - node_index;
-                    let node_item = &node_items[node_pos];
-                    if search_entry.equals(node_item) {
-                        found_match = true;
-                        match_positions.push(pos);
-
-                        let index = pos - leaf_nodes_offset;
-                        let offset = node_item.offset as usize;
-                        // println!("pushing leaf node. index: {index}, offset: {offset}");
-                        results.push(SearchResultItem { offset, index });
-                    }
-                }
-
-                // If we found a match, check neighboring nodes
-                if found_match {
-                    // Check if leftmost match is at the start of the node
-                    // If so, check the previous node for matches at the end
-                    if match_positions.first() == Some(&node_index)
-                        && node_index > level_bounds[0].start
-                    {
-                        let prev_node_index = node_index - node_size as usize;
-                        if !visited_leaf_nodes.contains(&prev_node_index) {
-                            queue.push_back((prev_node_index, level));
-                        }
-                    }
-
-                    // Check if rightmost match is at the end of the node
-                    // If so, check the next node for matches at the beginning
-                    if match_positions.last() == Some(&(end - 1)) && end < level_bounds[0].end {
-                        let next_node_index = end;
-                        if !visited_leaf_nodes.contains(&next_node_index) {
-                            queue.push_back((next_node_index, level));
-                        }
-                    }
-                }
-            } else {
-                // For internal nodes, find the appropriate child node(s) to traverse
-                // Default to leftmost child
-                let mut chosen_child_pos = 0; // Relative to node_items array
-                let mut found_potential_path = false;
-
-                // Find all children that could contain the search key
-                for node_pos in 0..node_items.len() {
-                    let node_item = &node_items[node_pos];
-                    let actual_pos = node_index + node_pos;
-
-                    // If we find an exact match in an internal node, we need to check:
-                    // 1. The child node pointed to by this internal node
-                    // 2. Also potentially the child node of the next internal node
-                    if search_entry.equals(node_item) {
-                        found_potential_path = true;
-                        found_match = true;
-
-                        // Add this child's subtree to the search queue
-                        let offset = node_item.offset as usize;
-                        let prev_level = level - 1;
-                        queue.push_back((offset, prev_level));
-
-                        // If this is not the last entry in the node, we might need to check
-                        // the next child's subtree as well (depends on the B-tree implementation)
-                        if node_pos + 1 < node_items.len() {
-                            let next_node_item = &node_items[node_pos + 1];
-                            queue.push_back((next_node_item.offset as usize, prev_level));
-                        }
-                    }
-                    // For keys less than the search key, update the potential path
-                    else if node_item.key < search_entry.key {
-                        chosen_child_pos = node_pos;
-                        found_potential_path = true;
-                    }
-                    // Once we find a key > search key, we've found the boundary
-                    else {
-                        // If we're at the first item and it's already > search_key,
-                        // we need to go to this child
-                        if node_pos == 0 {
-                            chosen_child_pos = 0;
-                            found_potential_path = true;
-                        }
-                        break;
-                    }
-                }
-
-                // If we didn't find an exact match but found a potential path,
-                // follow the chosen child
-                if !found_potential_path {
-                    // If all keys in the node are < search_key, go to the rightmost child
-                    chosen_child_pos = node_items.len() - 1;
-                    let offset = node_items[chosen_child_pos].offset as usize;
-                    let prev_level = level - 1;
-                    queue.push_back((offset, prev_level));
-                } else if !found_match {
-                    // This handles the case where we found a child to traverse but no exact match
-                    let offset = node_items[chosen_child_pos].offset as usize;
-                    let prev_level = level - 1;
-                    queue.push_back((offset, prev_level));
-                }
-            }
-        }
-
-        // Skip rest of index
-        data.seek(SeekFrom::Start(
-            index_base + (num_nodes * Entry::<K>::SERIALIZED_SIZE) as u64,
-        ))?;
         Ok(results)
     }
 
@@ -1002,10 +848,21 @@ mod tests {
             node.offset = offset;
             offset += NodeItem::<u64>::SERIALIZED_SIZE as u64;
         }
-        let tree = Stree::build(&nodes, 4)?;
+        let tree = Stree::build(&nodes, 3)?;
         let list = tree.find_exact(10)?;
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].index, 10);
+        assert_eq!(list[0].index, nodes[10].offset as usize);
+
+        let list = tree.find_exact(0)?;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].index, nodes[0].offset as usize);
+
+        // let list = tree.find_exact(18)?;
+        // assert_eq!(list.len(), 1);
+        // assert_eq!(list[0].index, nodes[18].offset as usize);
+
+        let list = tree.find_exact(19)?;
+        assert_eq!(list.len(), 0);
 
         Ok(())
     }
