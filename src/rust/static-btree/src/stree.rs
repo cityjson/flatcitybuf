@@ -1,7 +1,11 @@
 use crate::entry::Offset;
 use crate::error::Error;
-use crate::{Entry, Key};
 use crate::payload::PayloadEntry;
+use crate::{Entry, Key};
+/// Marker bit in offset to indicate a payload reference (MSB).
+const PAYLOAD_TAG: Offset = 1u64 << 63;
+/// Mask to clear the tag bit.
+const PAYLOAD_MASK: Offset = !PAYLOAD_TAG;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use core::f64;
 // #[cfg(feature = "http")]
@@ -111,7 +115,6 @@ pub struct SearchResultItem {
     pub index: usize,
 }
 
-
 /// S-Tree
 pub struct Stree<K: Key> {
     node_items: Vec<NodeItem<K>>,
@@ -134,7 +137,6 @@ impl<K: Key> Stree<K> {
         assert!(branching_factor >= 2, "Branching factor must be at least 2");
         assert!(self.num_leaf_nodes > 0, "Cannot create empty tree");
         self.branching_factor = branching_factor.clamp(2u16, 65535u16);
-        println!("branching_factor: {branching_factor}");
         self.level_bounds =
             Stree::<K>::generate_level_bounds(self.num_leaf_nodes, self.branching_factor);
         let num_nodes = self
@@ -169,7 +171,6 @@ impl<K: Key> Stree<K> {
             }
         }
 
-        println!("level_num_nodes: {level_num_nodes:?}");
         // bounds per level in reversed storage order (top-down)
         let mut level_offsets: Vec<usize> = Vec::with_capacity(level_num_nodes.len());
         n = num_nodes;
@@ -177,12 +178,10 @@ impl<K: Key> Stree<K> {
             level_offsets.push(n - size);
             n -= size;
         }
-        println!("level_offsets: {level_offsets:?}");
         let mut level_bounds = Vec::with_capacity(level_num_nodes.len());
         for i in 0..level_num_nodes.len() {
             level_bounds.push(level_offsets[i]..level_offsets[i] + level_num_nodes[i]);
         }
-        println!("level_bounds: {level_bounds:?}");
         level_bounds
     }
 
@@ -313,37 +312,61 @@ impl<K: Key> Stree<K> {
 
     pub fn build(nodes: &[NodeItem<K>], branching_factor: u16) -> Result<Stree<K>, Error> {
         let branching_factor = branching_factor.clamp(2u16, 65535u16);
-        println!("branching_factor: {branching_factor}");
+        // Group duplicates into payload entries and build with unique keys
+        // Tag bit for payload pointers: MSB of u64
+        const TAG_MASK: Offset = 1u64 << 63;
+        // nodes must be sorted by key
+        let mut payload_data = Vec::new();
+        let mut unique_leaves = Vec::new();
+        let mut i = 0;
+        while i < nodes.len() {
+            let key = nodes[i].key.clone();
+            let mut entry = PayloadEntry::new();
+            entry.add_offset(nodes[i].offset);
+            let mut j = i + 1;
+            while j < nodes.len() && nodes[j].key == key {
+                entry.add_offset(nodes[j].offset);
+                j += 1;
+            }
+            if entry.count == 1 {
+                // single entry, inline original offset
+                let mut n = NodeItem::new_with_key(key);
+                n.set_offset(entry.offsets[0]);
+                unique_leaves.push(n);
+            } else {
+                // serialize payload and tag pointer
+                let rel = payload_data.len() as Offset;
+                let buf = entry.serialize();
+                payload_data.extend_from_slice(&buf);
+                let mut n = NodeItem::new_with_key(key);
+                n.set_offset(TAG_MASK | rel);
+                unique_leaves.push(n);
+            }
+            i = j;
+        }
+        // initialize tree with unique leaves
         let mut tree = Stree::<K> {
             node_items: Vec::new(),
             num_original_items: nodes.len(),
-            num_leaf_nodes: nodes.len(),
+            num_leaf_nodes: unique_leaves.len(),
             branching_factor,
             level_bounds: Vec::new(),
             payload_start: 0,
-            payload_data: Vec::new(),
-            payload_initialized: false,
+            payload_data,
+            payload_initialized: true,
         };
         tree.init(branching_factor)?;
         let num_nodes = tree.num_nodes();
-        for (i, node) in nodes.iter().take(tree.num_leaf_nodes).cloned().enumerate() {
-            tree.node_items[num_nodes - tree.num_leaf_nodes + i] = node;
+        for (k, node) in unique_leaves.into_iter().enumerate() {
+            tree.node_items[num_nodes - tree.num_leaf_nodes + k] = node;
         }
         tree.generate_nodes()?;
-        //print tree for each level
-        for level in (0..tree.level_bounds.len()).rev() {
-            println!("level {level}:");
-            println!(
-                "{:?}",
-                tree.node_items[tree.level_bounds[level].start..tree.level_bounds[level].end]
-                    .to_vec()
-            );
-        }
+
         Ok(tree)
     }
 
     pub fn from_buf(
-        data: impl Read,
+        mut data: impl Read,
         num_items: usize,
         branching_factor: u16,
     ) -> Result<Stree<K>, Error> {
@@ -364,7 +387,15 @@ impl<K: Key> Stree<K> {
             payload_data: Vec::new(),
             payload_initialized: false,
         };
-        tree.read_data(data)?;
+        // Read node items (index)
+        tree.read_data(&mut data)?;
+        // Read any remaining bytes as payload data
+        let mut payload = Vec::new();
+        data.read_to_end(&mut payload)?;
+        if !payload.is_empty() {
+            tree.payload_data = payload;
+            tree.payload_initialized = true;
+        }
         Ok(tree)
     }
 
@@ -442,18 +473,27 @@ impl<K: Key> Stree<K> {
             if is_leaf_node {
                 let result = node_items.binary_search_by(|item| item.key.cmp(&search_entry.key));
                 match result {
-                    Ok(index) => {
-                        // For leaf nodes in the tests, we need to handle the index
-                        // based on how the test is set up
-
-                        results.push(SearchResultItem {
-                            offset: node_items[index].offset as usize,
-                            index: node_index + index - leaf_nodes_offset,
-                        });
+                    Ok(idx) => {
+                        let off = node_items[idx].offset;
+                        let base_index = node_index + idx - leaf_nodes_offset;
+                        // Check for payload reference
+                        if self.payload_initialized && (off & PAYLOAD_TAG) != 0 {
+                            let rel = (off & PAYLOAD_MASK) as usize;
+                            let (entry, _) = PayloadEntry::deserialize(&self.payload_data[rel..])?;
+                            for o in entry.offsets {
+                                results.push(SearchResultItem {
+                                    offset: o as usize,
+                                    index: base_index,
+                                });
+                            }
+                        } else {
+                            results.push(SearchResultItem {
+                                offset: off as usize,
+                                index: base_index,
+                            });
+                        }
                     }
-                    Err(_) => {
-                        continue;
-                    }
+                    Err(_) => continue,
                 }
             }
         }
@@ -512,12 +552,23 @@ impl<K: Key> Stree<K> {
             // Add items that fall within the range
             for (i, item) in node_items.iter().enumerate() {
                 if item.key >= lower && item.key <= upper {
+                    let off = item.offset;
                     let idx = current_idx + i - leaf_nodes_offset;
-
-                    results.push(SearchResultItem {
-                        offset: item.offset as usize,
-                        index: idx,
-                    });
+                    if self.payload_initialized && (off & PAYLOAD_TAG) != 0 {
+                        let rel = (off & PAYLOAD_MASK) as usize;
+                        let (entry, _) = PayloadEntry::deserialize(&self.payload_data[rel..])?;
+                        for o in entry.offsets {
+                            results.push(SearchResultItem {
+                                offset: o as usize,
+                                index: idx,
+                            });
+                        }
+                    } else {
+                        results.push(SearchResultItem {
+                            offset: off as usize,
+                            index: idx,
+                        });
+                    }
                 }
             }
 
@@ -604,17 +655,18 @@ impl<K: Key> Stree<K> {
         num_nodes * Entry::<K>::SERIALIZED_SIZE
     }
 
-    /// Write all index nodes
+    /// Write all index nodes and any payload data
     pub fn stream_write<W: Write>(&self, out: &mut W) -> std::io::Result<()> {
+        // Write serialized nodes
         for item in &self.node_items {
             item.write(out)?;
         }
+        // Append payload section, if initialized
+        if self.payload_initialized && !self.payload_data.is_empty() {
+            out.write_all(&self.payload_data)?;
+        }
         Ok(())
     }
-
-    // pub fn root(&self) -> NodeItem<K> {
-    //     self.root.clone()
-    // }
 }
 
 #[cfg(feature = "http")]
@@ -705,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_19items_roundtrip_stream_search() -> Result<()> {
+    fn tree_19items_roundtrip_find_exact() -> Result<()> {
         let mut nodes = vec![
             NodeItem::new(0_i64, 0_u64),
             NodeItem::new(1_i64, 1_u64),
@@ -825,10 +877,8 @@ mod tests {
         // Verify the found items have offsets corresponding to indices 7-12
         let found_indices: Vec<usize> = list
             .iter()
-            .map(|item| item.offset / Entry::<i64>::SERIALIZED_SIZE as usize)
+            .map(|item| item.offset / Entry::<i64>::SERIALIZED_SIZE)
             .collect();
-
-        println!("Test 3 - Found indices: {:?}", found_indices);
 
         // Verify we found at least items 7, 8, 9, 10, 11
         assert!(found_indices.contains(&7));
@@ -847,7 +897,7 @@ mod tests {
         // Verify the found items have offsets corresponding to indices 15-18
         let found_indices: Vec<usize> = list
             .iter()
-            .map(|item| item.offset / Entry::<i64>::SERIALIZED_SIZE as usize)
+            .map(|item| item.offset / Entry::<i64>::SERIALIZED_SIZE)
             .collect();
 
         println!("Test 4 - Found indices: {:?}", found_indices);
@@ -924,8 +974,8 @@ mod tests {
         let found_keys: Vec<String> = list
             .iter()
             .map(|item| {
-                let idx = item.offset / Entry::<FixedStringKey<10>>::SERIALIZED_SIZE as usize;
-                let c = ('a' as u8 + idx as u8) as char;
+                let idx = item.offset / Entry::<FixedStringKey<10>>::SERIALIZED_SIZE;
+                let c = (b'a' + idx as u8) as char;
                 c.to_string()
             })
             .collect();
@@ -956,8 +1006,8 @@ mod tests {
         println!("Single key range found: {}", list.len());
         if !list.is_empty() {
             // Extract the key from the offset
-            let idx = list[0].offset / Entry::<FixedStringKey<10>>::SERIALIZED_SIZE as usize;
-            let found_key = ('a' as u8 + idx as u8) as char;
+            let idx = list[0].offset / Entry::<FixedStringKey<10>>::SERIALIZED_SIZE;
+            let found_key = (b'a' + idx as u8) as char;
             println!("Found key: {}", found_key);
 
             assert_eq!(found_key, 'k');
@@ -1113,6 +1163,110 @@ mod tests {
         let list = tree.find_exact(FixedStringKey::<10>::from_str("not exists"))?;
         assert_eq!(list.len(), 0);
 
+        Ok(())
+    }
+    #[test]
+    /// Test exact search with duplicate keys
+    fn test_duplicates_exact() -> Result<()> {
+        let nodes = vec![
+            NodeItem::new(0, 0),
+            NodeItem::new(1, 10),
+            NodeItem::new(1, 20),
+            NodeItem::new(1, 30),
+            NodeItem::new(2, 40),
+            NodeItem::new(2, 50),
+            NodeItem::new(2, 60),
+            NodeItem::new(3, 70),
+            NodeItem::new(3, 80),
+            NodeItem::new(3, 90),
+            NodeItem::new(4, 100),
+            NodeItem::new(5, 110),
+            NodeItem::new(6, 120),
+            NodeItem::new(7, 130),
+            NodeItem::new(8, 140),
+            NodeItem::new(9, 150),
+        ];
+        let tree = Stree::build(&nodes, 2)?;
+        let res = tree.find_exact(1)?;
+        assert_eq!(res.len(), 3);
+        let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
+        offs.sort_unstable();
+        assert_eq!(offs, vec![10, 20, 30]);
+        Ok(())
+    }
+
+    #[test]
+    /// Test range search across duplicates and unique keys
+    fn test_duplicates_range() -> Result<()> {
+        let nodes = vec![
+            NodeItem::new(1, 5),
+            NodeItem::new(1, 6),
+            NodeItem::new(2, 7),
+            NodeItem::new(2, 8),
+            NodeItem::new(3, 9),
+        ];
+        let tree = Stree::build(&nodes, 3)?;
+        // range 1..2 should include both 1s and 2s
+        let res = tree.find_range(1, 2)?;
+        assert_eq!(res.len(), 4);
+        let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
+        offs.sort_unstable();
+        assert_eq!(offs, vec![5, 6, 7, 8]);
+        Ok(())
+    }
+
+    #[test]
+    /// Ensure stream_write appends payload after index nodes
+    fn test_stream_write_payload() -> Result<()> {
+        // Two duplicate entries for key=1 to generate payload
+        let nodes = vec![NodeItem::new(1, 10), NodeItem::new(1, 20)];
+        let tree = Stree::build(&nodes, 2)?;
+        // Capture stream output
+        let mut buf = Vec::new();
+        tree.stream_write(&mut buf)?;
+        // Index size in bytes
+        let idx_bytes = tree.size();
+        // payload_data should be appended
+        let payload = &tree.payload_data;
+        assert!(!payload.is_empty());
+        assert_eq!(buf.len(), idx_bytes + payload.len());
+        assert_eq!(&buf[idx_bytes..], payload);
+        Ok(())
+    }
+
+    #[test]
+    /// Test write to buffer and read back via from_buf, then search exact
+    fn test_read_write_roundtrip() -> Result<()> {
+        // Prepare nodes with duplicates and unique keys
+        let nodes = vec![
+            NodeItem::new(1, 100),
+            NodeItem::new(1, 200),
+            NodeItem::new(2, 300),
+            NodeItem::new(3, 400),
+            NodeItem::new(3, 500),
+        ];
+        // Build original tree
+        let orig = Stree::build(&nodes, 3)?;
+        // Serialize to buffer
+        let mut buf = Vec::new();
+        orig.stream_write(&mut buf)?;
+        // Read back from buffer: num_leaf_nodes equals unique leaf count
+        let mut cursor = std::io::Cursor::new(&buf);
+        let restored: Stree<i32> = Stree::from_buf(&mut cursor, orig.num_leaf_nodes, 3)?;
+        // Search for duplicates key=1 and key=3 and unique=2
+        let r1 = restored.find_exact(1)?;
+        let offs1: Vec<usize> = r1.iter().map(|r| r.offset).collect();
+        assert_eq!(offs1.len(), 2);
+        assert!(offs1.contains(&100));
+        assert!(offs1.contains(&200));
+        let r2 = restored.find_exact(2)?;
+        assert_eq!(r2.len(), 1);
+        assert_eq!(r2[0].offset, 300);
+        let r3 = restored.find_exact(3)?;
+        let offs3: Vec<usize> = r3.iter().map(|r| r.offset).collect();
+        assert_eq!(offs3.len(), 2);
+        assert!(offs3.contains(&400));
+        assert!(offs3.contains(&500));
         Ok(())
     }
 }
