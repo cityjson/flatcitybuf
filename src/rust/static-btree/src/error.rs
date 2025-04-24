@@ -1,3 +1,4 @@
+use http_range_client::HttpError;
 use std::io;
 use thiserror::Error; // Import the Error derive macro
 
@@ -35,4 +36,8 @@ pub enum Error {
     /// Used when an operation fails due to an unexpected condition.
     #[error("other error: {0}")]
     Other(String),
+
+    /// Used when an operation fails due to an HTTP error.
+    #[error("http error: {0}")]
+    HttpError(#[from] HttpError),
 }

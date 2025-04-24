@@ -26,16 +26,17 @@ chrono = { workspace = true }
 
 # Async support
 tokio = { workspace = true }
+tracing = { workspace = true }
+http-range-client = { workspace = true, optional = true, default-features = false }
 
 [dev-dependencies]
 criterion = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 
-# [features]
-# default = []
-# simd = ["packed_simd"]
-
+[features]
+default = []
+http = ["http-range-client"]
 # [[bench]]
 # name = "search_benchmark"
 # harness = false

@@ -8,8 +8,8 @@ const PAYLOAD_TAG: Offset = 1u64 << 63;
 const PAYLOAD_MASK: Offset = !PAYLOAD_TAG;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use core::f64;
-// #[cfg(feature = "http")]
-// use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
+#[cfg(feature = "http")]
+use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
 use std::cmp::{max, min, Ordering};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
@@ -83,28 +83,28 @@ fn read_node_items<K: Key, R: Read + Seek>(
     Ok(node_items)
 }
 
-// /// Read partial item vec from http
-// #[cfg(feature = "http")]
-// async fn read_http_node_items<T: AsyncHttpRangeClient>(
-//     client: &mut AsyncBufferedHttpRangeClient<T>,
-//     base: usize,
-//     node_ids: &Range<usize>,
-// ) -> Result<Vec<NodeItem>, Error> {
-//     let begin = base + node_ids.start * size_of::<NodeItem>();
-//     let length = node_ids.len() * size_of::<NodeItem>();
-//     let bytes = client
-//         // we've  already determined precisely which nodes to fetch - no need for extra.
-//         .min_req_size(0)
-//         .get_range(begin, length)
-//         .await?;
+/// Read partial item vec from http
+#[cfg(feature = "http")]
+async fn read_http_node_items<K: Key, T: AsyncHttpRangeClient>(
+    client: &mut AsyncBufferedHttpRangeClient<T>,
+    base: usize,
+    node_ids: &Range<usize>,
+) -> Result<Vec<NodeItem<K>>, Error> {
+    let begin = base + node_ids.start * size_of::<NodeItem<K>>();
+    let length = node_ids.len() * size_of::<NodeItem<K>>();
+    let bytes = client
+        // we've  already determined precisely which nodes to fetch - no need for extra.
+        .min_req_size(0)
+        .get_range(begin, length)
+        .await?;
 
-//     let mut node_items = Vec::with_capacity(node_ids.len());
-//     debug_assert_eq!(bytes.len(), length);
-//     for node_item_bytes in bytes.chunks(size_of::<NodeItem>()) {
-//         node_items.push(NodeItem::from_bytes(node_item_bytes)?);
-//     }
-//     Ok(node_items)
-// }
+    let mut node_items = Vec::with_capacity(node_ids.len());
+    debug_assert_eq!(bytes.len(), length);
+    for node_item_bytes in bytes.chunks(size_of::<NodeItem<K>>()) {
+        node_items.push(NodeItem::from_bytes(node_item_bytes)?);
+    }
+    Ok(node_items)
+}
 
 #[derive(Debug)]
 /// Bbox filter search result
@@ -296,12 +296,11 @@ impl<K: Key> Stree<K> {
         for i in 0..self.num_nodes() {
             let bytes = client
                 .min_req_size(min_req_size)
-                .get_range(pos, size_of::<NodeItem>())
+                .get_range(pos, size_of::<NodeItem<K>>())
                 .await?;
             let n = NodeItem::from_bytes(bytes)?;
-            self.extent.expand(&n);
             self.node_items[i] = n;
-            pos += size_of::<NodeItem>();
+            pos += NodeItem::<K>::SERIALIZED_SIZE;
         }
         Ok(())
     }
@@ -399,24 +398,27 @@ impl<K: Key> Stree<K> {
         Ok(tree)
     }
 
-    // #[cfg(feature = "http")]
-    // pub async fn from_http<T: AsyncHttpRangeClient>(
-    //     client: &mut AsyncBufferedHttpRangeClient<T>,
-    //     index_begin: usize,
-    //     num_items: usize,
-    //     node_size: u16,
-    // ) -> Result<Stree, Error> {
-    //     let mut tree = Stree {
-    //         extent: NodeItem::create(0),
-    //         node_items: Vec::new(),
-    //         num_leaf_nodes: num_items,
-    //         branching_factor: 0,
-    //         level_bounds: Vec::new(),
-    //     };
-    //     tree.init(node_size)?;
-    //     tree.read_http(client, index_begin).await?;
-    //     Ok(tree)
-    // }
+    #[cfg(feature = "http")]
+    pub async fn from_http<T: AsyncHttpRangeClient>(
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        index_begin: usize,
+        num_items: usize,
+        node_size: u16,
+    ) -> Result<Stree<K>, Error> {
+        let mut tree = Stree::<K> {
+            node_items: Vec::new(),
+            num_leaf_nodes: num_items,
+            branching_factor: 0,
+            level_bounds: Vec::new(),
+            payload_start: 0, // TODO: check if this is correct
+            payload_data: Vec::new(),
+            payload_initialized: false,
+            num_original_items: num_items,
+        };
+        tree.init(node_size)?;
+        tree.read_http(client, index_begin).await?;
+        Ok(tree)
+    }
 
     pub fn find_exact(&self, key: K) -> Result<Vec<SearchResultItem>, Error> {
         let leaf_nodes_offset = self
@@ -872,6 +874,132 @@ impl<K: Key> Stree<K> {
         Ok(node_index)
     }
 
+    #[cfg(feature = "http")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn http_stream_find_exact<T: AsyncHttpRangeClient>(
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        index_begin: usize,
+        attr_index_size: usize,
+        num_items: usize,
+        branching_factor: u16,
+        key: K,
+        combine_request_threshold: usize,
+    ) -> Result<Vec<HttpSearchResultItem>, Error> {
+        use tracing::debug;
+
+        if num_items == 0 {
+            return Ok(vec![]);
+        }
+        let search_entry = NodeItem::new_with_key(key.clone());
+        let node_size = branching_factor as usize - 1;
+        let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
+
+        let feature_begin =
+            index_begin + attr_index_size + Stree::<K>::index_size(num_items, branching_factor);
+
+        debug!("http_stream_find_exact - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, key: {key:?}");
+
+        #[derive(Debug, PartialEq, Eq)]
+        struct NodeRange {
+            level: usize,
+            nodes: Range<usize>,
+        }
+
+        let mut queue = VecDeque::new();
+        queue.push_back(NodeRange {
+            nodes: 0..1,
+            level: level_bounds.len() - 1,
+        });
+        let mut results = Vec::new();
+
+        while let Some(node_range) = queue.pop_front() {
+            debug!("next: {node_range:?}. {} items left in queue", queue.len());
+            let is_leaf = node_range.level == 0;
+            let node_items = read_http_node_items(client, index_begin, &node_range.nodes).await?;
+            if node_items.is_empty() {
+                continue;
+            }
+
+            if is_leaf {
+                let result = node_items
+                    .binary_search_by(|item: &NodeItem<K>| item.key.cmp(&search_entry.key));
+                match result {
+                    Ok(idx) => {
+                        // todo: get actual offset from payload_data
+                        let start = feature_begin + node_items[idx].offset as usize;
+                        results.push(HttpSearchResultItem {
+                            range: HttpRange::RangeFrom(start..), // TODO: if possible, get the end of the range
+                        });
+                    }
+                    Err(_) => continue,
+                }
+            } else {
+                let children_level = node_range.level - 1;
+                let mut children_nodes = node_items[0].offset as usize
+                    ..(node_items[0].offset + node_size as u64) as usize;
+                if children_level == 0 {
+                    // These children are leaf nodes.
+                    //
+                    // We can right-size our feature requests if we know the size of each feature.
+                    //
+                    // To infer the length of *this* feature, we need the start of the *next*
+                    // feature, so we get an extra node here. TODO: check if this is correct
+                    children_nodes.end += 1;
+                }
+                children_nodes.end = min(children_nodes.end, level_bounds[children_level].end);
+
+                let children_range = NodeRange {
+                    nodes: children_nodes,
+                    level: children_level,
+                };
+
+                let Some(tail) = queue.back_mut() else {
+                    debug!("Adding new request onto empty queue: {children_range:?}");
+                    queue.push_back(children_range);
+                    continue;
+                };
+
+                if tail.level != children_level {
+                    debug!("Adding new request for new level: {children_range:?} (existing queue tail: {tail:?})");
+                    queue.push_back(children_range);
+                    continue;
+                }
+
+                let wasted_bytes = {
+                    if children_range.nodes.start >= tail.nodes.end {
+                        (children_range.nodes.start - tail.nodes.end) * size_of::<NodeItem<K>>()
+                    } else {
+                        // To compute feature size, we fetch an extra leaf node, but computing
+                        // wasted_bytes for adjacent ranges will overflow in that case, so
+                        // we skip that computation.
+                        //
+                        // But let's make sure we're in the state we think we are:
+                        debug_assert_eq!(
+                            children_range.nodes.start + 1,
+                            tail.nodes.end,
+                            "we only ever fetch one extra node"
+                        );
+                        debug_assert_eq!(
+                            children_level, 0,
+                            "extra node fetching only happens with leaf nodes"
+                        );
+                        0
+                    }
+                };
+                if wasted_bytes > combine_request_threshold {
+                    debug!("Adding new request for: {children_range:?} rather than merging with distant NodeRange: {tail:?} (would waste {wasted_bytes} bytes)");
+                    queue.push_back(children_range);
+                    continue;
+                }
+
+                // Merge the ranges to avoid an extra request
+                debug!("Extending existing request {tail:?} with nearby children: {:?} (wastes {wasted_bytes} bytes)", &children_range.nodes);
+                tail.nodes.end = children_range.nodes.end;
+            }
+        }
+        Ok(results)
+    }
+
     pub fn size(&self) -> usize {
         self.num_nodes() * Entry::<K>::SERIALIZED_SIZE
     }
@@ -894,7 +1022,8 @@ impl<K: Key> Stree<K> {
                 break;
             }
         }
-        num_nodes * Entry::<K>::SERIALIZED_SIZE
+        // TODO: add payload size as well
+        num_nodes * NodeItem::<K>::SERIALIZED_SIZE
     }
 
     /// Write all index nodes and any payload data
