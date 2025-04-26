@@ -1,6 +1,6 @@
 use crate::entry::Offset;
 use crate::error::Result;
-use crate::payload::{PayloadEntry};
+use crate::payload::PayloadEntry;
 use crate::{Entry, Key};
 /// Marker bit in offset to indicate a payload reference (MSB).
 const PAYLOAD_TAG: Offset = 1u64 << 63;
@@ -367,6 +367,13 @@ impl<K: Key> Stree<K> {
             tree.node_items[num_nodes - tree.num_leaf_nodes + k] = node;
         }
         tree.generate_nodes()?;
+
+        for level in &tree.level_bounds {
+            println!("level: {:?}", level);
+            for node in tree.node_items[level.start..level.end].iter() {
+                println!("node: {:?}", node);
+            }
+        }
 
         Ok(tree)
     }
@@ -906,6 +913,13 @@ impl<K: Key> Stree<K> {
             .first()
             .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
 
+        let Range {
+            start: root_start,
+            end: root_end,
+        } = level_bounds
+            .last()
+            .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
+
         let feature_begin =
             index_begin + attr_index_size + Stree::<K>::index_size(num_items, branching_factor);
 
@@ -919,7 +933,7 @@ impl<K: Key> Stree<K> {
 
         let mut queue = VecDeque::new();
         queue.push_back(NodeRange {
-            nodes: 0..1,
+            nodes: *root_start..*root_end,
             level: level_bounds.len() - 1,
         });
         let mut results = Vec::new();
@@ -1773,29 +1787,60 @@ mod tests {
             NodeItem::new(17_i64, 17_u64),
             NodeItem::new(18_i64, 18_u64),
         ];
-        let tree = Stree::<i64>::build(&nodes, 3)?;
-        // Serialize tree to buffer
-        let mut buf = Vec::new();
-        tree.stream_write(&mut buf)?;
 
-        let mut client = MockHttpRangeClient::new_mock_http_range_client(&buf);
+        // ((query, expected_result), branching_factor)
+        let test_cases = vec![
+            ((9_i64, vec![9]), 3),
+            ((9_i64, vec![9]), 4),
+            ((9_i64, vec![9]), 5),
+            ((9_i64, vec![9]), 6),
+            ((0_i64, vec![0]), 4),
+            ((18_i64, vec![18]), 4),
+            ((19_i64, vec![]), 4),
+            ((-1_i64, vec![]), 4),
+        ];
 
-        // Perform http_stream_find_exact
-        let res = Stree::http_stream_find_exact(
-            &mut client,
-            0, // index_begin
-            0, // attr_index_size
-            tree.num_leaf_nodes,
-            3,          // branching_factor
-            9_i64,      // key
-            256 * 1024, // combine_request_threshold
-        )
-        .await?;
-        assert_eq!(res.len(), 1);
-        let mut offs: Vec<usize> = res.iter().map(|item| item.range.start()).collect();
-        offs.sort_unstable();
-        let feature_begin = Stree::<i64>::index_size(tree.num_leaf_nodes, 3);
-        assert_eq!(offs, vec![feature_begin + 9]);
+        for ((query, expected_result), branching_factor) in test_cases {
+            let tree = Stree::<i64>::build(&nodes, branching_factor)?;
+            // Serialize tree to buffer
+            let mut buf = Vec::new();
+            tree.stream_write(&mut buf)?;
+
+            let mut client = MockHttpRangeClient::new_mock_http_range_client(&buf);
+
+            let feature_begin = Stree::<i64>::index_size(tree.num_leaf_nodes, branching_factor);
+            println!("feature_begin: {:?}", feature_begin);
+
+            let expected_result = expected_result
+                .iter()
+                .map(|item| item + feature_begin)
+                .collect::<Vec<usize>>();
+
+            println!(
+                "test case: {:?}, {:?}, {:?}",
+                query, expected_result, branching_factor
+            );
+
+            // Perform http_stream_find_exact
+            let res = Stree::http_stream_find_exact(
+                &mut client,
+                0, // index_begin
+                0, // attr_index_size
+                tree.num_leaf_nodes,
+                branching_factor, // branching_factor
+                query,            // key
+                256 * 1024,       // combine_request_threshold
+            )
+            .await?;
+
+            let mut offs: Vec<usize> = res.iter().map(|item| item.range.start()).collect();
+            offs.sort_unstable();
+            assert_eq!(
+                offs, expected_result,
+                "expected_result: {:?}, offs: {:?}",
+                expected_result, offs
+            );
+        }
         Ok(())
     }
 }

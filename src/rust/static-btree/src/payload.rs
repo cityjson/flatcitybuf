@@ -65,6 +65,7 @@ impl PayloadEntry {
 mod tests {
     use super::*;
     use crate::error::Error;
+    use std::io::Cursor;
 
     #[test]
     fn test_serialize_deserialize_empty() {

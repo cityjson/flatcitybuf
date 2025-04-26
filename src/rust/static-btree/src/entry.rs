@@ -81,6 +81,7 @@ impl<K: Key> Ord for Entry<K> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
     use crate::key::Key;
     use std::io::Cursor;
 
