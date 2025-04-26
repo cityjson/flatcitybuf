@@ -1,16 +1,14 @@
 use crate::entry::Offset;
-use crate::error::{Error, Result};
-use crate::payload::{self, PayloadEntry};
+use crate::error::Result;
+use crate::payload::{PayloadEntry};
 use crate::{Entry, Key};
 /// Marker bit in offset to indicate a payload reference (MSB).
 const PAYLOAD_TAG: Offset = 1u64 << 63;
 /// Mask to clear the tag bit.
 const PAYLOAD_MASK: Offset = !PAYLOAD_TAG;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use core::f64;
 #[cfg(feature = "http")]
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
-use std::cmp::{max, min, Ordering};
+use std::cmp::{max, min};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
@@ -78,7 +76,6 @@ async fn read_http_node_items<K: Key, T: AsyncHttpRangeClient>(
     base: usize,
     node_ids: &Range<usize>,
 ) -> Result<Vec<NodeItem<K>>> {
-    println!("read_http_node_items - base: {base}, node_ids: {node_ids:?}");
     let begin = base + node_ids.start * NodeItem::<K>::SERIALIZED_SIZE;
     let length = node_ids.len() * NodeItem::<K>::SERIALIZED_SIZE;
     let bytes = client
@@ -90,11 +87,9 @@ async fn read_http_node_items<K: Key, T: AsyncHttpRangeClient>(
     let mut node_items = Vec::with_capacity(node_ids.len());
     debug_assert_eq!(bytes.len(), length);
     for node_item_bytes in bytes.chunks(NodeItem::<K>::SERIALIZED_SIZE) {
-        let node_item = NodeItem::from_bytes(node_item_bytes)?;
-        println!("read_http_node_items - node_item: {node_item:?}");
+        let node_item = NodeItem::from_reader(&mut Cursor::new(node_item_bytes))?;
         node_items.push(node_item);
     }
-    println!("read_http_node_items - node_items: {node_items:?}");
     Ok(node_items)
 }
 
@@ -373,7 +368,6 @@ impl<K: Key> Stree<K> {
         }
         tree.generate_nodes()?;
 
-        println!("tree.node_items: {:#?}", tree.node_items);
         Ok(tree)
     }
 
@@ -755,7 +749,6 @@ impl<K: Key> Stree<K> {
                     let off = item.offset;
                     let idx = current_idx + i - leaf_nodes_offset;
                     if (off & PAYLOAD_TAG) != 0 {
-                        println!(" find_partition--------");
                         let rel = (off & PAYLOAD_MASK) as usize;
                         data.seek(SeekFrom::Start(payload_data_start + rel as u64))?;
                         let (entry, _) = PayloadEntry::deserialize(data)?;
@@ -766,7 +759,6 @@ impl<K: Key> Stree<K> {
                             });
                         }
                     } else {
-                        println!(" find_partition---111111-----");
                         results.push(SearchResultItem {
                             offset: off as usize,
                             index: idx,
@@ -936,8 +928,6 @@ impl<K: Key> Stree<K> {
 
         while let Some(node_range) = queue.pop_front() {
             debug!("next: {node_range:?}. {} items left in queue", queue.len());
-            println!("next: {node_range:?}. {} items left in queue", queue.len());
-            let index_base = node_range.nodes.start;
             let is_leaf = node_range.level == 0;
             let node_items = read_http_node_items(client, index_begin, &node_range.nodes).await?;
             if node_items.is_empty() {
@@ -973,9 +963,25 @@ impl<K: Key> Stree<K> {
                     Err(_) => continue,
                 }
             } else {
+                let result = node_items
+                    .binary_search_by(|item: &NodeItem<K>| item.key.cmp(&search_entry.key));
+                let mut offset = 0;
+                match result {
+                    Ok(idx) => {
+                        offset = node_items[idx].offset as usize + node_size;
+                    }
+                    Err(idx) => {
+                        if idx == 0 {
+                            offset = node_items[0].offset as usize;
+                        } else if idx == node_items.len() {
+                            offset = node_items[node_items.len() - 1].offset as usize + node_size;
+                        } else {
+                            offset = node_items[idx].offset as usize;
+                        }
+                    }
+                }
                 let children_level = node_range.level - 1;
-                let mut children_nodes = node_items[0].offset as usize
-                    ..(node_items[0].offset + node_size as u64) as usize;
+                let mut children_nodes = offset..(offset + node_size);
                 if children_level == 0 {
                     // These children are leaf nodes.
                     //
@@ -986,7 +992,6 @@ impl<K: Key> Stree<K> {
                     children_nodes.end += 1;
                 }
                 children_nodes.end = min(children_nodes.end, level_bounds[children_level].end);
-                println!("children_nodes: {children_nodes:?}");
 
                 let children_range = NodeRange {
                     nodes: children_nodes,
@@ -1028,7 +1033,6 @@ impl<K: Key> Stree<K> {
                 };
                 if wasted_bytes > combine_request_threshold {
                     debug!("Adding new request for: {children_range:?} rather than merging with distant NodeRange: {tail:?} (would waste {wasted_bytes} bytes)");
-                    println!("Adding new request for: {children_range:?}");
                     queue.push_back(children_range);
                     continue;
                 }
@@ -1036,7 +1040,6 @@ impl<K: Key> Stree<K> {
                 // Merge the ranges to avoid an extra request
                 debug!("Extending existing request {tail:?} with nearby children: {:?} (wastes {wasted_bytes} bytes)", &children_range.nodes);
                 tail.nodes.end = children_range.nodes.end;
-                println!("Extending existing request {tail:?} with nearby children: {:?} (wastes {wasted_bytes} bytes)", &children_range.nodes);
             }
         }
         Ok(results)
@@ -1046,10 +1049,10 @@ impl<K: Key> Stree<K> {
         self.num_nodes() * Entry::<K>::SERIALIZED_SIZE
     }
 
-    pub fn index_size(num_items: usize, node_size: u16) -> usize {
-        assert!(node_size >= 2, "Node size must be at least 2");
+    pub fn index_size(num_items: usize, branching_factor: u16) -> usize {
+        assert!(branching_factor >= 2, "Node size must be at least 2");
         assert!(num_items > 0, "Cannot create empty tree");
-        let node_size_min = node_size.clamp(2, 65535) as usize;
+        let branching_factor_min = branching_factor.clamp(2, 65535) as usize;
         // limit so that resulting size in bytes can be represented by uint64_t
         // assert!(
         //     num_items <= 1 << 56,
@@ -1057,10 +1060,11 @@ impl<K: Key> Stree<K> {
         // );
         let mut n = num_items;
         let mut num_nodes = n;
+
         loop {
-            n = n.div_ceil(node_size_min);
+            n = n.div_ceil(branching_factor_min);
             num_nodes += n;
-            if n == 1 {
+            if n < branching_factor_min {
                 break;
             }
         }
@@ -1769,27 +1773,29 @@ mod tests {
             NodeItem::new(17_i64, 17_u64),
             NodeItem::new(18_i64, 18_u64),
         ];
-        let tree = Stree::<i64>::build(&nodes, 4)?;
+        let tree = Stree::<i64>::build(&nodes, 3)?;
         // Serialize tree to buffer
         let mut buf = Vec::new();
         tree.stream_write(&mut buf)?;
 
         let mut client = MockHttpRangeClient::new_mock_http_range_client(&buf);
+
         // Perform http_stream_find_exact
         let res = Stree::http_stream_find_exact(
             &mut client,
             0, // index_begin
             0, // attr_index_size
             tree.num_leaf_nodes,
-            4,          // branching_factor
-            1,          // key
+            3,          // branching_factor
+            9_i64,      // key
             256 * 1024, // combine_request_threshold
         )
         .await?;
         assert_eq!(res.len(), 1);
         let mut offs: Vec<usize> = res.iter().map(|item| item.range.start()).collect();
         offs.sort_unstable();
-        assert_eq!(offs, vec![11]);
+        let feature_begin = Stree::<i64>::index_size(tree.num_leaf_nodes, 3);
+        assert_eq!(offs, vec![feature_begin + 9]);
         Ok(())
     }
 }

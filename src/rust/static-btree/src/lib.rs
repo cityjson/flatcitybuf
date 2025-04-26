@@ -1,4 +1,3 @@
-use std::mem;
 
 pub mod entry;
 pub mod error;

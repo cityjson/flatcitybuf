@@ -6,7 +6,6 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use tracing::trace;
 
 /// NOTE: For debugging expediency, this test class often prefers panics over returning a result.
 pub(crate) struct MockHttpRangeClient {

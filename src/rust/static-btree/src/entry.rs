@@ -1,4 +1,6 @@
-use crate::error::{Error, Result};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use crate::error::Result;
 use crate::key::Key;
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -39,7 +41,8 @@ impl<K: Key> Entry<K> {
     /// Assumes little-endian encoding for the `Value`.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         self.key.write_to(writer)?;
-        writer.write_all(&self.offset.to_le_bytes())?;
+
+        writer.write_u64::<LittleEndian>(self.offset)?;
         Ok(())
     }
 
@@ -47,9 +50,7 @@ impl<K: Key> Entry<K> {
     /// Assumes little-endian encoding for the `Value`.
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
         let key = K::read_from(reader)?;
-        let mut offset_bytes = [0u8; Self::OFFSET_SIZE];
-        reader.read_exact(&mut offset_bytes)?;
-        let offset = Offset::from_le_bytes(offset_bytes);
+        let offset = reader.read_u64::<LittleEndian>()?;
         Ok(Entry { key, offset })
     }
 

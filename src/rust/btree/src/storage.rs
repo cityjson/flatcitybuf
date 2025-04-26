@@ -2,7 +2,6 @@ use crate::errors::{BTreeError, Result};
 use lru::LruCache;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::num::NonZeroUsize;
 
@@ -819,8 +818,8 @@ mod tests {
         assert_eq!(offset2, 128);
 
         // Write data to both blocks
-        storage.write_block(offset1, &vec![1, 2, 3]).unwrap();
-        storage.write_block(offset2, &vec![4, 5, 6]).unwrap();
+        storage.write_block(offset1, &[1, 2, 3]).unwrap();
+        storage.write_block(offset2, &[4, 5, 6]).unwrap();
 
         // Flush the data
         storage.flush().unwrap();
@@ -875,7 +874,7 @@ mod tests {
                 assert_eq!(offset, 0);
 
                 // Write to the first block should succeed
-                storage.write_block(offset, &vec![1, 2, 3]).unwrap();
+                storage.write_block(offset, &[1, 2, 3]).unwrap();
 
                 // Second block allocation should fail since we're at the limit
                 let result = storage.allocate_block();
@@ -901,7 +900,7 @@ mod tests {
                 }
 
                 // Direct write beyond bounds should fail
-                let result = storage.write_block(128, &vec![4, 5, 6]);
+                let result = storage.write_block(128, &[4, 5, 6]);
                 assert!(result.is_err(), "Should have failed to write beyond bounds");
             }
             Err(e) => {

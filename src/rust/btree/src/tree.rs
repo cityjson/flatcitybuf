@@ -1,6 +1,6 @@
 use crate::entry::Entry;
 use crate::errors::{BTreeError, Result};
-use crate::key::{AnyKeyEncoder, KeyEncoder, KeyType};
+use crate::key::KeyEncoder;
 use crate::node::{Node, NodeType};
 use crate::storage::BlockStorage;
 use std::cmp::Ordering;
@@ -745,7 +745,7 @@ impl<K, S: BlockStorage> BTreeBuilder<K, S> {
             _ => {
                 // For any other case, calculate a balanced distribution
                 let nodes_needed =
-                    (total_entries + self.max_entries_per_node - 1) / self.max_entries_per_node;
+                    total_entries.div_ceil(self.max_entries_per_node);
                 let base_per_node = total_entries / nodes_needed;
                 let remainder = total_entries % nodes_needed;
 
@@ -820,7 +820,7 @@ impl<K, S: BlockStorage> BTreeBuilder<K, S> {
 
         // Minimum number of parent nodes needed
         let min_parent_nodes =
-            (total_child_nodes + max_children_per_node - 1) / max_children_per_node;
+            total_child_nodes.div_ceil(max_children_per_node);
 
         // Calculate base children per parent for even distribution
         let base_children_per_parent = total_child_nodes / min_parent_nodes;
@@ -930,7 +930,7 @@ mod tests {
     use super::*;
     use crate::key::{AnyKeyEncoder, KeyType};
     use crate::storage::MemoryBlockStorage;
-    use std::collections::HashMap;
+    
 
     // Helper function to create a test tree with integer keys
     fn create_test_tree() -> Result<BTree<KeyType, MemoryBlockStorage>> {

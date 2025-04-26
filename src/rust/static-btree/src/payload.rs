@@ -1,7 +1,7 @@
 use crate::entry::Offset;
 use crate::error::Error;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Cursor, Read, Seek};
+use std::io::{Read, Seek};
 
 #[derive(Debug)]
 /// A collection of offsets for duplicate keys.
@@ -10,6 +10,12 @@ pub struct PayloadEntry {
     pub count: u32,
     /// Offsets for each duplicate
     pub offsets: Vec<Offset>,
+}
+
+impl Default for PayloadEntry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PayloadEntry {

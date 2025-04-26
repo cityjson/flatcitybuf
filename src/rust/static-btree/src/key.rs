@@ -1,4 +1,5 @@
-use crate::error::Error;
+use crate::error::{Error, Result};
+use byteorder::{LittleEndian, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use ordered_float::OrderedFloat; // Import OrderedFloat
 use std::fmt::Debug;
@@ -32,7 +33,7 @@ pub trait Key: Sized + Ord + Clone + Debug + Default + Max {
     /// # Returns
     /// `Ok(())` on success.
     /// `Err(Error)` if writing fails or the implementation cannot guarantee writing exactly `SERIALIZED_SIZE` bytes.
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error>;
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()>;
 
     /// Deserializes a key from the provided reader.
     ///
@@ -42,7 +43,7 @@ pub trait Key: Sized + Ord + Clone + Debug + Default + Max {
     /// # Returns
     /// `Ok(Self)` containing the deserialized key on success.
     /// `Err(Error)` if reading fails or the implementation cannot read exactly `SERIALIZED_SIZE` bytes.
-    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error>;
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self>;
 
     /// Deserializes a key from the provided bytes.
     ///
@@ -52,7 +53,7 @@ pub trait Key: Sized + Ord + Clone + Debug + Default + Max {
     /// # Returns
     /// `Ok(Self)` containing the deserialized key on success.
     /// `Err(Error)` if the bytes are not a valid key.
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Error>;
+    fn from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
 // Implement Max for primitive integer types
@@ -120,24 +121,25 @@ impl<const N: usize> Max for FixedStringKey<N> {
 
 // Macro to implement Key for primitive integer types easily
 macro_rules! impl_key_for_int {
-    ($T:ty) => {
+    ($T:ty, $write_method:ident) => {
         impl Key for $T {
             const SERIALIZED_SIZE: usize = mem::size_of::<$T>();
 
             #[inline]
-            fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-                writer.write_all(&self.to_le_bytes()).map_err(Error::from)
+            fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+                writer.$write_method::<LittleEndian>(*self)?;
+                Ok(())
             }
 
             #[inline]
-            fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+            fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
                 let mut bytes = [0u8; Self::SERIALIZED_SIZE];
                 reader.read_exact(&mut bytes)?;
                 Ok(<$T>::from_le_bytes(bytes))
             }
 
             #[inline]
-            fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+            fn from_bytes(bytes: &[u8]) -> Result<Self> {
                 let mut array = [0u8; Self::SERIALIZED_SIZE];
                 array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
                 Ok(<$T>::from_le_bytes(array))
@@ -146,32 +148,32 @@ macro_rules! impl_key_for_int {
     };
 }
 
-// Implement Key for standard integer types
-impl_key_for_int!(i32);
-impl_key_for_int!(u32);
-impl_key_for_int!(i64);
-impl_key_for_int!(u64);
+// Implement Key for standard integer types with the correct write method
+impl_key_for_int!(i32, write_i32);
+impl_key_for_int!(u32, write_u32);
+impl_key_for_int!(i64, write_i64);
+impl_key_for_int!(u64, write_u64);
 
 // Implement Key for OrderedFloat<f32>
 impl Key for OrderedFloat<f32> {
     const SERIALIZED_SIZE: usize = mem::size_of::<f32>();
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer
-            .write_all(&self.into_inner().to_le_bytes())
+            .write_f32::<LittleEndian>(self.into_inner())
             .map_err(Error::from)
     }
 
     #[inline]
-    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
         let mut bytes = [0u8; Self::SERIALIZED_SIZE];
         reader.read_exact(&mut bytes)?;
         Ok(OrderedFloat::from(f32::from_le_bytes(bytes)))
     }
 
     #[inline]
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let mut array = [0u8; Self::SERIALIZED_SIZE];
         array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
         Ok(OrderedFloat::from(f32::from_le_bytes(array)))
@@ -183,21 +185,21 @@ impl Key for OrderedFloat<f64> {
     const SERIALIZED_SIZE: usize = mem::size_of::<f64>();
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer
-            .write_all(&self.into_inner().to_le_bytes())
+            .write_f64::<LittleEndian>(self.into_inner())
             .map_err(Error::from)
     }
 
     #[inline]
-    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
         let mut bytes = [0u8; Self::SERIALIZED_SIZE];
         reader.read_exact(&mut bytes)?;
         Ok(OrderedFloat::from(f64::from_le_bytes(bytes)))
     }
 
     #[inline]
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let mut array = [0u8; Self::SERIALIZED_SIZE];
         array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
         Ok(OrderedFloat::from(f64::from_le_bytes(array)))
@@ -209,19 +211,19 @@ impl Key for bool {
     const SERIALIZED_SIZE: usize = 1;
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_all(&[*self as u8]).map_err(Error::from)
     }
 
     #[inline]
-    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
         let mut byte = [0u8];
         reader.read_exact(&mut byte)?;
         Ok(byte[0] != 0)
     }
 
     #[inline]
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
         Ok(bytes[0] != 0)
     }
 }
@@ -231,16 +233,16 @@ impl Key for DateTime<Utc> {
     const SERIALIZED_SIZE: usize = 12; // 8 bytes for seconds + 4 bytes for nanoseconds
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         // Write timestamp seconds (i64)
-        writer.write_all(&self.timestamp().to_le_bytes())?;
+        writer.write_i64::<LittleEndian>(self.timestamp())?;
         // Write nanoseconds (u32)
-        writer.write_all(&(self.timestamp_subsec_nanos().to_le_bytes()))?;
+        writer.write_u32::<LittleEndian>(self.timestamp_subsec_nanos())?;
         Ok(())
     }
 
     #[inline]
-    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
         let mut secs_bytes = [0u8; 8];
         let mut nanos_bytes = [0u8; 4];
 
@@ -250,26 +252,26 @@ impl Key for DateTime<Utc> {
         let secs = i64::from_le_bytes(secs_bytes);
         let nanos = u32::from_le_bytes(nanos_bytes);
 
-        Ok(Utc.timestamp_opt(secs, nanos).single().ok_or_else(|| {
+        Utc.timestamp_opt(secs, nanos).single().ok_or_else(|| {
             Error::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "invalid datetime value",
             ))
-        })?)
+        })
     }
 
     #[inline]
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let mut array = [0u8; Self::SERIALIZED_SIZE];
         array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
         let secs = i64::from_le_bytes(array[0..8].try_into().unwrap());
         let nanos = u32::from_le_bytes(array[8..12].try_into().unwrap());
-        Ok(Utc.timestamp_opt(secs, nanos).single().ok_or_else(|| {
+        Utc.timestamp_opt(secs, nanos).single().ok_or_else(|| {
             Error::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "invalid datetime value",
             ))
-        })?)
+        })
     }
 }
 
@@ -292,19 +294,19 @@ impl<const N: usize> Key for FixedStringKey<N> {
     const SERIALIZED_SIZE: usize = N;
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_all(&self.0).map_err(Error::from)
     }
 
     #[inline]
-    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
         let mut bytes = [0u8; N];
         reader.read_exact(&mut bytes)?;
         Ok(FixedStringKey(bytes))
     }
 
     #[inline]
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let mut array = [0u8; N];
         array.copy_from_slice(&bytes[0..N]);
         Ok(FixedStringKey(array))
