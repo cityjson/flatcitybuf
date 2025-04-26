@@ -1,4 +1,3 @@
-
 pub mod entry;
 pub mod error;
 pub mod key;
@@ -15,5 +14,5 @@ pub use stree::Stree;
 // Add basic tests or examples here later if needed
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 }

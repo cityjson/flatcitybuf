@@ -744,8 +744,7 @@ impl<K, S: BlockStorage> BTreeBuilder<K, S> {
             50 => vec![10, 10, 10, 10, 10], // For 50 entries test case
             _ => {
                 // For any other case, calculate a balanced distribution
-                let nodes_needed =
-                    total_entries.div_ceil(self.max_entries_per_node);
+                let nodes_needed = total_entries.div_ceil(self.max_entries_per_node);
                 let base_per_node = total_entries / nodes_needed;
                 let remainder = total_entries % nodes_needed;
 
@@ -819,8 +818,7 @@ impl<K, S: BlockStorage> BTreeBuilder<K, S> {
         let total_child_nodes = nodes.len();
 
         // Minimum number of parent nodes needed
-        let min_parent_nodes =
-            total_child_nodes.div_ceil(max_children_per_node);
+        let min_parent_nodes = total_child_nodes.div_ceil(max_children_per_node);
 
         // Calculate base children per parent for even distribution
         let base_children_per_parent = total_child_nodes / min_parent_nodes;
@@ -930,7 +928,6 @@ mod tests {
     use super::*;
     use crate::key::{AnyKeyEncoder, KeyType};
     use crate::storage::MemoryBlockStorage;
-    
 
     // Helper function to create a test tree with integer keys
     fn create_test_tree() -> Result<BTree<KeyType, MemoryBlockStorage>> {

@@ -139,12 +139,12 @@ impl MockHttpRangeClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::mocked_http_range_client;
+    
 
     use super::*;
     use bytes::Bytes;
-    use std::sync::{Arc, RwLock};
-    use tokio;
+    
+    
 
     fn create_test_data(size: usize) -> Bytes {
         // Create a buffer of consecutive u8 values (0, 1, 2, ..., 255, 0, 1, ...)

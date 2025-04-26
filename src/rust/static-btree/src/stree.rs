@@ -1217,15 +1217,15 @@ mod tests {
         let tree = Stree::build(&nodes, 4)?;
         let list = tree.find_exact(10)?;
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].offset as usize, nodes[10].offset as usize);
+        assert_eq!({ list[0].offset }, nodes[10].offset as usize);
 
         let list = tree.find_exact(0)?;
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].offset as usize, nodes[0].offset as usize);
+        assert_eq!({ list[0].offset }, nodes[0].offset as usize);
 
         let list = tree.find_exact(18)?;
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].offset as usize, nodes[18].offset as usize);
+        assert_eq!({ list[0].offset }, nodes[18].offset as usize);
 
         // Not exists
         let list = tree.find_exact(19)?;
@@ -1279,7 +1279,7 @@ mod tests {
         let keys: Vec<i64> = list
             .iter()
             .map(|item| {
-                let idx = item.offset / Entry::<i64>::SERIALIZED_SIZE as usize;
+                let idx = item.offset / Entry::<i64>::SERIALIZED_SIZE;
                 idx as i64
             })
             .collect();
@@ -1749,12 +1749,9 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "http")]
-    use crate::mocked_http_range_client::{MockHttpRangeClient, RequestStats};
-    #[cfg(feature = "http")]
-    use bytes::Bytes;
-    #[cfg(feature = "http")]
-    use std::sync::{Arc, RwLock};
+    
+    
+    
 
     #[cfg(feature = "http")]
     #[tokio::test]
@@ -1762,7 +1759,7 @@ mod tests {
     async fn test_http_stream_find_exact() -> Result<()> {
         // Prepare a simple tree with duplicate key 1
 
-        use crate::mocked_http_range_client::{MockHttpRangeClient, RequestStats};
+        use crate::mocked_http_range_client::MockHttpRangeClient;
 
         let nodes = vec![
             NodeItem::new(0_i64, 0_u64),

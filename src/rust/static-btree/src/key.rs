@@ -417,7 +417,7 @@ mod tests {
         );
 
         // Test Max implementation for bool
-        assert_eq!(bool::max_value(), true);
+        assert!(bool::max_value());
 
         // Test Max implementation for DateTime
         let max_date = DateTime::<Utc>::max_value();
@@ -430,7 +430,7 @@ mod tests {
         // Verify max values are actually maximum
         assert!(5_i32 < i32::max_value());
         assert!(OrderedFloat(1000.0f64) < OrderedFloat::<f64>::max_value());
-        assert!(false < bool::max_value());
+        assert!(bool::max_value());
         assert!(Utc::now() < DateTime::<Utc>::max_value());
         assert!(FixedStringKey::<5>::from_str("zzzzz") < FixedStringKey::<5>::max_value());
     }
