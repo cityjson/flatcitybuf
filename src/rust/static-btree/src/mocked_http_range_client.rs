@@ -1,28 +1,12 @@
 use bytes::Bytes;
-use http_range_client::{self, AsyncHttpRangeClient};
+use http_range_client::{self, AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
+use std::cmp::min;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::trace;
-
-// impl HttpFcbReader<MockHttpRangeClient> {
-//     /// NOTE: For debugging expediency, this test class often prefers panics over returning a result.
-//     pub async fn mock_from_file(
-//         path: &str,
-//     ) -> Result<(
-//         HttpFcbReader<MockHttpRangeClient>,
-//         Arc<RwLock<RequestStats>>,
-//     )> {
-//         trace!("starting: opening http reader, reading header");
-
-//         let stats = Arc::new(RwLock::new(RequestStats::new()));
-//         let http_client = MockHttpRangeClient::new(path, stats.clone());
-//         let client = http_range_client::AsyncBufferedHttpRangeClient::with(http_client, path);
-//         Ok((Self::_open(client).await?, stats))
-//     }
-// }
 
 /// NOTE: For debugging expediency, this test class often prefers panics over returning a result.
 pub(crate) struct MockHttpRangeClient {
@@ -37,7 +21,7 @@ pub(crate) struct RequestStats {
 }
 
 impl RequestStats {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             request_count: 0,
             bytes_requested: 0,
@@ -49,7 +33,6 @@ impl RequestStats {
 impl AsyncHttpRangeClient for MockHttpRangeClient {
     async fn get_range(&self, url: &str, range: &str) -> http_range_client::Result<Bytes> {
         assert_eq!(url, self.path.to_str().unwrap());
-
         /// This is a hack, but we need the start and length of the range
         /// since all we're given is the pre-formatted range string, we
         /// need to parse it into its components
@@ -67,7 +50,6 @@ impl AsyncHttpRangeClient for MockHttpRangeClient {
 
         let range = parse_range_header(range);
         let request_length = range.end - range.start;
-
         let mut stats = self
             .stats
             .write()
@@ -81,7 +63,8 @@ impl AsyncHttpRangeClient for MockHttpRangeClient {
             let end = range.end as usize;
 
             // Ensure we don't go out of bounds
-            assert!(end <= buffer.len(), "requested range exceeds buffer size");
+            // assert!(end <= buffer.len(), "requested range exceeds buffer size");
+            let end = min(end, buffer.len());
 
             Ok(buffer.slice(start..end))
         } else {
@@ -107,7 +90,28 @@ impl AsyncHttpRangeClient for MockHttpRangeClient {
 }
 
 impl MockHttpRangeClient {
-    fn new(path: &str, stats: Arc<RwLock<RequestStats>>) -> Self {
+    pub fn new_mock_http_range_client(
+        data: &[u8],
+    ) -> AsyncBufferedHttpRangeClient<MockHttpRangeClient> {
+        let stats = Arc::new(RwLock::new(RequestStats::new()));
+        let client =
+            MockHttpRangeClient::new_with_bytes("in-memory", Bytes::from(data.to_vec()), stats);
+
+        let mut client = AsyncBufferedHttpRangeClient::with(client, "in-memory");
+        client.set_min_req_size(0);
+        client
+    }
+
+    pub fn request_count(&self) -> u64 {
+        self.stats.read().unwrap().request_count
+    }
+
+    pub fn bytes_requested(&self) -> u64 {
+        self.stats.read().unwrap().bytes_requested
+    }
+
+    fn new(path: &str) -> Self {
+        let stats = Arc::new(RwLock::new(RequestStats::new()));
         Self {
             path: path.into(),
             stats,
@@ -131,5 +135,80 @@ impl MockHttpRangeClient {
         file.read_to_end(&mut buffer)?;
         self.buffer = Some(Bytes::from(buffer));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mocked_http_range_client;
+
+    use super::*;
+    use bytes::Bytes;
+    use std::sync::{Arc, RwLock};
+    use tokio;
+
+    fn create_test_data(size: usize) -> Bytes {
+        // Create a buffer of consecutive u8 values (0, 1, 2, ..., 255, 0, 1, ...)
+        let mut buffer = Vec::with_capacity(size);
+        for i in 0..size {
+            buffer.push((i % 256) as u8);
+        }
+        Bytes::from(buffer)
+    }
+
+    #[tokio::test]
+    async fn test_mock_client_range_fetching() {
+        // Create test data with 1000 bytes of consecutive values
+        let test_data = create_test_data(1000);
+
+        let mut client = MockHttpRangeClient::new_mock_http_range_client(&test_data);
+
+        // Test cases with different ranges
+        let test_cases = vec![
+            (0, 10),     // Start of buffer
+            (500, 520),  // Middle of buffer
+            (990, 1000), // End of buffer
+            (100, 400),  // Larger range
+            (0, 1),      // Minimal range
+        ];
+
+        for (start, end) in test_cases {
+            // Calculate the expected data for this range
+            let expected = test_data.slice(start..end);
+
+            let length = end - start;
+            println!(
+                "test_mock_client_range_fetching: start={}, end={}, length={}",
+                start, end, length
+            );
+            // Fetch the range
+            let result = client.get_range(start, length).await.unwrap();
+
+            // Verify the result matches expected data
+            assert_eq!(
+                result.len(),
+                expected.len(),
+                "Range {}-{}: returned length {} doesn't match expected length {}",
+                start,
+                end,
+                result.len(),
+                expected.len()
+            );
+
+            assert_eq!(
+                result, expected,
+                "Range {}-{}: returned data doesn't match expected data",
+                start, end
+            );
+
+            // Verify each byte individually for clarity in case of failure
+            for i in 0..result.len() {
+                assert_eq!(
+                    result[i], expected[i],
+                    "Range {}-{}: Mismatch at position {}: got {} expected {}",
+                    start, end, i, result[i], expected[i]
+                );
+            }
+        }
     }
 }

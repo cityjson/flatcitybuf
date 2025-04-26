@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::key::Key;
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -37,7 +37,7 @@ impl<K: Key> Entry<K> {
 
     /// Serializes the entire entry (key followed by value) to a writer.
     /// Assumes little-endian encoding for the `Value`.
-    pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         self.key.write_to(writer)?;
         writer.write_all(&self.offset.to_le_bytes())?;
         Ok(())
@@ -45,11 +45,17 @@ impl<K: Key> Entry<K> {
 
     /// Deserializes an entire entry from a reader.
     /// Assumes little-endian encoding for the `Value`.
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+    pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
         let key = K::read_from(reader)?;
         let mut offset_bytes = [0u8; Self::OFFSET_SIZE];
         reader.read_exact(&mut offset_bytes)?;
         let offset = Offset::from_le_bytes(offset_bytes);
+        Ok(Entry { key, offset })
+    }
+
+    pub fn from_bytes(raw: &[u8]) -> Result<Self> {
+        let key = K::from_bytes(&raw[0..K::SERIALIZED_SIZE])?;
+        let offset = Offset::from_bytes(&raw[K::SERIALIZED_SIZE..])?;
         Ok(Entry { key, offset })
     }
 
@@ -95,7 +101,8 @@ mod tests {
         assert_eq!(buffer.len(), Entry::<i32>::SERIALIZED_SIZE); // Update const access
 
         let mut cursor = Cursor::new(buffer);
-        let deserialized_entry = Entry::<i32>::read_from(&mut cursor).expect("read should succeed"); // Update type
+        let deserialized_entry =
+            Entry::<i32>::from_reader(&mut cursor).expect("read should succeed"); // Update type
 
         assert_eq!(entry, deserialized_entry);
     }
@@ -128,7 +135,7 @@ mod tests {
     fn test_entry_read_error_short_read() {
         let mut short_buffer = vec![0u8; Entry::<i32>::SERIALIZED_SIZE - 1]; // Update const access
         let mut cursor = Cursor::new(&mut short_buffer);
-        let result = Entry::<i32>::read_from(&mut cursor); // Update type
+        let result = Entry::<i32>::from_reader(&mut cursor); // Update type
         assert!(result.is_err());
         match result.err().unwrap() {
             Error::IoError(e) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),

@@ -41,3 +41,5 @@ pub enum Error {
     #[error("http error: {0}")]
     HttpError(#[from] HttpError),
 }
+
+pub type Result<T> = std::result::Result<T, Error>;

@@ -43,6 +43,16 @@ pub trait Key: Sized + Ord + Clone + Debug + Default + Max {
     /// `Ok(Self)` containing the deserialized key on success.
     /// `Err(Error)` if reading fails or the implementation cannot read exactly `SERIALIZED_SIZE` bytes.
     fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error>;
+
+    /// Deserializes a key from the provided bytes.
+    ///
+    /// # Arguments
+    /// * `bytes`: The bytes to deserialize the key from.
+    ///
+    /// # Returns
+    /// `Ok(Self)` containing the deserialized key on success.
+    /// `Err(Error)` if the bytes are not a valid key.
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error>;
 }
 
 // Implement Max for primitive integer types
@@ -125,6 +135,13 @@ macro_rules! impl_key_for_int {
                 reader.read_exact(&mut bytes)?;
                 Ok(<$T>::from_le_bytes(bytes))
             }
+
+            #[inline]
+            fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+                let mut array = [0u8; Self::SERIALIZED_SIZE];
+                array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
+                Ok(<$T>::from_le_bytes(array))
+            }
         }
     };
 }
@@ -152,6 +169,13 @@ impl Key for OrderedFloat<f32> {
         reader.read_exact(&mut bytes)?;
         Ok(OrderedFloat::from(f32::from_le_bytes(bytes)))
     }
+
+    #[inline]
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let mut array = [0u8; Self::SERIALIZED_SIZE];
+        array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
+        Ok(OrderedFloat::from(f32::from_le_bytes(array)))
+    }
 }
 
 // Implement Key for OrderedFloat<f64>
@@ -171,6 +195,13 @@ impl Key for OrderedFloat<f64> {
         reader.read_exact(&mut bytes)?;
         Ok(OrderedFloat::from(f64::from_le_bytes(bytes)))
     }
+
+    #[inline]
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let mut array = [0u8; Self::SERIALIZED_SIZE];
+        array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
+        Ok(OrderedFloat::from(f64::from_le_bytes(array)))
+    }
 }
 
 // Implement Key for bool
@@ -187,6 +218,11 @@ impl Key for bool {
         let mut byte = [0u8];
         reader.read_exact(&mut byte)?;
         Ok(byte[0] != 0)
+    }
+
+    #[inline]
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(bytes[0] != 0)
     }
 }
 
@@ -214,6 +250,20 @@ impl Key for DateTime<Utc> {
         let secs = i64::from_le_bytes(secs_bytes);
         let nanos = u32::from_le_bytes(nanos_bytes);
 
+        Ok(Utc.timestamp_opt(secs, nanos).single().ok_or_else(|| {
+            Error::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid datetime value",
+            ))
+        })?)
+    }
+
+    #[inline]
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let mut array = [0u8; Self::SERIALIZED_SIZE];
+        array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
+        let secs = i64::from_le_bytes(array[0..8].try_into().unwrap());
+        let nanos = u32::from_le_bytes(array[8..12].try_into().unwrap());
         Ok(Utc.timestamp_opt(secs, nanos).single().ok_or_else(|| {
             Error::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -251,6 +301,13 @@ impl<const N: usize> Key for FixedStringKey<N> {
         let mut bytes = [0u8; N];
         reader.read_exact(&mut bytes)?;
         Ok(FixedStringKey(bytes))
+    }
+
+    #[inline]
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let mut array = [0u8; N];
+        array.copy_from_slice(&bytes[0..N]);
+        Ok(FixedStringKey(array))
     }
 }
 
