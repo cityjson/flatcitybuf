@@ -98,18 +98,15 @@ async fn read_http_payload_data<T: AsyncHttpRangeClient>(
     client: &mut AsyncBufferedHttpRangeClient<T>,
     offset: usize,
 ) -> Result<PayloadEntry> {
-    // read length bytes from offset
-    let count = client
-        .min_req_size(0)
-        .get_range(offset, size_of::<u32>())
-        .await?;
-    let count = u32::from_le_bytes(count.try_into().unwrap());
+    let temp_buffered_count_bytes_size = 4096; //This is hueristic, we don't know the size of the payload. TODO: find a better way
+
     let payload_data = client
         .min_req_size(0)
-        .get_range(offset + size_of::<u32>(), count as usize * size_of::<u64>())
+        .get_range(offset, temp_buffered_count_bytes_size)
         .await?;
+    let mut buf = Cursor::new(payload_data);
 
-    let (payload_entry, _) = PayloadEntry::deserialize(&mut Cursor::new(payload_data))?;
+    let (payload_entry, _) = PayloadEntry::deserialize(&mut buf)?;
     Ok(payload_entry)
 }
 
@@ -327,22 +324,22 @@ impl<K: Key> Stree<K> {
         let mut i = 0;
         while i < nodes.len() {
             let key = nodes[i].key.clone();
-            let mut entry = PayloadEntry::new();
-            entry.add_offset(nodes[i].offset);
+            let mut payload_entry = PayloadEntry::new();
+            payload_entry.add_offset(nodes[i].offset);
             let mut j = i + 1;
             while j < nodes.len() && nodes[j].key == key {
-                entry.add_offset(nodes[j].offset);
+                payload_entry.add_offset(nodes[j].offset);
                 j += 1;
             }
-            if entry.count == 1 {
+            if payload_entry.count == 1 {
                 // single entry, inline original offset
                 let mut n = NodeItem::new_with_key(key);
-                n.set_offset(entry.offsets[0]);
+                n.set_offset(payload_entry.offsets[0]);
                 unique_leaves.push(n);
             } else {
                 // serialize payload and tag pointer
                 let rel = payload_data.len() as Offset;
-                let buf = entry.serialize();
+                let buf = payload_entry.serialize();
                 payload_data.extend_from_slice(&buf);
                 let mut n = NodeItem::new_with_key(key);
                 n.set_offset(TAG_MASK | rel);
@@ -367,6 +364,7 @@ impl<K: Key> Stree<K> {
             tree.node_items[num_nodes - tree.num_leaf_nodes + k] = node;
         }
         tree.generate_nodes()?;
+        tree.payload_start = tree.node_items.len() * size_of::<NodeItem<K>>();
 
         Ok(tree)
     }
@@ -516,6 +514,7 @@ impl<K: Key> Stree<K> {
         num_items: usize, // number of items in the tree, not the number of entries of original data
         branching_factor: u16,
         key: K,
+        payload_size: usize,
     ) -> Result<Vec<SearchResultItem>> {
         let search_entry = NodeItem::new_with_key(key);
         let mut results = Vec::new();
@@ -692,6 +691,7 @@ impl<K: Key> Stree<K> {
         branching_factor: u16,
         lower: K,
         upper: K,
+        payload_size: usize,
     ) -> Result<Vec<SearchResultItem>> {
         let node_size = branching_factor as usize - 1;
         let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
@@ -714,11 +714,16 @@ impl<K: Key> Stree<K> {
         // Special case for exact matches (when lower == upper)
         // Use find_exact for single-item ranges to ensure consistent behavior
         if lower == upper {
-            return Stree::stream_find_exact(data, num_items, branching_factor, lower);
+            return Stree::stream_find_exact(
+                data,
+                num_items,
+                branching_factor,
+                lower,
+                payload_size,
+            );
         }
 
         let mut results = Vec::new();
-        println!("level bounds: {:?}", level_bounds);
 
         // Find partition points for lower and upper bounds
         let upper_idx =
@@ -844,7 +849,6 @@ impl<K: Key> Stree<K> {
         // This traversal is similar to find_exact but focuses on finding
         // the insertion point rather than an exact match
         for level in (1..level_bounds.len()).rev() {
-            println!("level: {:?}", level);
             let end = min(node_index + node_size, level_bounds[level].end);
             let node_items = read_node_items(data, index_base, node_index, end - node_index)?;
 
@@ -893,6 +897,7 @@ impl<K: Key> Stree<K> {
         num_items: usize,
         branching_factor: u16,
         key: K,
+        payload_size: usize,
         combine_request_threshold: usize,
     ) -> Result<Vec<HttpSearchResultItem>> {
         use tracing::debug;
@@ -918,8 +923,7 @@ impl<K: Key> Stree<K> {
             .last()
             .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
 
-        let feature_begin =
-            index_begin + attr_index_size + Stree::<K>::index_size(num_items, branching_factor);
+        let feature_begin = Self::index_size(num_items, branching_factor, payload_size);
 
         debug!("http_stream_find_exact - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, key: {key:?}");
 
@@ -936,7 +940,7 @@ impl<K: Key> Stree<K> {
         });
         let mut results = Vec::new();
 
-        let payload_data_start = (Entry::<K>::SERIALIZED_SIZE as u64) * (*num_nodes as u64);
+        let payload_data_start = feature_begin - payload_size;
 
         while let Some(node_range) = queue.pop_front() {
             debug!("next: {node_range:?}. {} items left in queue", queue.len());
@@ -957,8 +961,7 @@ impl<K: Key> Stree<K> {
                         if (off & PAYLOAD_TAG) != 0 {
                             let rel = (off & PAYLOAD_MASK) as usize;
                             let payload_data =
-                                read_http_payload_data(client, payload_data_start as usize + rel)
-                                    .await?;
+                                read_http_payload_data(client, payload_data_start + rel).await?;
                             for offset in payload_data.offsets {
                                 let start = feature_begin + offset as usize;
                                 results.push(HttpSearchResultItem {
@@ -1061,7 +1064,7 @@ impl<K: Key> Stree<K> {
         self.num_nodes() * Entry::<K>::SERIALIZED_SIZE
     }
 
-    pub fn index_size(num_items: usize, branching_factor: u16) -> usize {
+    pub fn index_size(num_items: usize, branching_factor: u16, payload_size: usize) -> usize {
         assert!(branching_factor >= 2, "Node size must be at least 2");
         assert!(num_items > 0, "Cannot create empty tree");
         let branching_factor_min = branching_factor.clamp(2, 65535) as usize;
@@ -1080,8 +1083,8 @@ impl<K: Key> Stree<K> {
                 break;
             }
         }
-        // TODO: add payload size as well
-        num_nodes * NodeItem::<K>::SERIALIZED_SIZE
+
+        num_nodes * NodeItem::<K>::SERIALIZED_SIZE + payload_size
     }
 
     /// Write all index nodes and any payload data
@@ -1329,8 +1332,6 @@ mod tests {
             .map(|item| item.offset / Entry::<i64>::SERIALIZED_SIZE)
             .collect();
 
-        println!("Test 4 - Found indices: {:?}", found_indices);
-
         // Verify we found at least items 15, 16, 17
         assert!(found_indices.contains(&15));
         assert!(found_indices.contains(&16));
@@ -1409,9 +1410,6 @@ mod tests {
             })
             .collect();
 
-        // Print found keys for debugging
-        println!("Found keys: {:?}", found_keys);
-
         // Check that we found the expected keys
         assert!(found_keys.iter().any(|k| k == "c"));
         assert!(found_keys.iter().any(|k| k == "d"));
@@ -1432,7 +1430,6 @@ mod tests {
             FixedStringKey::<10>::from_str("k"),
         )?;
 
-        println!("Single key range found: {}", list.len());
         if !list.is_empty() {
             // Extract the key from the offset
             let idx = list[0].offset / Entry::<FixedStringKey<10>>::SERIALIZED_SIZE;
@@ -1708,10 +1705,11 @@ mod tests {
             NodeItem::new(2, 33),
         ];
         let tree = Stree::build(&nodes, 2)?;
+        let payload_size = tree.payload_data.len();
         let mut buf = Vec::new();
         tree.stream_write(&mut buf)?;
         let mut cursor = std::io::Cursor::new(&buf);
-        let res = Stree::stream_find_exact(&mut cursor, tree.num_leaf_nodes, 2, 1)?;
+        let res = Stree::stream_find_exact(&mut cursor, tree.num_leaf_nodes, 2, 1, payload_size)?;
         assert_eq!(res.len(), 2);
         let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
         offs.sort_unstable();
@@ -1737,11 +1735,12 @@ mod tests {
             NodeItem::new(7, 120),
         ];
         let tree = Stree::build(&nodes, 3)?;
+        let payload_size = tree.payload_data.len();
         let mut buf = Vec::new();
         tree.stream_write(&mut buf)?;
         let mut cursor = std::io::Cursor::new(&buf);
         let res: Vec<SearchResultItem> =
-            Stree::stream_find_range(&mut cursor, tree.num_leaf_nodes, 3, 1, 2)?;
+            Stree::stream_find_range(&mut cursor, tree.num_leaf_nodes, 3, 1, 2, payload_size)?;
         assert_eq!(res.len(), 4);
         let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
         offs.sort_unstable();
@@ -1749,21 +1748,15 @@ mod tests {
         Ok(())
     }
 
-    
-    
-    
-
     #[cfg(feature = "http")]
     #[tokio::test]
-    /// Test http_stream_find_exact using MockHttpRangeClient in-memory
     async fn test_http_stream_find_exact() -> Result<()> {
-        // Prepare a simple tree with duplicate key 1
-
         use crate::mocked_http_range_client::MockHttpRangeClient;
 
         let nodes = vec![
             NodeItem::new(0_i64, 0_u64),
             NodeItem::new(1_i64, 1_u64),
+            NodeItem::new(1_i64, 101_u64),
             NodeItem::new(2_i64, 2_u64),
             NodeItem::new(3_i64, 3_u64),
             NodeItem::new(4_i64, 4_u64),
@@ -1772,6 +1765,7 @@ mod tests {
             NodeItem::new(7_i64, 7_u64),
             NodeItem::new(8_i64, 8_u64),
             NodeItem::new(9_i64, 9_u64),
+            NodeItem::new(9_i64, 99_u64),
             NodeItem::new(10_i64, 10_u64),
             NodeItem::new(11_i64, 11_u64),
             NodeItem::new(12_i64, 12_u64),
@@ -1785,45 +1779,52 @@ mod tests {
 
         // ((query, expected_result), branching_factor)
         let test_cases = vec![
-            ((9_i64, vec![9]), 3),
-            ((9_i64, vec![9]), 4),
-            ((9_i64, vec![9]), 5),
-            ((9_i64, vec![9]), 6),
+            // unique keys and different branching factor
+            ((8_i64, vec![8]), 3),
+            ((8_i64, vec![8]), 4),
+            ((8_i64, vec![8]), 5),
+            ((8_i64, vec![8]), 6),
+            // unique keys and leftmost key
             ((0_i64, vec![0]), 4),
+            // unique keys and rightmost key
             ((18_i64, vec![18]), 4),
+            // unique keys and out of range
             ((19_i64, vec![]), 4),
+            // unique keys and negative key
             ((-1_i64, vec![]), 4),
+            // duplicate keys
+            ((9_i64, vec![9, 99]), 4),
+            ((-1_i64, vec![]), 4),
+            ((1_i64, vec![1, 101]), 4),
         ];
 
         for ((query, expected_result), branching_factor) in test_cases {
             let tree = Stree::<i64>::build(&nodes, branching_factor)?;
+            let payload_size = tree.payload_data.len();
             // Serialize tree to buffer
             let mut buf = Vec::new();
             tree.stream_write(&mut buf)?;
 
             let mut client = MockHttpRangeClient::new_mock_http_range_client(&buf);
 
-            let feature_begin = Stree::<i64>::index_size(tree.num_leaf_nodes, branching_factor);
+            let feature_begin =
+                Stree::<i64>::index_size(tree.num_leaf_nodes, branching_factor, payload_size);
 
             let expected_result = expected_result
                 .iter()
                 .map(|item| item + feature_begin)
                 .collect::<Vec<usize>>();
 
-            println!(
-                "test case: {:?}, {:?}, {:?}",
-                query, expected_result, branching_factor
-            );
-
             // Perform http_stream_find_exact
-            let res = Stree::http_stream_find_exact(
+            let res = Stree::<i64>::http_stream_find_exact(
                 &mut client,
                 0, // index_begin
                 0, // attr_index_size
                 tree.num_leaf_nodes,
                 branching_factor, // branching_factor
-                query,            // key
-                256 * 1024,       // combine_request_threshold
+                query,
+                payload_size,
+                256 * 1024, // combine_request_threshold
             )
             .await?;
 

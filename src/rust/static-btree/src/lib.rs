@@ -13,6 +13,4 @@ pub use stree::Stree;
 
 // Add basic tests or examples here later if needed
 #[cfg(test)]
-mod tests {
-    
-}
+mod tests {}
