@@ -368,13 +368,6 @@ impl<K: Key> Stree<K> {
         }
         tree.generate_nodes()?;
 
-        for level in &tree.level_bounds {
-            println!("level: {:?}", level);
-            for node in tree.node_items[level.start..level.end].iter() {
-                println!("node: {:?}", node);
-            }
-        }
-
         Ok(tree)
     }
 
@@ -725,12 +718,13 @@ impl<K: Key> Stree<K> {
         }
 
         let mut results = Vec::new();
+        println!("level bounds: {:?}", level_bounds);
 
         // Find partition points for lower and upper bounds
-        let lower_idx =
-            Stree::stream_find_partition(data, num_items, branching_factor, lower.clone())?;
         let upper_idx =
             Stree::stream_find_partition(data, num_items, branching_factor, upper.clone())?;
+        let lower_idx =
+            Stree::stream_find_partition(data, num_items, branching_factor, lower.clone())?;
 
         // Get the leaf level bounds
         let leaf_level = 0;
@@ -838,6 +832,7 @@ impl<K: Key> Stree<K> {
         branching_factor: u16,
         key: K,
     ) -> Result<usize> {
+        let start_position = data.stream_position()?;
         let node_size = branching_factor as usize - 1;
         let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
 
@@ -849,6 +844,7 @@ impl<K: Key> Stree<K> {
         // This traversal is similar to find_exact but focuses on finding
         // the insertion point rather than an exact match
         for level in (1..level_bounds.len()).rev() {
+            println!("level: {:?}", level);
             let end = min(node_index + node_size, level_bounds[level].end);
             let node_items = read_node_items(data, index_base, node_index, end - node_index)?;
 
@@ -880,6 +876,8 @@ impl<K: Key> Stree<K> {
                 }
             }
         }
+
+        data.seek(SeekFrom::Start(start_position))?;
 
         // At this point, node_index is the position in the leaf level
         // where the key would be inserted
@@ -1744,10 +1742,10 @@ mod tests {
         let mut cursor = std::io::Cursor::new(&buf);
         let res: Vec<SearchResultItem> =
             Stree::stream_find_range(&mut cursor, tree.num_leaf_nodes, 3, 1, 2)?;
-        assert_eq!(res.len(), 3);
+        assert_eq!(res.len(), 4);
         let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
         offs.sort_unstable();
-        assert_eq!(offs, vec![10, 20, 30]);
+        assert_eq!(offs, vec![10, 20, 30, 40]);
         Ok(())
     }
 
@@ -1809,7 +1807,6 @@ mod tests {
             let mut client = MockHttpRangeClient::new_mock_http_range_client(&buf);
 
             let feature_begin = Stree::<i64>::index_size(tree.num_leaf_nodes, branching_factor);
-            println!("feature_begin: {:?}", feature_begin);
 
             let expected_result = expected_result
                 .iter()
