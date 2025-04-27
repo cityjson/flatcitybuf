@@ -120,6 +120,7 @@ pub struct SearchResultItem {
 }
 
 /// S-Tree
+#[derive(Debug, Clone)]
 pub struct Stree<K: Key> {
     node_items: Vec<NodeItem<K>>,
     num_original_items: usize, // number of entries given, this will allow duplicates
@@ -315,10 +316,12 @@ impl<K: Key> Stree<K> {
 
     pub fn build(nodes: &[NodeItem<K>], branching_factor: u16) -> Result<Stree<K>> {
         let branching_factor = branching_factor.clamp(2u16, 65535u16);
+        // sort nodes by key
+        let mut nodes = nodes.to_vec();
+        nodes.sort_by_key(|item| item.key.clone());
         // Group duplicates into payload entries and build with unique keys
         // Tag bit for payload pointers: MSB of u64
         const TAG_MASK: Offset = 1u64 << 63;
-        // nodes must be sorted by key
         let mut payload_data = Vec::new();
         let mut unique_leaves = Vec::new();
         let mut i = 0;
@@ -1164,17 +1167,24 @@ impl<K: Key> Stree<K> {
         self.num_leaf_nodes
     }
 
+    pub fn branching_factor(&self) -> u16 {
+        self.branching_factor
+    }
+
     /// Write all index nodes and any payload data
-    pub fn stream_write<W: Write>(&self, out: &mut W) -> Result<()> {
+    pub fn stream_write<W: Write>(&self, out: &mut W) -> Result<usize> {
+        //returns written bytes
+        let mut written_bytes = 0;
         // Write serialized nodes
         for item in &self.node_items {
-            item.write_to(out)?;
+            written_bytes += item.write_to(out)?;
         }
         // Append payload section, if initialized
         if self.payload_initialized && !self.payload_data.is_empty() {
             out.write_all(&self.payload_data)?;
+            written_bytes += self.payload_data.len();
         }
-        Ok(())
+        Ok(written_bytes)
     }
 
     #[cfg(feature = "http")]
@@ -1190,7 +1200,7 @@ impl<K: Key> Stree<K> {
         _payload_size: usize,
         combine_request_threshold: usize,
     ) -> Result<Vec<HttpSearchResultItem>> {
-        use std::println;
+        
         use tracing::debug;
 
         // Return empty result if invalid range

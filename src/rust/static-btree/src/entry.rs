@@ -39,11 +39,13 @@ impl<K: Key> Entry<K> {
 
     /// Serializes the entire entry (key followed by value) to a writer.
     /// Assumes little-endian encoding for the `Value`.
-    pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        self.key.write_to(writer)?;
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
+        let mut written_bytes = 0;
+        written_bytes += self.key.write_to(writer)?;
 
         writer.write_u64::<LittleEndian>(self.offset)?;
-        Ok(())
+        written_bytes += Self::OFFSET_SIZE;
+        Ok(written_bytes)
     }
 
     /// Deserializes an entire entry from a reader.

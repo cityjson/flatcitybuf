@@ -36,9 +36,9 @@ pub trait Key: Sized + Ord + Clone + Debug + Default + Max + Min {
     /// * `writer`: The `Write` target.
     ///
     /// # Returns
-    /// `Ok(())` on success.
-    /// `Err(Error)` if writing fails or the implementation cannot guarantee writing exactly `SERIALIZED_SIZE` bytes.
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()>;
+    /// Returns the number of bytes written, which is always SERIALIZED_SIZE
+    /// `Err(Error)` if writing fails.
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize>;
 
     /// Deserializes a key from the provided reader.
     ///
@@ -185,9 +185,9 @@ macro_rules! impl_key_for_int {
             const SERIALIZED_SIZE: usize = mem::size_of::<$T>();
 
             #[inline]
-            fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+            fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
                 writer.$write_method::<LittleEndian>(*self)?;
-                Ok(())
+                Ok(Self::SERIALIZED_SIZE)
             }
 
             #[inline]
@@ -218,10 +218,9 @@ impl Key for OrderedFloat<f32> {
     const SERIALIZED_SIZE: usize = mem::size_of::<f32>();
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        writer
-            .write_f32::<LittleEndian>(self.into_inner())
-            .map_err(Error::from)
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
+        writer.write_f32::<LittleEndian>(self.into_inner())?;
+        Ok(Self::SERIALIZED_SIZE)
     }
 
     #[inline]
@@ -244,10 +243,9 @@ impl Key for OrderedFloat<f64> {
     const SERIALIZED_SIZE: usize = mem::size_of::<f64>();
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        writer
-            .write_f64::<LittleEndian>(self.into_inner())
-            .map_err(Error::from)
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
+        writer.write_f64::<LittleEndian>(self.into_inner())?;
+        Ok(Self::SERIALIZED_SIZE)
     }
 
     #[inline]
@@ -270,8 +268,9 @@ impl Key for bool {
     const SERIALIZED_SIZE: usize = 1;
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        writer.write_all(&[*self as u8]).map_err(Error::from)
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
+        writer.write_all(&[*self as u8]).map_err(Error::from);
+        Ok(Self::SERIALIZED_SIZE)
     }
 
     #[inline]
@@ -292,12 +291,12 @@ impl Key for DateTime<Utc> {
     const SERIALIZED_SIZE: usize = 12; // 8 bytes for seconds + 4 bytes for nanoseconds
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
         // Write timestamp seconds (i64)
         writer.write_i64::<LittleEndian>(self.timestamp())?;
         // Write nanoseconds (u32)
         writer.write_u32::<LittleEndian>(self.timestamp_subsec_nanos())?;
-        Ok(())
+        Ok(Self::SERIALIZED_SIZE)
     }
 
     #[inline]
@@ -353,8 +352,9 @@ impl<const N: usize> Key for FixedStringKey<N> {
     const SERIALIZED_SIZE: usize = N;
 
     #[inline]
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        writer.write_all(&self.0).map_err(Error::from)
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
+        writer.write_all(&self.0).map_err(Error::from);
+        Ok(Self::SERIALIZED_SIZE)
     }
 
     #[inline]

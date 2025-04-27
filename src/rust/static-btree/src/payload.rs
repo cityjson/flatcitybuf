@@ -1,5 +1,5 @@
 use crate::entry::Offset;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Seek};
 
