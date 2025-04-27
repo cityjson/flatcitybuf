@@ -1,3 +1,4 @@
+#[cfg(feature = "http")]
 use http_range_client::HttpError;
 use std::io;
 use thiserror::Error; // Import the Error derive macro
@@ -38,6 +39,7 @@ pub enum Error {
     Other(String),
 
     /// Used when an operation fails due to an HTTP error.
+    #[cfg(feature = "http")]
     #[error("http error: {0}")]
     HttpError(#[from] HttpError),
 }
