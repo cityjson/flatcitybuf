@@ -29,6 +29,7 @@ The static-btree crate is organized into the following key modules:
 | `entry.rs` | Implementation of node entries (`NodeItem<K>` / `Entry<K>`) |
 | `key.rs` | Trait definitions and implementations for key types |
 | `mocked_http_range_client.rs` | Mock HTTP client for testing HTTP-based operations |
+| `query/` | Query interface for higher-level operations (described in section 10) |
 
 ### Key Components
 
@@ -223,7 +224,66 @@ The search process follows these general steps:
 * All fallible functions use `crate::error::Result` (`std::result::Result<T, Error>`).
 * `Error::IoError` is propagated verbatim from underlying I/O operations.
 
-## 10. Limitations and Constraints
+## 10. Query Interface
+
+The static-btree crate provides a higher-level query interface designed to work with multiple indices and support complex query operations.
+
+### 10.1 Query Module Structure
+
+```
+static-btree/
+├── src/
+│   ├── query/
+│   │   ├── mod.rs         // Re-exports from submodules
+│   │   ├── types.rs       // Query types and traits
+│   │   ├── memory.rs      // In-memory index implementation
+│   │   ├── stream.rs      // Stream-based index implementation
+│   │   └── http.rs        // HTTP-based index implementation (conditional)
+```
+
+### 10.2 Core Query Types
+
+The query module defines several core types to support high-level query operations:
+
+1. **Operator Enum**: Defines comparison operators (Eq, Ne, Gt, Lt, Ge, Le)
+2. **QueryCondition**: Represents a single condition with a field name, operator, and key value
+3. **Query**: A collection of conditions combined with AND logic
+
+### 10.3 Index Abstractions
+
+The query module provides several abstractions for working with indices:
+
+1. **SearchIndex Trait**: Core interface for index operations including `find_exact` and `find_range`
+2. **MultiIndex Types**: Collections of indices that can be queried together:
+   * **MemoryMultiIndex**: For in-memory operations
+   * **StreamMultiIndex**: For file-based operations
+   * **HttpMultiIndex**: For HTTP-based operations (with the `http` feature)
+
+### 10.4 Query Execution Process
+
+The query execution process in the static-btree crate follows these steps:
+
+1. **Condition Evaluation**:
+   * Each condition is evaluated against the appropriate index
+   * Results are collected as sets of offsets
+
+2. **Result Combination**:
+   * Results from different conditions are intersected (AND logic)
+   * The final set contains offsets that match all conditions
+
+3. **Stream-based Processing**:
+   * For file-based operations, only required nodes are read
+   * For HTTP-based operations, range requests fetch only needed data
+
+### 10.5 Compatibility Layer
+
+For integration with fcb_core, the crate provides a compatibility layer that maps the query interface to the existing BST API:
+
+1. **Type Aliases**: Mapping static-btree types to BST-compatible names
+2. **Wrapper Structs**: Implementing BST interfaces using static-btree functionality
+3. **Conversion Functions**: Translating between different API conventions
+
+## 11. Limitations and Constraints
 
 1. **Read-Only Structure**:
    * Tree is immutable after construction.
@@ -237,7 +297,7 @@ The search process follows these general steps:
    * Full tree needs to be loaded in memory during construction.
    * Stream-based operations require minimal memory during queries.
 
-## 11. Future Work
+## 12. Future Work
 
 1. **Prefetch hints** – Explore prefetching for sequential range scans to improve performance.
 2. **Compression** – Investigate node-level compression techniques for reduced storage requirements.

@@ -1,93 +1,207 @@
-
 # Static B-Tree Implementation - Task Handover Document
 
 ## Current Status
 
-We've successfully implemented and tested a partition-based range search for the Static B+Tree data structure. The implementation is now complete with:
+We've successfully implemented the core Static B+Tree functionality including:
 
-- `find_exact` function for exact key matches
-- `find_partition` helper function to find the position where a key would be inserted
-- `find_range` function with efficient range search capabilities
-- Comprehensive unit tests for all functions
+- Complete core tree implementation with `find_exact` and `find_range` operations
+- Payload handling for duplicate keys
+- HTTP-based search operations with request batching
+- Detailed query implementation design
 
-## Tree structure
+The next phase involves implementing the query module to provide a higher-level interface for index operations and to prepare for integration with fcb_core.
 
-The tree is stored in a flat array of `NodeItem`s. The hierarchy looks like this:
+## Query Module Implementation
+
+The query module will provide a more abstract interface to the Static B+Tree, allowing it to be used as a drop-in replacement for the current BST implementation in fcb_core.
+
+### Module Structure
 
 ```
-[Entry { key: 18, offset: 1 }]
-level 2:
-[Entry { key: 6, offset: 4 }, Entry { key: 12, offset: 6 }, Entry { key: 18446744073709551615, offset: 10 }]
-level 1:
-[Entry { key: 2, offset: 11 }, Entry { key: 4, offset: 13 }, Entry { key: 8, offset: 17 }, Entry { key: 10, offset: 19 }, Entry { key: 14, offset: 23 }, Entry { key: 16, offset: 25 }, Entry { key: 18446744073709551615, offset: 29 }]
-level 0:
-[Entry { key: 0, offset: 0 }, Entry { key: 1, offset: 16 }, Entry { key: 2, offset: 32 }, Entry { key: 3, offset: 48 }, Entry { key: 4, offset: 64 }, Entry { key: 5, offset: 80 }, Entry { key: 6, offset: 96 }, Entry { key: 7, offset: 112 }, Entry { key: 8, offset: 128 }, Entry { key: 9, offset: 144 }, Entry { key: 10, offset: 160 }, Entry { key: 11, offset: 176 }, Entry { key: 12, offset: 192 }, Entry { key: 13, offset: 208 }, Entry { key: 14, offset: 224 }, Entry { key: 15, offset: 240 }, Entry { key: 16, offset: 256 }, Entry { key: 17, offset: 272 }, Entry { key: 18, offset: 288 }]
+static-btree/
+├── src/
+│   ├── query/
+│   │   ├── mod.rs         // Re-exports from submodules
+│   │   ├── types.rs       // Query types and traits
+│   │   ├── memory.rs      // In-memory index implementation
+│   │   ├── stream.rs      // Stream-based index implementation
+│   │   └── http.rs        // HTTP-based index implementation (conditional)
 ```
 
-## Search strategies
+### Core Interfaces
 
-### Exact match
+#### 1. Query Types (types.rs)
 
-To find an exact match, we traverse nodes level by level, starting from the root node.
-We compare the search key with the `NodeItem`s in the current level, and find where the search key is greater than the current node key. If it finds where the search key is greater than the current node key, it will search the right children node. If the search key is less than leftmost key in the node, it will search the left children node. Otherwise, it will search the middle children node.
+```rust
+/// Comparison operators for queries
+pub enum Operator {
+    Eq,    // Equal
+    Ne,    // Not equal
+    Gt,    // Greater than
+    Lt,    // Less than
+    Ge,    // Greater than or equal
+    Le,    // Less than or equal
+}
 
-![image.png](image.png)
+/// A single query condition
+pub struct QueryCondition<K: Key> {
+    pub field: String,      // Field name
+    pub operator: Operator, // Comparison operator
+    pub key: K,             // Key value
+}
 
-### Range search
+/// A complete query with multiple conditions
+pub struct Query<K: Key> {
+    pub conditions: Vec<QueryCondition<K>>,
+}
 
-For range searches, we use a more efficient partition-based approach:
-1. Find the partition points for both the lower and upper bounds of the range
-2. Process only the leaf nodes between these partition points
-3. Filter the items within those leaf nodes to return only those within the range
+/// Core trait for index searching capabilities
+pub trait SearchIndex<K: Key> {
+    /// Find exact matches for a key
+    fn find_exact(&self, key: K) -> Result<Vec<u64>>;
 
-This approach minimizes tree traversals by locating the start and end points directly, then processing only the relevant leaf nodes. For single-key ranges (where lower == upper), we delegate to the `find_exact` function.
+    /// Find matches within a range (inclusive start, inclusive end)
+    fn find_range(&self, start: Option<K>, end: Option<K>) -> Result<Vec<u64>>;
+}
 
-## Next Task: Payload and Duplicates Handling
+/// Trait for multi-index query capabilities
+pub trait MultiIndex<K: Key> {
+    /// Execute a query and return matching offsets
+    fn query(&self, query: &Query<K>) -> Result<Vec<u64>>;
+}
+```
 
-According to the [progress.md](./progress.md) file, the next milestone (#4) involves implementing payload and duplicates handling in the tree.
+#### 2. Memory-based Index (memory.rs)
 
-### Implementation Steps
+The in-memory implementation will wrap the existing Stree functionality, providing:
 
-1. Modify the tree structure to support handling of payloads:
-   - Update the `Entry` struct to include payload information or references
-   - Consider how payloads will be stored and accessed efficiently
+```rust
+/// In-memory index implementation
+pub struct MemoryIndex<K: Key> {
+    stree: Stree<K>,
+    num_items: usize,
+    branching_factor: u16,
+}
 
-2. Add duplicate key handling:
-   - Decide on a strategy for duplicate keys (linked list, array of values, etc.)
-   - Modify the `find_exact` and `find_range` functions to return all matching entries for duplicate keys
+/// Container for multiple in-memory indices
+pub struct MemoryMultiIndex<K: Key> {
+    indices: HashMap<String, MemoryIndex<K>>,
+}
+```
 
-3. Update the tree construction process:
-   - Modify `generate_nodes` to handle duplicate keys correctly during tree construction
-   - Ensure that nodes with duplicate keys are properly connected
+#### 3. Stream-based Index (stream.rs)
 
-4. Create unit tests for both payloads and duplicates:
-   - Tests for storing and retrieving payloads
-   - Tests for handling multiple entries with the same key
-   - Edge cases like all entries having the same key
+For file-based operations, we'll implement:
 
-### Helpful Files and Functions
+```rust
+/// Stream-based index for file access
+pub struct StreamIndex<K: Key> {
+    num_items: usize,
+    branching_factor: u16,
+    index_offset: u64,
+    payload_size: usize,
+}
 
-- `src/stree.rs`: Contains the main tree implementation
-- `src/entry.rs`: Defines the Entry structure
-- `src/key.rs`: Contains the Key trait implementation
-- Look at the existing `find_exact` and `find_range` functions as examples
-- The `num_original_items` and `payload_start` fields in the Stree struct are currently unused but likely intended for payload/duplicate handling
+/// Container for multiple stream indices
+pub struct StreamMultiIndex<K: Key> {
+    indices: HashMap<String, StreamIndex<K>>,
+}
+```
 
-### Design Considerations
+#### 4. HTTP-based Index (http.rs)
 
-- Consider that this is a static tree, so all keys and their payloads must be known at construction time
-- Ensure that the implementation remains memory-efficient
-- Maintain the existing API design patterns for consistency
-- Keep the Eytzinger layout for optimal binary search performance 
+For remote operations, with the `http` feature enabled:
 
-### Future Integration
+```rust
+/// HTTP-based index for remote access
+#[cfg(feature = "http")]
+pub struct HttpIndex<K: Key> {
+    num_items: usize,
+    branching_factor: u16,
+    index_offset: usize,
+    attr_index_size: usize,
+    payload_size: usize,
+    combine_request_threshold: usize,
+}
 
-After completing this task, the next milestone (#5) will involve implementing the HTTP query functionality, so ensure that the payload handling design will work well with streaming use cases.
+/// Container for multiple HTTP indices
+#[cfg(feature = "http")]
+pub struct HttpMultiIndex<K: Key> {
+    indices: HashMap<String, HttpIndex<K>>,
+}
+```
 
-## Useful Resources
+## Implementation Tasks
 
-- Check the [implementation_plan.md](./implementation_plan.md) document for the overall design strategy
-- The existing tests in the `tests` module within `stree.rs` provide good examples
-- The codebase follows the approach used in FlatGeobuf, which might provide additional insights
+### 1. Base Module Setup
+
+- Create the query module directory structure
+- Implement the core types (Operator, QueryCondition, Query)
+- Define the SearchIndex and MultiIndex traits
+
+### 2. Memory Index Implementation
+
+- Implement MemoryIndex as a wrapper around Stree
+- Create MemoryMultiIndex for managing multiple indices
+- Add unit tests for basic query operations
+
+### 3. Stream Index Implementation
+
+- Implement StreamIndex for file-based operations
+- Create StreamMultiIndex with reader-based query methods
+- Test with file I/O to verify correct behavior
+
+### 4. HTTP Index Implementation
+
+- Implement HttpIndex for HTTP-based operations
+- Create HttpMultiIndex with async query methods
+- Test with mock HTTP clients to ensure correct behavior
+
+### 5. Integration Layer
+
+- Create the compatibility layer as outlined in implementation_integrate_w_flatcitybuf.md
+- Implement wrapper types that match the BST API
+- Develop tests comparing the behavior with the existing BST implementation
+
+## Implementation Guidelines
+
+### 1. Type Safety
+
+- Leverage Rust's type system, especially with the Key trait
+- Ensure proper error handling without unwrap() calls
+- Use Result types for all fallible operations
+
+### 2. Optimization Focus
+
+- Index operations should minimize allocations
+- Search operations should read only the necessary nodes
+- HTTP operations should batch requests when possible
+
+### 3. Testing Strategy
+
+- Write tests for each component before implementation
+- Include both unit tests and integration tests
+- Create comparative tests against the BST implementation
+
+### 4. Documentation
+
+- Document all public APIs with rustdoc
+- Explain design decisions in comments
+- Update the overview and progress documents as work advances
+
+## Resources
+
+- **implementation_query.md**: Detailed plan for the query implementation
+- **implementation_integrate_w_flatcitybuf.md**: Strategy for integrating with fcb_core
+- **overview.md**: Comprehensive overview of the static-btree crate
+- **stree.rs**: Core tree implementation to leverage for index operations
+
+## Coordination Points
+
+Coordinate with the fcb_core team on:
+
+1. The exact interface requirements for the compatibility layer
+2. Performance expectations for the new implementation
+3. Testing strategies to ensure correct behavior when integrated
 
 Good luck with the implementation!
