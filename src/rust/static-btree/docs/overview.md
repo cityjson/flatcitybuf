@@ -1,8 +1,23 @@
 # Static B+Tree (S+Tree) Crate Overview
 
+**Project:** Implement the `static-btree` Rust Crate
+**Goal:** Create a Rust crate for a Static B+Tree (S+Tree) optimized for read performance.
+
+## 1. Introduction
+
 This document provides a comprehensive overview of the static-btree crate, detailing its internal structure, modules, and workflows for tree construction and search operations.
 
-## 1. File Structure and Module Overview
+The implementation follows the principles described in the [Algorithmica S+Tree article](https://en.algorithmica.org/hpc/data-structures/s-tree/), utilizing an implicit Eytzinger layout for node addressing and storing the entire tree structure contiguously. The goal is to create a highly performant, read-optimized B+Tree suitable for large, static datasets, emphasizing cache efficiency and minimal memory usage during queries.
+
+## 2. Core Concepts
+
+* **Static:** Built once, read many times. No modifications after build.
+* **Implicit Layout (Eytzinger):** Nodes stored contiguously, often level-by-level.
+* **Packed Nodes:** Nodes are fully utilized (except potentially the last one per level) for better space and cache efficiency.
+* **Read Optimization:** Designed for fast lookups and range scans by minimizing I/O (reading only needed nodes).
+* **`Read + Seek` Abstraction:** Operates on standard Rust I/O traits, enabling use with files, memory, etc.
+
+## 3. File Structure and Module Overview
 
 The static-btree crate is organized into the following key modules:
 
@@ -17,79 +32,125 @@ The static-btree crate is organized into the following key modules:
 
 ### Key Components
 
-- **`Entry<K>`**: Represents an item in a tree node, containing a key and an offset.
-- **`Stree<K>`**: The core tree structure, managing node items and tree layout.
-- **`Key` trait**: Defines operations required for key types (comparison, serialization).
-- **`HttpSearchResultItem`**: Represents search results when using HTTP-based querying.
-- **`SearchResultItem`**: Represents search results when using direct memory or file access.
+* **`Entry<K>`**: Represents an item in a tree node, containing a key and an offset.
+* **`Stree<K>`**: The core tree structure, managing node items and tree layout.
+* **`Key` trait**: Defines operations required for key types (comparison, serialization).
+* **`HttpSearchResultItem`**: Represents search results when using HTTP-based querying.
+* **`SearchResultItem`**: Represents search results when using direct memory or file access.
 
-## 2. Tree Construction Workflow
+## 4. Terminology & Symbols
+
+Before diving into the implementation details, let's define the key terminology and symbols used throughout the crate:
+
+| Symbol | Meaning                          |
+|--------|----------------------------------|
+| `B`    | The number of pointers to children in a node. The number of items in a node is `B-1`. |
+| `N`    | Total number of entries          |
+| `H`    | Height of the tree               |
+| `K`    | Key type implementing `Key`      |
+| `O`    | Offset (`u64`) – value payload. This is the offset of the value in the payload. |
+| `payload` | The buffer where actual data offsets are stored. When there are duplicates, the payload is the array of offsets of the duplicate values. |
+
+## 5. Tree Structure
+
+### 5.1 Node Layout
+
+1. **Leaf Nodes**
+   * Store **up to `B`-1 keys** followed by their offsets.
+   * No explicit *next‑leaf* pointer is required – leaves are stored **contiguously**; the next leaf is `index + 1` except for the right‑most leaf.
+
+2. **Internal Nodes**
+   * Store keys and offsets. The offset is the offset index of the first (leftmost) item in the child node.
+   * For the parent, its children nodes have smaller keys than the parent. All node items in the child node can be retrieved by the offset and the number of items in the child node (B-1).
+   * Each key `i` equals the **smallest key in the `(i+1)`‑th child subtree** (standard B+ invariant).
+   * No padding is required for the last child node. Tree is packed.
+
+3. **Layer Packing**
+   * Layers are written **top‑down (root → leaves)** in both memory & on‑disk representation.
+   * Items in each layer are stored as single array. e.g. the root node is the first B-1 items, the next level is the next B items, etc. `[root node item1, root node item2, ..., root node itemB-1, child node item1, child node item2, ..., child node itemB-1]`.
+
+## 6. Tree Construction Workflow
 
 The static B+Tree construction follows a sequential process designed for efficient read-only operations:
 
-### 2.1. Data Preparation
+### 6.1. Data Preparation
 
 1. **Collection of Entries**:
-   - Starts with a collection of `Entry<K>` items containing keys and their corresponding offsets.
-   - Each entry represents a key-value pair, where the value is referenced by an offset.
+   * Starts with a collection of `Entry<K>` items containing keys and their corresponding offsets.
+   * Each entry represents a key-value pair, where the value is referenced by an offset.
 
 2. **Duplicate Handling**:
-   - Identify and handle duplicate keys.
-   - For duplicate keys, offsets are stored in a separate payload area.
-   - The tree itself stores only unique keys, with references to the payload for duplicates.
+   * Identify and handle duplicate keys.
+   * For duplicate keys, offsets are stored in a separate payload area.
+   * The tree itself stores only unique keys, with references to the payload for duplicates.
 
-### 2.2. Tree Structure Calculation
+### 6.2. Tree Structure Calculation
 
 1. **Level Bounds Calculation** (`generate_level_bounds`):
-   - Calculates the number of nodes per level based on:
-     - Total number of entries
-     - Branching factor (B)
-   - Creates a vector of ranges where each range represents a level in the tree.
-   - First range represents leaf nodes, last range represents the root.
+   * Calculates the number of nodes per level based on:
+     * Total number of entries
+     * Branching factor (B)
+   * Creates a vector of ranges where each range represents a level in the tree.
+   * First range represents leaf nodes, last range represents the root.
 
 2. **Node Structure Calculation**:
-   - B-1 keys per node (where B is the branching factor).
-   - Nodes are stored contiguously in a level-by-level layout.
-   - Level bounds store the start and end index of each level.
+   * B-1 keys per node (where B is the branching factor).
+   * Nodes are stored contiguously in a level-by-level layout.
+   * Level bounds store the start and end index of each level.
 
-### 2.3. Tree Building Process (`generate_nodes`)
+### 6.3. Tree Building Process (`generate_nodes`)
 
 1. **Bottom-up Construction**:
-   - Starts with leaf nodes (already prepared).
-   - Builds internal nodes level by level, moving upward toward the root.
+   * Starts with leaf nodes (already prepared).
+   * Builds internal nodes level by level, moving upward toward the root.
 
 2. **Internal Node Generation**:
-   - For each parent node slot, selects the minimum key from the right subtree.
-   - Sets the offset to point to the corresponding child node's position.
+   * For each parent node slot, selects the minimum key from the right subtree.
+   * Sets the offset to point to the corresponding child node's position.
 
 3. **Packing Strategy**:
-   - Tree is built with maximum packing density.
-   - Last nodes at each level may be partially filled, but most nodes are fully utilized.
-   - Follows the Eytzinger layout to optimize cache efficiency.
+   * Tree is built with maximum packing density.
+   * Last nodes at each level may be partially filled, but most nodes are fully utilized.
+   * Follows the Eytzinger layout to optimize cache efficiency.
 
-### 2.4. Payload Encoding
+### 6.4. Payload Encoding
 
 1. **Standard Entries**:
-   - For entries with unique keys, the offset directly points to the value.
+   * For entries with unique keys, the offset directly points to the value.
 
 2. **Duplicate Key Handling**:
-   - When duplicate keys exist, a special bit pattern in the offset (`PAYLOAD_TAG`) indicates it points to the payload area.
-   - The actual offset is masked with `PAYLOAD_MASK` to get the position in the payload area.
-   - Payload entries store multiple offsets for the duplicate keys.
-   - `PayloadEntry` structure contains a list of offsets for duplicate key values.
+   * When duplicate keys exist, a special bit pattern in the offset (`PAYLOAD_TAG`) indicates it points to the payload area.
+   * The actual offset is masked with `PAYLOAD_MASK` to get the position in the payload area.
+   * Payload entries store multiple offsets for the duplicate keys.
+   * `PayloadEntry` structure contains a list of offsets for duplicate key values.
 
-### 2.5. Serialization (`stream_write`)
+### 6.5. Serialization (`stream_write`)
 
 1. **Data Layout**:
-   - Tree is serialized level by level, starting from the root downward.
-   - Nodes and their entries are stored contiguously.
-   - Payload area is appended at the end if duplicates exist.
+   * Tree is serialized level by level, starting from the root downward.
+   * Nodes and their entries are stored contiguously.
+   * Payload area is appended at the end if duplicates exist.
 
-## 3. Search Operations
+### 6.6 Complete Construction Algorithm
+
+The following steps summarize the complete construction process:
+
+1. **Copy leaves** – Create subset of entries with unique keys, handling duplicates through the payload area.
+2. **Tree layout** – Calculate level bounds based on branching factor and number of items.
+3. **Build internal layers** – Generate internal nodes bottom-up from the leaf level.
+4. **Serialize** – Write the structure to an output stream.
+5. **Deserialize** – Read the structure back when needed for queries.
+
+**Complexities**:
+
+* **Build**: `O(N)` time, `O(N)` space.
+* **Search**: `O(log_{B} N)` node touches (each touch requires reading a single node from the underlying reader, not the whole tree).
+
+## 7. Search Operations
 
 The crate provides various search operations optimized for different access patterns and data sources:
 
-### 3.1. Direct Memory Search Operations
+### 7.1. Direct Memory Search Operations
 
 | Function | Description |
 |----------|-------------|
@@ -97,7 +158,7 @@ The crate provides various search operations optimized for different access patt
 | `find_range` | Finds entries with keys in a specified range in memory-loaded tree |
 | `find_partition` | Finds the index where a key would be inserted (useful for determining positions) |
 
-### 3.2. Stream-based Search Operations
+### 7.2. Stream-based Search Operations
 
 | Function | Description |
 |----------|-------------|
@@ -105,7 +166,7 @@ The crate provides various search operations optimized for different access patt
 | `stream_find_range` | Finds range matches by efficiently reading nodes within the range from a `Read + Seek` source |
 | `stream_find_partition` | Finds insertion position by navigating the tree through streaming |
 
-### 3.3. HTTP-based Search Operations
+### 7.3. HTTP-based Search Operations
 
 | Function | Description |
 |----------|-------------|
@@ -113,58 +174,71 @@ The crate provides various search operations optimized for different access patt
 | `http_stream_find_range` | Performs range search using HTTP range requests, optimizing data transfer |
 | `http_stream_find_partition` | Determines insertion position through HTTP requests, useful for binary search |
 
-### 3.4. Search Algorithm
+### 7.4. Search Algorithm
 
 The search process follows these general steps:
 
 1. **Tree Navigation**:
-   - Start at the root node.
-   - At each internal node, use binary search to find the child node to descend to.
-   - Continue until reaching a leaf node.
+   * Start at the root node.
+   * At each internal node, use binary search to find the child node to descend to.
+   * Continue until reaching a leaf node.
 
 2. **Leaf Processing**:
-   - For exact search: Use binary search to find the exact key.
-   - For range search: Scan leaf nodes within the range boundaries.
+   * For exact search: Use binary search to find the exact key.
+   * For range search: Scan leaf nodes within the range boundaries.
 
 3. **Result Collection**:
-   - For each matching key, determine if it points to a direct value or payload area.
-   - If direct, return the offset as a result.
-   - If pointing to payload, read all offsets from the payload area and return multiple results.
+   * For each matching key, determine if it points to a direct value or payload area.
+   * If direct, return the offset as a result.
+   * If pointing to payload, read all offsets from the payload area and return multiple results.
 
 4. **HTTP Optimization**:
-   - HTTP-based operations use range requests to fetch only needed nodes.
-   - Implements request batching when adjacent nodes need to be read to reduce HTTP round trips.
-   - Uses `AsyncHttpRangeClient` to perform asynchronous HTTP operations.
+   * HTTP-based operations use range requests to fetch only needed nodes.
+   * Implements request batching when adjacent nodes need to be read to reduce HTTP round trips.
+   * Uses `AsyncHttpRangeClient` to perform asynchronous HTTP operations.
 
-## 4. Performance Considerations
+## 8. Performance Considerations
 
 1. **Cache Efficiency**:
-   - Uses Eytzinger layout for better cache locality.
-   - Nodes at the same level are stored contiguously.
+   * Uses Eytzinger layout for better cache locality.
+   * Nodes at the same level are stored contiguously.
 
 2. **Minimal I/O**:
-   - Only reads nodes necessary for the search path.
-   - Uses binary search within nodes to minimize comparisons.
+   * Only reads nodes necessary for the search path.
+   * Uses binary search within nodes to minimize comparisons.
 
 3. **HTTP Optimizations**:
-   - Batches adjacent node requests to reduce HTTP overhead.
-   - Uses range requests to fetch only needed data.
-   - Buffers HTTP responses for better performance.
+   * Batches adjacent node requests to reduce HTTP overhead.
+   * Uses range requests to fetch only needed data.
+   * Buffers HTTP responses for better performance.
 
 4. **Memory Efficiency**:
-   - Static structure allows for precise memory allocation.
-   - Compact representation with minimal overhead.
+   * Static structure allows for precise memory allocation.
+   * No need for dynamic node allocations or pointer indirection.
+   * Compact representation with minimal overhead.
 
-## 5. Limitations and Constraints
+## 9. Safety & Error Handling
+
+* **No `unsafe`** is required; index math uses `usize` and is bounds‑checked in debug builds.
+* All fallible functions use `crate::error::Result` (`std::result::Result<T, Error>`).
+* `Error::IoError` is propagated verbatim from underlying I/O operations.
+
+## 10. Limitations and Constraints
 
 1. **Read-Only Structure**:
-   - Tree is immutable after construction.
-   - No support for insertions, deletions, or updates.
+   * Tree is immutable after construction.
+   * No support for insertions, deletions, or updates.
 
 2. **Construction Cost**:
-   - One-time O(N) build cost in both time and space.
-   - Must rebuild the entire tree to incorporate new data.
+   * One-time O(N) build cost in both time and space.
+   * Must rebuild the entire tree to incorporate new data.
 
 3. **Memory Requirements**:
-   - Full tree needs to be loaded in memory during construction.
-   - Stream-based operations require minimal memory during queries.
+   * Full tree needs to be loaded in memory during construction.
+   * Stream-based operations require minimal memory during queries.
+
+## 11. Future Work
+
+1. **Prefetch hints** – Explore prefetching for sequential range scans to improve performance.
+2. **Compression** – Investigate node-level compression techniques for reduced storage requirements.
+3. **Parallel construction** – Optimize tree building for multi-core systems.
