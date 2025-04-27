@@ -15,12 +15,17 @@ pub trait Max {
     fn max_value() -> Self;
 }
 
+pub trait Min {
+    /// Returns the minimum representable value for this type.
+    fn min_value() -> Self;
+}
+
 /// Trait defining requirements for keys used in the StaticBTree.
 ///
 /// Keys must support ordering (`Ord`), cloning (`Clone`), debugging (`Debug`),
 /// and have a fixed serialized size (`SERIALIZED_SIZE`). Variable-length types
 /// like `String` must be adapted (e.g., using fixed-size prefixes) to conform.
-pub trait Key: Sized + Ord + Clone + Debug + Default + Max {
+pub trait Key: Sized + Ord + Clone + Debug + Default + Max + Min {
     /// The exact size of the key in bytes when serialized.
     /// This is crucial for calculating node sizes and offsets.
     const SERIALIZED_SIZE: usize;
@@ -116,6 +121,60 @@ impl<const N: usize> Max for FixedStringKey<N> {
     fn max_value() -> Self {
         // For strings, a byte array filled with 0xFF represents the maximum lexicographical value
         Self([0xFF; N])
+    }
+}
+
+impl Min for i32 {
+    fn min_value() -> Self {
+        i32::MIN
+    }
+}
+
+impl Min for u32 {
+    fn min_value() -> Self {
+        u32::MIN
+    }
+}
+
+impl Min for i64 {
+    fn min_value() -> Self {
+        i64::MIN
+    }
+}
+
+impl Min for u64 {
+    fn min_value() -> Self {
+        u64::MIN
+    }
+}
+
+impl Min for OrderedFloat<f32> {
+    fn min_value() -> Self {
+        OrderedFloat(f32::NEG_INFINITY)
+    }
+}
+
+impl Min for OrderedFloat<f64> {
+    fn min_value() -> Self {
+        OrderedFloat(f64::NEG_INFINITY)
+    }
+}
+
+impl Min for bool {
+    fn min_value() -> Self {
+        false
+    }
+}
+
+impl Min for DateTime<Utc> {
+    fn min_value() -> Self {
+        Utc.timestamp_opt(0, 0).single().unwrap()
+    }
+}
+
+impl<const N: usize> Min for FixedStringKey<N> {
+    fn min_value() -> Self {
+        FixedStringKey([0u8; N])
     }
 }
 
