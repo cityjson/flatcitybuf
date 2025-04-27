@@ -1160,6 +1160,10 @@ impl<K: Key> Stree<K> {
         num_nodes * NodeItem::<K>::SERIALIZED_SIZE + payload_size
     }
 
+    pub fn num_items(&self) -> usize {
+        self.num_leaf_nodes
+    }
+
     /// Write all index nodes and any payload data
     pub fn stream_write<W: Write>(&self, out: &mut W) -> Result<()> {
         // Write serialized nodes
