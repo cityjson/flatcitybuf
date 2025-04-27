@@ -514,7 +514,7 @@ impl<K: Key> Stree<K> {
         num_items: usize, // number of items in the tree, not the number of entries of original data
         branching_factor: u16,
         key: K,
-        payload_size: usize,
+        _payload_size: usize,
     ) -> Result<Vec<SearchResultItem>> {
         let search_entry = NodeItem::new_with_key(key);
         let mut results = Vec::new();
@@ -656,10 +656,10 @@ impl<K: Key> Stree<K> {
             let node_items = &self.node_items[current_idx..node_end];
 
             // Add items that fall within the range
-            for (i, item) in node_items.iter().enumerate() {
+            for (_i, item) in node_items.iter().enumerate() {
                 if item.key >= lower && item.key <= upper {
                     let off = item.offset;
-                    let idx = current_idx + i - leaf_nodes_offset;
+                    let idx = current_idx + _i - leaf_nodes_offset;
                     if self.payload_initialized && (off & PAYLOAD_TAG) != 0 {
                         let rel = (off & PAYLOAD_MASK) as usize;
                         let (entry, _) =
@@ -750,10 +750,10 @@ impl<K: Key> Stree<K> {
                 read_node_items(data, index_base, current_idx, node_end - current_idx)?;
 
             // Add items that fall within the range
-            for (i, item) in node_items.iter().enumerate() {
+            for (_i, item) in node_items.iter().enumerate() {
                 if item.key >= lower && item.key <= upper {
                     let off = item.offset;
-                    let idx = current_idx + i - leaf_nodes_offset;
+                    let idx = current_idx + _i - leaf_nodes_offset;
                     if (off & PAYLOAD_TAG) != 0 {
                         let rel = (off & PAYLOAD_MASK) as usize;
                         data.seek(SeekFrom::Start(payload_data_start + rel as u64))?;
@@ -893,7 +893,7 @@ impl<K: Key> Stree<K> {
     pub async fn http_stream_find_exact<T: AsyncHttpRangeClient>(
         client: &mut AsyncBufferedHttpRangeClient<T>,
         index_begin: usize,
-        attr_index_size: usize,
+        _attr_index_size: usize,
         num_items: usize,
         branching_factor: u16,
         key: K,
@@ -909,12 +909,12 @@ impl<K: Key> Stree<K> {
         let node_size = branching_factor as usize - 1;
         let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
 
-        let Range {
-            start: leaf_nodes_offset,
-            end: num_nodes,
-        } = level_bounds
-            .first()
-            .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
+        // let Range {
+        //     start: leaf_nodes_offset,
+        //     end: num_nodes,
+        // } = level_bounds
+        //     .first()
+        //     .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
 
         let Range {
             start: root_start,
@@ -980,23 +980,23 @@ impl<K: Key> Stree<K> {
             } else {
                 let result = node_items
                     .binary_search_by(|item: &NodeItem<K>| item.key.cmp(&search_entry.key));
-                let mut offset = 0;
+                let mut _offset = 0;
                 match result {
                     Ok(idx) => {
-                        offset = node_items[idx].offset as usize + node_size;
+                        _offset = node_items[idx].offset as usize + node_size;
                     }
                     Err(idx) => {
                         if idx == 0 {
-                            offset = node_items[0].offset as usize;
+                            _offset = node_items[0].offset as usize;
                         } else if idx == node_items.len() {
-                            offset = node_items[node_items.len() - 1].offset as usize + node_size;
+                            _offset = node_items[node_items.len() - 1].offset as usize + node_size;
                         } else {
-                            offset = node_items[idx].offset as usize;
+                            _offset = node_items[idx].offset as usize;
                         }
                     }
                 }
                 let children_level = node_range.level - 1;
-                let mut children_nodes = offset..(offset + node_size);
+                let mut children_nodes = _offset..(_offset + node_size);
                 if children_level == 0 {
                     // These children are leaf nodes.
                     //
@@ -1060,6 +1060,79 @@ impl<K: Key> Stree<K> {
         Ok(results)
     }
 
+    #[cfg(feature = "http")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn http_stream_find_partition<T: AsyncHttpRangeClient>(
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        index_begin: usize,
+        num_items: usize,
+        branching_factor: u16,
+        key: K,
+        _combine_request_threshold: usize,
+    ) -> Result<usize> {
+        use tracing::debug;
+
+        if num_items == 0 {
+            return Ok(0);
+        }
+
+        let node_size = branching_factor as usize - 1;
+        let level_bounds = Self::generate_level_bounds(num_items, branching_factor);
+
+        debug!("http_stream_find_partition - index_begin: {index_begin}, num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, key: {key:?}");
+
+        // Start from the root level and work down to the leaf level
+        let mut node_index = 0;
+
+        // Start at the root and navigate down to the leaf level
+        for level in (1..level_bounds.len()).rev() {
+            let end = min(node_index + node_size, level_bounds[level].end);
+
+            // Create a range for the current node
+            let node_range = Range {
+                start: node_index,
+                end,
+            };
+
+            // Read the node items using HTTP
+            let node_items = read_http_node_items(client, index_begin, &node_range).await?;
+
+            if node_items.is_empty() {
+                continue;
+            }
+
+            // Find the child node to traverse next using binary search
+            match node_items.binary_search_by(|item: &NodeItem<K>| item.key.cmp(&key)) {
+                Ok(index) => {
+                    // Exact match found, go to the corresponding child
+                    node_index = node_items[index].offset as usize;
+                }
+
+                Err(index) => {
+                    let old_node_index = node_index;
+                    // No exact match, determine appropriate child based on comparison
+                    if index == 0 {
+                        // Key is smaller than all keys in this node
+                        // Go to the leftmost child
+                        node_index = node_items[0].offset as usize;
+                    } else if index >= node_items.len() {
+                        // Key is larger than all keys in this node
+                        // Go to the rightmost child's right sibling
+                        node_index = node_items[node_items.len() - 1].offset as usize + node_size;
+                    } else {
+                        // Key is between keys in this node
+                        // Go to the child node that would contain this key
+                        node_index = node_items[index].offset as usize;
+                    }
+                }
+            }
+        }
+
+        // At this point, node_index is the position in the leaf level
+        // where the key would be inserted
+        Ok(node_index)
+    }
+
     pub fn size(&self) -> usize {
         self.num_nodes() * Entry::<K>::SERIALIZED_SIZE
     }
@@ -1098,6 +1171,134 @@ impl<K: Key> Stree<K> {
             out.write_all(&self.payload_data)?;
         }
         Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn http_stream_find_range<T: AsyncHttpRangeClient>(
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        index_begin: usize,
+        _attr_index_size: usize,
+        num_items: usize,
+        branching_factor: u16,
+        lower: K,
+        upper: K,
+        _payload_size: usize,
+        combine_request_threshold: usize,
+    ) -> Result<Vec<HttpSearchResultItem>> {
+        use std::println;
+        use tracing::debug;
+
+        // Return empty result if invalid range
+        if lower > upper {
+            return Ok(Vec::new());
+        }
+
+        // Special case for exact matches (when lower == upper)
+        // Use find_exact for single-item ranges to ensure consistent behavior
+        if lower == upper {
+            return Self::http_stream_find_exact(
+                client,
+                index_begin,
+                _attr_index_size,
+                num_items,
+                branching_factor,
+                lower,
+                _payload_size,
+                combine_request_threshold,
+            )
+            .await;
+        }
+
+        let node_size = branching_factor as usize - 1;
+        let level_bounds = Self::generate_level_bounds(num_items, branching_factor);
+        let feature_begin = Self::index_size(num_items, branching_factor, _payload_size);
+        let payload_data_start = feature_begin - _payload_size;
+
+        debug!("http_stream_find_range - index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, lower: {lower:?}, upper: {upper:?}");
+
+        let Range {
+            start: leaf_nodes_offset,
+            end: num_nodes,
+        } = level_bounds
+            .first()
+            .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
+
+        // Find partition points for lower and upper bounds to determine the range to scan
+        let upper_idx = Self::http_stream_find_partition(
+            client,
+            index_begin,
+            num_items,
+            branching_factor,
+            upper.clone(),
+            combine_request_threshold,
+        )
+        .await?;
+
+        let lower_idx = Self::http_stream_find_partition(
+            client,
+            index_begin,
+            num_items,
+            branching_factor,
+            lower.clone(),
+            combine_request_threshold,
+        )
+        .await?;
+
+        // Get the leaf level bounds
+        let leaf_level = 0;
+        let leaf_start = level_bounds[leaf_level].start;
+        let leaf_end = level_bounds[leaf_level].end;
+
+        // Calculate the actual range within the leaf level
+        let start_idx = max(lower_idx, leaf_start);
+        let end_idx = min(upper_idx + node_size, leaf_end);
+
+        let mut results = Vec::new();
+
+        // Process all leaf nodes from lower to upper bound
+        let mut current_idx = start_idx;
+        while current_idx < end_idx {
+            let node_end = min(current_idx + node_size, end_idx);
+
+            // Create a range for the current set of nodes
+            let node_range = Range {
+                start: current_idx,
+                end: node_end,
+            };
+
+            // Read the node items for this range with explicit type parameters
+            let node_items = read_http_node_items::<K, T>(client, index_begin, &node_range).await?;
+
+            // Add items that fall within the range
+            for item in node_items.iter() {
+                if item.key >= lower && item.key <= upper {
+                    let off = item.offset;
+
+                    if (off & PAYLOAD_TAG) != 0 {
+                        let rel = (off & PAYLOAD_MASK) as usize;
+                        let payload_data =
+                            read_http_payload_data(client, payload_data_start + rel).await?;
+
+                        for offset in payload_data.offsets {
+                            let start = feature_begin + offset as usize;
+                            results.push(HttpSearchResultItem {
+                                range: HttpRange::RangeFrom(start..),
+                            });
+                        }
+                    } else {
+                        let start = feature_begin + off as usize;
+                        results.push(HttpSearchResultItem {
+                            range: HttpRange::RangeFrom(start..),
+                        });
+                    }
+                }
+            }
+
+            current_idx = node_end;
+        }
+
+        Ok(results)
     }
 }
 
@@ -1434,7 +1635,6 @@ mod tests {
             // Extract the key from the offset
             let idx = list[0].offset / Entry::<FixedStringKey<10>>::SERIALIZED_SIZE;
             let found_key = (b'a' + idx as u8) as char;
-            println!("Found key: {}", found_key);
 
             assert_eq!(found_key, 'k');
         } else {
@@ -1836,6 +2036,266 @@ mod tests {
                 expected_result, offs
             );
         }
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio::test]
+    async fn test_http_stream_find_partition() -> Result<()> {
+        use crate::mocked_http_range_client::MockHttpRangeClient;
+        use std::println;
+
+        println!("Starting test_http_stream_find_partition");
+
+        // Vector of nodes for the test
+        let nodes = vec![
+            NodeItem::new(0_i64, 0_u64),
+            NodeItem::new(1_i64, 1_u64),
+            NodeItem::new(2_i64, 2_u64),
+            NodeItem::new(3_i64, 3_u64),
+            NodeItem::new(4_i64, 4_u64),
+            NodeItem::new(5_i64, 5_u64),
+            NodeItem::new(6_i64, 6_u64),
+            NodeItem::new(7_i64, 7_u64),
+            NodeItem::new(8_i64, 8_u64),
+            NodeItem::new(8_i64, 88_u64),
+            NodeItem::new(9_i64, 9_u64),
+            NodeItem::new(10_i64, 10_u64),
+            NodeItem::new(11_i64, 11_u64),
+            NodeItem::new(12_i64, 12_u64),
+            NodeItem::new(13_i64, 13_u64),
+            NodeItem::new(14_i64, 14_u64),
+            NodeItem::new(15_i64, 15_u64),
+            NodeItem::new(16_i64, 16_u64),
+            NodeItem::new(17_i64, 17_u64),
+            NodeItem::new(18_i64, 18_u64),
+        ];
+
+        // Print all the node items to understand the tree structure
+        println!("Node items (key, offset):");
+        for (i, node) in nodes.iter().enumerate() {
+            println!("[{}] = ({}, {})", i, node.key, node.offset);
+        }
+
+        // Test cases for different queries and branching factors
+        // We build a test tree and get the correct expected positions from in-memory find_partition
+        let tree_4 = Stree::<i64>::build(&nodes, 4)?;
+
+        let test_cases = vec![
+            // query, branching factor, expected value
+            (8_i64, 4, tree_4.find_partition(8_i64)?), // Now using correct expected value for key 8
+            (0_i64, 4, tree_4.find_partition(0_i64)?), // Leftmost
+            (18_i64, 4, tree_4.find_partition(18_i64)?), // Rightmost
+            (19_i64, 4, tree_4.find_partition(19_i64)?), // Beyond rightmost
+            (-1_i64, 4, tree_4.find_partition(-1_i64)?), // Before leftmost
+        ];
+
+        // We also test with different branching factors
+        let tree_3 = Stree::<i64>::build(&nodes, 3)?;
+        let tree_5 = Stree::<i64>::build(&nodes, 5)?;
+        let tree_6 = Stree::<i64>::build(&nodes, 6)?;
+
+        let more_test_cases = vec![
+            (4_i64, 3, tree_3.find_partition(4_i64)?), // Different branching factor
+            (4_i64, 5, tree_5.find_partition(4_i64)?), // Different branching factor
+            (4_i64, 6, tree_6.find_partition(4_i64)?), // Different branching factor
+            (7_i64, 4, tree_4.find_partition(7_i64)?), // Another value
+            (7_i64, 3, tree_3.find_partition(7_i64)?), // Another value, different branching factor
+            (7_i64, 5, tree_5.find_partition(7_i64)?), // Another value, different branching factor
+        ];
+
+        // Combine all test cases
+        let all_test_cases = [test_cases, more_test_cases].concat();
+
+        for (query, branching_factor, expected_position) in all_test_cases {
+            println!(
+                "\nTesting query: {}, branching_factor: {}",
+                query, branching_factor
+            );
+
+            let tree = Stree::<i64>::build(&nodes, branching_factor)?;
+
+            println!("Tree built with num_leaf_nodes: {}", tree.num_leaf_nodes);
+            println!("Tree level_bounds: {:?}", tree.level_bounds);
+
+            // Verify expected_position using the in-memory find_partition
+            let in_memory_position = tree.find_partition(query)?;
+            println!("In-memory find_partition result: {}", in_memory_position);
+
+            // Ensure the expected position is what we expect from in-memory operation
+            assert_eq!(
+                in_memory_position, expected_position,
+                "Unexpected in-memory find_partition result"
+            );
+
+            // Serialize tree to buffer
+            let mut buf = Vec::new();
+            tree.stream_write(&mut buf)?;
+
+            let mut client = MockHttpRangeClient::new_mock_http_range_client(&buf);
+
+            // Perform http_stream_find_partition
+            let position = Stree::<i64>::http_stream_find_partition(
+                &mut client,
+                0, // index_begin
+                tree.num_leaf_nodes,
+                branching_factor, // branching_factor
+                query,
+                256 * 1024, // combine_request_threshold
+            )
+            .await?;
+
+            println!("HTTP stream find_partition result: {}", position);
+
+            // Verify HTTP implementation gives same result as in-memory
+            assert_eq!(
+                position, expected_position,
+                "HTTP version gives {} but expected {}",
+                position, expected_position
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio::test]
+    async fn test_http_stream_find_range() -> Result<()> {
+        use crate::mocked_http_range_client::MockHttpRangeClient;
+        use std::println;
+
+        println!("Starting test_http_stream_find_range");
+
+        // Create a test tree with node items
+        let nodes = vec![
+            NodeItem::new(0_i64, 0_u64),
+            NodeItem::new(1_i64, 1_u64),
+            NodeItem::new(1_i64, 101_u64), // Duplicate key for testing
+            NodeItem::new(2_i64, 2_u64),
+            NodeItem::new(3_i64, 3_u64),
+            NodeItem::new(4_i64, 4_u64),
+            NodeItem::new(5_i64, 5_u64),
+            NodeItem::new(6_i64, 6_u64),
+            NodeItem::new(7_i64, 7_u64),
+            NodeItem::new(8_i64, 8_u64),
+            NodeItem::new(9_i64, 9_u64),
+            NodeItem::new(9_i64, 99_u64), // Duplicate key for testing
+            NodeItem::new(10_i64, 10_u64),
+            NodeItem::new(11_i64, 11_u64),
+            NodeItem::new(12_i64, 12_u64),
+            NodeItem::new(13_i64, 13_u64),
+            NodeItem::new(14_i64, 14_u64),
+            NodeItem::new(15_i64, 15_u64),
+            NodeItem::new(16_i64, 16_u64),
+            NodeItem::new(17_i64, 17_u64),
+            NodeItem::new(18_i64, 18_u64),
+        ];
+
+        // Different range test cases
+        let test_cases = vec![
+            // (lower_bound, upper_bound, branching_factor)
+            (5_i64, 10_i64, 4),  // Regular range in the middle
+            (0_i64, 3_i64, 4),   // Range at the beginning
+            (15_i64, 18_i64, 4), // Range at the end
+            (0_i64, 18_i64, 4),  // Full range
+            (6_i64, 6_i64, 4),   // Single value (exact match)
+            (9_i64, 9_i64, 4),   // Single value with duplicates
+            (1_i64, 1_i64, 4),   // Another single value with duplicates
+            (19_i64, 20_i64, 4), // Range beyond the end
+            (-2_i64, -1_i64, 4), // Range before the beginning
+            (-1_i64, 2_i64, 4),  // Range overlapping the beginning
+            (17_i64, 20_i64, 4), // Range overlapping the end
+            (7_i64, 12_i64, 3),  // Range with different branching factor
+            (7_i64, 12_i64, 5),  // Range with different branching factor
+            (7_i64, 12_i64, 6),  // Range with different branching factor
+            (10_i64, 5_i64, 4),  // Invalid range (lower > upper)
+        ];
+
+        for (lower, upper, branching_factor) in test_cases {
+            println!(
+                "\nTesting range: [{}, {}], branching_factor: {}",
+                lower, upper, branching_factor
+            );
+
+            // Build the tree
+            let tree = Stree::<i64>::build(&nodes, branching_factor)?;
+            let payload_size = tree.payload_data.len();
+
+            println!("Tree built with num_leaf_nodes: {}", tree.num_leaf_nodes);
+            println!("Tree level_bounds: {:?}", tree.level_bounds);
+
+            // Get in-memory range search results for comparison
+            let in_memory_results = tree.find_range(lower, upper)?;
+
+            println!(
+                "In-memory range search found {} results",
+                in_memory_results.len()
+            );
+            if !in_memory_results.is_empty() {
+                println!("First few results (offset, index):");
+                for (i, item) in in_memory_results.iter().take(5).enumerate() {
+                    println!("[{}] = ({}, {})", i, item.offset, item.index);
+                }
+            }
+
+            // Serialize tree to buffer
+            let mut buf = Vec::new();
+            tree.stream_write(&mut buf)?;
+
+            let mut client = MockHttpRangeClient::new_mock_http_range_client(&buf);
+
+            // Calculate the feature begin point
+            let feature_begin =
+                Stree::<i64>::index_size(tree.num_leaf_nodes, branching_factor, payload_size);
+
+            // Perform http_stream_find_range
+            let http_results = Stree::<i64>::http_stream_find_range(
+                &mut client,
+                0, // index_begin
+                0, // attr_index_size
+                tree.num_leaf_nodes,
+                branching_factor,
+                lower,
+                upper,
+                payload_size,
+                256 * 1024, // combine_request_threshold
+            )
+            .await?;
+
+            println!("HTTP range search found {} results", http_results.len());
+
+            // Create a comparable set of results from HTTP results
+            let http_comparable_results: Vec<usize> = http_results
+                .iter()
+                .map(|item| item.range.start().saturating_sub(feature_begin))
+                .collect();
+
+            // Create a comparable set of results from in-memory results
+            let in_memory_comparable_results: Vec<usize> =
+                in_memory_results.iter().map(|item| item.offset).collect();
+
+            // For better diagnostics, print both result sets if they differ
+            if http_results.len() != in_memory_results.len() {
+                println!(
+                    "Result counts differ! HTTP: {}, In-memory: {}",
+                    http_results.len(),
+                    in_memory_results.len()
+                );
+            }
+
+            // Sort both result sets for comparison (may not be in the same order)
+            let mut http_sorted = http_comparable_results.clone();
+            http_sorted.sort_unstable();
+
+            let mut in_memory_sorted = in_memory_comparable_results.clone();
+            in_memory_sorted.sort_unstable();
+
+            // Verify results match
+            assert_eq!(
+                http_sorted, in_memory_sorted,
+                "HTTP results don't match in-memory results"
+            );
+        }
+
         Ok(())
     }
 }

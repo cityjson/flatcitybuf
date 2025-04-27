@@ -38,7 +38,7 @@ tempfile = { workspace = true }
 
 [features]
 default = []
-http = ["http-range-client"]
+http = ["http-range-client", "bytes"]
 # [[bench]]
 # name = "search_benchmark"
 # harness = false
