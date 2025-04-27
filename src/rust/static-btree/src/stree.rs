@@ -55,7 +55,7 @@ fn read_node_vec<K: Key>(node_items: &mut Vec<NodeItem<K>>, mut data: impl Read)
 }
 
 /// Read partial item vec from data stream
-fn read_node_items<K: Key, R: Read + Seek>(
+fn read_node_items<K: Key, R: Read + Seek + ?Sized>(
     data: &mut R,
     base: u64,
     node_index: usize,
@@ -512,7 +512,7 @@ impl<K: Key> Stree<K> {
         Ok(results)
     }
 
-    pub fn stream_find_exact<R: Read + Seek>(
+    pub fn stream_find_exact<R: Read + Seek + ?Sized>(
         data: &mut R,
         num_items: usize, // number of items in the tree, not the number of entries of original data
         branching_factor: u16,
@@ -688,7 +688,7 @@ impl<K: Key> Stree<K> {
         Ok(results)
     }
 
-    pub fn stream_find_range<R: Read + Seek>(
+    pub fn stream_find_range<R: Read + Seek + ?Sized>(
         data: &mut R,
         num_items: usize, // number of items in the tree, not the number of entries of original data
         branching_factor: u16,
@@ -834,7 +834,7 @@ impl<K: Key> Stree<K> {
         Ok(node_index)
     }
 
-    pub fn stream_find_partition<R: Read + Seek>(
+    pub fn stream_find_partition<R: Read + Seek + ?Sized>(
         data: &mut R,
         num_items: usize, // number of items in the tree, not the number of entries of original data
         branching_factor: u16,
@@ -1163,6 +1163,10 @@ impl<K: Key> Stree<K> {
         num_nodes * NodeItem::<K>::SERIALIZED_SIZE + payload_size
     }
 
+    pub fn payload_size(&self) -> usize {
+        self.payload_data.len()
+    }
+
     pub fn num_items(&self) -> usize {
         self.num_leaf_nodes
     }
@@ -1197,10 +1201,9 @@ impl<K: Key> Stree<K> {
         branching_factor: u16,
         lower: K,
         upper: K,
-        _payload_size: usize,
+        payload_size: usize,
         combine_request_threshold: usize,
     ) -> Result<Vec<HttpSearchResultItem>> {
-        
         use tracing::debug;
 
         // Return empty result if invalid range
@@ -1218,7 +1221,7 @@ impl<K: Key> Stree<K> {
                 num_items,
                 branching_factor,
                 lower,
-                _payload_size,
+                payload_size,
                 combine_request_threshold,
             )
             .await;
@@ -1226,8 +1229,8 @@ impl<K: Key> Stree<K> {
 
         let node_size = branching_factor as usize - 1;
         let level_bounds = Self::generate_level_bounds(num_items, branching_factor);
-        let feature_begin = Self::index_size(num_items, branching_factor, _payload_size);
-        let payload_data_start = feature_begin - _payload_size;
+        let feature_begin = Self::index_size(num_items, branching_factor, payload_size);
+        let payload_data_start = feature_begin - payload_size;
 
         debug!("http_stream_find_range - index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, lower: {lower:?}, upper: {upper:?}");
 

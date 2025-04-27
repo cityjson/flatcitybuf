@@ -49,7 +49,7 @@ impl PayloadEntry {
     }
 
     /// Deserialize from a byte slice, returning (entry, bytes_consumed).
-    pub fn deserialize<R: Read + Seek>(data: &mut R) -> Result<(Self, usize)> {
+    pub fn deserialize<R: Read + Seek + ?Sized>(data: &mut R) -> Result<(Self, usize)> {
         // [count, offset1, offset2, ...]
         let count = data.read_u32::<LittleEndian>()?;
         let mut offsets = Vec::with_capacity(count as usize);
