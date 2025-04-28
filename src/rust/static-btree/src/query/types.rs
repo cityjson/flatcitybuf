@@ -1,5 +1,8 @@
+use chrono::{DateTime, Utc};
+use ordered_float::OrderedFloat;
+
 use crate::error::Result;
-use crate::key::Key;
+use crate::key::{FixedStringKey, Key};
 
 /// Comparison operators for queries
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,25 +21,43 @@ pub enum Operator {
     Le,
 }
 
-/// A single query condition
+/// Enum to hold different key types supported by the system
 #[derive(Debug, Clone)]
-pub struct QueryCondition<K: Key> {
-    /// Field name
+pub enum KeyType {
+    /// Fixed-size string keys (with different sizes as type parameters)
+    StringKey20(FixedStringKey<20>),
+    StringKey50(FixedStringKey<50>),
+    StringKey100(FixedStringKey<100>),
+    /// Integer keys
+    Int32(i32),
+    Int64(i64),
+    UInt32(u32),
+    UInt64(u64),
+    /// Floating point keys (wrapped in OrderedFloat for total ordering)
+    Float32(OrderedFloat<f32>),
+    Float64(OrderedFloat<f64>),
+    /// Boolean keys
+    Bool(bool),
+    /// DateTime keys
+    DateTime(DateTime<Utc>),
+}
+
+/// A query condition with an enum key type
+#[derive(Debug, Clone)]
+pub struct TypedQueryCondition {
     pub field: String,
-    /// Comparison operator
     pub operator: Operator,
-    /// Key value
-    pub key: K,
+    pub key: KeyType,
 }
 
 /// A complete query with multiple conditions
 #[derive(Debug, Clone)]
-pub struct Query<K: Key> {
+pub struct Query {
     /// List of conditions combined with AND logic
-    pub conditions: Vec<QueryCondition<K>>,
+    pub conditions: Vec<TypedQueryCondition>,
 }
 
-impl<K: Key> Query<K> {
+impl Query {
     /// Create a new empty query
     pub fn new() -> Self {
         Self {
@@ -45,8 +66,8 @@ impl<K: Key> Query<K> {
     }
 
     /// Add a condition to the query
-    pub fn add_condition(&mut self, field: String, operator: Operator, key: K) {
-        self.conditions.push(QueryCondition {
+    pub fn add_condition(&mut self, field: String, operator: Operator, key: KeyType) {
+        self.conditions.push(TypedQueryCondition {
             field,
             operator,
             key,
@@ -54,14 +75,14 @@ impl<K: Key> Query<K> {
     }
 
     /// Create a query with a single condition
-    pub fn with_condition(field: String, operator: Operator, key: K) -> Self {
+    pub fn with_condition(field: String, operator: Operator, key: KeyType) -> Self {
         let mut query = Self::new();
         query.add_condition(field, operator, key);
         query
     }
 }
 
-impl<K: Key> Default for Query<K> {
+impl Default for Query {
     fn default() -> Self {
         Self::new()
     }
@@ -77,7 +98,7 @@ pub trait SearchIndex<K: Key> {
 }
 
 /// Trait for multi-index query capabilities
-pub trait MultiIndex<K: Key> {
+pub trait MultiIndex {
     /// Execute a query and return matching offsets
-    fn query(&self, query: &Query<K>) -> Result<Vec<u64>>;
+    fn query(&self, query: &[TypedQueryCondition]) -> Result<Vec<u64>>;
 }

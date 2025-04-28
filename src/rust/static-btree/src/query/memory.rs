@@ -9,6 +9,9 @@ use crate::key::{FixedStringKey, Key, Max, Min};
 use crate::query::types::{Operator, SearchIndex};
 use crate::stree::Stree;
 
+use super::types::{KeyType, TypedQueryCondition};
+use super::MultiIndex;
+
 /// In-memory index implementation that wraps the Stree structure
 // NOTE: This can be type alias for Stree later
 #[derive(Debug, Clone)]
@@ -82,35 +85,6 @@ impl<K: Key> SearchIndex<K> for MemoryIndex<K> {
             )),
         }
     }
-}
-
-/// Enum to hold different key types supported by the system
-#[derive(Debug, Clone)]
-pub enum KeyType {
-    /// Fixed-size string keys (with different sizes as type parameters)
-    StringKey20(FixedStringKey<20>),
-    StringKey50(FixedStringKey<50>),
-    StringKey100(FixedStringKey<100>),
-    /// Integer keys
-    Int32(i32),
-    Int64(i64),
-    UInt32(u32),
-    UInt64(u64),
-    /// Floating point keys (wrapped in OrderedFloat for total ordering)
-    Float32(OrderedFloat<f32>),
-    Float64(OrderedFloat<f64>),
-    /// Boolean keys
-    Bool(bool),
-    /// DateTime keys
-    DateTime(DateTime<Utc>),
-}
-
-/// A query condition with an enum key type
-#[derive(Debug, Clone)]
-pub struct TypedQueryCondition {
-    pub field: String,
-    pub operator: Operator,
-    pub key: KeyType,
 }
 
 /// Trait for different index types we might store
@@ -299,9 +273,11 @@ impl MemoryMultiIndex {
     pub fn add_datetime_index(&mut self, field: String, index: MemoryIndex<DateTime<Utc>>) {
         self.indices.insert(field, Box::new(index));
     }
+}
 
+impl MultiIndex for MemoryMultiIndex {
     /// Execute a heterogeneous query with different key types
-    pub fn query(&self, conditions: &[TypedQueryCondition]) -> Result<Vec<u64>> {
+    fn query(&self, conditions: &[TypedQueryCondition]) -> Result<Vec<u64>> {
         if conditions.is_empty() {
             return Err(Error::QueryError("query cannot be empty".to_string()));
         }

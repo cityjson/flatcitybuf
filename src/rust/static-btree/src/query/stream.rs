@@ -9,8 +9,7 @@ use ordered_float::OrderedFloat;
 
 use crate::error::{Error, Result};
 use crate::key::{FixedStringKey, Key, Max, Min};
-use crate::query::memory::{KeyType, TypedQueryCondition};
-use crate::query::types::Operator;
+use crate::query::types::{KeyType, Operator, TypedQueryCondition};
 use crate::stree::Stree;
 
 /// Stream-based index for file access
@@ -366,7 +365,7 @@ impl StreamMultiIndex {
     }
 
     /// Execute a heterogeneous query with different key types using a reader
-    pub fn query_with_reader(
+    pub fn query(
         &self,
         reader: &mut dyn ReadSeek,
         conditions: &[TypedQueryCondition],

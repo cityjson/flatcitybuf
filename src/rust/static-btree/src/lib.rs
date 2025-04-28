@@ -12,7 +12,7 @@ pub use error::Error;
 pub use key::Key;
 pub use payload::PayloadEntry;
 pub use query::{MemoryIndex, MemoryMultiIndex};
-pub use query::{MultiIndex, Operator, Query, QueryCondition, SearchIndex};
+pub use query::{MultiIndex, Operator, Query, SearchIndex, TypedQueryCondition};
 pub use query::{StreamIndex, StreamMultiIndex};
 pub use stree::Stree;
 

@@ -8,18 +8,20 @@ mod memory;
 mod stream;
 mod types;
 
-// We'll implement the HTTP module later when needed
-// #[cfg(feature = "http")]
-// mod http;
+/// HTTP-based query implementation (requires the `http` feature)
+#[cfg(feature = "http")]
+mod http;
 
 #[cfg(test)]
 mod tests;
 
 // Re-export public types and traits
 pub use memory::{MemoryIndex, MemoryMultiIndex};
+// Re-export KeyType and TypedQueryCondition from types
 pub use stream::{StreamIndex, StreamMultiIndex};
-pub use types::{MultiIndex, Operator, Query, QueryCondition, SearchIndex};
+pub use types::{KeyType, TypedQueryCondition};
+pub use types::{MultiIndex, Operator, Query, SearchIndex};
 
-// We'll re-export the HTTP types later when implemented
-// #[cfg(feature = "http")]
-// pub use http::{HttpIndex, HttpMultiIndex};
+/// Re-export HTTP query types when the `http` feature is enabled
+#[cfg(feature = "http")]
+pub use http::*;

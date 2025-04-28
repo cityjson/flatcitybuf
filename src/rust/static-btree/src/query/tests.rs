@@ -1,8 +1,8 @@
 // tests.rs is loaded as `query::tests`; no nested `mod tests` needed
 
 use crate::error::Result;
-use crate::query::memory::{KeyType, TypedQueryCondition};
-use crate::{MemoryIndex, MemoryMultiIndex, Operator, StreamIndex};
+use crate::query::types::{KeyType, Operator, TypedQueryCondition};
+use crate::{MemoryIndex, MemoryMultiIndex, StreamIndex};
 use crate::{SearchIndex, StreamMultiIndex};
 use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
@@ -447,7 +447,7 @@ fn test_memory_multi_index_with_mixed_types() -> Result<()> {
         datetime_index_length,
     );
     for (query, expected_results) in &test_cases {
-        let results = stream_multi_index.query_with_reader(&mut index_buffer_for_stream, query)?;
+        let results = stream_multi_index.query(&mut index_buffer_for_stream, query)?;
         assert_eq!(results, *expected_results);
     }
 
