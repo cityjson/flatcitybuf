@@ -42,11 +42,15 @@ impl<K: Key> MemoryIndex<K> {
     }
 
     pub fn num_items(&self) -> usize {
-        self.stree.num_items()
+        self.stree.num_leaf_items()
     }
 
     pub fn branching_factor(&self) -> u16 {
         self.stree.branching_factor()
+    }
+
+    pub fn size(&self) -> usize {
+        Stree::<K>::tree_size(self.num_items())
     }
 
     pub fn serialize(&self, out: &mut impl Write) -> Result<usize> {
@@ -291,6 +295,9 @@ impl MultiIndex for MemoryMultiIndex {
             ))
         })?;
         let mut result_set = index.execute_query_condition(first_condition)?;
+        if result_set.is_empty() {
+            return Ok(vec![]);
+        }
 
         // Process remaining conditions with set intersection
         for condition in &conditions[1..] {
@@ -302,9 +309,9 @@ impl MultiIndex for MemoryMultiIndex {
             // Perform intersection (AND logic)
             result_set.retain(|offset| condition_results.contains(offset));
 
-            // If result set is empty, we can short-circuit
+            // If result set is empty, we can short-circuit. For now it's AND logic, so if any condition is empty, the result set is empty
             if result_set.is_empty() {
-                break;
+                return Ok(vec![]);
             }
         }
 

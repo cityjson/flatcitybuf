@@ -216,9 +216,16 @@ fn create_test_multi_index() -> Result<MemoryMultiIndex> {
     Ok(multi_index)
 }
 
-#[test]
-fn test_memory_multi_index_with_mixed_types() -> Result<()> {
-    let test_cases = vec![
+#[derive(Debug)]
+struct TreeInfo {
+    num_items: usize,
+    branching_factor: u16,
+    index_offset: usize,
+    payload_size: usize,
+}
+
+fn test_cases() -> Vec<(Vec<TypedQueryCondition>, Vec<u64>)> {
+    vec![
         (
             vec![
                 TypedQueryCondition {
@@ -265,8 +272,36 @@ fn test_memory_multi_index_with_mixed_types() -> Result<()> {
             }],
             vec![5],
         ),
-    ];
+        (
+            // no results
+            vec![TypedQueryCondition {
+                field: "name".to_string(),
+                operator: Operator::Eq,
+                key: KeyType::StringKey20(FixedStringKey::<20>::from_str("hoge")),
+            }],
+            vec![],
+        ),
+        (
+            // no results
+            vec![
+                TypedQueryCondition {
+                    field: "name".to_string(),
+                    operator: Operator::Eq,
+                    key: KeyType::StringKey20(FixedStringKey::<20>::from_str("eve")),
+                },
+                TypedQueryCondition {
+                    field: "score".to_string(),
+                    operator: Operator::Lt,
+                    key: KeyType::Float32(OrderedFloat(80.0)),
+                },
+            ],
+            vec![],
+        ),
+    ]
+}
 
+#[test]
+fn test_memory_stream_multi_index() -> Result<()> {
     // Simply test with multi_index
     let id_index = create_id_index(4)?;
     let name_index = create_name_index(4)?;
@@ -285,6 +320,8 @@ fn test_memory_multi_index_with_mixed_types() -> Result<()> {
     multi_index.add_f32_index("score".to_string(), score_index);
     multi_index.add_datetime_index("datetime".to_string(), datetime_index);
 
+    let test_cases = test_cases();
+
     for (query, expected_results) in &test_cases {
         let results = multi_index.query(query)?;
         assert_eq!(results, *expected_results);
@@ -294,12 +331,7 @@ fn test_memory_multi_index_with_mixed_types() -> Result<()> {
     // serialize---
     let mut index_buffer = Cursor::new(Vec::<u8>::new());
     let mut total_written = 0;
-    struct TreeInfo {
-        num_items: usize,
-        branching_factor: u16,
-        index_offset: usize,
-        payload_size: usize,
-    }
+
     // serialize and store bytes represented indices into vector
     let mut index_offset = HashMap::new();
     index_offset.insert(
@@ -455,3 +487,127 @@ fn test_memory_multi_index_with_mixed_types() -> Result<()> {
 }
 
 // end of tests.rs
+
+#[cfg(feature = "http")]
+mod http_tests {
+    use super::*;
+    
+    use crate::mocked_http_range_client::MockHttpRangeClient;
+    use crate::query::http::{HttpIndex, HttpMultiIndex};
+    
+    use bytes::Bytes;
+
+    #[tokio::test]
+    async fn test_http_multi_index() -> Result<()> {
+        // First create the same indices used in the memory tests
+        let id_index = create_id_index(4)?;
+        let name_index = create_name_index(4)?;
+        let score_index = create_score_index(4)?;
+        let datetime_index = create_datetime_index(4)?;
+
+        // Create a buffer for serializing all indices
+        let mut index_buffer = Vec::new();
+
+        let mut total_written = 0;
+        // Serialize indices and track offsets
+        let id_index_info = TreeInfo {
+            num_items: id_index.num_items(),
+            branching_factor: id_index.branching_factor(),
+            index_offset: total_written,
+            payload_size: id_index.payload_size(),
+        };
+
+        total_written += id_index.serialize(&mut index_buffer)?;
+
+        let name_index_info = TreeInfo {
+            num_items: name_index.num_items(),
+            branching_factor: name_index.branching_factor(),
+            index_offset: total_written,
+            payload_size: name_index.payload_size(),
+        };
+        total_written += name_index.serialize(&mut index_buffer)?;
+
+        let score_index_info = TreeInfo {
+            num_items: score_index.num_items(),
+            branching_factor: score_index.branching_factor(),
+            index_offset: total_written,
+            payload_size: score_index.payload_size(),
+        };
+        total_written += score_index.serialize(&mut index_buffer)?;
+
+        let datetime_index_info = TreeInfo {
+            num_items: datetime_index.num_items(),
+            branching_factor: datetime_index.branching_factor(),
+            index_offset: total_written,
+            payload_size: datetime_index.payload_size(),
+        };
+        total_written += datetime_index.serialize(&mut index_buffer)?;
+
+        // Create HTTP client with the serialized data
+        let client = MockHttpRangeClient::new_with_bytes(
+            "in-memory",
+            Bytes::from(index_buffer),
+            std::sync::Arc::new(std::sync::RwLock::new(
+                crate::mocked_http_range_client::RequestStats::new(),
+            )),
+        );
+        let mut client = http_range_client::AsyncBufferedHttpRangeClient::with(client, "in-memory");
+        client.set_min_req_size(0); // Make sure we don't buffer more than necessary
+
+        let attr_index_size = total_written;
+        // Create HTTP index instances
+        let http_id_index = HttpIndex::<i64>::new(
+            id_index_info.num_items,
+            id_index_info.branching_factor,
+            id_index_info.index_offset,
+            attr_index_size,
+            1024, // combine_request_threshold
+        );
+
+        let http_name_index = HttpIndex::<FixedStringKey<20>>::new(
+            name_index_info.num_items,
+            name_index_info.branching_factor,
+            name_index_info.index_offset,
+            attr_index_size,
+            1024, // combine_request_threshold
+        );
+
+        let http_score_index = HttpIndex::<OrderedFloat<f32>>::new(
+            score_index_info.num_items,
+            score_index_info.branching_factor,
+            score_index_info.index_offset,
+            attr_index_size,
+            1024, // combine_request_threshold
+        );
+
+        let http_datetime_index = HttpIndex::<DateTime<Utc>>::new(
+            datetime_index_info.num_items,
+            datetime_index_info.branching_factor,
+            datetime_index_info.index_offset,
+            attr_index_size,
+            1024, // combine_request_threshold
+        );
+
+        // Create HTTP multi-index
+        let mut multi_index = HttpMultiIndex::new();
+        multi_index.add_index("id".to_string(), http_id_index);
+        multi_index.add_index("name".to_string(), http_name_index);
+        multi_index.add_index("score".to_string(), http_score_index);
+        multi_index.add_index("datetime".to_string(), http_datetime_index);
+
+        let test_cases = test_cases();
+        for (query, expected_results) in &test_cases {
+            let offset_adjusted_expected_results = expected_results
+                .iter()
+                .map(|&result| result + attr_index_size as u64)
+                .collect::<Vec<_>>();
+            let results = multi_index.query(&mut client, query).await?;
+            // Sort to ensure consistent comparison
+            let mut sorted_results = results.clone();
+            sorted_results.sort();
+            assert_eq!(sorted_results, offset_adjusted_expected_results);
+        }
+
+        Ok(())
+    }
+}

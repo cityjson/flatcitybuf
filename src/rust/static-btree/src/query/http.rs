@@ -21,10 +21,8 @@ pub struct HttpIndex<K: Key> {
     branching_factor: u16,
     /// byte offset where the index begins
     index_offset: usize,
-    /// size of the serialized index section
-    attr_index_size: usize,
-    /// size of the payload section (features data)
-    payload_size: usize,
+    /// byte offset where the feature data begins
+    feature_begin: usize,
     /// threshold for combining HTTP requests to reduce roundtrips
     combine_request_threshold: usize,
     _marker: PhantomData<K>,
@@ -36,16 +34,14 @@ impl<K: Key> HttpIndex<K> {
         num_items: usize,
         branching_factor: u16,
         index_offset: usize,
-        attr_index_size: usize,
-        payload_size: usize,
+        feature_begin: usize,
         combine_request_threshold: usize,
     ) -> Self {
         Self {
             num_items,
             branching_factor,
             index_offset,
-            attr_index_size,
-            payload_size,
+            feature_begin,
             combine_request_threshold,
             _marker: PhantomData,
         }
@@ -60,11 +56,10 @@ impl<K: Key> HttpIndex<K> {
         let items: Vec<HttpSearchResultItem> = Stree::http_stream_find_exact(
             client,
             self.index_offset,
-            self.attr_index_size,
+            self.feature_begin,
             self.num_items,
             self.branching_factor,
             key.clone(),
-            self.payload_size,
             self.combine_request_threshold,
         )
         .await?;
@@ -96,12 +91,11 @@ impl<K: Key> HttpIndex<K> {
         let items: Vec<HttpSearchResultItem> = Stree::http_stream_find_range(
             client,
             self.index_offset,
-            self.attr_index_size,
+            self.feature_begin,
             self.num_items,
             self.branching_factor,
             lower.clone(),
             upper.clone(),
-            self.payload_size,
             self.combine_request_threshold,
         )
         .await?;
@@ -235,6 +229,10 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpMultiIndex<T> {
             })?;
             let items = idx.execute_query_condition(client, cond).await?;
             result_sets.push(items);
+            if result_sets.is_empty() {
+                // no results found for this condition, return early so we don't waste time intersecting empty sets
+                return Ok(vec![]);
+            }
         }
         // intersect all sets
         let mut iter = result_sets.into_iter();

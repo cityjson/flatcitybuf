@@ -79,13 +79,7 @@ impl<K: Key> StreamIndex<K> {
         reader: &mut R,
         key: K,
     ) -> Result<Vec<u64>> {
-        let results = Stree::stream_find_exact(
-            reader,
-            self.num_items,
-            self.branching_factor,
-            key,
-            self.payload_size,
-        )?;
+        let results = Stree::stream_find_exact(reader, self.num_items, self.branching_factor, key)?;
 
         Ok(results.into_iter().map(|item| item.offset as u64).collect())
     }
@@ -388,6 +382,9 @@ impl StreamMultiIndex {
         reader.seek(SeekFrom::Start(index_range.start as u64))?;
 
         let mut result_set = indexer.execute_query_condition(reader, first)?;
+        if result_set.is_empty() {
+            return Ok(vec![]);
+        }
         // set cursor to the start of the index
         reader.seek(SeekFrom::Start(start_position))?;
 
@@ -405,7 +402,7 @@ impl StreamMultiIndex {
             let condition_results = indexer.execute_query_condition(reader, cond)?;
             result_set.retain(|offset| condition_results.contains(offset));
             if result_set.is_empty() {
-                break;
+                return Ok(vec![]); // no results found for this condition, return early so we don't waste time intersecting empty sets
             }
             // set cursor to the start of the index
             reader.seek(SeekFrom::Start(start_position))?;
@@ -421,155 +418,3 @@ impl Default for StreamMultiIndex {
         Self::new()
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::entry::Entry;
-//     use crate::query::memory::{KeyType, TypedQueryCondition};
-//     use crate::stree::Stree;
-//     use std::io::{Cursor, Seek, SeekFrom};
-
-//     fn create_test_data<K: Key>(entries: &[Entry<K>], branching_factor: u16) -> Vec<u8> {
-//         let index = Stree::build(entries, branching_factor).unwrap();
-//         let mut buffer = Vec::new();
-//         index.stream_write(&mut buffer).unwrap();
-//         buffer
-//     }
-
-//     #[test]
-//     fn test_stream_index_find_exact() -> Result<()> {
-//         // Create test data
-//         let entries = vec![
-//             Entry::new(10, 100),
-//             Entry::new(20, 200),
-//             Entry::new(30, 300),
-//             Entry::new(40, 400),
-//         ];
-
-//         let buffer = create_test_data(&entries, 4);
-//         let mut cursor = Cursor::new(buffer);
-
-//         // Create stream index
-//         let stream_index = StreamIndex::new(entries.len(), 4, 0, 0);
-
-//         // Test exact match
-//         let results = stream_index.find_exact_with_reader(&mut cursor, 20)?;
-//         assert_eq!(results, vec![200]);
-
-//         // Reset cursor position
-//         cursor.seek(SeekFrom::Start(0))?;
-
-//         // Test non-existent key
-//         let results = stream_index.find_exact_with_reader(&mut cursor, 25)?;
-//         assert!(results.is_empty());
-
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_stream_index_find_range() -> Result<()> {
-//         // Create test data
-//         let entries = vec![
-//             Entry::new(10, 100),
-//             Entry::new(20, 200),
-//             Entry::new(30, 300),
-//             Entry::new(40, 400),
-//         ];
-
-//         let buffer = create_test_data(&entries, 4);
-//         let mut cursor = Cursor::new(buffer);
-
-//         // Create stream index
-//         let stream_index = StreamIndex::new(entries.len(), 4, 0, 0);
-
-//         // Test inclusive range
-//         let results = stream_index.find_range_with_reader(&mut cursor, Some(20), Some(30))?;
-//         assert_eq!(results, vec![200, 300]);
-
-//         // Reset cursor position
-//         cursor.seek(SeekFrom::Start(0))?;
-
-//         // Test range with only start bound
-//         let results = stream_index.find_range_with_reader(&mut cursor, Some(30), None)?;
-//         assert_eq!(results, vec![300, 400]);
-
-//         Ok(())
-//     }
-
-//     #[test]
-//     fn test_stream_multi_index_query() -> Result<()> {
-//         // Create entries for "age" field
-//         let age_entries = vec![
-//             Entry::new(20, 1), // id=1, age=20
-//             Entry::new(30, 2), // id=2, age=30
-//             Entry::new(25, 3), // id=3, age=25
-//             Entry::new(40, 4), // id=4, age=40
-//         ];
-
-//         // Create entries for "score" field
-//         let score_entries = vec![
-//             Entry::new(85, 1), // id=1, score=85
-//             Entry::new(90, 2), // id=2, score=90
-//             Entry::new(75, 3), // id=3, score=75
-//             Entry::new(95, 4), // id=4, score=95
-//         ];
-
-//         // Create combined buffer with both indices
-//         let age_buffer = create_test_data(&age_entries, 4);
-//         let score_buffer = create_test_data(&score_entries, 4);
-//         let mut combined_buffer = Vec::new();
-//         let age_index_offset = 0;
-//         let score_index_offset = age_buffer.len() as u64;
-//         combined_buffer.extend_from_slice(&age_buffer);
-//         combined_buffer.extend_from_slice(&score_buffer);
-
-//         let mut cursor = Cursor::new(combined_buffer);
-
-//         // Create stream indices
-//         let age_index = StreamIndex::new(age_entries.len(), 4, age_index_offset, 0);
-//         let score_index = StreamIndex::new(score_entries.len(), 4, score_index_offset, 0);
-
-//         // Create multi-index
-//         let mut multi_index = StreamMultiIndex::new();
-//         multi_index.add_i32_index("age".to_string(), age_index);
-//         multi_index.add_i32_index("score".to_string(), score_index);
-
-//         // Query: age >= 25 AND score >= 85
-//         let conditions = vec![
-//             TypedQueryCondition {
-//                 field: "age".to_string(),
-//                 operator: Operator::Ge,
-//                 key: KeyType::Int32(25),
-//             },
-//             TypedQueryCondition {
-//                 field: "score".to_string(),
-//                 operator: Operator::Ge,
-//                 key: KeyType::Int32(85),
-//             },
-//         ];
-//         let results = multi_index.query_with_reader(&mut cursor, &conditions)?;
-//         assert_eq!(results, vec![2, 4]);
-
-//         // Reset cursor position
-//         cursor.seek(SeekFrom::Start(0))?;
-
-//         // Query: age = 40 AND score = 95
-//         let conditions = vec![
-//             TypedQueryCondition {
-//                 field: "age".to_string(),
-//                 operator: Operator::Eq,
-//                 key: KeyType::Int32(40),
-//             },
-//             TypedQueryCondition {
-//                 field: "score".to_string(),
-//                 operator: Operator::Eq,
-//                 key: KeyType::Int32(95),
-//             },
-//         ];
-//         let results = multi_index.query_with_reader(&mut cursor, &conditions)?;
-//         assert_eq!(results, vec![4]);
-
-//         Ok(())
-//     }
-// }
