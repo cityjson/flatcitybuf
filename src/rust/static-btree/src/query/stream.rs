@@ -1,6 +1,8 @@
 use std::collections::HashMap;
-use std::io::{Read, Seek};
+use std::fmt::Debug;
+use std::io::{Read, Seek, SeekFrom};
 use std::marker::PhantomData;
+use std::ops::Range;
 
 use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
@@ -12,6 +14,7 @@ use crate::query::types::Operator;
 use crate::stree::Stree;
 
 /// Stream-based index for file access
+#[derive(Debug, Clone)]
 pub struct StreamIndex<K: Key> {
     /// Number of items in the index
     num_items: usize,
@@ -21,6 +24,8 @@ pub struct StreamIndex<K: Key> {
     index_offset: u64,
     /// Size of the payload section
     payload_size: usize,
+
+    length: u64,
     /// Phantom marker for the key type
     _marker: PhantomData<K>,
 }
@@ -33,11 +38,13 @@ impl<K: Key> StreamIndex<K> {
         index_offset: u64,
         payload_size: usize,
     ) -> Self {
+        let length = Stree::<K>::index_size(num_items, branching_factor, payload_size) as u64;
         Self {
             num_items,
             branching_factor,
             index_offset,
             payload_size,
+            length,
             _marker: PhantomData,
         }
     }
@@ -60,6 +67,11 @@ impl<K: Key> StreamIndex<K> {
     /// Get the payload size
     pub fn payload_size(&self) -> usize {
         self.payload_size
+    }
+
+    /// Get the length of the index
+    pub fn length(&self) -> u64 {
+        self.length
     }
 
     /// Find exact matches using a reader
@@ -86,7 +98,9 @@ impl<K: Key> StreamIndex<K> {
         start: Option<K>,
         end: Option<K>,
     ) -> Result<Vec<u64>> {
-        match (start, end) {
+        // print current cursor position
+        let start_position = reader.stream_position()?;
+        let results = match (start, end) {
             (Some(start_key), Some(end_key)) => {
                 let results = Stree::stream_find_range(
                     reader,
@@ -125,7 +139,10 @@ impl<K: Key> StreamIndex<K> {
             (None, None) => Err(Error::QueryError(
                 "find_range requires at least one bound".to_string(),
             )),
-        }
+        };
+
+        reader.seek(SeekFrom::Start(start_position))?;
+        results
     }
 }
 
@@ -152,6 +169,7 @@ macro_rules! impl_typed_stream_search_index {
                 reader: &mut dyn ReadSeek,
                 condition: &TypedQueryCondition,
             ) -> Result<Vec<u64>> {
+                let start_position = reader.stream_position()?;
                 // Extract the key value from the enum variant
                 let key = match &condition.key {
                     $enum_variant(val) => val.clone(),
@@ -164,8 +182,8 @@ macro_rules! impl_typed_stream_search_index {
                     }
                 };
                 // Execute query based on operator
-                match condition.operator {
-                    Operator::Eq => self.find_exact_with_reader(reader, key),
+                let items = match condition.operator {
+                    Operator::Eq => self.find_exact_with_reader(reader, key)?,
                     Operator::Ne => {
                         let all_items = self.find_range_with_reader(
                             reader,
@@ -173,28 +191,30 @@ macro_rules! impl_typed_stream_search_index {
                             Some(<$key_type>::max_value()),
                         )?;
                         let matching_items = self.find_exact_with_reader(reader, key.clone())?;
-                        Ok(all_items
+                        all_items
                             .into_iter()
                             .filter(|item| !matching_items.contains(item))
-                            .collect())
+                            .collect()
                     }
                     Operator::Gt => {
                         let mut results =
                             self.find_range_with_reader(reader, Some(key.clone()), None)?;
                         let exact_matches = self.find_exact_with_reader(reader, key.clone())?;
                         results.retain(|item| !exact_matches.contains(item));
-                        Ok(results)
+                        results
                     }
                     Operator::Lt => {
                         let mut results =
                             self.find_range_with_reader(reader, None, Some(key.clone()))?;
                         let exact_matches = self.find_exact_with_reader(reader, key.clone())?;
                         results.retain(|item| !exact_matches.contains(item));
-                        Ok(results)
+                        results
                     }
-                    Operator::Ge => self.find_range_with_reader(reader, Some(key), None),
-                    Operator::Le => self.find_range_with_reader(reader, None, Some(key)),
-                }
+                    Operator::Ge => self.find_range_with_reader(reader, Some(key), None)?,
+                    Operator::Le => self.find_range_with_reader(reader, None, Some(key))?,
+                };
+                reader.seek(SeekFrom::Start(start_position))?;
+                Ok(items)
             }
         }
     };
@@ -216,6 +236,7 @@ impl_typed_stream_search_index!(FixedStringKey<100>, KeyType::StringKey100);
 /// Container for multiple stream indices with different key types
 pub struct StreamMultiIndex {
     indices: HashMap<String, Box<dyn TypedStreamSearchIndex>>,
+    index_offsets: HashMap<String, Range<usize>>,
 }
 
 impl StreamMultiIndex {
@@ -223,6 +244,7 @@ impl StreamMultiIndex {
     pub fn new() -> Self {
         Self {
             indices: HashMap::new(),
+            index_offsets: HashMap::new(),
         }
     }
 
@@ -234,59 +256,113 @@ impl StreamMultiIndex {
         self.indices.insert(field, Box::new(index));
     }
 
+    fn add_index_offset(&mut self, field: String, length: u64) {
+        //length of the index about to be added
+        // get the last index offset
+        let largest_offset = self
+            .index_offsets
+            .values()
+            .map(|v| v.end)
+            .max()
+            .unwrap_or(0);
+        self.index_offsets
+            .insert(field, largest_offset..largest_offset + length as usize);
+    }
+
     /// Add a string index with key size 20
-    pub fn add_string_index20(&mut self, field: String, index: StreamIndex<FixedStringKey<20>>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_string_index20(
+        &mut self,
+        field: String,
+        index: StreamIndex<FixedStringKey<20>>,
+        length: u64,
+    ) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add a string index with key size 50
-    pub fn add_string_index50(&mut self, field: String, index: StreamIndex<FixedStringKey<50>>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_string_index50(
+        &mut self,
+        field: String,
+        index: StreamIndex<FixedStringKey<50>>,
+        length: u64,
+    ) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add a string index with key size 100
-    pub fn add_string_index100(&mut self, field: String, index: StreamIndex<FixedStringKey<100>>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_string_index100(
+        &mut self,
+        field: String,
+        index: StreamIndex<FixedStringKey<100>>,
+        length: u64,
+    ) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add an i32 index
-    pub fn add_i32_index(&mut self, field: String, index: StreamIndex<i32>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_i32_index(&mut self, field: String, index: StreamIndex<i32>, length: u64) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add an i64 index
-    pub fn add_i64_index(&mut self, field: String, index: StreamIndex<i64>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_i64_index(&mut self, field: String, index: StreamIndex<i64>, length: u64) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add a u32 index
-    pub fn add_u32_index(&mut self, field: String, index: StreamIndex<u32>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_u32_index(&mut self, field: String, index: StreamIndex<u32>, length: u64) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add a u64 index
-    pub fn add_u64_index(&mut self, field: String, index: StreamIndex<u64>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_u64_index(&mut self, field: String, index: StreamIndex<u64>, length: u64) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add a float32 index
-    pub fn add_f32_index(&mut self, field: String, index: StreamIndex<OrderedFloat<f32>>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_f32_index(
+        &mut self,
+        field: String,
+        index: StreamIndex<OrderedFloat<f32>>,
+        length: u64,
+    ) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add a float64 index
-    pub fn add_f64_index(&mut self, field: String, index: StreamIndex<OrderedFloat<f64>>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_f64_index(
+        &mut self,
+        field: String,
+        index: StreamIndex<OrderedFloat<f64>>,
+        length: u64,
+    ) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add a boolean index
-    pub fn add_bool_index(&mut self, field: String, index: StreamIndex<bool>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_bool_index(&mut self, field: String, index: StreamIndex<bool>, length: u64) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Add a datetime index
-    pub fn add_datetime_index(&mut self, field: String, index: StreamIndex<DateTime<Utc>>) {
-        self.indices.insert(field, Box::new(index));
+    pub fn add_datetime_index(
+        &mut self,
+        field: String,
+        index: StreamIndex<DateTime<Utc>>,
+        length: u64,
+    ) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
     }
 
     /// Execute a heterogeneous query with different key types using a reader
@@ -302,14 +378,41 @@ impl StreamMultiIndex {
         let indexer = self.indices.get(&first.field).ok_or_else(|| {
             Error::QueryError(format!("no index found for field '{}'", first.field))
         })?;
+        let index_range = self.index_offsets.get(&first.field).ok_or_else(|| {
+            Error::QueryError(format!("no index range found for field '{}'", first.field))
+        })?;
+
+        // currently reader is continuous buffer of multiple indices. We need to create different readers for each index. `index_offsets` field of the struct accomodates Range of each indices. e.g. if index_offsets is [(field1, 0..100), (field2, 100..200)], it means that field1 is at offset 0-99 and field2 is at offset 100-199 in the reader. Since `execute_query_condition` is called with a reader, we need to create a new reader for each index.
+
+        let start_position = reader.stream_position()?;
+        // set cursor to the start of the index
+        reader.seek(SeekFrom::Start(index_range.start as u64))?;
+
         let mut result_set = indexer.execute_query_condition(reader, first)?;
+        // set cursor to the start of the index
+        reader.seek(SeekFrom::Start(start_position))?;
+
         for cond in &conditions[1..] {
+            let start_position = reader.stream_position()?;
+            let indexer = self.indices.get(&cond.field).ok_or_else(|| {
+                Error::QueryError(format!("no index found for field '{}'", cond.field))
+            })?;
+            let index_range = self.index_offsets.get(&cond.field).ok_or_else(|| {
+                Error::QueryError(format!("no index range found for field '{}'", cond.field))
+            })?;
+            let index_start = index_range.start as u64;
+            // set cursor to the start of the index
+            reader.seek(SeekFrom::Start(index_start))?;
             let condition_results = indexer.execute_query_condition(reader, cond)?;
             result_set.retain(|offset| condition_results.contains(offset));
             if result_set.is_empty() {
                 break;
             }
+            // set cursor to the start of the index
+            reader.seek(SeekFrom::Start(start_position))?;
         }
+        // set cursor to the start of the index
+        reader.seek(SeekFrom::Start(start_position))?;
         Ok(result_set)
     }
 }
