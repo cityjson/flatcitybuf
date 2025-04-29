@@ -1,9 +1,7 @@
 use std::error::Error;
 
 use anyhow::Result;
-use fcb_core::{
-    deserializer::to_cj_metadata, Float, HttpFcbReader, KeyType, Operator,
-};
+use fcb_core::{deserializer::to_cj_metadata, Float, HttpFcbReader, KeyType, Operator};
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;

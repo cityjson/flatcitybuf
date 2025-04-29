@@ -5,11 +5,11 @@ use std::io::{Read, Write};
 
 use crate::entry::Entry;
 use crate::error::{Error, Result};
-use crate::key::{FixedStringKey, Key, Max, Min};
+use crate::key::{FixedStringKey, Key, KeyType, Max, Min};
 use crate::query::types::{Operator, SearchIndex};
 use crate::stree::Stree;
 
-use super::types::{KeyType, QueryCondition};
+use super::types::QueryCondition;
 use super::MultiIndex;
 
 /// In-memory index implementation that wraps the Stree structure
@@ -30,7 +30,7 @@ impl<K: Key> MemoryIndex<K> {
 
     /// Build a memory index from a collection of entries
     pub fn build(entries: &[Entry<K>], branching_factor: u16) -> Result<Self> {
-        let stree = Stree::build(entries, branching_factor)?;
+        let stree = Stree::<K>::build(entries, branching_factor)?;
 
         Ok(Self { stree })
     }

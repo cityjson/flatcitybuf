@@ -1,7 +1,10 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::{DateTime, Utc};
+use ordered_float::OrderedFloat;
 
 use crate::error::Result;
 use crate::key::Key;
+use crate::FixedStringKey;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::io::{Read, Write};
@@ -78,6 +81,20 @@ impl<K: Key> Ord for Entry<K> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.key.cmp(&other.key)
     }
+}
+
+pub enum TypedEntry {
+    StringKey20(Entry<FixedStringKey<20>>),
+    StringKey50(Entry<FixedStringKey<50>>),
+    StringKey100(Entry<FixedStringKey<100>>),
+    Int32(Entry<i32>),
+    Int64(Entry<i64>),
+    UInt32(Entry<u32>),
+    UInt64(Entry<u64>),
+    Float32(Entry<OrderedFloat<f32>>),
+    Float64(Entry<OrderedFloat<f64>>),
+    Bool(Entry<bool>),
+    DateTime(Entry<DateTime<Utc>>),
 }
 
 #[cfg(test)]

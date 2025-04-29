@@ -304,56 +304,49 @@ mod tests {
 
         let test_cases = vec![
             // Test case: Expect one matching feature with b3_h_dak_50p > 2.0 and matching identificatie.
-            // QueryTestCase {
-            //     test_name: "test_attr_index_multiple_queries: b3_h_dak_50p > 2.0 and identificatie == NL.IMBAG.Pand.0503100000012869",
-            //     query: vec![
-            //         (
-            //             "b3_h_dak_50p".to_string(),
-            //             Operator::Gt,
-            //             KeyType::Float64(Float(2.0)),
-            //         ),
-            //         (
-            //             "identificatie".to_string(),
-            //             Operator::Eq,
-            //             KeyType::StringKey50(FixedStringKey::from_str(
-            //                 "NL.IMBAG.Pand.0503100000012869",
-            //             )),
-            //         ),
-            //     ],
-            //     expected_count: 1,
-            //     validator: |feature: &CityJSONFeature| {
-            //         let mut valid_b3 = false;
-            //         let mut valid_ident = false;
-            //         for co in feature.city_objects.values() {
-            //             if let Some(attrs) = &co.attributes {
-            //                 if let Some(val) = attrs.get("b3_h_dak_50p") {
-            //                     if val.as_f64().unwrap() > 2.0 {
-            //                         valid_b3 = true;
-            //                     }
-            //                 }
-            //                 if let Some(ident) = attrs.get("identificatie") {
-            //                     if ident.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
-            //                         valid_ident = true;
-            //                     }
-            //                 }
-            //             }
-            //         }
-            //         valid_b3 && valid_ident
-            //     },
-            // },
+            QueryTestCase {
+                test_name: "test_attr_index_multiple_queries: b3_h_dak_50p > 2.0 and identificatie == NL.IMBAG.Pand.0503100000012869",
+                query: vec![
+                    (
+                        "b3_h_dak_50p".to_string(),
+                        Operator::Gt,
+                        KeyType::Float64(Float(2.0)),
+                    ),
+                    (
+                        "identificatie".to_string(),
+                        Operator::Eq,
+                        KeyType::StringKey50(FixedStringKey::from_str(
+                            "NL.IMBAG.Pand.0503100000012869",
+                        )),
+                    ),
+                ],
+                expected_count: 1,
+                validator: |feature: &CityJSONFeature| {
+                    let mut valid_b3 = false;
+                    let mut valid_ident = false;
+                    for co in feature.city_objects.values() {
+                        if let Some(attrs) = &co.attributes {
+                            if let Some(val) = attrs.get("b3_h_dak_50p") {
+                                if val.as_f64().unwrap() > 2.0 {
+                                    valid_b3 = true;
+                                }
+                            }
+                            if let Some(ident) = attrs.get("identificatie") {
+                                if ident.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
+                                    valid_ident = true;
+                                }
+                            }
+                        }
+                    }
+                    valid_b3 && valid_ident
+                },
+            },
             // Test case: Expect zero features where tijdstipregistratie is before 2008-01-01.
             QueryTestCase {
                 test_name: "test_attr_index_multiple_queries: tijdstipregistratie < 2008-01-01",
                 query: vec![(
                     "tijdstipregistratie".to_string(),
                     Operator::Lt,
-                    // KeyType::DateTime(chrono::DateTime::<chrono::Utc>::from_utc(
-                    //     chrono::NaiveDate::from_ymd_opt(2008, 1, 1)
-                    //         .unwrap()
-                    //         .and_hms_opt(0, 0, 0)
-                    //         .unwrap(),
-                    //     chrono::Utc,
-                    // )),
                     KeyType::DateTime(chrono::DateTime::<chrono::Utc>::from_str(
                         "2008-01-01T00:00:00Z",
                     )?),
@@ -380,39 +373,39 @@ mod tests {
                 },
             },
             // // Test case: Expect zero features where tijdstipregistratie is after 2008-01-01.
-            // QueryTestCase {
-            //     test_name: "test_attr_index_multiple_queries: tijdstipregistratie > 2008-01-01",
-            //     query: vec![(
-            //         "tijdstipregistratie".to_string(),
-            //         Operator::Gt,
-            //         KeyType::DateTime(chrono::DateTime::<chrono::Utc>::from_utc(
-            //             chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0),
-            //             chrono::Utc,
-            //         )),
-            //     )],
-            //     expected_count: 3,
-            //     validator: |feature: &CityJSONFeature| {
-            //         let mut valid_tijdstip = false;
-            //         let query_tijdstip = chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0);
-            //         for co in feature.city_objects.values() {
-            //             if let Some(attrs) = &co.attributes {
-            //                 if let Some(val) = attrs.get("tijdstipregistratie") {
-            //                     let val_tijdstip =
-            //                         chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap())
-            //                             .map_err(|e| eprintln!("Failed to parse datetime: {}", e))
-            //                             .map(|dt| dt.naive_utc())
-            //                             .unwrap_or_else(|_| {
-            //                                 chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
-            //                             });
-            //                     if val_tijdstip > query_tijdstip {
-            //                         valid_tijdstip = true;
-            //                     }
-            //                 }
-            //             }
-            //         }
-            //         valid_tijdstip
-            //     },
-            // },
+            QueryTestCase {
+                test_name: "test_attr_index_multiple_queries: tijdstipregistratie > 2008-01-01",
+                query: vec![(
+                    "tijdstipregistratie".to_string(),
+                    Operator::Gt,
+                    KeyType::DateTime(chrono::DateTime::<chrono::Utc>::from_utc(
+                        chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0),
+                        chrono::Utc,
+                    )),
+                )],
+                expected_count: 3,
+                validator: |feature: &CityJSONFeature| {
+                    let mut valid_tijdstip = false;
+                    let query_tijdstip = chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0);
+                    for co in feature.city_objects.values() {
+                        if let Some(attrs) = &co.attributes {
+                            if let Some(val) = attrs.get("tijdstipregistratie") {
+                                let val_tijdstip =
+                                    chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap())
+                                        .map_err(|e| eprintln!("Failed to parse datetime: {}", e))
+                                        .map(|dt| dt.naive_utc())
+                                        .unwrap_or_else(|_| {
+                                            chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
+                                        });
+                                if val_tijdstip > query_tijdstip {
+                                    valid_tijdstip = true;
+                                }
+                            }
+                        }
+                    }
+                    valid_tijdstip
+                },
+            },
         ];
 
         // --- Run Test Cases ---

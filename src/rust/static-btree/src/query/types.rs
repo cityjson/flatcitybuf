@@ -1,8 +1,7 @@
-use chrono::{DateTime, Utc};
-use ordered_float::OrderedFloat;
 
 use crate::error::Result;
-use crate::key::{FixedStringKey, Key};
+use crate::key::Key;
+use crate::KeyType;
 
 /// Comparison operators for queries
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,27 +18,6 @@ pub enum Operator {
     Ge,
     /// Less than or equal
     Le,
-}
-
-/// Enum to hold different key types supported by the system
-#[derive(Debug, Clone)]
-pub enum KeyType {
-    /// Fixed-size string keys (with different sizes as type parameters)
-    StringKey20(FixedStringKey<20>),
-    StringKey50(FixedStringKey<50>),
-    StringKey100(FixedStringKey<100>),
-    /// Integer keys
-    Int32(i32),
-    Int64(i64),
-    UInt32(u32),
-    UInt64(u64),
-    /// Floating point keys (wrapped in OrderedFloat for total ordering)
-    Float32(OrderedFloat<f32>),
-    Float64(OrderedFloat<f64>),
-    /// Boolean keys
-    Bool(bool),
-    /// DateTime keys
-    DateTime(DateTime<Utc>),
 }
 
 /// A query condition with an enum key type

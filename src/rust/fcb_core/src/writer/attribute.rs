@@ -309,18 +309,19 @@ pub fn attribute_to_index_entries(
                     });
                 }
                 ColumnType::DateTime => {
+                    let dt = match chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap_or(""))
+                    {
+                        Ok(dt) => dt.to_utc(),
+                        Err(e) => {
+                            eprintln!("Failed to parse DateTime: {}", e);
+                            // Choose whether to skip, default, or handle differently
+                            // For example, default to 1970-01-01:
+                            DateTime::<Utc>::from_timestamp(0, 0).unwrap()
+                        }
+                    };
                     index_entries.push(AttributeIndexEntry::DateTime {
                         index: *index,
-                        val: match chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap_or(""))
-                        {
-                            Ok(dt) => dt.to_utc(),
-                            Err(e) => {
-                                eprintln!("Failed to parse DateTime: {}", e);
-                                // Choose whether to skip, default, or handle differently
-                                // For example, default to 1970-01-01:
-                                DateTime::<Utc>::from_timestamp(0, 0).unwrap()
-                            }
-                        },
+                        val: dt,
                     });
                 }
                 _ => {

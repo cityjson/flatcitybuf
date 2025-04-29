@@ -1,7 +1,5 @@
-// tests.rs is loaded as `query::tests`; no nested `mod tests` needed
-
 use crate::error::Result;
-use crate::query::types::{KeyType, Operator, QueryCondition};
+use crate::query::types::{Operator, QueryCondition};
 use crate::{MemoryIndex, MemoryMultiIndex, StreamIndex, Stree};
 use crate::{SearchIndex, StreamMultiIndex};
 use chrono::{DateTime, Utc};
@@ -12,7 +10,7 @@ use std::str::FromStr;
 
 use super::*;
 use crate::entry::Entry;
-use crate::key::FixedStringKey;
+use crate::key::{FixedStringKey, KeyType};
 
 #[test]
 fn test_memory_index_with_complex_data() -> Result<()> {

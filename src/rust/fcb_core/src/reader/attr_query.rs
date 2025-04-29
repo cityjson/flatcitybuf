@@ -99,93 +99,81 @@ pub fn add_indices_to_multi_stream_index<R: Read + Seek>(
     index_begin: usize,
 ) -> Result<()> {
     if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
-        if query.iter().any(|(name, _, _)| col.name() == name) {
-            // let index_begin = attr_info.index() as u64; // TODO: get the index begin from the header
-            let index_begin = index_begin as u64;
-            match col.type_() {
-                ColumnType::Int => {
-                    let index = StreamIndex::<i32>::new(
-                        attr_info.num_unique_items() as usize,
-                        attr_info.branching_factor(),
-                        index_begin,
-                        attr_info.length() as u64,
-                    );
-                    multi_index.add_i32_index(
-                        col.name().to_string(),
-                        index,
-                        attr_info.length() as u64,
-                    );
-                }
-                ColumnType::Float => {
-                    let index = StreamIndex::<Float<f32>>::new(
-                        attr_info.num_unique_items() as usize,
-                        attr_info.branching_factor(),
-                        index_begin,
-                        attr_info.length() as u64,
-                    );
-                    multi_index.add_f32_index(
-                        col.name().to_string(),
-                        index,
-                        attr_info.length() as u64,
-                    );
-                }
-                ColumnType::Double => {
-                    let index = StreamIndex::<Float<f64>>::new(
-                        attr_info.num_unique_items() as usize,
-                        attr_info.branching_factor(),
-                        index_begin,
-                        attr_info.length() as u64,
-                    );
-                    multi_index.add_f64_index(
-                        col.name().to_string(),
-                        index,
-                        attr_info.length() as u64,
-                    );
-                }
-                ColumnType::String => {
-                    let index = StreamIndex::<FixedStringKey<50>>::new(
-                        attr_info.num_unique_items() as usize,
-                        attr_info.branching_factor(),
-                        index_begin,
-                        attr_info.length() as u64,
-                    );
-                    multi_index.add_string_index50(
-                        col.name().to_string(),
-                        index,
-                        attr_info.length() as u64,
-                    );
-                }
-                ColumnType::Bool => {
-                    let index = StreamIndex::<bool>::new(
-                        attr_info.num_unique_items() as usize,
-                        attr_info.branching_factor(),
-                        index_begin,
-                        attr_info.length() as u64,
-                    );
-                    multi_index.add_bool_index(
-                        col.name().to_string(),
-                        index,
-                        attr_info.length() as u64,
-                    );
-                }
-                ColumnType::DateTime => {
-                    let index = StreamIndex::<DateTime<Utc>>::new(
-                        attr_info.num_unique_items() as usize,
-                        attr_info.branching_factor(),
-                        index_begin,
-                        attr_info.length() as u64,
-                    );
-                    multi_index.add_datetime_index(
-                        col.name().to_string(),
-                        index,
-                        attr_info.length() as u64,
-                    );
-                }
-                _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
+        // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
+        let index_begin = index_begin as u64;
+        match col.type_() {
+            ColumnType::Int => {
+                let index = StreamIndex::<i32>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_i32_index(col.name().to_string(), index, attr_info.length() as u64);
             }
-        } else {
-            println!("  - Skipping index for field: {}", col.name());
+            ColumnType::Float => {
+                let index = StreamIndex::<Float<f32>>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_f32_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::Double => {
+                let index = StreamIndex::<Float<f64>>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_f64_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::String => {
+                let index = StreamIndex::<FixedStringKey<50>>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_string_index50(
+                    col.name().to_string(),
+                    index,
+                    attr_info.length() as u64,
+                );
+            }
+            ColumnType::Bool => {
+                let index = StreamIndex::<bool>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_bool_index(
+                    col.name().to_string(),
+                    index,
+                    attr_info.length() as u64,
+                );
+            }
+            ColumnType::DateTime => {
+                let index = StreamIndex::<DateTime<Utc>>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_datetime_index(
+                    col.name().to_string(),
+                    index,
+                    attr_info.length() as u64,
+                );
+            }
+            _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
         }
+        // }
+        // else {
+        //     println!("  - Skipping index for field: {}", col.name());
+        // }
     }
     Ok(())
 }
@@ -270,21 +258,20 @@ impl<R: Read + Seek> FcbReader<R> {
                 .iter()
                 .find(|c| c.index() == column_idx)
                 .ok_or(Error::AttributeIndexNotFound)?;
-            if query
-                .iter()
-                .any(|(name, _, _)| name.as_str() == column.name())
-            {
-                let index_range = attr_index_range
-                    .get(column.name())
-                    .ok_or(Error::AttributeIndexNotFound)?;
-                add_indices_to_multi_stream_index::<R>(
-                    &mut multi_index,
-                    &columns,
-                    &query,
-                    attr_info,
-                    index_range.start,
-                )?;
-            }
+            // if query
+            //     .iter()
+            //     .any(|(name, _, _)| name.as_str() == column.name())
+
+            let index_range = attr_index_range
+                .get(column.name())
+                .ok_or(Error::AttributeIndexNotFound)?;
+            add_indices_to_multi_stream_index::<R>(
+                &mut multi_index,
+                &columns,
+                &query,
+                attr_info,
+                index_range.start,
+            )?;
         }
 
         let result = match multi_index.query(&mut self.reader, &query_obj.conditions) {

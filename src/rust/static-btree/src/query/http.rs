@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use crate::error::{Error, Result};
-use crate::key::{Key, Max, Min};
-use crate::query::types::{KeyType, Operator, QueryCondition};
+use crate::key::{Key, KeyType, Max, Min};
+use crate::query::types::{Operator, QueryCondition};
 use crate::stree::http::HttpSearchResultItem;
 use crate::stree::Stree;
 use async_trait::async_trait;

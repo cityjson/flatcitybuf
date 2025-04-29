@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
 
 use crate::error::{Error, Result};
-use crate::key::{FixedStringKey, Key, Max, Min};
-use crate::query::types::{KeyType, Operator, QueryCondition};
+use crate::key::{FixedStringKey, Key, KeyType, Max, Min};
+use crate::query::types::{Operator, QueryCondition};
 use crate::stree::Stree;
 
 /// Stream-based index for file access
