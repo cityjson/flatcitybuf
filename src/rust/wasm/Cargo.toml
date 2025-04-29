@@ -7,14 +7,14 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
-[build]
-target = "wasm32-unknown-unknown"
+# [build]
+# target = "wasm32-unknown-unknown"
 
 
 [dependencies]
 packed_rtree = { path = "../packed_rtree" }
 bytes = { workspace = true }
-fcb_core = { path = "../fcb_core", features = ["wasm"] }
+fcb_core = { path = "../fcb_core", features = ["wasm", "cjseq"] }
 getrandom = { workspace = true, features = ["js"] }
 gloo-net = { workspace = true }
 http-range-client = { workspace = true, default-features = false }

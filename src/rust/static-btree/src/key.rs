@@ -62,6 +62,30 @@ pub trait Key: Sized + Ord + Clone + Debug + Default + Max + Min {
 }
 
 // Implement Max for primitive integer types
+impl Max for i8 {
+    fn max_value() -> Self {
+        i8::MAX
+    }
+}
+
+impl Max for u8 {
+    fn max_value() -> Self {
+        u8::MAX
+    }
+}
+
+impl Max for u16 {
+    fn max_value() -> Self {
+        u16::MAX
+    }
+}
+
+impl Max for i16 {
+    fn max_value() -> Self {
+        i16::MAX
+    }
+}
+
 impl Max for i32 {
     fn max_value() -> Self {
         i32::MAX
@@ -121,6 +145,30 @@ impl<const N: usize> Max for FixedStringKey<N> {
     fn max_value() -> Self {
         // For strings, a byte array filled with 0xFF represents the maximum lexicographical value
         Self([0xFF; N])
+    }
+}
+
+// Implement Min for primitive integer types
+impl Min for i8 {
+    fn min_value() -> Self {
+        i8::MIN
+    }
+}
+
+impl Min for u8 {
+    fn min_value() -> Self {
+        u8::MIN
+    }
+}
+impl Min for i16 {
+    fn min_value() -> Self {
+        i16::MIN
+    }
+}
+
+impl Min for u16 {
+    fn min_value() -> Self {
+        u16::MIN
     }
 }
 
@@ -207,7 +255,40 @@ macro_rules! impl_key_for_int {
     };
 }
 
+// Macro for single-byte types that don't need endianness specifiers
+macro_rules! impl_key_for_byte {
+    ($T:ty, $write_method:ident) => {
+        impl Key for $T {
+            const SERIALIZED_SIZE: usize = mem::size_of::<$T>();
+
+            #[inline]
+            fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
+                writer.$write_method(*self)?;
+                Ok(Self::SERIALIZED_SIZE)
+            }
+
+            #[inline]
+            fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
+                let mut bytes = [0u8; Self::SERIALIZED_SIZE];
+                reader.read_exact(&mut bytes)?;
+                Ok(<$T>::from_le_bytes(bytes))
+            }
+
+            #[inline]
+            fn from_bytes(bytes: &[u8]) -> Result<Self> {
+                let mut array = [0u8; Self::SERIALIZED_SIZE];
+                array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
+                Ok(<$T>::from_le_bytes(array))
+            }
+        }
+    };
+}
+
 // Implement Key for standard integer types with the correct write method
+impl_key_for_byte!(u8, write_u8);
+impl_key_for_byte!(i8, write_i8);
+impl_key_for_int!(i16, write_i16);
+impl_key_for_int!(u16, write_u16);
 impl_key_for_int!(i32, write_i32);
 impl_key_for_int!(u32, write_u32);
 impl_key_for_int!(i64, write_i64);

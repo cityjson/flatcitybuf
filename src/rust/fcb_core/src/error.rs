@@ -77,6 +77,12 @@ pub enum Error {
         #[from]
         source: CjseqError,
     },
+
+    #[error("StaticBTree error: {source}")]
+    StaticBTree {
+        #[from]
+        source: static_btree::Error,
+    },
 }
 
 impl Error {

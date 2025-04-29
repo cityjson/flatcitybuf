@@ -24,7 +24,10 @@ fn write_file() -> Result<(), Box<dyn Error>> {
         let output_file = File::create(output_file)?;
         let outputwriter = BufWriter::new(output_file);
 
-        let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
+        let attr_indices = vec![
+            ("b3_h_dak_50p".to_string(), None),
+            ("identificatie".to_string(), None),
+        ];
         let header_options = Some(HeaderWriterOptions {
             write_index: false,
             feature_count: features.len() as u64,

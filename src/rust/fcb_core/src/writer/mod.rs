@@ -145,7 +145,11 @@ impl<'a> FcbWriter<'a> {
             self.feat_writer = Some(FeatureWriter::new(
                 feature,
                 self.attr_schema.clone(),
-                self.header_writer.header_options.attribute_indices.clone(),
+                self.header_writer
+                    .header_options
+                    .attribute_indices
+                    .as_ref()
+                    .map(|a| a.iter().map(|(name, _)| name.clone()).collect()),
             ));
         }
 
@@ -222,11 +226,14 @@ impl<'a> FcbWriter<'a> {
         let mut attr_index_buf: Vec<u8> = Vec::new();
         let mut attr_index_info: Vec<AttributeIndexInfo> = Vec::new();
         if let Some(attr_indices) = attr_indices {
-            for attr in attr_indices {
-                if let Some((ai_buf, attr_info)) = build_attribute_index_for_attr(
-                    &attr,
+            for (attr_name, branching_factor) in attr_indices {
+                let branching_factor =
+                    branching_factor.unwrap_or(static_btree::DEFAULT_BRANCHING_FACTOR);
+                if let Ok((ai_buf, attr_info)) = build_attribute_index_for_attr(
+                    &attr_name,
                     &self.attr_schema,
                     &self.attribute_index_entries,
+                    branching_factor,
                 ) {
                     attr_index_info.push(attr_info);
                     // Write the sorted index block.

@@ -46,7 +46,10 @@ mod tests {
                 }
             }
         }
-        let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
+        let attr_indices = vec![
+            ("b3_h_dak_50p".to_string(), None),
+            ("identificatie".to_string(), None),
+        ];
         let mut fcb = FcbWriter::new(
             original_cj_seq.cj.clone(),
             Some(HeaderWriterOptions {
@@ -145,7 +148,10 @@ mod tests {
                 }
             }
         }
-        let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
+        let attr_indices = vec![
+            ("b3_h_dak_50p".to_string(), None),
+            ("identificatie".to_string(), None),
+        ];
         let mut fcb = FcbWriter::new(
             original_cj_seq.cj.clone(),
             Some(HeaderWriterOptions {
@@ -240,9 +246,9 @@ mod tests {
             }
         }
         let attr_indices = vec![
-            "b3_h_dak_50p".to_string(),
-            "identificatie".to_string(),
-            "tijdstipregistratie".to_string(),
+            ("b3_h_dak_50p".to_string(), None),
+            ("identificatie".to_string(), None),
+            ("tijdstipregistratie".to_string(), None),
         ];
         let mut fcb = FcbWriter::new(
             original_cj_seq.cj.clone(),

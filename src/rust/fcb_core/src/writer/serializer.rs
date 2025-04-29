@@ -33,6 +33,8 @@ use crate::error::Result;
 pub(super) struct AttributeIndexInfo {
     pub index: u16,
     pub length: u32,
+    pub branching_factor: u16,
+    pub num_unique_items: u32,
 }
 /// -----------------------------------
 /// Serializer for Header
@@ -60,7 +62,14 @@ pub(super) fn to_fcb_header<'a>(
         if let Some(attribute_indices_info) = attribute_indices_info {
             let attribute_indices_info_vec = attribute_indices_info
                 .iter()
-                .map(|info| AttributeIndex::new(info.index, info.length))
+                .map(|info| {
+                    AttributeIndex::new(
+                        info.index,
+                        info.length,
+                        info.branching_factor,
+                        info.num_unique_items,
+                    )
+                })
                 .collect::<Vec<_>>();
             Some(fbb.create_vector(&attribute_indices_info_vec))
         } else {

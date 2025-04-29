@@ -491,10 +491,10 @@ fn test_memory_stream_multi_index() -> Result<()> {
 #[cfg(feature = "http")]
 mod http_tests {
     use super::*;
-    
+
     use crate::mocked_http_range_client::MockHttpRangeClient;
     use crate::query::http::{HttpIndex, HttpMultiIndex};
-    
+
     use bytes::Bytes;
 
     #[tokio::test]

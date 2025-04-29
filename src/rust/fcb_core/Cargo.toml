@@ -7,13 +7,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["http"]
-http = ["http-range-client", "reqwest", "bytes"]
+http = ["http-range-client", "reqwest", "bytes", "cjseq"]
 wasm = [
   "wasm-bindgen",
   "wasm-bindgen-futures",
   "gloo-net",
   "js-sys",
   "getrandom",
+  "cjseq",
 ]
 extension = ["cjseq/extension"]
 
@@ -21,7 +22,7 @@ extension = ["cjseq/extension"]
 bytes = { workspace = true, optional = true }
 flatbuffers = { workspace = true }
 byteorder = { workspace = true }
-cjseq = { workspace = true, features = [] }
+cjseq = { workspace = true, optional = true, features = [] }
 tempfile = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

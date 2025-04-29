@@ -15,6 +15,8 @@ pub use payload::*;
 pub use query::*;
 pub use stree::*;
 
+pub const DEFAULT_BRANCHING_FACTOR: u16 = 16;
+
 // Add basic tests or examples here later if needed
 #[cfg(test)]
 mod tests {}
