@@ -99,6 +99,7 @@ impl<K: Key> HttpIndex<K> {
 }
 
 /// Trait for HTTP indices with heterogeneous key support
+#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 pub trait TypedHttpSearchIndex<T: AsyncHttpRangeClient + Send + Sync>:
     Send + Sync + std::fmt::Debug
@@ -111,13 +112,79 @@ pub trait TypedHttpSearchIndex<T: AsyncHttpRangeClient + Send + Sync>:
     ) -> Result<Vec<HttpSearchResultItem>>;
 }
 
+/// Wasm-specific version that doesn't require Send + Sync
+#[cfg(target_arch = "wasm32")]
+#[async_trait(?Send)]
+pub trait TypedHttpSearchIndex<T: AsyncHttpRangeClient>: std::fmt::Debug {
+    /// Execute a typed query condition over HTTP with a specific HTTP client
+    async fn execute_query_condition(
+        &self,
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        condition: &QueryCondition,
+    ) -> Result<Vec<HttpSearchResultItem>>;
+}
+
 /// Implement the TypedHttpSearchIndex trait for each supported key type
 macro_rules! impl_typed_http_search_index {
     ($key_type:ty, $enum_variant:path) => {
+        #[cfg(not(target_arch = "wasm32"))]
         #[async_trait]
         impl<T: AsyncHttpRangeClient + Send + Sync> TypedHttpSearchIndex<T>
             for HttpIndex<$key_type>
         {
+            async fn execute_query_condition(
+                &self,
+                client: &mut AsyncBufferedHttpRangeClient<T>,
+                condition: &QueryCondition,
+            ) -> Result<Vec<HttpSearchResultItem>> {
+                // Extract the key value from the enum variant
+                let key: $key_type = match &condition.key {
+                    $enum_variant(val) => val.clone(),
+                    _ => {
+                        return Err(Error::QueryError(format!(
+                            "key type mismatch: expected {}, got {:?}",
+                            stringify!($key_type),
+                            condition.key
+                        )))
+                    }
+                };
+
+                // Dispatch to exact or range methods
+                let results = match condition.operator {
+                    Operator::Eq => self.find_exact(client, key.clone()).await?,
+                    Operator::Ne => {
+                        let all = self
+                            .find_range(
+                                client,
+                                Some(<$key_type>::min_value()),
+                                Some(<$key_type>::max_value()),
+                            )
+                            .await?;
+                        let eq = self.find_exact(client, key.clone()).await?;
+                        all.into_iter().filter(|x| !eq.contains(x)).collect()
+                    }
+                    Operator::Gt => {
+                        let mut v = self.find_range(client, Some(key.clone()), None).await?;
+                        let eq = self.find_exact(client, key.clone()).await?;
+                        v.retain(|x| !eq.contains(x));
+                        v
+                    }
+                    Operator::Lt => {
+                        let mut v = self.find_range(client, None, Some(key.clone())).await?;
+                        let eq = self.find_exact(client, key.clone()).await?;
+                        v.retain(|x| !eq.contains(x));
+                        v
+                    }
+                    Operator::Ge => self.find_range(client, Some(key.clone()), None).await?,
+                    Operator::Le => self.find_range(client, None, Some(key.clone())).await?,
+                };
+                Ok(results)
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        #[async_trait(?Send)]
+        impl<T: AsyncHttpRangeClient> TypedHttpSearchIndex<T> for HttpIndex<$key_type> {
             async fn execute_query_condition(
                 &self,
                 client: &mut AsyncBufferedHttpRangeClient<T>,
@@ -184,10 +251,12 @@ impl_typed_http_search_index!(crate::key::FixedStringKey<100>, KeyType::StringKe
 
 /// Container for multiple HTTP indices keyed by field name
 #[derive(Debug)]
+#[cfg(not(target_arch = "wasm32"))]
 pub struct HttpMultiIndex<T: AsyncHttpRangeClient + Send + Sync> {
     indices: HashMap<String, Box<dyn TypedHttpSearchIndex<T>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<T: AsyncHttpRangeClient + Send + Sync> HttpMultiIndex<T> {
     /// Create a new empty HTTP multi-index
     pub fn new() -> Self {
@@ -235,7 +304,70 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpMultiIndex<T> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<T: AsyncHttpRangeClient + Send + Sync> Default for HttpMultiIndex<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Container for multiple HTTP indices keyed by field name (WASM version)
+#[derive(Debug)]
+#[cfg(target_arch = "wasm32")]
+pub struct HttpMultiIndex<T: AsyncHttpRangeClient> {
+    indices: HashMap<String, Box<dyn TypedHttpSearchIndex<T>>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<T: AsyncHttpRangeClient> HttpMultiIndex<T> {
+    /// Create a new empty HTTP multi-index
+    pub fn new() -> Self {
+        Self {
+            indices: HashMap::new(),
+        }
+    }
+
+    /// Add an index for any supported key type
+    pub fn add_index<K: Key + 'static>(&mut self, field: String, index: HttpIndex<K>)
+    where
+        HttpIndex<K>: TypedHttpSearchIndex<T> + 'static,
+    {
+        self.indices.insert(field, Box::new(index));
+    }
+
+    /// Execute a multi-condition query by AND-ing all conditions
+    pub async fn query(
+        &self,
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        conditions: &[QueryCondition],
+    ) -> Result<Vec<HttpSearchResultItem>> {
+        if conditions.is_empty() {
+            return Err(Error::QueryError("query cannot be empty".to_string()));
+        }
+        let mut result_sets = Vec::with_capacity(conditions.len());
+        for cond in conditions {
+            let idx = self.indices.get(&cond.field).ok_or_else(|| {
+                Error::QueryError(format!("no index found for field '{}'", cond.field))
+            })?;
+            let items = idx.execute_query_condition(client, cond).await?;
+            result_sets.push(items);
+            if result_sets.is_empty() {
+                // no results found for this condition, return early so we don't waste time intersecting empty sets
+                return Ok(vec![]);
+            }
+        }
+        // intersect all sets
+        let mut iter = result_sets.into_iter();
+        let mut intersection = iter.next().unwrap_or_default();
+        for set in iter {
+            intersection.retain(|x| set.contains(x));
+        }
+        Ok(intersection)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<T: AsyncHttpRangeClient> Default for HttpMultiIndex<T> {
     fn default() -> Self {
         Self::new()
     }

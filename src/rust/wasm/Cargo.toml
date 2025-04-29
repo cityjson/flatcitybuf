@@ -13,6 +13,32 @@ crate-type = ["cdylib"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 packed_rtree = { path = "../packed_rtree" }
+static-btree = { path = "../static-btree" }
+bytes = { workspace = true }
+fcb_core = { path = "../fcb_core", features = ["http"] }
+getrandom = { workspace = true, features = ["js"] }
+gloo-net = { workspace = true }
+http-range-client = { workspace = true, default-features = false }
+js-sys = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+byteorder = { workspace = true }
+tempfile = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+clap = { workspace = true }
+tracing = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+async-trait = { workspace = true, default-features = false }
+console_error_panic_hook = { workspace = true }
+console_log = { workspace = true }
+log = { workspace = true }
+chrono = { workspace = true }
+
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+packed_rtree = { path = "../packed_rtree" }
+static-btree = { path = "../static-btree" }
 bytes = { workspace = true }
 fcb_core = { path = "../fcb_core", features = ["http"] }
 getrandom = { workspace = true, features = ["js"] }

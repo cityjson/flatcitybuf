@@ -240,13 +240,13 @@ function _assertClass(instance, klass) {
 function __wbg_adapter_38(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure332_externref_shim(arg0, arg1, arg2);
+    wasm.closure396_externref_shim(arg0, arg1, arg2);
 }
 
 function __wbg_adapter_142(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure399_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure437_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -432,7 +432,7 @@ const WasmAttrQueryFinalization = (typeof FinalizationRegistry === 'undefined')
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmattrquery_free(ptr >>> 0, 1));
 /**
  * A wasm‑friendly wrapper over `AttrQuery`, which is defined as:
- * `pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;`
+ * `pub type AttrQuery = Vec<(String, Operator, )>;`
  */
 export class WasmAttrQuery {
 
@@ -804,8 +804,8 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper4427 = function() { return logError(function (arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 333, __wbg_adapter_38);
+    imports.wbg.__wbindgen_closure_wrapper5815 = function() { return logError(function (arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 397, __wbg_adapter_38);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {

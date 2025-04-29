@@ -24,6 +24,6 @@ export const __externref_table_alloc: () => number;
 export const __wbindgen_export_4: WebAssembly.Table;
 export const __wbindgen_export_5: WebAssembly.Table;
 export const __externref_table_dealloc: (a: number) => void;
-export const closure332_externref_shim: (a: number, b: number, c: any) => void;
-export const closure399_externref_shim: (a: number, b: number, c: any, d: any) => void;
+export const closure396_externref_shim: (a: number, b: number, c: any) => void;
+export const closure437_externref_shim: (a: number, b: number, c: any, d: any) => void;
 export const __wbindgen_start: () => void;

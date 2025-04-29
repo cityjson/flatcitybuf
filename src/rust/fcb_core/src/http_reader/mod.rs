@@ -394,6 +394,86 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         }
         Ok(())
     }
+
+    // Add WASM-specific version without Send + Sync bounds
+    #[cfg(target_arch = "wasm32")]
+    pub fn add_indices_to_multi_wasm_http_index<C: AsyncHttpRangeClient>(
+        multi_index: &mut HttpMultiIndex<C>,
+        columns: &[Column],
+        attr_info: &AttributeIndex,
+        index_begin: usize,
+        feature_begin: usize,
+    ) -> Result<()> {
+        if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
+            // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
+            let index_begin = index_begin as u64;
+            match col.type_() {
+                ColumnType::Int => {
+                    let index = HttpIndex::<i32>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                ColumnType::Float => {
+                    let index = HttpIndex::<Float<f32>>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                ColumnType::Double => {
+                    let index = HttpIndex::<Float<f64>>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                ColumnType::String => {
+                    let index = HttpIndex::<FixedStringKey<50>>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+
+                ColumnType::Bool => {
+                    let index = HttpIndex::<bool>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                ColumnType::DateTime => {
+                    let index = HttpIndex::<DateTime<Utc>>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<T: AsyncHttpRangeClient + Send + Sync> AsyncFeatureIter<T> {
