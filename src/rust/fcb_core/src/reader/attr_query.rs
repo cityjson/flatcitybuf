@@ -94,7 +94,7 @@ pub fn add_indices_to_multi_memory_index<R: Read>(
 pub fn add_indices_to_multi_stream_index<R: Read + Seek>(
     multi_index: &mut StreamMultiIndex,
     columns: &[Column],
-    query: &AttrQuery,
+    query: &AttrQuery, // TODO: remove this
     attr_info: &AttributeIndex,
     index_begin: usize,
 ) -> Result<()> {

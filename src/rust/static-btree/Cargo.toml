@@ -33,7 +33,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [features]
-default = []
+default = ["http"]
 http = ["http-range-client", "bytes"]
 # [[bench]]
 # name = "search_benchmark"

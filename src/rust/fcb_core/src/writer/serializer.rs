@@ -16,11 +16,14 @@ use crate::{
 };
 use cjseq::{
     Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON, CityJSONFeature,
-    CityObject as CjCityObject, ExtensionFile as CjExtensionFile, Geometry as CjGeometry,
-    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, TextFormat as CjTextFormat, TextType as CjTextType,
-    Transform as CjTransform, WrapMode as CjWrapMode,
+    CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
+    PointOfContact as CjPointOfContact, ReferenceSystem as CjReferenceSystem,
+    TextFormat as CjTextFormat, TextType as CjTextType, Transform as CjTransform,
+    WrapMode as CjWrapMode,
 };
+
+use cjseq::ExtensionFile as CjExtensionFile;
+
 use flatbuffers::FlatBufferBuilder;
 use packed_rtree::NodeItem;
 use serde_json::Value;
@@ -343,6 +346,15 @@ fn to_point_of_contact<'a>(
 }
 
 /// Converts the ExtensionSchema to a FlatBuffers Extension table
+///
+/// # Arguments
+///
+/// * `fbb` - FlatBuffers builder instance
+/// * `extension` - Extension file
+///
+/// # Returns
+///
+/// * `flatbuffers::WIPOffset<Extension<'a>>` - Extension table
 pub fn to_extension<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     extension: &CjExtensionFile,

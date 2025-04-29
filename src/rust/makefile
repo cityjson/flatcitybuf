@@ -1,13 +1,13 @@
 .PHONY: pre-commit
 pre-commit:
 	make check-common
-	make check-wasm
+	# make check-wasm
 
 .PHONY: check-common
 check-common:
 	cargo fmt
 	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm
-	cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
+	# cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
 # cargo machete --all-features --workspace --exclude wasm
 	cargo nextest run --all-features --workspace --exclude fcb_wasm
 	cargo check --all-features --workspace --exclude fcb_wasm

@@ -3,8 +3,9 @@ name = "fcb_cli"
 version = "0.1.0"
 edition = "2021"
 
+
 [dependencies]
-fcb_core = { path = "../fcb_core" }
+fcb_core = { path = "../fcb_core", features = ["http"] }
 cjseq = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }

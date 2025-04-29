@@ -1321,7 +1321,7 @@ pub mod http {
     use std::ops::{Range, RangeFrom};
 
     /// Byte range within a file. Suitable for an HTTP Range request.
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Eq, PartialEq)]
     pub enum HttpRange {
         Range(Range<usize>),
         RangeFrom(RangeFrom<usize>),
@@ -1357,7 +1357,7 @@ pub mod http {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Eq, PartialEq, Clone)]
     /// Bbox filter search result
     pub struct HttpSearchResultItem {
         /// Byte offset in feature data section

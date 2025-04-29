@@ -30,8 +30,6 @@ async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
             break;
         }
     }
-    println!("cj: {:?}", cj);
-    println!("features count: {:?}", features.len());
     // TODO: add more tests
     Ok(())
 }
@@ -87,19 +85,20 @@ async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
     };
     let mut iter = http_reader.select_attr_query(&query).await?;
 
-    let mut deserialized_features = Vec::new();
+    let mut features = Vec::new();
     let mut feat_num = 0;
     while let Ok(Some(feat_buf)) = iter.next().await {
         let feature = feat_buf.cj_feature()?;
-        println!("feature: {:?}", feature);
-        deserialized_features.push(feature);
+        features.push(feature);
         feat_num += 1;
         if feat_num >= features_count {
             break;
         }
     }
 
-    let feature = deserialized_features.first().unwrap();
+    println!("deserialized_features: {:?}", features.len());
+
+    let feature = features.first().unwrap();
     let mut contains_b3_h_dak_50p = false;
     // let mut contains_identificatie = false;
     for co in feature.city_objects.values() {

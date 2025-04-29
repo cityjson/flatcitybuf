@@ -499,6 +499,7 @@ mod http_tests {
 
     use crate::mocked_http_range_client::MockHttpRangeClient;
     use crate::query::http::{HttpIndex, HttpMultiIndex};
+    use crate::{HttpRange, HttpSearchResultItem};
 
     use bytes::Bytes;
 
@@ -604,12 +605,14 @@ mod http_tests {
         for (query, expected_results) in &test_cases {
             let offset_adjusted_expected_results = expected_results
                 .iter()
-                .map(|&result| result + attr_index_size as u64)
+                .map(|&result| HttpSearchResultItem {
+                    range: HttpRange::RangeFrom(result as usize + attr_index_size..),
+                })
                 .collect::<Vec<_>>();
             let results = multi_index.query(&mut client, query).await?;
             // Sort to ensure consistent comparison
             let mut sorted_results = results.clone();
-            sorted_results.sort();
+            sorted_results.sort_by_key(|item| item.range.start());
             assert_eq!(sorted_results, offset_adjusted_expected_results);
         }
 

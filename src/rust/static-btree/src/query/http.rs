@@ -1,6 +1,3 @@
-// HTTP-based query implementation
-#![cfg(feature = "http")]
-
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
@@ -20,7 +17,7 @@ pub struct HttpIndex<K: Key> {
     /// branching factor of the B+tree
     branching_factor: u16,
     /// byte offset where the index begins
-    index_offset: usize,
+    index_begin: usize,
     /// byte offset where the feature data begins
     feature_begin: usize,
     /// threshold for combining HTTP requests to reduce roundtrips
@@ -33,14 +30,14 @@ impl<K: Key> HttpIndex<K> {
     pub fn new(
         num_items: usize,
         branching_factor: u16,
-        index_offset: usize,
+        index_begin: usize,
         feature_begin: usize,
         combine_request_threshold: usize,
     ) -> Self {
         Self {
             num_items,
             branching_factor,
-            index_offset,
+            index_begin,
             feature_begin,
             combine_request_threshold,
             _marker: PhantomData,
@@ -52,10 +49,10 @@ impl<K: Key> HttpIndex<K> {
         &self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
         key: K,
-    ) -> Result<Vec<u64>> {
+    ) -> Result<Vec<HttpSearchResultItem>> {
         let items: Vec<HttpSearchResultItem> = Stree::http_stream_find_exact(
             client,
-            self.index_offset,
+            self.index_begin,
             self.feature_begin,
             self.num_items,
             self.branching_factor,
@@ -64,10 +61,7 @@ impl<K: Key> HttpIndex<K> {
         )
         .await?;
 
-        Ok(items
-            .into_iter()
-            .map(|item| item.range.start() as u64)
-            .collect())
+        Ok(items)
     }
 
     /// Find all items in [start..end] via HTTP. At least one bound is required.
@@ -76,7 +70,7 @@ impl<K: Key> HttpIndex<K> {
         client: &mut AsyncBufferedHttpRangeClient<T>,
         start: Option<K>,
         end: Option<K>,
-    ) -> Result<Vec<u64>> {
+    ) -> Result<Vec<HttpSearchResultItem>> {
         let (lower, upper) = match (start, end) {
             (Some(lo), Some(hi)) => (lo, hi),
             (Some(lo), None) => (lo, K::max_value()),
@@ -90,7 +84,7 @@ impl<K: Key> HttpIndex<K> {
 
         let items: Vec<HttpSearchResultItem> = Stree::http_stream_find_range(
             client,
-            self.index_offset,
+            self.index_begin,
             self.feature_begin,
             self.num_items,
             self.branching_factor,
@@ -100,10 +94,7 @@ impl<K: Key> HttpIndex<K> {
         )
         .await?;
 
-        Ok(items
-            .into_iter()
-            .map(|item| item.range.start() as u64)
-            .collect())
+        Ok(items)
     }
 }
 
@@ -117,7 +108,7 @@ pub trait TypedHttpSearchIndex<T: AsyncHttpRangeClient + Send + Sync>:
         &self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
         condition: &QueryCondition,
-    ) -> Result<Vec<u64>>;
+    ) -> Result<Vec<HttpSearchResultItem>>;
 }
 
 /// Implement the TypedHttpSearchIndex trait for each supported key type
@@ -131,7 +122,7 @@ macro_rules! impl_typed_http_search_index {
                 &self,
                 client: &mut AsyncBufferedHttpRangeClient<T>,
                 condition: &QueryCondition,
-            ) -> Result<Vec<u64>> {
+            ) -> Result<Vec<HttpSearchResultItem>> {
                 // Extract the key value from the enum variant
                 let key: $key_type = match &condition.key {
                     $enum_variant(val) => val.clone(),
@@ -218,7 +209,7 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpMultiIndex<T> {
         &self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
         conditions: &[QueryCondition],
-    ) -> Result<Vec<u64>> {
+    ) -> Result<Vec<HttpSearchResultItem>> {
         if conditions.is_empty() {
             return Err(Error::QueryError("query cannot be empty".to_string()));
         }
