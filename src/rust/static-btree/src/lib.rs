@@ -2,19 +2,18 @@ pub mod entry;
 pub mod error;
 pub mod key;
 #[cfg(feature = "http")]
+#[cfg(test)]
 mod mocked_http_range_client;
 pub mod payload;
 pub mod query;
 pub mod stree;
 
-pub use entry::Entry;
-pub use error::Error;
-pub use key::Key;
-pub use payload::PayloadEntry;
-pub use query::{MemoryIndex, MemoryMultiIndex};
-pub use query::{MultiIndex, Operator, Query, SearchIndex, TypedQueryCondition};
-pub use query::{StreamIndex, StreamMultiIndex};
-pub use stree::Stree;
+pub use entry::*;
+pub use error::*;
+pub use key::*;
+pub use payload::*;
+pub use query::*;
+pub use stree::*;
 
 // Add basic tests or examples here later if needed
 #[cfg(test)]

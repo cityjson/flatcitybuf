@@ -4,15 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [
-  "cli",
-  "fcb_core",
-  "packed_rtree",
-  "wasm",
-  "bst",
-  "btree",
-  "static-btree",
-]
+members = ["cli", "fcb_core", "packed_rtree", "wasm", "bst", "static-btree"]
 resolver = "2"
 
 [workspace.dependencies]

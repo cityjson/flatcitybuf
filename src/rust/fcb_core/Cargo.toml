@@ -30,6 +30,7 @@ clap = { workspace = true }
 tracing = { workspace = true }
 packed_rtree = { path = "../packed_rtree" }
 bst = { path = "../bst" }
+static-btree = { path = "../static-btree" }
 ordered-float = { workspace = true }
 chrono = { workspace = true }
 http-range-client = { workspace = true, default-features = false, optional = true, features = [
