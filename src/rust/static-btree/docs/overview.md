@@ -226,7 +226,7 @@ The search process follows these general steps:
 
 ## 10. Query Interface
 
-The static-btree crate provides a higher-level query interface designed to work with multiple indices and support complex query operations.
+The static-btree crate provides a higher-level query interface designed to work with multiple indices and support complex query operations. This interface has been fully implemented and tested.
 
 ### 10.1 Query Module Structure
 
@@ -235,53 +235,129 @@ static-btree/
 ├── src/
 │   ├── query/
 │   │   ├── mod.rs         // Re-exports from submodules
-│   │   ├── types.rs       // Query types and traits
-│   │   ├── memory.rs      // In-memory index implementation
-│   │   ├── stream.rs      // Stream-based index implementation
-│   │   └── http.rs        // HTTP-based index implementation (conditional)
+│   │   ├── types.rs       // Query types and traits (KeyType, Operator, TypedQueryCondition)
+│   │   ├── memory.rs      // In-memory index implementation (MemoryIndex, MemoryMultiIndex)
+│   │   ├── stream.rs      // Stream-based index implementation (StreamIndex, StreamMultiIndex)
+│   │   └── http.rs        // HTTP-based index implementation (feature-gated)
 ```
 
 ### 10.2 Core Query Types
 
 The query module defines several core types to support high-level query operations:
 
-1. **Operator Enum**: Defines comparison operators (Eq, Ne, Gt, Lt, Ge, Le)
-2. **QueryCondition**: Represents a single condition with a field name, operator, and key value
-3. **Query**: A collection of conditions combined with AND logic
+1. **Operator Enum**: Defines comparison operators:
+   * `Eq` - Equal
+   * `Ne` - Not equal
+   * `Gt` - Greater than
+   * `Lt` - Less than
+   * `Ge` - Greater than or equal
+   * `Le` - Less than or equal
+
+2. **KeyType Enum**: Heterogeneous key type support:
+   * Integers: `Int32`, `Int64`, `UInt32`, `UInt64`
+   * Floats: `Float32`, `Float64` (using OrderedFloat)
+   * `Bool`: Boolean values
+   * `DateTime`: Timestamps with UTC timezone
+   * String keys: `StringKey20`, `StringKey50`, `StringKey100` (fixed-length strings)
+
+3. **TypedQueryCondition**: Represents a single condition with:
+   * Field name (string)
+   * Operator (from the Operator enum)
+   * Key value (from the KeyType enum)
 
 ### 10.3 Index Abstractions
 
-The query module provides several abstractions for working with indices:
+The query module implements several index abstractions:
 
-1. **SearchIndex Trait**: Core interface for index operations including `find_exact` and `find_range`
-2. **MultiIndex Types**: Collections of indices that can be queried together:
-   * **MemoryMultiIndex**: For in-memory operations
-   * **StreamMultiIndex**: For file-based operations
-   * **HttpMultiIndex**: For HTTP-based operations (with the `http` feature)
+1. **Basic Index Types**:
+   * **MemoryIndex\<K\>**: In-memory index for fast local operations
+   * **StreamIndex\<K\>**: File-based index using Read+Seek for minimal memory usage
+   * **HttpIndex\<K\>**: Remote index accessed via HTTP range requests
 
-### 10.4 Query Execution Process
+2. **Multi-Index Types**:
+   * **MemoryMultiIndex**: Collection of in-memory indices with heterogeneous key types
+   * **StreamMultiIndex**: Collection of stream-based indices with heterogeneous key types
+   * **HttpMultiIndex\<T\>**: Collection of HTTP-based indices with heterogeneous key types
+
+3. **Supporting Traits**:
+   * **TypedSearchIndex**: For memory-based query execution
+   * **TypedStreamSearchIndex**: For stream-based query execution
+   * **TypedHttpSearchIndex\<T\>**: For HTTP-based query execution with AsyncHttpRangeClient
+
+### 10.4 HTTP Index Implementation
+
+The HTTP index implementation (`query/http.rs`) provides several key features:
+
+1. **HttpIndex\<K\>**:
+   * Implements exact and range queries over HTTP
+   * Uses `AsyncHttpRangeClient` for network operations
+   * Supports request batching to minimize HTTP round trips
+   * Properly handles all key types through the `Key` trait
+
+2. **TypedHttpSearchIndex\<T\> Trait**:
+   * Provides a common interface for different key types
+   * Implemented for all supported key types via a macro
+   * Supports all comparison operators with proper type checking
+
+3. **HttpMultiIndex\<T\>**:
+   * Container for multiple HTTP indices of different key types
+   * Query execution combines results from multiple conditions
+   * Properly handles error cases and type mismatches
+
+4. **Query Execution**:
+   * Supports complex queries with multiple conditions
+   * Implements result set intersection for AND logic
+   * Properly expands payload references for duplicate keys
+
+### 10.5 Query Execution Process
 
 The query execution process in the static-btree crate follows these steps:
 
 1. **Condition Evaluation**:
    * Each condition is evaluated against the appropriate index
+   * For HTTP indices, conditions are translated to async HTTP operations
    * Results are collected as sets of offsets
 
 2. **Result Combination**:
    * Results from different conditions are intersected (AND logic)
+   * For HTTP queries, this happens after all async operations complete
    * The final set contains offsets that match all conditions
 
-3. **Stream-based Processing**:
-   * For file-based operations, only required nodes are read
-   * For HTTP-based operations, range requests fetch only needed data
+3. **Type Safety**:
+   * The implementation provides compile-time type safety through generics
+   * Runtime type checking is used for heterogeneous operations
+   * Proper error messages are generated for type mismatches
 
-### 10.5 Compatibility Layer
+### 10.6 Integration Testing
 
-For integration with fcb_core, the crate provides a compatibility layer that maps the query interface to the existing BST API:
+The query module includes comprehensive end-to-end tests:
 
-1. **Type Aliases**: Mapping static-btree types to BST-compatible names
-2. **Wrapper Structs**: Implementing BST interfaces using static-btree functionality
-3. **Conversion Functions**: Translating between different API conventions
+1. **Memory Index Tests**:
+   * Verify exact and range queries with various key types
+   * Test all comparison operators and edge cases
+   * Ensure proper handling of duplicate keys
+
+2. **Stream Index Tests**:
+   * Test serialization and deserialization
+   * Verify correct operation with file-like sources
+   * Ensure minimal memory usage during operations
+
+3. **HTTP Index Tests**:
+   * Use a mock HTTP client for deterministic testing
+   * Verify that HTTP range requests fetch the correct data
+   * Test complex queries with multiple conditions
+   * Ensure proper handling of network errors
+
+### 10.7 Current Status and Next Steps
+
+All query module components have been fully implemented and tested, including:
+
+* Memory-based indices
+* Stream-based indices
+* HTTP-based indices (feature-gated)
+* End-to-end tests for all index types
+
+The next phase is integration with fcb_core as outlined in the implementation_integrate_w_flatcitybuf.md document.
 
 ## 11. Limitations and Constraints
 
@@ -302,3 +378,4 @@ For integration with fcb_core, the crate provides a compatibility layer that map
 1. **Prefetch hints** – Explore prefetching for sequential range scans to improve performance.
 2. **Compression** – Investigate node-level compression techniques for reduced storage requirements.
 3. **Parallel construction** – Optimize tree building for multi-core systems.
+4. **fcb_core Integration** – Create compatibility layer for smooth integration with fcb_core.
