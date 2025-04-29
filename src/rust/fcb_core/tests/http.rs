@@ -1,8 +1,9 @@
 use std::error::Error;
 
 use anyhow::Result;
-use bst::{ByteSerializableValue, Operator, OrderedFloat};
-use fcb_core::{deserializer::to_cj_metadata, HttpFcbReader};
+use fcb_core::{
+    deserializer::to_cj_metadata, Float, HttpFcbReader, KeyType, Operator,
+};
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
@@ -70,11 +71,11 @@ async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
 
 async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
-    let query: Vec<(String, Operator, ByteSerializableValue)> = vec![
+    let query: Vec<(String, Operator, KeyType)> = vec![
         (
             "b3_h_dak_50p".to_string(),
             Operator::Gt,
-            ByteSerializableValue::F64(OrderedFloat(10.0)),
+            KeyType::Float64(Float(10.0)),
         ),
         // (
         //     "identificatie".to_string(),

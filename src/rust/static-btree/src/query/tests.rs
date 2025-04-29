@@ -1,8 +1,8 @@
 // tests.rs is loaded as `query::tests`; no nested `mod tests` needed
 
 use crate::error::Result;
-use crate::query::types::{KeyType, Operator, TypedQueryCondition};
-use crate::{MemoryIndex, MemoryMultiIndex, StreamIndex};
+use crate::query::types::{KeyType, Operator, QueryCondition};
+use crate::{MemoryIndex, MemoryMultiIndex, StreamIndex, Stree};
 use crate::{SearchIndex, StreamMultiIndex};
 use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
@@ -224,21 +224,21 @@ struct TreeInfo {
     payload_size: usize,
 }
 
-fn test_cases() -> Vec<(Vec<TypedQueryCondition>, Vec<u64>)> {
+fn test_cases() -> Vec<(Vec<QueryCondition>, Vec<u64>)> {
     vec![
         (
             vec![
-                TypedQueryCondition {
+                QueryCondition {
                     field: "id".to_string(),
                     operator: Operator::Ge,
                     key: KeyType::Int64(3),
                 },
-                TypedQueryCondition {
+                QueryCondition {
                     field: "score".to_string(),
                     operator: Operator::Gt,
                     key: KeyType::Float32(OrderedFloat(80.0)),
                 },
-                TypedQueryCondition {
+                QueryCondition {
                     field: "datetime".to_string(),
                     operator: Operator::Ge,
                     key: KeyType::DateTime(
@@ -251,12 +251,12 @@ fn test_cases() -> Vec<(Vec<TypedQueryCondition>, Vec<u64>)> {
         // Test another query: name starts with "a" or "b" AND score < 95.0
         (
             vec![
-                TypedQueryCondition {
+                QueryCondition {
                     field: "name".to_string(),
                     operator: Operator::Eq,
                     key: KeyType::StringKey20(FixedStringKey::<20>::from_str("eve")),
                 },
-                TypedQueryCondition {
+                QueryCondition {
                     field: "score".to_string(),
                     operator: Operator::Lt,
                     key: KeyType::Float32(OrderedFloat(95.0)),
@@ -265,7 +265,7 @@ fn test_cases() -> Vec<(Vec<TypedQueryCondition>, Vec<u64>)> {
             vec![5],
         ),
         (
-            vec![TypedQueryCondition {
+            vec![QueryCondition {
                 field: "name".to_string(),
                 operator: Operator::Eq,
                 key: KeyType::StringKey20(FixedStringKey::<20>::from_str("eve")),
@@ -274,7 +274,7 @@ fn test_cases() -> Vec<(Vec<TypedQueryCondition>, Vec<u64>)> {
         ),
         (
             // no results
-            vec![TypedQueryCondition {
+            vec![QueryCondition {
                 field: "name".to_string(),
                 operator: Operator::Eq,
                 key: KeyType::StringKey20(FixedStringKey::<20>::from_str("hoge")),
@@ -284,12 +284,12 @@ fn test_cases() -> Vec<(Vec<TypedQueryCondition>, Vec<u64>)> {
         (
             // no results
             vec![
-                TypedQueryCondition {
+                QueryCondition {
                     field: "name".to_string(),
                     operator: Operator::Eq,
                     key: KeyType::StringKey20(FixedStringKey::<20>::from_str("eve")),
                 },
-                TypedQueryCondition {
+                QueryCondition {
                     field: "score".to_string(),
                     operator: Operator::Lt,
                     key: KeyType::Float32(OrderedFloat(80.0)),
@@ -446,15 +446,20 @@ fn test_memory_stream_multi_index() -> Result<()> {
     // stream query test. It tests if multi index can work after serialize and deserialize
     let mut stream_multi_index = StreamMultiIndex::new();
 
-    let stream_id_index =
-        StreamIndex::<i64>::new(*id_num_items, *id_b, *id_start as u64, *id_payload_size);
+    let stream_id_index = StreamIndex::<i64>::new(
+        *id_num_items,
+        *id_b,
+        *id_start as u64,
+        Stree::<i64>::index_size(*id_num_items, *id_b, *id_payload_size) as u64,
+    );
     let id_index_length = stream_id_index.length();
     stream_multi_index.add_i64_index("id".to_string(), stream_id_index, id_index_length);
     let stream_name_index = StreamIndex::<FixedStringKey<20>>::new(
         *name_num_items,
         *name_b,
         *name_start as u64,
-        *name_payload_size,
+        Stree::<FixedStringKey<20>>::index_size(*name_num_items, *name_b, *name_payload_size)
+            as u64,
     );
     let name_index_length = stream_name_index.length();
     stream_multi_index.add_string_index20("name".to_string(), stream_name_index, name_index_length);
@@ -462,7 +467,8 @@ fn test_memory_stream_multi_index() -> Result<()> {
         *score_num_items,
         *score_b,
         *score_start as u64,
-        *score_payload_size,
+        Stree::<OrderedFloat<f32>>::index_size(*score_num_items, *score_b, *score_payload_size)
+            as u64,
     );
     let score_index_length = stream_score_index.length();
     stream_multi_index.add_f32_index("score".to_string(), stream_score_index, score_index_length);
@@ -470,7 +476,8 @@ fn test_memory_stream_multi_index() -> Result<()> {
         *datetime_num_items,
         *datetime_b,
         *datetime_start as u64,
-        *datetime_payload_size,
+        Stree::<DateTime<Utc>>::index_size(*datetime_num_items, *datetime_b, *datetime_payload_size)
+            as u64,
     );
     let datetime_index_length = stream_datetime_index.length();
     stream_multi_index.add_datetime_index(

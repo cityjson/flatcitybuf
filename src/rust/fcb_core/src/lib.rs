@@ -16,6 +16,10 @@ pub use const_vars::*;
 pub use error::*;
 pub use fb::*;
 pub use reader::*;
+pub use static_btree::{
+    Entry, FixedStringKey, Float, Key, KeyType, MemoryIndex, MemoryMultiIndex, MultiIndex,
+    Operator, Query, QueryCondition, StreamIndex, StreamMultiIndex,
+};
 pub use writer::*;
 
 #[cfg(feature = "http")]

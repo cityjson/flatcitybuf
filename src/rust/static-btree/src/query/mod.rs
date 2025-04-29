@@ -17,7 +17,7 @@ mod tests;
 pub use memory::*;
 pub use stream::*;
 pub use types::*;
-pub use types::{MultiIndex, Operator, Query, SearchIndex, TypedQueryCondition};
+pub use types::{MultiIndex, Operator, Query, QueryCondition, SearchIndex};
 
 #[cfg(feature = "http")]
 pub use http::*;

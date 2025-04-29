@@ -17,7 +17,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use chrono::NaiveDateTime;
 use fcb_core::city_buffer::FcbBuffer;
 use fcb_core::{
-    build_query, check_magic_bytes, fb::*, process_attr_index_entry,
+    add_indices_to_multi_memory_index, build_query, check_magic_bytes, fb::*,
     size_prefixed_root_as_city_feature, AttrQuery, HEADER_MAX_BUFFER_SIZE, HEADER_SIZE_SIZE,
     MAGIC_BYTES_SIZE,
 };

@@ -36,7 +36,7 @@ where
         }
     }
 
-    let index = MemoryIndex::build(&entries, branching_factor)?;
+    let index = MemoryIndex::<T>::build(&entries, branching_factor)?;
     let mut buf = Vec::new();
     index.serialize(&mut buf)?;
     let buf_length = buf.len();
@@ -173,7 +173,7 @@ pub(super) fn build_attribute_index_for_attr(
             },
             branching_factor,
         ),
-        ColumnType::String => build_index_generic::<FixedStringKey<20>, _>(
+        ColumnType::String => build_index_generic::<FixedStringKey<50>, _>(
             *schema_index,
             attribute_entries,
             |entry| {

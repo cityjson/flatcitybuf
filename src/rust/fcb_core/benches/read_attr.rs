@@ -1,7 +1,7 @@
-use anyhow::Result;
 use bst::OrderedFloat;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use fcb_core::{AttrQuery, ByteSerializableValue, FcbReader, Operator};
+use fcb_core::error::Result;
+use fcb_core::{AttrQuery, FcbReader, KeyType, Operator};
 use std::{fs::File, io::BufReader};
 
 // TODO: test these cases as well
@@ -57,12 +57,12 @@ fn read_fcb_with_attr_index_seekable(path: &str) -> Result<()> {
         (
             "b3_h_dak_50p".to_string(),
             Operator::Gt,
-            ByteSerializableValue::F64(OrderedFloat(2.0)),
+            KeyType::Float64(OrderedFloat(2.0)),
         ),
         (
             "b3_h_dak_50p".to_string(),
             Operator::Lt,
-            ByteSerializableValue::F64(OrderedFloat(50.0)),
+            KeyType::Float64(OrderedFloat(50.0)),
         ),
         // (
         //     "identificatie".to_string(),
@@ -116,17 +116,17 @@ fn read_fcb_with_attr_index_non_seekable(path: &str) -> Result<()> {
         (
             "b3_h_dak_50p".to_string(),
             Operator::Gt,
-            ByteSerializableValue::F64(OrderedFloat(2.0)),
+            KeyType::Float64(OrderedFloat(2.0)),
         ),
         (
             "b3_h_dak_50p".to_string(),
             Operator::Lt,
-            ByteSerializableValue::F64(OrderedFloat(50.0)),
+            KeyType::Float64(OrderedFloat(50.0)),
         ),
         // (
         //     "identificatie".to_string(),
         //     Operator::Eq,
-        //     ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+        //     KeyType::StringKey50(FixedStringKey::from_str("NL.IMBAG.Pand.0503100000012869")),
         // ),
     ];
 

@@ -9,7 +9,7 @@ use ordered_float::OrderedFloat;
 
 use crate::error::{Error, Result};
 use crate::key::{FixedStringKey, Key, Max, Min};
-use crate::query::types::{KeyType, Operator, TypedQueryCondition};
+use crate::query::types::{KeyType, Operator, QueryCondition};
 use crate::stree::Stree;
 
 /// Stream-based index for file access
@@ -21,9 +21,7 @@ pub struct StreamIndex<K: Key> {
     branching_factor: u16,
     /// Offset of the index in the file
     index_offset: u64,
-    /// Size of the payload section
-    payload_size: usize,
-
+    /// Size of the index
     length: u64,
     /// Phantom marker for the key type
     _marker: PhantomData<K>,
@@ -31,18 +29,11 @@ pub struct StreamIndex<K: Key> {
 
 impl<K: Key> StreamIndex<K> {
     /// Create a new stream index with metadata
-    pub fn new(
-        num_items: usize,
-        branching_factor: u16,
-        index_offset: u64,
-        payload_size: usize,
-    ) -> Self {
-        let length = Stree::<K>::index_size(num_items, branching_factor, payload_size) as u64;
+    pub fn new(num_items: usize, branching_factor: u16, index_offset: u64, length: u64) -> Self {
         Self {
             num_items,
             branching_factor,
             index_offset,
-            payload_size,
             length,
             _marker: PhantomData,
         }
@@ -61,11 +52,6 @@ impl<K: Key> StreamIndex<K> {
     /// Get the index offset
     pub fn index_offset(&self) -> u64 {
         self.index_offset
-    }
-
-    /// Get the payload size
-    pub fn payload_size(&self) -> usize {
-        self.payload_size
     }
 
     /// Get the length of the index
@@ -101,7 +87,6 @@ impl<K: Key> StreamIndex<K> {
                     self.branching_factor,
                     start_key,
                     end_key,
-                    self.payload_size,
                 )?;
                 Ok(results.into_iter().map(|item| item.offset as u64).collect())
             }
@@ -113,7 +98,6 @@ impl<K: Key> StreamIndex<K> {
                     self.branching_factor,
                     start_key,
                     K::max_value(),
-                    self.payload_size,
                 )?;
                 Ok(results.into_iter().map(|item| item.offset as u64).collect())
             }
@@ -125,7 +109,6 @@ impl<K: Key> StreamIndex<K> {
                     self.branching_factor,
                     K::min_value(),
                     end_key,
-                    self.payload_size,
                 )?;
                 Ok(results.into_iter().map(|item| item.offset as u64).collect())
             }
@@ -149,7 +132,7 @@ pub trait TypedStreamSearchIndex: Send + Sync {
     fn execute_query_condition(
         &self,
         reader: &mut dyn ReadSeek,
-        condition: &TypedQueryCondition,
+        condition: &QueryCondition,
     ) -> Result<Vec<u64>>;
 }
 
@@ -160,7 +143,7 @@ macro_rules! impl_typed_stream_search_index {
             fn execute_query_condition(
                 &self,
                 reader: &mut dyn ReadSeek,
-                condition: &TypedQueryCondition,
+                condition: &QueryCondition,
             ) -> Result<Vec<u64>> {
                 let start_position = reader.stream_position()?;
                 // Extract the key value from the enum variant
@@ -362,7 +345,7 @@ impl StreamMultiIndex {
     pub fn query(
         &self,
         reader: &mut dyn ReadSeek,
-        conditions: &[TypedQueryCondition],
+        conditions: &[QueryCondition],
     ) -> Result<Vec<u64>> {
         if conditions.is_empty() {
             return Err(Error::QueryError("query cannot be empty".to_string()));
@@ -379,7 +362,7 @@ impl StreamMultiIndex {
 
         let start_position = reader.stream_position()?;
         // set cursor to the start of the index
-        reader.seek(SeekFrom::Start(index_range.start as u64))?;
+        reader.seek(SeekFrom::Start(start_position + index_range.start as u64))?;
 
         let mut result_set = indexer.execute_query_condition(reader, first)?;
         if result_set.is_empty() {
@@ -396,9 +379,12 @@ impl StreamMultiIndex {
             let index_range = self.index_offsets.get(&cond.field).ok_or_else(|| {
                 Error::QueryError(format!("no index range found for field '{}'", cond.field))
             })?;
-            let index_start = index_range.start as u64;
+            let index_start = start_position + index_range.start as u64;
             // set cursor to the start of the index
             reader.seek(SeekFrom::Start(index_start))?;
+            println!("index_start: {}", index_start);
+            println!("start_position: {}", start_position);
+            println!("query condition: {:?}", cond);
             let condition_results = indexer.execute_query_condition(reader, cond)?;
             result_set.retain(|offset| condition_results.contains(offset));
             if result_set.is_empty() {

@@ -1,5 +1,5 @@
 use crate::deserializer::to_cj_feature;
-use crate::{build_query, fb::*, process_attr_index_entry, AttrQuery};
+use crate::{add_indices_to_multi_memory_index, build_query, fb::*, AttrQuery};
 
 use crate::error::Error;
 use crate::reader::city_buffer::FcbBuffer;
@@ -7,7 +7,6 @@ use crate::{
     check_magic_bytes, size_prefixed_root_as_city_feature, HEADER_MAX_BUFFER_SIZE,
     HEADER_SIZE_SIZE, MAGIC_BYTES_SIZE,
 };
-use bst::{ByteSerializable, HttpRange as BstHttpRange, MultiIndex};
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
 use cjseq::CityJSONFeature;

@@ -688,7 +688,6 @@ impl<K: Key> Stree<K> {
         branching_factor: u16,
         lower: K,
         upper: K,
-        payload_size: usize,
     ) -> Result<Vec<SearchResultItem>> {
         let node_size = branching_factor as usize - 1;
         let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
@@ -1957,7 +1956,7 @@ mod tests {
         tree.stream_write(&mut buf)?;
         let mut cursor = std::io::Cursor::new(&buf);
         let res: Vec<SearchResultItem> =
-            Stree::stream_find_range(&mut cursor, tree.num_leaf_nodes, 3, 1, 2, payload_size)?;
+            Stree::stream_find_range(&mut cursor, tree.num_leaf_nodes, 3, 1, 2)?;
         assert_eq!(res.len(), 4);
         let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
         offs.sort_unstable();

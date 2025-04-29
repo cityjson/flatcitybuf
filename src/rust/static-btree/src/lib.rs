@@ -11,6 +11,7 @@ pub mod stree;
 pub use entry::*;
 pub use error::*;
 pub use key::*;
+pub use ordered_float::OrderedFloat as Float;
 pub use payload::*;
 pub use query::*;
 pub use stree::*;

@@ -44,7 +44,7 @@ pub enum KeyType {
 
 /// A query condition with an enum key type
 #[derive(Debug, Clone)]
-pub struct TypedQueryCondition {
+pub struct QueryCondition {
     pub field: String,
     pub operator: Operator,
     pub key: KeyType,
@@ -54,7 +54,7 @@ pub struct TypedQueryCondition {
 #[derive(Debug, Clone)]
 pub struct Query {
     /// List of conditions combined with AND logic
-    pub conditions: Vec<TypedQueryCondition>,
+    pub conditions: Vec<QueryCondition>,
 }
 
 impl Query {
@@ -67,7 +67,7 @@ impl Query {
 
     /// Add a condition to the query
     pub fn add_condition(&mut self, field: String, operator: Operator, key: KeyType) {
-        self.conditions.push(TypedQueryCondition {
+        self.conditions.push(QueryCondition {
             field,
             operator,
             key,
@@ -100,5 +100,5 @@ pub trait SearchIndex<K: Key> {
 /// Trait for multi-index query capabilities
 pub trait MultiIndex {
     /// Execute a query and return matching offsets
-    fn query(&self, query: &[TypedQueryCondition]) -> Result<Vec<u64>>;
+    fn query(&self, query: &[QueryCondition]) -> Result<Vec<u64>>;
 }

@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 
 use crate::error::{Error, Result};
 use crate::key::{Key, Max, Min};
-use crate::query::types::{KeyType, Operator, TypedQueryCondition};
+use crate::query::types::{KeyType, Operator, QueryCondition};
 use crate::stree::http::HttpSearchResultItem;
 use crate::stree::Stree;
 use async_trait::async_trait;
@@ -116,7 +116,7 @@ pub trait TypedHttpSearchIndex<T: AsyncHttpRangeClient + Send + Sync>:
     async fn execute_query_condition(
         &self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-        condition: &TypedQueryCondition,
+        condition: &QueryCondition,
     ) -> Result<Vec<u64>>;
 }
 
@@ -130,7 +130,7 @@ macro_rules! impl_typed_http_search_index {
             async fn execute_query_condition(
                 &self,
                 client: &mut AsyncBufferedHttpRangeClient<T>,
-                condition: &TypedQueryCondition,
+                condition: &QueryCondition,
             ) -> Result<Vec<u64>> {
                 // Extract the key value from the enum variant
                 let key: $key_type = match &condition.key {
@@ -217,7 +217,7 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpMultiIndex<T> {
     pub async fn query(
         &self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-        conditions: &[TypedQueryCondition],
+        conditions: &[QueryCondition],
     ) -> Result<Vec<u64>> {
         if conditions.is_empty() {
             return Err(Error::QueryError("query cannot be empty".to_string()));

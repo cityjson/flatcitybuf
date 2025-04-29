@@ -1,6 +1,5 @@
 use anyhow::Result;
-use bst::{ByteSerializableValue, Operator, OrderedFloat};
-use fcb_core::{AttrQuery, FcbReader};
+use fcb_core::{AttrQuery, FcbReader, Float, KeyType, Operator};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -14,12 +13,12 @@ fn read_fcb_with_attr_index_non_seekable(path: PathBuf) -> Result<()> {
         (
             "b3_h_dak_50p".to_string(),
             Operator::Gt,
-            ByteSerializableValue::F64(OrderedFloat(2.0)),
+            KeyType::Float64(Float(2.0)),
         ),
         (
             "b3_h_dak_50p".to_string(),
             Operator::Lt,
-            ByteSerializableValue::F64(OrderedFloat(50.0)),
+            KeyType::Float64(Float(50.0)),
         ),
     ];
 
