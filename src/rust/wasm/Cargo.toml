@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 packed_rtree = { path = "../packed_rtree" }
 bytes = { workspace = true }
-fcb_core = { path = "../fcb_core", features = ["wasm"] }
+fcb_core = { path = "../fcb_core", features = ["http"] }
 getrandom = { workspace = true, features = ["js"] }
 gloo-net = { workspace = true }
 http-range-client = { workspace = true, default-features = false }
@@ -32,5 +32,4 @@ async-trait = { workspace = true, default-features = false }
 console_error_panic_hook = { workspace = true }
 console_log = { workspace = true }
 log = { workspace = true }
-bst = { path = "../bst" }
 chrono = { workspace = true }

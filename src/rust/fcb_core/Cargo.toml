@@ -7,14 +7,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["http"]
-http = ["http-range-client", "reqwest", "bytes"]
-wasm = [
-  "wasm-bindgen",
-  "wasm-bindgen-futures",
-  "gloo-net",
-  "js-sys",
-  "getrandom",
-]
+http = ["http-range-client", "bytes"]
+
 
 [dependencies]
 bytes = { workspace = true, optional = true }
@@ -38,21 +32,13 @@ http-range-client = { workspace = true, default-features = false, optional = tru
 reqwest = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
-[target.'cfg(feature = "http")'.dependencies]
+[target.'cfg(all(feature = "http", not(target_arch = "wasm32")))'.dependencies]
 tokio = { workspace = true }
 http-range-client = { workspace = true, default-features = false, optional = true, features = [
   "reqwest-async",
 ] }
 reqwest = { workspace = true, optional = true }
-getrandom = { workspace = true, optional = true, default-features = false, features = [
-  "js",
-] }
 async-trait = { workspace = true, optional = true, default-features = false }
-gloo-net = { workspace = true, optional = true }
-js-sys = { workspace = true, optional = true }
-wasm-bindgen = { workspace = true, optional = true }
-wasm-bindgen-futures = { workspace = true, optional = true }
-
 
 [lib]
 name = "fcb_core"

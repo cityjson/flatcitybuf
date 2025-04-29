@@ -61,7 +61,6 @@ fn read_node_items<K: Key, R: Read + Seek + ?Sized>(
     node_index: usize,
     length: usize,
 ) -> Result<Vec<NodeItem<K>>> {
-    let pos = data.stream_position()?;
     let mut node_items = Vec::with_capacity(length);
     data.seek(SeekFrom::Start(
         base + (node_index * NodeItem::<K>::SERIALIZED_SIZE) as u64,

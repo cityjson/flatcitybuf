@@ -1,7 +1,9 @@
 use std::error::Error;
 
 use anyhow::Result;
-use fcb_core::{deserializer::to_cj_metadata, Float, HttpFcbReader, KeyType, Operator};
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+use fcb_core::HttpFcbReader;
+use fcb_core::{deserializer::to_cj_metadata, FixedStringKey, KeyType, Operator};
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
@@ -68,17 +70,18 @@ async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
 async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
     let query: Vec<(String, Operator, KeyType)> = vec![
-        (
-            "b3_h_dak_50p".to_string(),
-            Operator::Gt,
-            KeyType::Float64(Float(10.0)),
-        ),
         // (
-        //     "identificatie".to_string(),
-        //     Operator::Eq,
-        //     ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+        //     "b3_h_dak_50p".to_string(),
+        //     Operator::Gt,
+        //     KeyType::Float64(Float(10.0)),
         // ),
+        (
+            "identificatie".to_string(),
+            Operator::Eq,
+            KeyType::StringKey50(FixedStringKey::from_str("NL.IMBAG.Pand.0503100000012869")),
+        ),
     ];
+
     let (cj, features_count) = {
         let header = http_reader.header();
         (to_cj_metadata(&header)?, header.features_count())
@@ -99,29 +102,29 @@ async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
     println!("deserialized_features: {:?}", features.len());
 
     let feature = features.first().unwrap();
-    let mut contains_b3_h_dak_50p = false;
-    // let mut contains_identificatie = false;
+    let contains_b3_h_dak_50p = false;
+    let mut contains_identificatie = false;
     for co in feature.city_objects.values() {
         if co.attributes.is_some() {
             let attrs = co.attributes.as_ref().unwrap();
-            if let Some(b3_h_dak_50p) = attrs.get("b3_h_dak_50p") {
-                if b3_h_dak_50p.as_f64().unwrap() > 10.0 {
-                    contains_b3_h_dak_50p = true;
-                }
-                if b3_h_dak_50p.as_f64().unwrap() < 10.0 {
-                    contains_b3_h_dak_50p = false;
+            // if let Some(b3_h_dak_50p) = attrs.get("b3_h_dak_50p") {
+            //     if b3_h_dak_50p.as_f64().unwrap() > 10.0 {
+            //         contains_b3_h_dak_50p = true;
+            //     }
+            //     if b3_h_dak_50p.as_f64().unwrap() < 10.0 {
+            //         contains_b3_h_dak_50p = false;
+            //     }
+            // }
+            if let Some(identificatie) = attrs.get("identificatie") {
+                if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
+                    contains_identificatie = true;
                 }
             }
-            // if let Some(identificatie) = attrs.get("identificatie") {
-            //     if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
-            //         contains_identificatie = true;
-            //     }
         }
-        // }
     }
 
     assert!(feat_num > 0 && feat_num < features_count);
-    assert!(contains_b3_h_dak_50p);
+    assert!(contains_identificatie);
     Ok(())
 }
 
@@ -133,8 +136,8 @@ mod http {
     #[tokio::test]
     async fn test_read_http_file() -> Result<()> {
         let res =
-            read_http_file_bbox("https://storage.googleapis.com/flatcitybuf/3dbag_100k.fcb").await;
-        // read_http_file_bbox("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
+            // read_http_file_bbox("https://storage.googleapis.com/flatcitybuf/3dbag_100k.fcb").await;
+        read_http_file_bbox("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
 
         assert!(res.is_ok());
         Ok(())
