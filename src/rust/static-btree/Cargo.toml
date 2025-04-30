@@ -12,6 +12,7 @@ readme = "README.md"
 thiserror = { workspace = true }
 ordered-float = { workspace = true }
 byteorder = { workspace = true }
+log = { workspace = true }
 
 # For platforms without packed_simd support
 bytemuck = { workspace = true }

@@ -42,6 +42,10 @@ pub enum Error {
     #[cfg(feature = "http")]
     #[error("http error: {0}")]
     HttpError(#[from] HttpError),
+
+    /// Requested payload offset is not in the cache
+    #[error("payload offset not in cache")]
+    PayloadOffsetNotInCache,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

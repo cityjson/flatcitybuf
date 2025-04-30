@@ -1,18 +1,20 @@
-use crate::entry::Offset;
-use crate::error::Result;
+use crate::entry::{Entry, Offset};
+use crate::error::{Error, Result};
+use crate::key::Key;
 use crate::payload::PayloadEntry;
-use crate::{Entry, Key};
-/// Marker bit in offset to indicate a payload reference (MSB).
-const PAYLOAD_TAG: Offset = 1u64 << 63;
-/// Mask to clear the tag bit.
-const PAYLOAD_MASK: Offset = !PAYLOAD_TAG;
 #[cfg(feature = "http")]
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
+use log::{debug, info};
 use std::cmp::{max, min};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::ops::Range;
+
+/// Marker bit in offset to indicate a payload reference (MSB).
+const PAYLOAD_TAG: Offset = 1u64 << 63;
+/// Mask to clear the tag bit.
+const PAYLOAD_MASK: Offset = !PAYLOAD_TAG;
 
 // This implementation was derived from FlatGeobuf's implemenation.
 
@@ -76,11 +78,13 @@ async fn read_http_node_items<K: Key, T: AsyncHttpRangeClient>(
     base: usize,
     node_ids: &Range<usize>,
 ) -> Result<Vec<NodeItem<K>>> {
+    info!("sending request to fetch node items, base: {base}, node_ids: {node_ids:?}");
+
     let begin = base + node_ids.start * NodeItem::<K>::SERIALIZED_SIZE;
     let length = node_ids.len() * NodeItem::<K>::SERIALIZED_SIZE;
     let bytes = client
         // we've  already determined precisely which nodes to fetch - no need for extra.
-        .min_req_size(0)
+        .min_req_size(1024 * 1024)
         .get_range(begin, length)
         .await?;
 
@@ -100,14 +104,269 @@ async fn read_http_payload_data<T: AsyncHttpRangeClient>(
 ) -> Result<PayloadEntry> {
     let temp_buffered_count_bytes_size = 4096; //This is hueristic, we don't know the size of the payload. TODO: find a better way
 
+    debug!("sending request to fetch payload, offset {offset:?}");
+
     let payload_data = client
-        .min_req_size(0)
         .get_range(offset, temp_buffered_count_bytes_size)
         .await?;
     let mut buf = Cursor::new(payload_data);
 
     let (payload_entry, _) = PayloadEntry::deserialize(&mut buf)?;
     Ok(payload_entry)
+}
+
+/// Cache for prefetched payload data to reduce HTTP requests
+#[derive(Debug, Default)]
+pub struct PayloadCache {
+    /// Raw bytes of the prefetched payload section
+    data: Vec<u8>,
+    /// Start offset of the cached data
+    start_offset: usize,
+    /// End offset of the cached data (exclusive)
+    end_offset: usize,
+}
+
+impl PayloadCache {
+    /// Create a new empty payload cache
+    pub fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            start_offset: 0,
+            end_offset: 0,
+        }
+    }
+
+    /// Check if the given offset is in the cache
+    pub fn contains(&self, offset: usize) -> bool {
+        !self.data.is_empty() && offset >= self.start_offset && offset < self.end_offset
+    }
+
+    /// Get payload entry from the cache at the given offset
+    pub fn get_entry(&self, offset: usize) -> Result<PayloadEntry> {
+        if !self.contains(offset) {
+            return Err(Error::PayloadOffsetNotInCache);
+        }
+
+        let relative_offset = offset - self.start_offset;
+        let mut cursor = Cursor::new(&self.data[relative_offset..]);
+        let (entry, _) = PayloadEntry::deserialize(&mut cursor)?;
+        Ok(entry)
+    }
+
+    /// Update cache with new data
+    pub fn update(&mut self, start_offset: usize, data: Vec<u8>) {
+        self.data = data;
+        self.start_offset = start_offset;
+        self.end_offset = start_offset + self.data.len();
+    }
+}
+
+/// Prefetch a chunk of payload data to reduce HTTP requests
+///
+/// This function fetches a chunk of the payload section starting from the given offset
+/// and returns a cache containing the prefetched data. The cache can then be used to
+/// read payload entries without making additional HTTP requests.
+///
+/// # Arguments
+/// * `client` - The HTTP client to use for fetching data
+/// * `payload_section_start` - The start offset of the payload section
+/// * `chunk_size` - The size of the chunk to prefetch (in bytes)
+#[cfg(feature = "http")]
+pub async fn prefetch_payload<T: AsyncHttpRangeClient>(
+    client: &mut AsyncBufferedHttpRangeClient<T>,
+    payload_section_start: usize,
+    chunk_size: usize,
+) -> Result<PayloadCache> {
+    debug!(
+        "prefetching payload chunk: start={}, size={}",
+        payload_section_start, chunk_size
+    );
+
+    let mut cache = PayloadCache::new();
+
+    // Fetch the chunk of payload data
+    let payload_data = client.get_range(payload_section_start, chunk_size).await?;
+
+    // Store the fetched data in the cache
+    cache.update(payload_section_start, payload_data.to_vec());
+
+    Ok(cache)
+}
+
+/// Read a payload entry from the payload cache if available, otherwise fetch it from HTTP
+#[cfg(feature = "http")]
+async fn read_payload_entry<T: AsyncHttpRangeClient>(
+    client: &mut AsyncBufferedHttpRangeClient<T>,
+    offset: usize,
+    cache: Option<&PayloadCache>,
+) -> Result<PayloadEntry> {
+    // Check if the offset is in the cache
+    if let Some(cache) = cache {
+        if cache.contains(offset) {
+            return cache.get_entry(offset);
+        }
+    }
+
+    // Fallback to HTTP request if not in cache or no cache provided
+    read_http_payload_data(client, offset).await
+}
+
+/// Intermediate search result containing either a direct feature offset or a reference to a payload
+#[derive(Debug)]
+enum PayloadRef {
+    /// Direct feature offset
+    Direct(u64),
+    /// Reference to an offset in the payload section
+    Indirect(usize),
+}
+
+/// Batch resolve multiple payload references in a single HTTP request
+#[cfg(feature = "http")]
+async fn batch_resolve_payloads<T: AsyncHttpRangeClient>(
+    client: &mut AsyncBufferedHttpRangeClient<T>,
+    payload_refs: Vec<PayloadRef>,
+    payload_section_start: usize,
+    feature_begin: usize,
+    cache: Option<&PayloadCache>,
+) -> Result<Vec<HttpSearchResultItem>> {
+    debug!("batch resolving {} payload references", payload_refs.len());
+
+    // Early return if there's nothing to process
+    if payload_refs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Separate direct offsets from indirect payload references
+    let mut results = Vec::new();
+    let mut payload_offsets_to_fetch = Vec::new();
+
+    // Process direct offsets and collect indirect ones
+    for payload_ref in payload_refs {
+        match payload_ref {
+            PayloadRef::Direct(offset) => {
+                // Direct offsets can be added to results immediately
+                let start = feature_begin + offset as usize;
+                results.push(HttpSearchResultItem {
+                    range: HttpRange::RangeFrom(start..),
+                });
+            }
+            PayloadRef::Indirect(rel_offset) => {
+                let abs_offset = payload_section_start + rel_offset;
+
+                // Check if the payload entry is in the cache
+                if let Some(cache) = cache {
+                    if cache.contains(abs_offset) {
+                        // If it's in the cache, resolve it immediately
+                        match cache.get_entry(abs_offset) {
+                            Ok(entry) => {
+                                for offset in entry.offsets {
+                                    let start = feature_begin + offset as usize;
+                                    results.push(HttpSearchResultItem {
+                                        range: HttpRange::RangeFrom(start..),
+                                    });
+                                }
+                                continue;
+                            }
+                            Err(_) => {
+                                // Cache lookup failed, fall back to fetching
+                                payload_offsets_to_fetch.push(abs_offset);
+                            }
+                        }
+                    } else {
+                        // Not in cache, need to fetch
+                        payload_offsets_to_fetch.push(abs_offset);
+                    }
+                } else {
+                    // No cache, need to fetch
+                    payload_offsets_to_fetch.push(abs_offset);
+                }
+            }
+        }
+    }
+
+    // If there are no payloads to fetch, we're done
+    if payload_offsets_to_fetch.is_empty() {
+        return Ok(results);
+    }
+
+    // Sort offsets to improve locality and potential for range requests
+    payload_offsets_to_fetch.sort();
+
+    // Remove duplicates
+    payload_offsets_to_fetch.dedup();
+
+    debug!(
+        "fetching {} unique payload offsets",
+        payload_offsets_to_fetch.len()
+    );
+
+    // Group adjacent offsets to reduce number of requests
+    let mut offset_ranges = Vec::new();
+    let mut current_range = (payload_offsets_to_fetch[0], payload_offsets_to_fetch[0]);
+
+    for &offset in payload_offsets_to_fetch.iter().skip(1) {
+        // If offsets are close (within 4KB), extend the current range
+        if offset <= current_range.1 + 4096 {
+            current_range.1 = offset;
+        } else {
+            // Otherwise, finish the current range and start a new one
+            offset_ranges.push(current_range);
+            current_range = (offset, offset);
+        }
+    }
+    offset_ranges.push(current_range);
+
+    debug!(
+        "grouped into {} payload range requests",
+        offset_ranges.len()
+    );
+
+    // Fetch each range and process
+    let mut fetched_payloads = HashMap::new();
+
+    for (start, end) in offset_ranges {
+        // Calculate fetch size to include the complete payload entries
+        // Add a margin to account for variable-sized payload entries
+        let fetch_size = (end - start) + 4096;
+
+        let payload_data = client.get_range(start, fetch_size).await?;
+
+        // Process each requested offset within this range
+        for &offset in payload_offsets_to_fetch
+            .iter()
+            .filter(|&&o| o >= start && o <= end)
+        {
+            let relative_offset = offset - start;
+
+            // Make sure we have enough data
+            if relative_offset < payload_data.len() {
+                let mut buf = Cursor::new(&payload_data[relative_offset..]);
+                match PayloadEntry::deserialize(&mut buf) {
+                    Ok((entry, _)) => {
+                        fetched_payloads.insert(offset, entry);
+                    }
+                    Err(e) => {
+                        debug!("error deserializing payload at offset {}: {:?}", offset, e);
+                        // Continue with other offsets on error
+                    }
+                }
+            }
+        }
+    }
+
+    // Process the fetched payloads and add to results
+    for &offset in &payload_offsets_to_fetch {
+        if let Some(entry) = fetched_payloads.get(&offset) {
+            for offset in &entry.offsets {
+                let start = feature_begin + *offset as usize;
+                results.push(HttpSearchResultItem {
+                    range: HttpRange::RangeFrom(start..),
+                });
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 #[derive(Debug)]
@@ -134,6 +393,50 @@ pub struct Stree<K: Key> {
 
 impl<K: Key> Stree<K> {
     pub const DEFAULT_NODE_SIZE: u16 = 16;
+
+    /// Default size for prefetching payload data (1MB)
+    pub const DEFAULT_PAYLOAD_PREFETCH_SIZE: usize = 1024 * 1024;
+
+    /// Compute the optimal payload prefetch size based on tree characteristics.
+    ///
+    /// This method estimates the appropriate size to prefetch from the payload section.
+    /// It takes into account the number of items in the tree and adapts the prefetch size
+    /// to balance between memory usage and HTTP request reduction.
+    ///
+    /// # Arguments
+    /// * `num_items` - Number of items in the tree
+    /// * `estimated_avg_payload_size` - Estimated average size of each payload entry (default: 64 bytes)
+    /// * `prefetch_factor` - Adjustment factor for the prefetch size (default: 1.0)
+    ///
+    /// # Returns
+    /// The recommended payload prefetch size in bytes
+    pub fn compute_payload_prefetch_size(
+        num_items: usize,
+        estimated_avg_payload_size: Option<usize>,
+        prefetch_factor: Option<f32>,
+    ) -> usize {
+        // Default estimated payload entry size if not specified
+        let avg_size = estimated_avg_payload_size.unwrap_or(64);
+
+        // Default prefetch factor if not specified
+        let factor = prefetch_factor.unwrap_or(1.0);
+
+        // Estimate how many entries might be in the payload section
+        // We assume approximately 10% of items might have duplicate keys
+        // This is a heuristic and can be adjusted based on data characteristics
+        let estimated_payload_entries = (num_items as f32 * 0.1).ceil() as usize;
+
+        // Calculate the estimated payload section size
+        let estimated_payload_size = estimated_payload_entries * avg_size;
+
+        // Apply the prefetch factor to adjust the final size
+        let prefetch_size = (estimated_payload_size as f32 * factor) as usize;
+
+        // Ensure we don't prefetch too little or too much
+        // - Minimum: 16KB to avoid too many small requests
+        // - Maximum: 4MB to avoid excessive memory usage
+        prefetch_size.clamp(16 * 1024, 4 * 1024 * 1024)
+    }
 
     // branching_factor is the number of children per node, it'll be B and node_size is B-1
     fn init(&mut self, branching_factor: u16) -> Result<()> {
@@ -889,7 +1192,7 @@ impl<K: Key> Stree<K> {
         key: K,
         combine_request_threshold: usize,
     ) -> Result<Vec<HttpSearchResultItem>> {
-        use tracing::debug;
+        debug!("http_stream_find_exact starts: index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, key: {key:?}");
 
         if num_items == 0 {
             return Ok(vec![]);
@@ -912,8 +1215,6 @@ impl<K: Key> Stree<K> {
             .last()
             .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
 
-        debug!("http_stream_find_exact - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, key: {key:?}");
-
         #[derive(Debug, PartialEq, Eq)]
         struct NodeRange {
             level: usize,
@@ -925,7 +1226,9 @@ impl<K: Key> Stree<K> {
             nodes: *root_start..*root_end,
             level: level_bounds.len() - 1,
         });
-        let mut results = Vec::new();
+
+        // Collect payload references instead of immediately resolving them
+        let mut payload_refs = Vec::new();
 
         let num_all_items = level_bounds
             .first()
@@ -933,6 +1236,13 @@ impl<K: Key> Stree<K> {
             .end;
 
         let payload_data_start = index_begin + Stree::<K>::tree_size(num_all_items);
+
+        // Calculate optimal payload prefetch size based on tree characteristics
+        let prefetch_size = Self::compute_payload_prefetch_size(num_items, None, None);
+        debug!("prefetching payload with size: {} bytes", prefetch_size);
+
+        // Prefetch a chunk of payload data
+        let payload_cache = prefetch_payload(client, payload_data_start, prefetch_size).await?;
 
         while let Some(node_range) = queue.pop_front() {
             debug!("next: {node_range:?}. {} items left in queue", queue.len());
@@ -952,19 +1262,11 @@ impl<K: Key> Stree<K> {
 
                         if (off & PAYLOAD_TAG) != 0 {
                             let rel = (off & PAYLOAD_MASK) as usize;
-                            let payload_data =
-                                read_http_payload_data(client, payload_data_start + rel).await?;
-                            for offset in payload_data.offsets {
-                                let start = feature_begin + offset as usize;
-                                results.push(HttpSearchResultItem {
-                                    range: HttpRange::RangeFrom(start..), // TODO: if possible, get the end of the range
-                                });
-                            }
+                            // Add as indirect reference to be resolved in batch
+                            payload_refs.push(PayloadRef::Indirect(rel));
                         } else {
-                            let start = feature_begin + node_items[idx].offset as usize;
-                            results.push(HttpSearchResultItem {
-                                range: HttpRange::RangeFrom(start..), // TODO: if possible, get the end of the range
-                            });
+                            // Add as direct offset
+                            payload_refs.push(PayloadRef::Direct(off));
                         }
                     }
                     Err(_) => continue,
@@ -1049,6 +1351,17 @@ impl<K: Key> Stree<K> {
                 tail.nodes.end = children_range.nodes.end;
             }
         }
+
+        // Batch resolve all payload references
+        let results = batch_resolve_payloads(
+            client,
+            payload_refs,
+            payload_data_start,
+            feature_begin,
+            Some(&payload_cache),
+        )
+        .await?;
+
         Ok(results)
     }
 
@@ -1062,8 +1375,6 @@ impl<K: Key> Stree<K> {
         key: K,
         _combine_request_threshold: usize,
     ) -> Result<usize> {
-        use tracing::debug;
-
         if num_items == 0 {
             return Ok(0);
         }
@@ -1127,6 +1438,40 @@ impl<K: Key> Stree<K> {
 
     pub fn tree_size(num_items: usize) -> usize {
         num_items * Entry::<K>::SERIALIZED_SIZE
+    }
+
+    /// Estimate the total size of the payload section based on tree characteristics.
+    ///
+    /// This method provides an estimate of how large the payload section might be
+    /// based on the number of items in the tree and an estimated percentage of
+    /// items with duplicate keys.
+    ///
+    /// # Arguments
+    /// * `num_items` - Number of items in the tree
+    /// * `duplicate_percentage` - Estimated percentage of items with duplicate keys (0.0-1.0)
+    /// * `avg_duplicates_per_key` - Average number of duplicates per duplicate key
+    ///
+    /// # Returns
+    /// The estimated size of the payload section in bytes
+    pub fn estimate_payload_section_size(
+        num_items: usize,
+        duplicate_percentage: Option<f32>,
+        avg_duplicates_per_key: Option<f32>,
+    ) -> usize {
+        // Default values if not specified
+        let dup_pct = duplicate_percentage.unwrap_or(0.1); // Default: 10% of items have duplicates
+        let avg_dups = avg_duplicates_per_key.unwrap_or(3.0); // Default: 3 duplicates per key
+
+        // Calculate estimated number of entries in the payload section
+        let num_dup_keys = (num_items as f32 * dup_pct).ceil() as usize;
+
+        // Each PayloadEntry contains:
+        // - count (u32): 4 bytes
+        // - offsets: 8 bytes per offset
+        let avg_entry_size = 4 + (avg_dups as usize * 8);
+
+        // Calculate total estimated size
+        num_dup_keys * avg_entry_size
     }
 
     pub fn index_size(num_items: usize, branching_factor: u16, payload_size: usize) -> usize {
@@ -1196,7 +1541,7 @@ impl<K: Key> Stree<K> {
         upper: K,
         combine_request_threshold: usize,
     ) -> Result<Vec<HttpSearchResultItem>> {
-        use tracing::debug;
+        debug!("http_stream_find_range starts: index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, lower: {lower:?}, upper: {upper:?}");
 
         // Return empty result if invalid range
         if lower > upper {
@@ -1227,6 +1572,14 @@ impl<K: Key> Stree<K> {
             .end;
 
         let payload_data_start = index_begin + Stree::<K>::tree_size(num_all_items);
+
+        // Calculate optimal payload prefetch size based on tree characteristics
+        // For range queries, we might need to access more payload entries, so use a higher prefetch factor
+        let prefetch_size = Self::compute_payload_prefetch_size(num_items, None, Some(1.5));
+        debug!("prefetching payload with size: {} bytes", prefetch_size);
+
+        // Prefetch a chunk of payload data
+        let payload_cache = prefetch_payload(client, payload_data_start, prefetch_size).await?;
 
         debug!("http_stream_find_range - index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, lower: {lower:?}, upper: {upper:?}");
 
@@ -1267,7 +1620,8 @@ impl<K: Key> Stree<K> {
         let start_idx = max(lower_idx, leaf_start);
         let end_idx = min(upper_idx + node_size, leaf_end);
 
-        let mut results = Vec::new();
+        // Collect payload references instead of immediately resolving them
+        let mut payload_refs = Vec::new();
 
         // Process all leaf nodes from lower to upper bound
         let mut current_idx = start_idx;
@@ -1283,33 +1637,34 @@ impl<K: Key> Stree<K> {
             // Read the node items for this range with explicit type parameters
             let node_items = read_http_node_items::<K, T>(client, index_begin, &node_range).await?;
 
-            // Add items that fall within the range
+            // Collect payload references from items that fall within the range
             for item in node_items.iter() {
                 if item.key >= lower && item.key <= upper {
                     let off = item.offset;
 
                     if (off & PAYLOAD_TAG) != 0 {
                         let rel = (off & PAYLOAD_MASK) as usize;
-                        let payload_data =
-                            read_http_payload_data(client, payload_data_start + rel).await?;
-
-                        for offset in payload_data.offsets {
-                            let start = feature_begin + offset as usize;
-                            results.push(HttpSearchResultItem {
-                                range: HttpRange::RangeFrom(start..),
-                            });
-                        }
+                        // Add as indirect reference to be resolved in batch
+                        payload_refs.push(PayloadRef::Indirect(rel));
                     } else {
-                        let start = feature_begin + off as usize;
-                        results.push(HttpSearchResultItem {
-                            range: HttpRange::RangeFrom(start..),
-                        });
+                        // Add as direct offset
+                        payload_refs.push(PayloadRef::Direct(off));
                     }
                 }
             }
 
             current_idx = node_end;
         }
+
+        // Batch resolve all payload references
+        let results = batch_resolve_payloads(
+            client,
+            payload_refs,
+            payload_data_start,
+            feature_begin,
+            Some(&payload_cache),
+        )
+        .await?;
 
         Ok(results)
     }
@@ -1372,6 +1727,109 @@ mod tests {
     use crate::error::Result;
     use crate::key::FixedStringKey;
     use crate::key::Key;
+
+    #[test]
+    fn test_compute_payload_prefetch_size() -> Result<()> {
+        // Small tree
+        let small_size = Stree::<i32>::compute_payload_prefetch_size(100, None, None);
+        assert!(small_size >= 16 * 1024, "Minimum size should be enforced");
+
+        // Medium tree
+        let medium_size = Stree::<i32>::compute_payload_prefetch_size(10000, None, None);
+        assert!(
+            medium_size > small_size,
+            "Medium tree should have larger prefetch size"
+        );
+
+        // Large tree
+        let large_size = Stree::<i32>::compute_payload_prefetch_size(100000, None, None);
+        assert!(
+            large_size > medium_size,
+            "Large tree should have larger prefetch size"
+        );
+
+        // Custom settings
+        let custom_size = Stree::<i32>::compute_payload_prefetch_size(1000, Some(128), Some(2.0));
+        assert!(
+            custom_size > Stree::<i32>::compute_payload_prefetch_size(1000, None, None),
+            "Custom settings should produce larger size"
+        );
+
+        // Maximum size enforcement
+        let huge_size =
+            Stree::<i32>::compute_payload_prefetch_size(10000000, Some(1024), Some(10.0));
+        assert!(
+            huge_size <= 4 * 1024 * 1024,
+            "Maximum size should be enforced"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_estimate_payload_section_size() -> Result<()> {
+        // Default settings (10% duplicates, 3 duplicates per key)
+        let small_size = Stree::<i32>::estimate_payload_section_size(100, None, None);
+        assert_eq!(
+            small_size,
+            10 * (4 + 3 * 8),
+            "Size calculation should match expected formula"
+        );
+
+        // Custom settings
+        let custom_size = Stree::<i32>::estimate_payload_section_size(1000, Some(0.2), Some(5.0));
+        assert_eq!(
+            custom_size,
+            200 * (4 + 5 * 8),
+            "Custom settings should be applied correctly"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_payload_cache() -> Result<()> {
+        use crate::payload::PayloadEntry;
+
+        // Create a mock payload entry
+        let mut entry = PayloadEntry::new();
+        entry.add_offset(42);
+        entry.add_offset(43);
+
+        // Serialize it
+        let serialized = entry.serialize();
+
+        // Create a cache
+        let mut cache = PayloadCache::new();
+        cache.update(1000, serialized.clone());
+
+        // Check if the offset is in the cache
+        assert!(cache.contains(1000), "Offset should be in cache");
+        assert!(!cache.contains(999), "Offset should not be in cache");
+        assert!(
+            !cache.contains(1000 + serialized.len()),
+            "Offset should not be in cache"
+        );
+
+        // Get the entry from the cache
+        let retrieved_entry = cache.get_entry(1000)?;
+        assert_eq!(retrieved_entry.count, 2, "Entry count should match");
+        assert_eq!(
+            retrieved_entry.offsets,
+            vec![42, 43],
+            "Entry offsets should match"
+        );
+
+        // Test accessing an offset not in the cache
+        let err = cache.get_entry(2000).unwrap_err();
+        assert!(
+            matches!(err, Error::PayloadOffsetNotInCache),
+            "Should return correct error"
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn tree_2items() -> Result<()> {
         let mut nodes = Vec::new();
@@ -2311,6 +2769,92 @@ mod tests {
                 "HTTP results don't match in-memory results"
             );
         }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio::test]
+    async fn test_payload_prefetch_with_http() -> Result<()> {
+        use crate::entry::Entry;
+        #[cfg(test)]
+        use crate::mocked_http_range_client::MockHttpRangeClient;
+        use crate::payload::PayloadEntry;
+        use http_range_client::AsyncBufferedHttpRangeClient;
+        use std::collections::HashMap;
+        use std::sync::{Arc, RwLock};
+
+        // Set up test data
+        let index_begin = 0;
+        let feature_begin = 10000;
+        let num_items = 100;
+        let branching_factor = 16;
+
+        // Create some test tree nodes (simplified)
+        let mut nodes = Vec::new();
+        for i in 0..num_items {
+            // Every 10th key is a duplicate that will point to payload
+            if i % 10 == 0 && i > 0 {
+                // Create an offset with the PAYLOAD_TAG flag
+                let offset = PAYLOAD_TAG | ((i * 100) as u64 & PAYLOAD_MASK);
+                nodes.push(NodeItem::<i32>::new(i as i32, offset));
+            } else {
+                // Regular offset
+                nodes.push(NodeItem::<i32>::new(i as i32, i as u64));
+            }
+        }
+
+        // Build the tree
+        let tree = Stree::<i32>::build(&nodes, branching_factor)?;
+
+        // Serialize the tree to bytes
+        let mut tree_bytes = Vec::new();
+        tree.stream_write(&mut tree_bytes)?;
+
+        // Create payload entries for the tagged offsets
+        let mut payload_entries = HashMap::new();
+        for i in (10..=90).step_by(10) {
+            let mut entry = PayloadEntry::new();
+            entry.add_offset(1000 + i as u64);
+            entry.add_offset(2000 + i as u64);
+
+            let offset = i * 100;
+            let serialized = entry.serialize_to_vec()?;
+            payload_entries.insert(offset, serialized);
+        }
+
+        // Create a mocked HTTP client with the tree data
+        let mocked_client = MockHttpRangeClient::new_mock_http_range_client(&tree_bytes);
+        let mut buffered_client = AsyncBufferedHttpRangeClient::new(mocked_client);
+
+        // Calculate payload section start
+        let payload_section_start = tree_bytes.len();
+
+        // Test prefetching payload
+        let prefetch_size = Stree::<i32>::compute_payload_prefetch_size(num_items, None, None);
+        let payload_cache =
+            prefetch_payload(&mut buffered_client, payload_section_start, prefetch_size).await?;
+
+        // Verify that prefetched cache contains expected entries
+        assert!(
+            payload_cache.contains(payload_section_start),
+            "Cache should contain the start of payload section"
+        );
+
+        // Test that the payload search functionality now works with the prefetched cache
+        let result = Stree::<i32>::http_stream_find_exact(
+            &mut buffered_client,
+            index_begin,
+            feature_begin,
+            num_items,
+            branching_factor,
+            30,   // Search for a key that we know uses payload indirection
+            4096, // combine_request_threshold
+        )
+        .await?;
+
+        // If our implementation is correct, we should find some results for key 30
+        assert!(!result.is_empty(), "Should find results for key 30");
 
         Ok(())
     }

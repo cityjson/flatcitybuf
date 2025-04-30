@@ -21,6 +21,7 @@ anyhow = { workspace = true }
 fallible-streaming-iterator = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
+log = { workspace = true }
 packed_rtree = { path = "../packed_rtree" }
 static-btree = { path = "../static-btree" }
 ordered-float = { workspace = true }
@@ -76,6 +77,7 @@ memory-stats = { workspace = true }
 pretty_assertions = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+env_logger = { workspace = true }
 
 # --performance comparison
 bson = { workspace = true }

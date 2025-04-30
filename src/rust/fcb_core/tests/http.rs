@@ -4,6 +4,7 @@ use anyhow::Result;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 use fcb_core::HttpFcbReader;
 use fcb_core::{deserializer::to_cj_metadata, FixedStringKey, Float, KeyType, Operator};
+use log::info;
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
@@ -145,10 +146,10 @@ mod http {
 
     #[tokio::test]
     async fn test_read_http_file_attr() -> Result<()> {
-        let res = read_http_file_attr(
-            "http://127.0.0.1:5501/src/rust/fcb_core/tests/data/delft_attr.fcb",
-        )
-        .await;
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let res =
+            read_http_file_attr("http://127.0.0.1:5501/src/rust/temp/3dbag_partial.fcb").await;
         // read_http_file_attr("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
         assert!(res.is_ok());
         Ok(())

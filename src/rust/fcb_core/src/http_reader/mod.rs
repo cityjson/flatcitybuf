@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use cjseq::CityJSONFeature;
 use http_range_client::BufferedHttpRangeClient;
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
+use log::debug;
 use reqwest;
 use static_btree::{FixedStringKey, Float, KeyType, Operator};
 
@@ -24,7 +25,6 @@ use static_btree::{HttpIndex, HttpMultiIndex};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Range;
-use tracing::debug;
 use tracing::trace;
 
 #[cfg(test)]
@@ -260,6 +260,11 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             .collect();
         attr_index_entries.sort_by_key(|attr_info| attr_info.index());
 
+        // debug!("attr_index_entries: {attr_index_entries:?}");
+        // debug print detail of attr_index_entries
+        for attr_info in attr_index_entries.iter() {
+            debug!("attr_info: {attr_info:?}");
+        }
         // Build the query
         let query = build_query(&query);
 
