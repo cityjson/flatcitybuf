@@ -216,7 +216,7 @@ impl<K: Key> Stree<K> {
 
                 let is_right_most_child = (node_size * node_size) <= (child_idx_diff % skip_size)
                     && (child_idx_diff % skip_size)
-                        < (self.branching_factor * self.branching_factor) as usize;
+                        < (self.branching_factor as usize * self.branching_factor as usize);
                 let has_next_node = child_idx + node_size < children_level.end;
 
                 if is_right_most_child {

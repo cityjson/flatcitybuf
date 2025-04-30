@@ -197,6 +197,8 @@ fn serialize(
         geographical_extent: geo_extent,
     };
 
+    println!("header_options in cli: {:?}", header_options);
+
     let mut fcb = FcbWriter::new(cj, Some(header_options), attr_schema)?;
 
     for feature in filtered_features.iter() {

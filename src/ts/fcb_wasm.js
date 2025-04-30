@@ -240,13 +240,13 @@ function _assertClass(instance, klass) {
 function __wbg_adapter_38(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure390_externref_shim(arg0, arg1, arg2);
+    wasm.closure394_externref_shim(arg0, arg1, arg2);
 }
 
 function __wbg_adapter_142(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure431_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure435_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -804,8 +804,8 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper5784 = function() { return logError(function (arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 391, __wbg_adapter_38);
+    imports.wbg.__wbindgen_closure_wrapper5792 = function() { return logError(function (arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 395, __wbg_adapter_38);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {

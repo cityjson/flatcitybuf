@@ -11,6 +11,7 @@ use std::{
     path::PathBuf,
 };
 
+#[cfg(test)]
 mod tests {
     use std::str::FromStr;
 

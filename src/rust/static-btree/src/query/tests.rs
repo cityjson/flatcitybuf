@@ -234,7 +234,7 @@ fn test_cases() -> Vec<(Vec<QueryCondition>, Vec<u64>)> {
                 QueryCondition {
                     field: "score".to_string(),
                     operator: Operator::Gt,
-                    key: KeyType::Float32(OrderedFloat(80.0)),
+                    key: KeyType::Float32(OrderedFloat::<f32>(80.0)),
                 },
                 QueryCondition {
                     field: "datetime".to_string(),

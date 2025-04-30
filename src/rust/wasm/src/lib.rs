@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 mod gloo_client;
 
-#[cfg(target_arch = "wasm32")]
+// #[cfg(target_arch = "wasm32")]
 mod wasm {
 
     use crate::gloo_client::WasmHttpClient;
@@ -68,8 +68,6 @@ mod wasm {
     impl HttpFcbReader {
         #[wasm_bindgen(constructor, start)]
         pub async fn new(url: String) -> Result<HttpFcbReader, JsValue> {
-            println!("open===: {:?}", url);
-
             // Only initialize the logger once
             if !LOGGER_INITIALIZED.load(Ordering::SeqCst)
                 && console_log::init_with_level(Level::Trace).is_ok()
@@ -119,7 +117,6 @@ mod wasm {
             if !check_magic_bytes(bytes) {
                 return Err(JsValue::from_str("MissingMagicBytes"));
             }
-            debug!("checked magic bytes");
 
             read_bytes += MAGIC_BYTES_SIZE;
             let mut bytes = BytesMut::from(
@@ -137,7 +134,6 @@ mod wasm {
                     "IllegalHeaderSize: {header_size}"
                 )));
             }
-            info!("header_size: {header_size}");
 
             bytes.put(
                 client
@@ -151,8 +147,6 @@ mod wasm {
             // verify flatbuffer
             let header = size_prefixed_root_as_header(&header_buf)
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            info!("header:---------");
-            info!("header: {:?}", to_cj_metadata(&header));
             trace!("completed: opening http reader");
             Ok(HttpFcbReader {
                 client,
@@ -167,6 +161,10 @@ mod wasm {
         pub fn header(&self) -> Result<JsValue, JsValue> {
             let header = self.fbs.header();
             info!("header in the function: {:?}", to_cj_metadata(&header));
+            info!(
+                "attribute index in the function: {:?}",
+                header.attribute_index()
+            );
             let cj = to_cj_metadata(&header).map_err(|e| JsValue::from_str(&e.to_string()))?;
             let jsval = to_value(&cj).map_err(|e| JsValue::from_str(&e.to_string()))?;
             info!("jsval: {:?}", jsval);
@@ -308,6 +306,7 @@ mod wasm {
             let attr_index_begin = header_len + rtree_index_size;
             let feature_begin = header_len + rtree_index_size + attr_index_size;
 
+            let combine_request_threshold = 1024 * 1024; // TODO: make this configurable
             let attr_index_entries = header
                 .attribute_index()
                 .ok_or_else(|| JsValue::from_str("attribute index not found"))?;
@@ -333,11 +332,13 @@ mod wasm {
                     attr_info,
                     current_index_begin,
                     feature_begin,
+                    combine_request_threshold,
                 )
                 .map_err(|e| JsValue::from_str(&format!("failed to add index: {:?}", e)))?;
                 current_index_begin += attr_info.length() as usize;
             }
 
+            self.client.set_min_req_size(combine_request_threshold);
             let result = http_multi_index
                 .query(&mut self.client, &query.conditions)
                 .await
@@ -378,6 +379,7 @@ mod wasm {
             attr_info: &AttributeIndex,
             index_begin: usize,
             feature_begin: usize,
+            combine_request_threshold: usize,
         ) -> Result<(), JsValue> {
             if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
                 // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
@@ -389,7 +391,7 @@ mod wasm {
                             attr_info.branching_factor(),
                             index_begin as usize,
                             feature_begin,
-                            1024 * 1024, // combine_request_threshold
+                            combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
                     }
@@ -399,7 +401,7 @@ mod wasm {
                             attr_info.branching_factor(),
                             index_begin as usize,
                             feature_begin,
-                            1024 * 1024, // combine_request_threshold
+                            combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
                     }
@@ -409,7 +411,7 @@ mod wasm {
                             attr_info.branching_factor(),
                             index_begin as usize,
                             feature_begin,
-                            1024 * 1024, // combine_request_threshold
+                            combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
                     }
@@ -419,7 +421,7 @@ mod wasm {
                             attr_info.branching_factor(),
                             index_begin as usize,
                             feature_begin,
-                            1024 * 1024, // combine_request_threshold
+                            combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
                     }
@@ -430,7 +432,7 @@ mod wasm {
                             attr_info.branching_factor(),
                             index_begin as usize,
                             feature_begin,
-                            1024 * 1024, // combine_request_threshold
+                            combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
                     }
@@ -440,7 +442,7 @@ mod wasm {
                             attr_info.branching_factor(),
                             index_begin as usize,
                             feature_begin,
-                            1024 * 1024, // combine_request_threshold
+                            combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
                     }

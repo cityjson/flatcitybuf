@@ -3,7 +3,7 @@ use std::error::Error;
 use anyhow::Result;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 use fcb_core::HttpFcbReader;
-use fcb_core::{deserializer::to_cj_metadata, FixedStringKey, KeyType, Operator};
+use fcb_core::{deserializer::to_cj_metadata, FixedStringKey, Float, KeyType, Operator};
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
@@ -70,11 +70,11 @@ async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
 async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
     let query: Vec<(String, Operator, KeyType)> = vec![
-        // (
-        //     "b3_h_dak_50p".to_string(),
-        //     Operator::Gt,
-        //     KeyType::Float64(Float(10.0)),
-        // ),
+        (
+            "b3_h_dak_50p".to_string(),
+            Operator::Gt,
+            KeyType::Float64(Float(1.0)),
+        ),
         (
             "identificatie".to_string(),
             Operator::Eq,
@@ -145,8 +145,11 @@ mod http {
 
     #[tokio::test]
     async fn test_read_http_file_attr() -> Result<()> {
-        let res =
-            read_http_file_attr("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
+        let res = read_http_file_attr(
+            "http://127.0.0.1:5501/src/rust/fcb_core/tests/data/delft_attr.fcb",
+        )
+        .await;
+        // read_http_file_attr("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
         assert!(res.is_ok());
         Ok(())
     }

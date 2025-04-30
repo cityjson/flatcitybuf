@@ -176,7 +176,17 @@ impl<'a> FcbWriter<'a> {
     ///
     /// A Result indicating success or failure of the write operation
     pub fn write(mut self, mut out: impl Write) -> Result<()> {
-        let attr_indices = self.header_writer.header_options.attribute_indices.clone();
+        let mut attr_indices = self.header_writer.header_options.attribute_indices.clone();
+
+        // sort attribute indices by schema index (ascending)
+        if let Some(ref mut indices) = attr_indices {
+            indices.sort_by_key(|(name, _)| {
+                self.attr_schema
+                    .get(name)
+                    .map(|(idx, _)| *idx)
+                    .unwrap_or(u16::MAX)
+            });
+        }
 
         out.write_all(&MAGIC_BYTES)?;
         let index_node_size = self.header_writer.header_options.index_node_size;
@@ -223,31 +233,30 @@ impl<'a> FcbWriter<'a> {
             unsorted_feature_reader.read_exact(&mut sorted_feature_buf[cur_len..])?;
         }
 
+        // build attribute index buffers in sorted order
         let mut attr_index_buf: Vec<u8> = Vec::new();
         let mut attr_index_info: Vec<AttributeIndexInfo> = Vec::new();
-        if let Some(attr_indices) = attr_indices {
-            for (attr_name, branching_factor) in attr_indices {
-                let branching_factor =
-                    branching_factor.unwrap_or(static_btree::DEFAULT_BRANCHING_FACTOR);
-                if let Ok((ai_buf, attr_info)) = build_attribute_index_for_attr(
-                    &attr_name,
+        if let Some(sorted_indices) = &attr_indices {
+            for (name, bf_opt) in sorted_indices {
+                let bf = bf_opt.unwrap_or(static_btree::DEFAULT_BRANCHING_FACTOR);
+                if let Ok((buf, info)) = build_attribute_index_for_attr(
+                    name,
                     &self.attr_schema,
                     &self.attribute_index_entries,
-                    branching_factor,
+                    bf,
                 ) {
-                    attr_index_info.push(attr_info);
-                    // Write the sorted index block.
-                    attr_index_buf.extend(&ai_buf);
-                } else {
-                    // Write zero length if no index was built.
+                    attr_index_info.push(info);
+                    attr_index_buf.extend(&buf);
                 }
             }
         }
-        //write attribute index buf to out
+
+        // write header with attribute indices metadata
         self.header_writer.attribute_indices_info = Some(attr_index_info);
         let header_buf = self.header_writer.finish_to_header()?;
         out.write_all(&header_buf)?;
 
+        // write spatial index (if any), attribute index bytes, then feature data
         out.write_all(&rtree_buf)?;
         out.write_all(&attr_index_buf)?;
         out.write_all(&sorted_feature_buf)?;

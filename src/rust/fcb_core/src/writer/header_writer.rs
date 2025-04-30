@@ -22,6 +22,7 @@ pub struct HeaderWriter<'a> {
 }
 
 /// Configuration options for header writing process
+#[derive(Debug, Clone)]
 pub struct HeaderWriterOptions {
     /// Whether to write index information
     pub write_index: bool,
