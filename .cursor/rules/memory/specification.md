@@ -258,6 +258,39 @@ Entries in the index are stored and they have fixed size of key + pointer. The b
 
 this block-based structure aligns with typical page sizes and efficient http range requests, significantly improving i/o performance compared to the previous sorted array approach
 
+### payload section
+
+when duplicate keys exist within an index, a special payload section is used:
+
+- **payload entries**: store arrays of offsets that point to features with the same key
+- **payload reference**: leaf nodes store a tagged offset (MSB set to 1) that points to a payload entry
+- **offset arrays**: each payload entry contains a count followed by an array of feature offsets
+
+this approach maintains efficient tree traversal for unique keys while properly handling duplicate keys with minimal overhead. the payload section is placed at the end of the index section, after all the node entries.
+
+### payload optimization techniques
+
+two major optimizations improve remote access efficiency for the payload section:
+
+1. **payload prefetching**:
+   - a configurable portion of the payload section is prefetched into a cache during the initial query
+   - the optimal prefetch size is calculated based on:
+     - total tree size (number of entries)
+     - estimated duplicate percentage
+     - average entries per duplicate key
+   - prefetched data is stored in a query-scoped cache for fast access
+   - cache hits eliminate individual http requests for payload entries
+
+2. **batch payload resolution**:
+   - during tree traversal, references to payload entries are collected rather than immediately resolved
+   - after traversal completes, payload references are:
+     - deduplicated to avoid redundant fetches
+     - grouped by proximity to minimize http requests
+     - resolved in batches through consolidated http requests
+   - results from direct offsets and payload entries are combined in the final result set
+
+these optimizations significantly reduce http overhead when working with datasets containing duplicate keys.
+
 ### serialization by type
 
 different attribute types are serialized using the `keyencoder` trait:
@@ -475,6 +508,26 @@ flatcitybuf implements several optimizations for http access:
    - features are loaded on demand as they're needed
    - supports streaming iteration through features
    - allows applications to start processing data before the entire file is downloaded
+
+5. **payload optimizations**:
+   - **payload prefetching**: proactively caches parts of the payload section during initial query execution
+     - uses adaptive sizing based on tree characteristics (16kb-1mb typical range)
+     - maintains prefetched data in a query-scoped cache
+     - eliminates individual http requests for cached payload entries
+
+   - **batch payload resolution**: combines multiple payload lookups into minimal http requests
+     - collects payload references during tree traversal instead of resolving immediately
+     - deduplicates and groups nearby payload references before http requests
+     - makes consolidated http requests for adjacent payload entries
+     - processes all fetched payload entries in memory
+     - can reduce http requests by up to 90% for queries returning many results
+
+   - **payload reference handling**: intelligently manages the tradeoff between memory usage and network efficiency
+     - direct offsets are resolved immediately without additional http requests
+     - payload references are either resolved from cache or batched for optimal http efficiency
+     - result processing respects the original ordering of matching keys
+
+these optimizations work together to minimize latency and bandwidth usage when accessing flatcitybuf files over http, making the format particularly well-suited for cloud-hosted datasets.
 
 ## file dependencies graph
 

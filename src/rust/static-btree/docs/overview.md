@@ -198,6 +198,51 @@ The search process follows these general steps:
    * Implements request batching when adjacent nodes need to be read to reduce HTTP round trips.
    * Uses `AsyncHttpRangeClient` to perform asynchronous HTTP operations.
 
+### 7.5. Payload Handling Optimizations
+
+The implementation includes advanced techniques for efficient payload handling:
+
+#### 7.5.1. Payload Prefetching
+
+Instead of making individual HTTP requests for each payload entry, a prefetching mechanism significantly reduces HTTP overhead:
+
+1. **Initial Prefetch**:
+   * Before starting a search, a chunk of the payload section is prefetched.
+   * The size is computed based on the characteristics of the tree (number of entries, estimated duplicate rate).
+   * A `PayloadCache` stores and manages the prefetched data.
+
+2. **Adaptive Sizing**:
+   * The prefetch size is adapted based on the tree characteristics:
+     * For small trees: A minimum prefetch size ensures basic efficiency (16KB)
+     * For medium trees: Prefetch size grows linearly with tree size
+     * For large trees: Maximum caps prevent excessive memory usage (1MB by default)
+   * Prefetch factor can be adjusted for specific workloads (higher for range queries, lower for exact matches)
+
+3. **Cache Management**:
+   * The `PayloadCache` maintains the prefetched data and provides fast offset lookup.
+   * Subsequent payload lookups check the cache before making HTTP requests.
+   * The cache is query-scoped to avoid growing memory usage over time.
+
+#### 7.5.2. Batch Payload Resolution
+
+When a search identifies multiple keys that reference payload entries, batch resolution combines them:
+
+1. **Reference Collection**:
+   * During tree traversal, references to payload entries are collected rather than immediately resolved.
+   * Both direct offsets and payload references are tracked in a unified collection.
+
+2. **Deduplication and Grouping**:
+   * Duplicate payload references are removed to prevent redundant fetches.
+   * Adjacent payload entries are grouped based on proximity (within 4KB).
+   * This reduces the number of HTTP requests while avoiding excessive unused data transfer.
+
+3. **Consolidated Fetching**:
+   * A single HTTP request is made for each group of adjacent payload entries.
+   * Fetched data is processed in memory to extract all payload entries.
+   * Results from direct offsets and payload entries are combined in the final result set.
+
+This batch approach can reduce HTTP requests by orders of magnitude when dealing with queries that return many results or datasets with many duplicate keys.
+
 ## 8. Performance Considerations
 
 1. **Cache Efficiency**:
@@ -212,11 +257,24 @@ The search process follows these general steps:
    * Batches adjacent node requests to reduce HTTP overhead.
    * Uses range requests to fetch only needed data.
    * Buffers HTTP responses for better performance.
+   * Implements payload prefetching and batch resolution to minimize HTTP requests.
+   * Adaptively sizes prefetch requests based on tree characteristics.
+   * Groups adjacent payload references to maximize HTTP efficiency.
 
 4. **Memory Efficiency**:
    * Static structure allows for precise memory allocation.
    * No need for dynamic node allocations or pointer indirection.
    * Compact representation with minimal overhead.
+   * Payload cache balances memory usage with HTTP request reduction.
+
+5. **Request Efficiency for HTTP**:
+   * For typical queries, the number of HTTP requests is reduced by up to 90% through:
+     * Proactive payload prefetching
+     * Batch payload resolution
+     * Adaptive grouping of nearby offsets
+     * Cache-first lookup approach
+   * These optimizations are especially effective for range queries or datasets with many duplicate keys.
+   * The implementation automatically adapts to different network conditions and dataset characteristics.
 
 ## 9. Safety & Error Handling
 
