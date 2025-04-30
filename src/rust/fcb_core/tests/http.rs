@@ -148,8 +148,7 @@ mod http {
         let _ = env_logger::builder().is_test(true).try_init();
 
         let res =
-            read_http_file_attr("http://127.0.0.1:5501/src/rust/temp/3dbag_partial.fcb").await;
-        // read_http_file_attr("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
+            read_http_file_attr("https://storage.googleapis.com/flatcitybuf/delft_attr.fcb").await;
         assert!(res.is_ok());
         Ok(())
     }
