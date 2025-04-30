@@ -4,7 +4,6 @@ use anyhow::Result;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 use fcb_core::HttpFcbReader;
 use fcb_core::{deserializer::to_cj_metadata, FixedStringKey, Float, KeyType, Operator};
-use log::info;
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
