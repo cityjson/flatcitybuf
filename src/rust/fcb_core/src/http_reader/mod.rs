@@ -11,14 +11,10 @@ use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use cjseq::CityJSONFeature;
-#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+use http_range_client::BufferedHttpRangeClient;
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
-#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 use reqwest;
 use static_btree::{FixedStringKey, Float, KeyType, Operator};
-
-#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
-use http_range_client::BufferedHttpRangeClient;
 
 use packed_rtree::{http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree};
 use static_btree::{
@@ -34,15 +30,11 @@ use tracing::trace;
 #[cfg(test)]
 mod mock_http_range_client;
 
-// #[cfg(feature = "wasm")]
-// mod wasm_client;
-
 // The largest request we'll speculatively make.
 // If a single huge feature requires, we'll necessarily exceed this limit.
 const DEFAULT_HTTP_FETCH_SIZE: usize = 1_048_576; // 1MB
 
 /// FlatCityBuf dataset HTTP reader
-#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub struct HttpFcbReader<T: AsyncHttpRangeClient + Send + Sync> {
     client: AsyncBufferedHttpRangeClient<T>,
     // feature reading requires header access, therefore
@@ -50,7 +42,6 @@ pub struct HttpFcbReader<T: AsyncHttpRangeClient + Send + Sync> {
     fbs: FcbBuffer,
 }
 
-#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub struct AsyncFeatureIter<T: AsyncHttpRangeClient + Send + Sync> {
     client: AsyncBufferedHttpRangeClient<T>,
     // feature reading requires header access, therefore
@@ -62,7 +53,6 @@ pub struct AsyncFeatureIter<T: AsyncHttpRangeClient + Send + Sync> {
     count: usize,
 }
 
-#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 impl HttpFcbReader<reqwest::Client> {
     pub async fn open(url: &str) -> Result<HttpFcbReader<reqwest::Client>> {
         trace!("starting: opening http reader, reading header");
@@ -711,7 +701,6 @@ impl SelectAttr {
         Ok(Some(feature_buffer.freeze()))
     }
 }
-
 #[cfg(test)]
 mod tests {
     use std::{path::PathBuf, str::FromStr};

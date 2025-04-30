@@ -1,7 +1,7 @@
-use bst::OrderedFloat;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::error::Result;
 use fcb_core::{AttrQuery, FcbReader, KeyType, Operator};
+use static_btree::Float;
 use std::{fs::File, io::BufReader};
 
 // TODO: test these cases as well
@@ -57,12 +57,12 @@ fn read_fcb_with_attr_index_seekable(path: &str) -> Result<()> {
         (
             "b3_h_dak_50p".to_string(),
             Operator::Gt,
-            KeyType::Float64(OrderedFloat(2.0)),
+            KeyType::Float64(Float(2.0)),
         ),
         (
             "b3_h_dak_50p".to_string(),
             Operator::Lt,
-            KeyType::Float64(OrderedFloat(50.0)),
+            KeyType::Float64(Float(50.0)),
         ),
         // (
         //     "identificatie".to_string(),
@@ -116,12 +116,12 @@ fn read_fcb_with_attr_index_non_seekable(path: &str) -> Result<()> {
         (
             "b3_h_dak_50p".to_string(),
             Operator::Gt,
-            KeyType::Float64(OrderedFloat(2.0)),
+            KeyType::Float64(Float(2.0)),
         ),
         (
             "b3_h_dak_50p".to_string(),
             Operator::Lt,
-            KeyType::Float64(OrderedFloat(50.0)),
+            KeyType::Float64(Float(50.0)),
         ),
         // (
         //     "identificatie".to_string(),

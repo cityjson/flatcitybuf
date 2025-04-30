@@ -12,17 +12,14 @@ mod wasm {
     use serde_wasm_bindgen::to_value;
     use wasm_bindgen::prelude::*;
 
-    use static_btree::{
-        Entry, FixedStringKey, Float, HttpIndex, HttpMultiIndex, Key, KeyType, Query,
-        QueryCondition,
-    };
+    use static_btree::{FixedStringKey, Float, HttpIndex, HttpMultiIndex, KeyType};
 
     use byteorder::{ByteOrder, LittleEndian};
     use bytes::{BufMut, Bytes, BytesMut};
     use chrono::{DateTime, NaiveDateTime, Utc};
     use fcb_core::city_buffer::FcbBuffer;
     use fcb_core::{
-        add_indices_to_multi_memory_index, build_query, check_magic_bytes,
+        build_query, check_magic_bytes,
         deserializer::{to_cj_feature, to_cj_metadata},
         fb::*,
         size_prefixed_root_as_city_feature, AttrQuery, HEADER_MAX_BUFFER_SIZE, HEADER_SIZE_SIZE,
@@ -391,7 +388,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             1024 * 1024, // combine_request_threshold
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -401,7 +398,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             1024 * 1024, // combine_request_threshold
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -411,7 +408,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             1024 * 1024, // combine_request_threshold
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -421,7 +418,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             1024 * 1024, // combine_request_threshold
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -432,7 +429,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             1024 * 1024, // combine_request_threshold
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -442,7 +439,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             1024 * 1024, // combine_request_threshold
                         );
                         multi_index.add_index(col.name().to_string(), index);

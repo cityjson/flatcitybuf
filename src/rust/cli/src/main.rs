@@ -24,15 +24,15 @@ enum Commands {
     /// Convert CityJSON to FCB
     Ser {
         /// Input file (use '-' for stdin)
-        #[arg(short, long)]
+        #[arg(short = 'i', long)]
         input: String,
 
         /// Output file (use '-' for stdout)
-        #[arg(short, long)]
+        #[arg(short = 'o', long)]
         output: String,
 
         /// Comma-separated list of attributes to create index for
-        #[arg(long)]
+        #[arg(short = 'a', long)]
         attr_index: Option<String>,
 
         /// Branching factor for attribute index
@@ -40,11 +40,11 @@ enum Commands {
         attr_branching_factor: Option<u16>,
 
         /// Bounding box filter in format "minx,miny,maxx,maxy"
-        #[arg(long)]
+        #[arg(short = 'b', long)]
         bbox: Option<String>,
 
         /// Automatically calculate and set geospatial extent in header
-        #[arg(long)]
+        #[arg(short = 'g', long)]
         ge: bool,
     },
 
@@ -156,7 +156,8 @@ fn serialize(
 
     let attr_schema = {
         let mut schema = AttributeSchema::new();
-        for feature in filtered_features.iter() {
+        // Limit to max 1000 features for schema building to have faster build time
+        for feature in filtered_features.iter().take(1000) {
             for (_, co) in feature.city_objects.iter() {
                 if let Some(attributes) = &co.attributes {
                     schema.add_attributes(attributes);

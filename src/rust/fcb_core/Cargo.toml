@@ -22,23 +22,16 @@ fallible-streaming-iterator = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 packed_rtree = { path = "../packed_rtree" }
-bst = { path = "../bst" }
 static-btree = { path = "../static-btree" }
 ordered-float = { workspace = true }
 chrono = { workspace = true }
 http-range-client = { workspace = true, default-features = false, optional = true, features = [
   "reqwest-async",
 ] }
-reqwest = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
-[target.'cfg(all(feature = "http", not(target_arch = "wasm32")))'.dependencies]
-tokio = { workspace = true }
-http-range-client = { workspace = true, default-features = false, optional = true, features = [
-  "reqwest-async",
-] }
-reqwest = { workspace = true, optional = true }
-async-trait = { workspace = true, optional = true, default-features = false }
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { workspace = true }
 
 [lib]
 name = "fcb_core"
