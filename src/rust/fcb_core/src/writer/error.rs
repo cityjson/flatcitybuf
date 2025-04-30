@@ -9,8 +9,8 @@ pub enum Error {
     #[error("R-tree error: {0}")]
     Rtree(#[from] packed_rtree::Error),
 
-    #[error("BST error: {0}")]
-    Bst(#[from] bst::Error),
+    #[error("StaticBTree error: {0}")]
+    StaticBTree(#[from] static_btree::Error),
 
     #[error("Invalid attribute name: {name}")]
     InvalidAttributeName { name: String },
@@ -60,7 +60,7 @@ impl From<Error> for crate::error::Error {
         match err {
             Error::Io(e) => Self::IoError(e),
             Error::Rtree(e) => Self::RtreeError(e),
-            Error::Bst(e) => Self::BstError(e),
+            Error::StaticBTree(e) => Self::StaticBTree { source: e },
             Error::InvalidAttributeName { name } => Self::InvalidAttributeValue {
                 msg: format!("Invalid attribute name: {}", name),
             },

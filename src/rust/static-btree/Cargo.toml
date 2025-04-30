@@ -1,0 +1,46 @@
+[package]
+name = "static-btree"
+version = "0.1.0"
+edition = "2021"
+authors = ["HideBa"]
+description = "A high-performance static B+tree implementation for read-only workloads"
+license = "MIT"
+repository = "https://github.com/hideba/flatcitybuf"
+readme = "README.md"
+
+[dependencies]
+thiserror = { workspace = true }
+ordered-float = { workspace = true }
+byteorder = { workspace = true }
+log = { workspace = true }
+
+# For platforms without packed_simd support
+bytemuck = { workspace = true }
+
+# Other utilities
+lru = { version = "0.13" }
+chrono = { workspace = true }
+
+# Async support
+tracing = { workspace = true }
+http-range-client = { workspace = true, optional = true, default-features = false }
+bytes = { workspace = true, optional = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+rand = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[features]
+default = ["http"]
+http = ["http-range-client", "bytes"]
+# [[bench]]
+# name = "search_benchmark"
+# harness = false
+
+
+[lib]
+name = "static_btree"
+path = "src/lib.rs"

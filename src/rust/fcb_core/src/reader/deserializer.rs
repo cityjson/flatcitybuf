@@ -7,30 +7,15 @@ use crate::{
 };
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
-    Address as CjAddress,
-    Appearance as CjAppearance,
-    Boundaries as CjBoundaries,
-    CityJSON,
-    CityJSONFeature,
-    CityObject as CjCityObject,
-    Extension as CjExtension,
-    ExtensionFile as CjExtensionFile,
-    Geometry as CjGeometry,
-    GeometryTemplates as CjGeometryTemplates, // Added GeometryTemplates
-    GeometryType as CjGeometryType,
-    MaterialObject as CjMaterial,
-    Metadata as CjMetadata,
-    PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem,
-    Semantics as CjSemantics,
-    TextFormat as CjTextFormat,
-    TextType as CjTextType,
-    TextureObject as CjTexture,
-    Transform as CjTransform,
+    Address as CjAddress, Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON,
+    CityJSONFeature, CityObject as CjCityObject, Extension as CjExtension,
+    ExtensionFile as CjExtensionFile, Geometry as CjGeometry,
+    GeometryTemplates as CjGeometryTemplates, GeometryType as CjGeometryType,
+    MaterialObject as CjMaterial, Metadata as CjMetadata, PointOfContact as CjPointOfContact,
+    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, TextFormat as CjTextFormat,
+    TextType as CjTextType, TextureObject as CjTexture, Transform as CjTransform,
     WrapMode as CjWrapMode,
 };
-
-// Removed unused import: use super::geom_decoder::decode;
 
 pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
     let mut cj = CityJSON::new();

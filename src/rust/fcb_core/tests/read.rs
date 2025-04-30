@@ -29,7 +29,10 @@ fn read_bbox() -> Result<()> {
             }
         }
     }
-    let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
+    let attr_indices = vec![
+        ("b3_h_dak_50p".to_string(), None),
+        ("identificatie".to_string(), None),
+    ];
 
     let mut memory_buffer = Cursor::new(Vec::new());
     let mut fcb = FcbWriter::new(
@@ -133,7 +136,10 @@ fn read_bbox_nonseekable() -> anyhow::Result<()> {
             }
         }
     }
-    let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
+    let attr_indices = vec![
+        ("b3_h_dak_50p".to_string(), None),
+        ("identificatie".to_string(), None),
+    ];
 
     // write out the FCB data into a memory buffer
     let mut memory_buffer = Cursor::new(Vec::new());

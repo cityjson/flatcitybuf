@@ -4,8 +4,7 @@ mod const_vars;
 pub mod error;
 pub mod fb;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
-#[cfg(feature = "http")]
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 mod http_reader;
 
 mod reader;
@@ -16,10 +15,13 @@ pub use const_vars::*;
 pub use error::*;
 pub use fb::*;
 pub use reader::*;
+pub use static_btree::{
+    Entry, FixedStringKey, Float, Key, KeyType, MemoryIndex, MemoryMultiIndex, MultiIndex,
+    Operator, Query, QueryCondition, StreamIndex, StreamMultiIndex,
+};
 pub use writer::*;
 
-#[cfg(feature = "http")]
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use http_reader::*;
 
 pub fn check_magic_bytes(bytes: &[u8]) -> bool {

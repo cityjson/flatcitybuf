@@ -59,6 +59,205 @@ graph TD
     N -->|returns| O
 ```
 
+## Binary Search Tree Streaming Process
+
+The binary search tree (BST) in FlatCityBuf is designed for efficient streaming access, allowing queries to be executed without loading the entire index into memory. This section illustrates how the BST is structured and accessed during streaming queries.
+
+### BST Structure and File Layout
+
+```mermaid
+graph TD
+    subgraph "File Representation (Memory Buffer)"
+        direction LR
+        H["Type ID<br>(4 bytes)"] --- I["Entry Count<br>(8 bytes)"] --- J["Entry 1"] --- K["Entry 2"] --- L["Entry 3"] --- M["... Entry n"]
+
+        subgraph "Entry Structure"
+            direction LR
+            N["Key Length<br>(8 bytes)"] --- O["Key Bytes<br>(variable e.g. 'delft' or <br>'rotterdam' for string keys)"] --- P["Offset Count<br>(8 bytes)"] --- Q["Offset Values<br>(8 bytes each)"]
+        end
+
+        J -.-> N
+    end
+```
+
+The BST is serialized to a file in a format that preserves the sorted order of keys, allowing for efficient binary search directly on the serialized data. Each entry in the file contains a key and its associated offsets. The horizontal layout of the file representation reflects how the data is stored sequentially in memory or on disk as a continuous buffer.
+
+### Binary Search on Serialized BST
+
+```mermaid
+graph TD
+    subgraph "Binary Search Process"
+        A["Start: left=0, right=entry_count-1"]
+        B["Calculate mid = (left + right) / 2"]
+        C["Seek to entry at position mid"]
+        D["Read key at mid position"]
+        E["Compare key with search key"]
+
+        A --> B --> C --> D --> E
+
+        E -->|"key < search_key"| F["left = mid + 1"]
+        E -->|"key > search_key"| G["right = mid - 1"]
+        E -->|"key = search_key"| H["Found match!"]
+
+        F --> B
+        G --> B
+        H --> I["Read offsets"]
+    end
+
+    subgraph "File Navigation"
+        J["File with serialized BST"]
+        K["Cursor position"]
+
+        J --> K
+
+        L["Entry 1"]
+        M["Entry 2 (mid)"]
+        N["Entry 3"]
+        O["Entry 4"]
+        P["Entry 5"]
+
+        J --> L --> M --> N --> O --> P
+
+        K -.->|"1.Initial seek"| M
+        K -.->|"2.Read key"| M
+        K -.->|"3.Compare"| M
+        K -.->|"4.Move to new mid"| O
+    end
+```
+
+During a binary search:
+1. The algorithm starts with the full range of entries
+2. It calculates the middle position and seeks to that entry in the file
+3. It reads the key at that position and compares it with the search key
+4. Based on the comparison, it narrows the search range and repeats
+5. When a match is found, it reads the associated offsets
+
+### Range Query Process
+
+```mermaid
+graph TD
+    subgraph "Range Query Process"
+        A["Find lower bound"]
+        B["Find upper bound"]
+        C["Scan entries between bounds"]
+        D["Collect all matching offsets"]
+
+        A --> B --> C --> D
+    end
+
+    subgraph "File Layout with Range Query"
+        E["Serialized BST"]
+
+        F["Entry 1"]
+        G["Entry 2 (lower bound)"]
+        H["Entry 3"]
+        I["Entry 4"]
+        J["Entry 5 (upper bound)"]
+        K["Entry 6"]
+
+        E --> F --> G --> H --> I --> J --> K
+
+        L["Cursor"]
+
+        L -.->|"1.Binary search for lower bound"| G
+        L -.->|"2.Sequential scan"| H
+        L -.->|"3.Sequential scan"| I
+        L -.->|"4.Stop at upper bound"| J
+    end
+```
+
+For range queries:
+1. Binary search is used to find the lower bound
+2. Another binary search finds the upper bound
+3. The algorithm then sequentially scans all entries between these bounds
+4. All matching offsets are collected and returned
+
+### StreamableMultiIndex Query Process
+
+```mermaid
+graph TD
+    subgraph "StreamableMultiIndex"
+        A["Query with multiple conditions"]
+
+        B["Condition 1: field=height, op=Gt, value=20.0"]
+        C["Condition 2: field=id, op=Eq, value='building1'"]
+
+        A --> B
+        A --> C
+
+        D["Index 1: height"]
+        E["Index 2: id"]
+
+        B -->|"Execute on"| D
+        C -->|"Execute on"| E
+
+        F["Results from height index"]
+        G["Results from id index"]
+
+        D --> F
+        E --> G
+
+        H["Intersect results"]
+
+        F --> H
+        G --> H
+
+        I["Final result set"]
+
+        H --> I
+    end
+```
+
+When executing a query with multiple conditions:
+1. The StreamableMultiIndex saves the current cursor position
+2. For each condition, it seeks to the appropriate index in the file
+3. It executes the query on that index and collects the results
+4. It intersects the results from all conditions to find records that match all criteria
+5. Finally, it restores the original cursor position
+
+### Memory Efficiency in Streaming Queries
+
+```mermaid
+graph TD
+    subgraph "Memory Usage Comparison"
+        A["BufferedIndex (In-Memory)"]
+        B["StreamableMultiIndex (Streaming)"]
+
+        A -->|"Memory Usage"| C["Entire index loaded in memory"]
+        B -->|"Memory Usage"| D["Only metadata in memory"]
+
+        C -->|"Scales with"| E["Size of index"]
+        D -->|"Scales with"| F["Number of indices"]
+
+        G["Large Dataset (1M entries)"]
+
+        G -->|"With BufferedIndex"| H["High memory usage"]
+        G -->|"With StreamableMultiIndex"| I["Low memory usage"]
+    end
+
+    subgraph "Metadata vs. Full Index"
+        J["TypeErasedIndexMeta"]
+        K["Full BufferedIndex"]
+
+        J -->|"Contains"| L["entry_count: u64"]
+        J -->|"Contains"| M["size: u64"]
+        J -->|"Contains"| N["type_id: ByteSerializableType"]
+
+        K -->|"Contains"| O["entries: Vec<KeyValue<T>>"]
+        O -->|"Contains"| P["Many key-value pairs"]
+
+        Q["Memory Footprint"]
+
+        J -->|"Small (constant)"| Q
+        K -->|"Large (proportional to data)"| Q
+    end
+```
+
+The streaming approach offers significant memory efficiency:
+1. BufferedIndex loads the entire index into memory, which can be problematic for large datasets
+2. StreamableMultiIndex only keeps metadata in memory, using file I/O to access the actual data
+3. This allows FlatCityBuf to handle datasets that would be too large to fit entirely in memory
+
 ## Type System
 
 The type system in FlatCityBuf is built around the `ByteSerializable` trait, which provides methods for converting types to and from byte representations:

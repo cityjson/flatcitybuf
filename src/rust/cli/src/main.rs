@@ -24,23 +24,27 @@ enum Commands {
     /// Convert CityJSON to FCB
     Ser {
         /// Input file (use '-' for stdin)
-        #[arg(short, long)]
+        #[arg(short = 'i', long)]
         input: String,
 
         /// Output file (use '-' for stdout)
-        #[arg(short, long)]
+        #[arg(short = 'o', long)]
         output: String,
 
         /// Comma-separated list of attributes to create index for
-        #[arg(long)]
+        #[arg(short = 'a', long)]
         attr_index: Option<String>,
 
-        /// Bounding box filter in format "minx,miny,maxx,maxy"
+        /// Branching factor for attribute index
         #[arg(long)]
+        attr_branching_factor: Option<u16>,
+
+        /// Bounding box filter in format "minx,miny,maxx,maxy"
+        #[arg(short = 'b', long)]
         bbox: Option<String>,
 
         /// Automatically calculate and set geospatial extent in header
-        #[arg(long)]
+        #[arg(short = 'g', long)]
         ge: bool,
     },
 
@@ -101,6 +105,7 @@ fn serialize(
     input: &str,
     output: &str,
     attr_index: Option<String>,
+    attr_branching_factor: Option<u16>,
     bbox: Option<String>,
     ge: bool,
 ) -> Result<(), Error> {
@@ -151,7 +156,8 @@ fn serialize(
 
     let attr_schema = {
         let mut schema = AttributeSchema::new();
-        for feature in filtered_features.iter() {
+        // Limit to max 1000 features for schema building to have faster build time
+        for feature in filtered_features.iter().take(1000) {
             for (_, co) in feature.city_objects.iter() {
                 if let Some(attributes) = &co.attributes {
                     schema.add_attributes(attributes);
@@ -165,11 +171,12 @@ fn serialize(
         }
     };
 
-    let attr_index_vec = attr_index.map(|s| {
+    let attr_index_vec: Option<Vec<(String, Option<u16>)>> = attr_index.map(|s| {
         s.split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
+            .map(|s| (s, attr_branching_factor))
+            .collect::<Vec<(String, Option<u16>)>>()
     });
 
     // Calculate geospatial extent if requested
@@ -189,6 +196,8 @@ fn serialize(
         attribute_indices: attr_index_vec,
         geographical_extent: geo_extent,
     };
+
+    println!("header_options in cli: {:?}", header_options);
 
     let mut fcb = FcbWriter::new(cj, Some(header_options), attr_schema)?;
 
@@ -450,9 +459,10 @@ fn main() -> Result<(), Error> {
             input,
             output,
             attr_index,
+            attr_branching_factor,
             bbox,
             ge,
-        } => serialize(&input, &output, attr_index, bbox, ge),
+        } => serialize(&input, &output, attr_index, attr_branching_factor, bbox, ge),
         Commands::Deser { input, output } => deserialize(&input, &output),
         Commands::Cbor { input, output } => encode_cbor(&input, &output),
         Commands::Bson { input, output } => encode_bson(&input, &output),

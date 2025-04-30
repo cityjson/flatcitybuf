@@ -1,11 +1,11 @@
+use anyhow::Result;
 use fcb_core::deserializer::to_cj_metadata;
 use fcb_core::FcbReader;
-use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
-fn read_file() -> Result<(), Box<dyn Error>> {
+fn read_file() -> Result<()> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let input_file_path = manifest_dir.join("temp").join("test_output.fcb");
     let input_file = File::open(input_file_path)?;

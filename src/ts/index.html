@@ -104,7 +104,11 @@
   <!-- URL input for the FCB data -->
   <label for="url-input">enter url for httpfcbreader:</label>
   <input type="text" id="url-input" placeholder="https://example.com/data"
-    value="https://storage.googleapis.com/flatcitybuf/3dbag_100k.fcb" />
+    value="http://127.0.0.1:5501/src/rust/temp/3dbag_partial.fcb" />
+  <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
+    value="http://127.0.0.1:5501/src/rust/fcb_core/tests/data/delft_attr.fcb" /> -->
+  <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
+    value="https://storage.googleapis.com/flatcitybuf/3dbag_partial.fcb" /> -->
   <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
     value="https://storage.googleapis.com/flatcitybuf/delft_attr.fcb" /> -->
 
@@ -207,6 +211,7 @@
       let count = 0;
       try {
         while (true) {
+          console.log('fetching feature: ', count + 1);
           log(`fetching feature ${count + 1}...`);
           const feature = await iter.next();
           if (feature === undefined || feature === null) {

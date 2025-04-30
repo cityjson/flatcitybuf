@@ -8,7 +8,7 @@ check-common:
 	cargo fmt
 	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm
 	cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
-# cargo machete --all-features --workspace --exclude wasm
+	# cargo machete --exclude wasm
 	cargo nextest run --all-features --workspace --exclude fcb_wasm
 	cargo check --all-features --workspace --exclude fcb_wasm
 	cargo build --workspace --all-features --exclude fcb_wasm
@@ -22,7 +22,7 @@ check-wasm:
 
 .PHONY: ser
 ser:
-	cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o fcb_core/tests/data/delft_attr.fcb --attr-index b3_h_dak_50p,identificatie
+	cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl  -o fcb_core/tests/data/delft_attr.fcb --attr-index identificatie,tijdstipregistratie,b3_is_glas_dak,b3_h_dak_50p --attr-branching-factor 256
 # cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o temp/delft_bbox.fcb
 # cargo run --bin flatcitybuf_cli serialize -i tests/data/delft.city.jsonl -o temp/delft.fcb
 	# cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o fcb_core/benchmark_data/attribute/delft.fcb

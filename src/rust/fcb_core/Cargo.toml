@@ -7,52 +7,32 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["http"]
-http = ["http-range-client", "reqwest", "bytes"]
-wasm = [
-  "wasm-bindgen",
-  "wasm-bindgen-futures",
-  "gloo-net",
-  "js-sys",
-  "getrandom",
-]
-extension = ["cjseq/extension"]
+http = ["http-range-client", "bytes"]
+
 
 [dependencies]
 bytes = { workspace = true, optional = true }
 flatbuffers = { workspace = true }
 byteorder = { workspace = true }
-cjseq = { workspace = true, features = [] }
+cjseq = { workspace = true }
 tempfile = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 fallible-streaming-iterator = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
+log = { workspace = true }
 packed_rtree = { path = "../packed_rtree" }
-bst = { path = "../bst" }
+static-btree = { path = "../static-btree" }
 ordered-float = { workspace = true }
 chrono = { workspace = true }
 http-range-client = { workspace = true, default-features = false, optional = true, features = [
   "reqwest-async",
 ] }
-reqwest = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
-[target.'cfg(feature = "http")'.dependencies]
-tokio = { workspace = true }
-http-range-client = { workspace = true, default-features = false, optional = true, features = [
-  "reqwest-async",
-] }
-reqwest = { workspace = true, optional = true }
-getrandom = { workspace = true, optional = true, default-features = false, features = [
-  "js",
-] }
-async-trait = { workspace = true, optional = true, default-features = false }
-gloo-net = { workspace = true, optional = true }
-js-sys = { workspace = true, optional = true }
-wasm-bindgen = { workspace = true, optional = true }
-wasm-bindgen-futures = { workspace = true, optional = true }
-
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { workspace = true }
 
 [lib]
 name = "fcb_core"
@@ -75,6 +55,14 @@ path = "benches/read_profile.rs"
 name = "read_cj"
 path = "src/bin/read_cj.rs"
 
+[[bin]]
+name = "read_attr_stream"
+path = "src/bin/read_attr_stream.rs"
+
+[[bin]]
+name = "read_attr"
+path = "src/bin/read_attr.rs"
+
 [[bench]]
 name = "read"
 harness = false
@@ -89,5 +77,13 @@ memory-stats = { workspace = true }
 pretty_assertions = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+env_logger = { workspace = true }
+
+# --performance comparison
 bson = { workspace = true }
 serde_cbor = { workspace = true }
+
+
+[profile.release]
+debug = 1
+strip = "debuginfo"

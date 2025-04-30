@@ -1,9 +1,9 @@
 pub mod city_buffer;
 pub mod deserializer;
-use bst::ValueOffset;
 use city_buffer::*;
 use cjseq::CityJSONFeature;
 use deserializer::to_cj_feature;
+use static_btree::Offset;
 
 use crate::error::Error;
 use crate::fb::{size_prefixed_root_as_city_feature, CityFeature};
@@ -33,7 +33,7 @@ pub struct FeatureIter<R, S> {
     /// Select>ed features or None if no bbox filter
     item_filter: Option<Vec<packed_rtree::SearchResultItem>>,
     /// Selected attributes or None if no attribute filter
-    item_attr_filter: Option<Vec<ValueOffset>>,
+    item_attr_filter: Option<Vec<Offset>>,
     /// Number of selected features (None for undefined feature count)
     count: Option<usize>,
     /// Current feature number
@@ -460,7 +460,7 @@ impl<R: Read, S> FeatureIter<R, S> {
         verify: bool,
         buffer: FcbBuffer,
         item_filter: Option<Vec<packed_rtree::SearchResultItem>>,
-        item_attr_filter: Option<Vec<ValueOffset>>,
+        item_attr_filter: Option<Vec<Offset>>,
         feature_offset: FeatureOffset,
         total_feat_count: u64,
     ) -> FeatureIter<R, S> {

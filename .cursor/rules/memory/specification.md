@@ -167,7 +167,7 @@ graph TD
     C --> C1[4 bytes uint32]
     D --> D1[FlatBuffers Header]
     E --> E1[Packed R-tree]
-    F --> F1[Sorted Array Index]
+    F --> F1[Static B+tree Index]
     G --> G1[FlatBuffers Features]
 ```
 
@@ -175,7 +175,7 @@ graph TD
 2. **header size**: 4 bytes uint32 indicating the size of the header in bytes
 3. **header**: flatbuffers-encoded header containing metadata, schema, and index information
 4. **r-tree index**: packed r-tree for spatial indexing
-5. **attribute index**: sorted array-based index for attribute queries
+5. **attribute index**: static b+tree indices for attribute queries
 6. **features**: the actual city objects encoded as flatbuffers
 
 each section is aligned to facilitate efficient http range requests, allowing clients to fetch only the parts they need.
@@ -244,62 +244,89 @@ for 3d filtering, additional z-coordinate filtering must be performed after retr
 
 ## attribute indexing
 
-flatcitybuf implements a sorted array-based index for efficient attribute queries:
+flatcitybuf implements a b-tree-based index for efficient attribute queries:
 
 ### encoding structure
 
-the attribute index is stored as a sorted array of key-value entries:
+the attribute index is organized as a static/implicit b-tree structure:
 
-```
-┌─────────────────┐
-│ entry count     │ 8 bytes, number of entries
-├─────────────────┤
-│ key-value entry │ variable length
-├─────────────────┤
-│ key-value entry │ variable length
-├─────────────────┤
-│ ...             │
-└─────────────────┘
-```
+Entries in the index are stored and they have fixed size of key + pointer. The byte size of the key is dependent on the attribute type. .e.g. for i32, the key is 4 bytes.
 
-each key-value entry contains:
+- **internal nodes**: contain keys and pointers to child nodes
+- **leaf nodes**: contain keys and offsets to features
+- **node structure**: each node includes a entry count, and next-node pointer (for leaf nodes)
 
-- **key length**: 8 bytes, length of the key in bytes
-- **key**: variable length, serialized key value
-- **offsets count**: 8 bytes, number of offsets
-- **offsets**: array of 8-byte offsets pointing to features
+this block-based structure aligns with typical page sizes and efficient http range requests, significantly improving i/o performance compared to the previous sorted array approach
+
+### payload section
+
+when duplicate keys exist within an index, a special payload section is used:
+
+- **payload entries**: store arrays of offsets that point to features with the same key
+- **payload reference**: leaf nodes store a tagged offset (MSB set to 1) that points to a payload entry
+- **offset arrays**: each payload entry contains a count followed by an array of feature offsets
+
+this approach maintains efficient tree traversal for unique keys while properly handling duplicate keys with minimal overhead. the payload section is placed at the end of the index section, after all the node entries.
+
+### payload optimization techniques
+
+two major optimizations improve remote access efficiency for the payload section:
+
+1. **payload prefetching**:
+   - a configurable portion of the payload section is prefetched into a cache during the initial query
+   - the optimal prefetch size is calculated based on:
+     - total tree size (number of entries)
+     - estimated duplicate percentage
+     - average entries per duplicate key
+   - prefetched data is stored in a query-scoped cache for fast access
+   - cache hits eliminate individual http requests for payload entries
+
+2. **batch payload resolution**:
+   - during tree traversal, references to payload entries are collected rather than immediately resolved
+   - after traversal completes, payload references are:
+     - deduplicated to avoid redundant fetches
+     - grouped by proximity to minimize http requests
+     - resolved in batches through consolidated http requests
+   - results from direct offsets and payload entries are combined in the final result set
+
+these optimizations significantly reduce http overhead when working with datasets containing duplicate keys.
 
 ### serialization by type
 
-different attribute types are serialized using the `byteserializable` trait:
+different attribute types are serialized using the `keyencoder` trait:
 
-- **integers**: stored in little-endian format (i8, i16, i32, i64, u8, u16, u32, u64)
+- **integers**: stored in little-endian format with fixed size (i8, i16, i32, i64, u8, u16, u32, u64)
 - **floating point**: wrapped in `orderedfloat` to handle nan values properly
-- **strings**: utf-8 encoded byte arrays
+- **strings**: fixed-width prefix with utf-8 encoding and overflow handling
 - **booleans**: single byte (0 for false, 1 for true)
-- **datetimes**: 12 bytes (8 for timestamp, 4 for nanoseconds)
-- **dates**: 12 bytes (4 for year, 4 for month, 4 for day)
+- **datetimes**: normalized representation for efficient comparison
+- **dates**: normalized format preserving chronological ordering
 
 ### query algorithm
 
-the attribute index supports various query operations:
+the b-tree index supports various query operations with improved efficiency:
 
-- **exact match**: binary search to find the exact key
-- **range queries**: find all keys within a specified range
+- **exact match**: logarithmic search time through the tree height (log_b(n) where b is the branching factor)
+- **range queries**: efficient traversal using linked leaf nodes
 - **comparison operators**: =, !=, >, >=, <, <=
-- **compound queries**: multiple conditions combined with logical and
+- **compound queries**: multiple conditions combined with logical and/or
 
-the `multiindex` structure maps field names to their corresponding indices, allowing for heterogeneous index types.
+the `queryexecutor` coordinates between multiple b-tree indices and handles selectivity-based optimization.
 
 ### http optimization
 
-currently, the attribute index can filter results when used with http range requests, but has limitations:
+the b-tree structure offers significant advantages for http range requests:
 
-1. **current implementation**: each matching feature is fetched individually, which can lead to many small http requests
-2. **future work**: batch processing of nearby offsets to reduce the number of http requests
-3. **optimization needed**: streaming processing for attribute indices to avoid loading all attributes at once
+1. **reduced request count**: fewer http requests due to logarithmic tree height
+2. **block-level caching**: client-side caching of frequently accessed nodes improves performance
+3. **efficient range queries**: linked leaf nodes enable efficient range scans without traversing the tree repeatedly
+4. **progressive loading**: loads only the nodes needed for a query
 
-these optimizations will significantly improve performance for attribute-based queries over http, especially for large datasets with many features.
+future optimizations include:
+
+1. **batch processing**: grouping feature requests based on spatial proximity
+2. **prefetching**: predicting which nodes might be needed and fetching them proactively
+3. **advanced caching**: implementing ttl and size-based cache management
 
 ## boundaries, semantics, and appearances encoding
 
@@ -481,6 +508,26 @@ flatcitybuf implements several optimizations for http access:
    - features are loaded on demand as they're needed
    - supports streaming iteration through features
    - allows applications to start processing data before the entire file is downloaded
+
+5. **payload optimizations**:
+   - **payload prefetching**: proactively caches parts of the payload section during initial query execution
+     - uses adaptive sizing based on tree characteristics (16kb-1mb typical range)
+     - maintains prefetched data in a query-scoped cache
+     - eliminates individual http requests for cached payload entries
+
+   - **batch payload resolution**: combines multiple payload lookups into minimal http requests
+     - collects payload references during tree traversal instead of resolving immediately
+     - deduplicates and groups nearby payload references before http requests
+     - makes consolidated http requests for adjacent payload entries
+     - processes all fetched payload entries in memory
+     - can reduce http requests by up to 90% for queries returning many results
+
+   - **payload reference handling**: intelligently manages the tradeoff between memory usage and network efficiency
+     - direct offsets are resolved immediately without additional http requests
+     - payload references are either resolved from cache or batched for optimal http efficiency
+     - result processing respects the original ordering of matching keys
+
+these optimizations work together to minimize latency and bandwidth usage when accessing flatcitybuf files over http, making the format particularly well-suited for cloud-hosted datasets.
 
 ## file dependencies graph
 

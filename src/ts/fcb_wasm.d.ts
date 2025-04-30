@@ -35,7 +35,7 @@ export class HttpFcbReader {
 }
 /**
  * A wasm‑friendly wrapper over `AttrQuery`, which is defined as:
- * `pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;`
+ * `pub type AttrQuery = Vec<(String, Operator, )>;`
  */
 export class WasmAttrQuery {
   free(): void;
@@ -85,8 +85,8 @@ export interface InitOutput {
   readonly __wbindgen_export_4: WebAssembly.Table;
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure332_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure399_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure400_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure440_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

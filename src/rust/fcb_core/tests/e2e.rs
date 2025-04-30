@@ -462,7 +462,6 @@ fn test_geometry_template_cycle() -> Result<()> {
 }
 
 #[test]
-#[cfg(feature = "extension")]
 fn test_extension_serialization_cycle() -> Result<()> {
     // Setup paths
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

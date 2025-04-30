@@ -71,8 +71,8 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 2. **Spatial Indexing - Packed R-tree Implementation**
    - Implemented packed R-tree for spatial indexing of features.
 
-3. **Binary Search Tree (BST) for Attribute Indexing**
-   - Implemented ByteSerializable trait for efficient indexing.
+3. **Static(Implicit) B+tree for Attribute Indexing**
+   - Implement Static(Implicit) B+tree for attribute indexing.
    - Query execution and sorted index storage.
 
 4. **WASM Build Support**
@@ -91,6 +91,7 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
    - Implement progressive loading of attribute indices to reduce memory footprint.
    - Develop a buffering strategy that only keeps frequently accessed indices in memory.
    - Research efficient serialization formats for attribute indices that support partial loading.
+   - Implement a B+tree for attribute indexing. Beforehand, I've implemented Binary Search Tree for attribute indexing. However, since the height of the binary search tree is log2(n), it caused a lot of cache misses when the dataset is large. I'll switch to a B+tree for attribute indexing since B+tree fetches larger chunks of data at once.
 
 2. **Performance Optimization for HTTP Fetching**
    - Improve fetching efficiency, reducing per-feature requests for batch retrieval.
@@ -218,6 +219,7 @@ While optimized data formats such as PMTiles, FlatBuffers, Mapbox Vector Tiles, 
 - Improved texture handling in CityJSON encoding.
 - Completed initial benchmarking against CityJSON and CityJSONSeq.
 - Created preliminary documentation for the file format specification.
+- Implemented complete B-tree implementation for local file system and in-memory storage with caching optimizations.
 
 ## progress status
 

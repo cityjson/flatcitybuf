@@ -39,10 +39,6 @@ pub enum Error {
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
 
-    // Data structure errors
-    #[error("BST error: {0}")]
-    BstError(#[from] bst::Error),
-
     #[error("R-tree error: {0}")]
     RtreeError(#[from] packed_rtree::Error),
 
@@ -77,6 +73,12 @@ pub enum Error {
         #[from]
         source: CjseqError,
     },
+
+    #[error("StaticBTree error: {source}")]
+    StaticBTree {
+        #[from]
+        source: static_btree::Error,
+    },
 }
 
 impl Error {
@@ -105,7 +107,7 @@ impl Error {
     pub fn is_index_error(&self) -> bool {
         matches!(
             self,
-            Error::IndexCreationError(_) | Error::QueryExecutionError(_) | Error::BstError(_)
+            Error::IndexCreationError(_) | Error::QueryExecutionError(_)
         )
     }
 }

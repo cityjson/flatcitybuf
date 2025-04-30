@@ -1,50 +1,48 @@
 use crate::deserializer::to_cj_feature;
-use crate::{build_query, fb::*, process_attr_index_entry, AttrQuery};
+use crate::{add_indices_to_multi_memory_index, build_query, fb::*, AttrQuery};
 
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::reader::city_buffer::FcbBuffer;
 use crate::{
     check_magic_bytes, size_prefixed_root_as_city_feature, HEADER_MAX_BUFFER_SIZE,
     HEADER_SIZE_SIZE, MAGIC_BYTES_SIZE,
 };
-use bst::{ByteSerializable, HttpRange as BstHttpRange, MultiIndex};
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, Bytes, BytesMut};
+use chrono::{DateTime, Utc};
 use cjseq::CityJSONFeature;
-#[cfg(feature = "http")]
-use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
-use reqwest;
-
-#[cfg(feature = "http")]
 use http_range_client::BufferedHttpRangeClient;
+use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
+use log::debug;
+use reqwest;
+use static_btree::{FixedStringKey, Float, KeyType, Operator};
 
-use bst::StreamableMultiIndex;
 use packed_rtree::{http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree};
+use static_btree::{
+    http::HttpRange as AttrHttpRange, http::HttpSearchResultItem as AttrHttpSearchResultItem,
+};
+use static_btree::{HttpIndex, HttpMultiIndex};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Range;
-use tracing::debug;
 use tracing::trace;
 
 #[cfg(test)]
 mod mock_http_range_client;
-
-// #[cfg(feature = "wasm")]
-// mod wasm_client;
 
 // The largest request we'll speculatively make.
 // If a single huge feature requires, we'll necessarily exceed this limit.
 const DEFAULT_HTTP_FETCH_SIZE: usize = 1_048_576; // 1MB
 
 /// FlatCityBuf dataset HTTP reader
-pub struct HttpFcbReader<T: AsyncHttpRangeClient> {
+pub struct HttpFcbReader<T: AsyncHttpRangeClient + Send + Sync> {
     client: AsyncBufferedHttpRangeClient<T>,
     // feature reading requires header access, therefore
     // header_buf is included in the FcbBuffer struct.
     fbs: FcbBuffer,
 }
 
-pub struct AsyncFeatureIter<T: AsyncHttpRangeClient> {
+pub struct AsyncFeatureIter<T: AsyncHttpRangeClient + Send + Sync> {
     client: AsyncBufferedHttpRangeClient<T>,
     // feature reading requires header access, therefore
     // header_buf is included in the FcbBuffer struct.
@@ -55,21 +53,20 @@ pub struct AsyncFeatureIter<T: AsyncHttpRangeClient> {
     count: usize,
 }
 
-#[cfg(feature = "http")]
 impl HttpFcbReader<reqwest::Client> {
-    pub async fn open(url: &str) -> Result<HttpFcbReader<reqwest::Client>, Error> {
+    pub async fn open(url: &str) -> Result<HttpFcbReader<reqwest::Client>> {
         trace!("starting: opening http reader, reading header");
         let client = BufferedHttpRangeClient::new(url);
         Self::_open(client).await
     }
 }
 
-impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
-    pub async fn new(client: AsyncBufferedHttpRangeClient<T>) -> Result<HttpFcbReader<T>, Error> {
+impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
+    pub async fn new(client: AsyncBufferedHttpRangeClient<T>) -> Result<HttpFcbReader<T>> {
         Self::_open(client).await
     }
 
-    async fn _open(mut client: AsyncBufferedHttpRangeClient<T>) -> Result<HttpFcbReader<T>, Error> {
+    async fn _open(mut client: AsyncBufferedHttpRangeClient<T>) -> Result<HttpFcbReader<T>> {
         // Because we use a buffered HTTP reader, anything extra we fetch here can
         // be utilized to skip subsequent fetches.
         // Immediately following the header is the optional spatial index, we deliberately fetch
@@ -165,16 +162,15 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
             .unwrap_or(0) as u64
     }
 
+    fn index_size(&self) -> u64 {
+        self.rtree_index_size() + self.attr_index_size()
+    }
+
     /// Select all features.
-    pub async fn select_all(self) -> Result<AsyncFeatureIter<T>, Error> {
+    pub async fn select_all(self) -> Result<AsyncFeatureIter<T>> {
         let header = self.fbs.header();
         let count = header.features_count();
-        // TODO: support reading with unknown feature count
-        let index_size = if header.index_node_size() > 0 {
-            PackedRTree::index_size(count as usize, header.index_node_size())
-        } else {
-            0
-        };
+        let index_size = self.index_size() as usize;
         // Skip index
         let feature_base = self.header_len() + index_size;
         Ok(AsyncFeatureIter {
@@ -194,7 +190,7 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
         min_y: f64,
         max_x: f64,
         max_y: f64,
-    ) -> Result<AsyncFeatureIter<T>, Error> {
+    ) -> Result<AsyncFeatureIter<T>> {
         trace!("starting: select_bbox, traversing index");
         // Read R-Tree index and build filter for features within bbox
         let header = self.fbs.header();
@@ -240,88 +236,162 @@ impl<T: AsyncHttpRangeClient> HttpFcbReader<T> {
 
     /// This method uses the attribute index section to find matching feature offsets.
     /// It then groups (batches) the remote feature ranges in order to reduce IO overhead.
-    pub async fn select_attr_query(
-        mut self,
-        query: &AttrQuery,
-    ) -> Result<AsyncFeatureIter<T>, Error> {
+    pub async fn select_attr_query(mut self, query: &AttrQuery) -> Result<AsyncFeatureIter<T>> {
         trace!("starting: select_attr_query via http reader");
-        unimplemented!()
-        // let header = self.fbs.header();
-        // let header_len = self.header_len();
-        // // Assume the header provides rtree and attribute index sizes.
-        // let rtree_index_size = self.rtree_index_size() as usize;
-        // let attr_index_size = self.attr_index_size() as usize;
-        // let attr_index_offset = header_len + rtree_index_size;
-        // let feature_begin = header_len + rtree_index_size + attr_index_size;
+        let header = self.fbs.header();
+        let header_len = self.header_len();
+        // Assume the header provides rtree and attribute index sizes.
 
-        // let attr_index_entries = header
-        //     .attribute_index()
-        //     .ok_or_else(|| Error::AttributeIndexNotFound)?;
-        // let columns: Vec<Column> = header
-        //     .columns()
-        //     .ok_or_else(|| Error::NoColumnsInHeader)?
-        //     .iter()
-        //     .collect();
+        // file structure:
+        // magic_bytes + header + rtree_index + attr_index1 + attr_index2 + ... + features
+        let rtree_index_size = self.rtree_index_size() as usize;
+        let attr_index_size = self.attr_index_size() as usize;
+        let attr_index_begin = header_len + rtree_index_size;
+        let feature_begin = header_len + rtree_index_size + attr_index_size;
 
-        // // Create a map of field names to index offsets
-        // let mut index_offsets = HashMap::new();
-        // let mut field_names = Vec::new();
+        let attr_index_entries = header
+            .attribute_index()
+            .ok_or_else(|| Error::AttributeIndexNotFound)?;
+        let mut attr_index_entries = attr_index_entries.iter().collect::<Vec<_>>();
+        let columns: Vec<Column> = header
+            .columns()
+            .ok_or_else(|| Error::NoColumnsInHeader)?
+            .iter()
+            .collect();
+        attr_index_entries.sort_by_key(|attr_info| attr_info.index());
 
-        // for attr_info in attr_index_entries.iter() {
-        //     let field_name = columns
-        //         .iter()
-        //         .find(|c| c.index() == attr_info.index())
-        //         .map(|c| c.name().to_string())
-        //         .ok_or_else(|| Error::AttributeIndexNotFound)?;
-        //     let offset = attr_index_offset + attr_info.length() as usize;
-        //     index_offsets.insert(field_name.clone(), offset);
-        //     field_names.push(field_name);
-        // }
+        // debug!("attr_index_entries: {attr_index_entries:?}");
+        // debug print detail of attr_index_entries
+        for attr_info in attr_index_entries.iter() {
+            debug!("attr_info: {attr_info:?}");
+        }
+        // Build the query
+        let query = build_query(&query);
 
-        // // Create a StreamableMultiIndex from HTTP range requests
-        // let streamable_index =
-        //     StreamableMultiIndex::from_http(&mut self.client, &index_offsets).await?;
+        // Create a StreamableMultiIndex from HTTP range requests
+        let mut http_multi_index = HttpMultiIndex::new();
 
-        // // Build the query
-        // let bst_query = build_query(&query);
+        let mut current_index_begin = attr_index_begin;
+        for attr_info in attr_index_entries.iter() {
+            Self::add_indices_to_multi_http_index(
+                &mut http_multi_index,
+                &columns,
+                attr_info,
+                current_index_begin,
+                feature_begin,
+            )?;
+            current_index_begin += attr_info.length() as usize;
+        }
 
-        // // Execute the query using HTTP streaming
-        // let result = streamable_index
-        //     .http_stream_query(
-        //         &mut self.client,
-        //         &bst_query,
-        //         attr_index_offset,
-        //         feature_begin,
-        //     )
-        //     .await?;
+        let result = http_multi_index
+            .query(&mut self.client, &query.conditions)
+            .await?;
 
-        // let count = result.len();
+        let count = result.len();
 
-        // let http_ranges: Vec<HttpRange> = result
-        //     .into_iter()
-        //     .map(|item| match item.range {
-        //         BstHttpRange::Range(range) => HttpRange::Range(range.start..range.end),
-        //         BstHttpRange::RangeFrom(range) => HttpRange::RangeFrom(range.start..),
-        //     })
-        //     .collect();
+        let http_ranges: Vec<HttpRange> = result
+            .into_iter()
+            .map(|item| match item.range {
+                AttrHttpRange::Range(range) => HttpRange::Range(range.start..range.end),
+                AttrHttpRange::RangeFrom(range) => HttpRange::RangeFrom(range.start..),
+            })
+            .collect();
 
-        // trace!(
-        //     "completed: select_attr_query via http reader, matched features: {}",
-        //     count
-        // );
-        // Ok(AsyncFeatureIter {
-        //     client: self.client,
-        //     fbs: self.fbs,
-        //     selection: FeatureSelection::SelectAttr(SelectAttr {
-        //         ranges: http_ranges,
-        //         range_pos: 0,
-        //     }),
-        //     count,
-        // })
+        trace!(
+            "completed: select_attr_query via http reader, matched features: {}",
+            count
+        );
+        Ok(AsyncFeatureIter {
+            client: self.client,
+            fbs: self.fbs,
+            selection: FeatureSelection::SelectAttr(SelectAttr {
+                ranges: http_ranges,
+                range_pos: 0,
+            }),
+            count,
+        })
+    }
+
+    pub fn add_indices_to_multi_http_index<C: AsyncHttpRangeClient + Send + Sync>(
+        multi_index: &mut HttpMultiIndex<C>,
+        columns: &[Column],
+        attr_info: &AttributeIndex,
+        index_begin: usize,
+        feature_begin: usize,
+    ) -> Result<()> {
+        if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
+            // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
+            let index_begin = index_begin as u64;
+            match col.type_() {
+                ColumnType::Int => {
+                    let index = HttpIndex::<i32>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                ColumnType::Float => {
+                    let index = HttpIndex::<Float<f32>>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                ColumnType::Double => {
+                    let index = HttpIndex::<Float<f64>>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                ColumnType::String => {
+                    let index = HttpIndex::<FixedStringKey<50>>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+
+                ColumnType::Bool => {
+                    let index = HttpIndex::<bool>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                ColumnType::DateTime => {
+                    let index = HttpIndex::<DateTime<Utc>>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
+                _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
+            }
+        }
+        Ok(())
     }
 }
 
-impl<T: AsyncHttpRangeClient> AsyncFeatureIter<T> {
+impl<T: AsyncHttpRangeClient + Send + Sync> AsyncFeatureIter<T> {
     pub fn header(&self) -> Header {
         self.fbs.header()
     }
@@ -334,7 +404,7 @@ impl<T: AsyncHttpRangeClient> AsyncFeatureIter<T> {
         }
     }
     /// Read next feature
-    pub async fn next(&mut self) -> Result<Option<&FcbBuffer>, Error> {
+    pub async fn next(&mut self) -> Result<Option<&FcbBuffer>> {
         let Some(buffer) = self.selection.next_feature_buffer(&mut self.client).await? else {
             return Ok(None);
         };
@@ -350,7 +420,7 @@ impl<T: AsyncHttpRangeClient> AsyncFeatureIter<T> {
         &self.fbs
     }
 
-    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature, Error> {
+    pub fn cur_cj_feature(&self) -> Result<CityJSONFeature> {
         let cj_feature = to_cj_feature(self.cur_feature().feature(), self.header().columns())?;
         Ok(cj_feature)
     }
@@ -366,7 +436,7 @@ impl FeatureSelection {
     async fn next_feature_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>, Error> {
+    ) -> Result<Option<Bytes>> {
         match self {
             FeatureSelection::SelectAll(select_all) => select_all.next_buffer(client).await,
             FeatureSelection::SelectBbox(select_bbox) => select_bbox.next_buffer(client).await,
@@ -387,7 +457,7 @@ impl SelectAll {
     async fn next_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>, Error> {
+    ) -> Result<Option<Bytes>> {
         client.min_req_size(DEFAULT_HTTP_FETCH_SIZE);
 
         if self.features_left == 0 {
@@ -414,7 +484,7 @@ impl SelectBbox {
     async fn next_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>, Error> {
+    ) -> Result<Option<Bytes>> {
         let mut next_buffer = None;
         while next_buffer.is_none() {
             let Some(feature_batch) = self.feature_batches.last_mut() else {
@@ -443,7 +513,7 @@ impl FeatureBatch {
     async fn make_batches(
         feature_ranges: Vec<HttpSearchResultItem>,
         combine_request_threshold: usize,
-    ) -> Result<Vec<Self>, Error> {
+    ) -> Result<Vec<Self>> {
         let mut batched_ranges = vec![];
 
         for search_result_item in feature_ranges.into_iter() {
@@ -518,7 +588,7 @@ impl FeatureBatch {
     async fn next_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>, Error> {
+    ) -> Result<Option<Bytes>> {
         let request_size = self.request_size();
         client.set_min_req_size(request_size);
         let Some(feature_range) = self.feature_ranges.pop_front() else {
@@ -545,7 +615,7 @@ impl SelectAttr {
     async fn next_buffer<T: AsyncHttpRangeClient>(
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
-    ) -> Result<Option<Bytes>, Error> {
+    ) -> Result<Option<Bytes>> {
         let Some(range) = self.ranges.get(self.range_pos) else {
             return Ok(None);
         };
@@ -557,42 +627,176 @@ impl SelectAttr {
     }
 }
 
+//TODO: Fix this test. It's failling bc of the mock client and payload cache.
 // #[cfg(test)]
 // mod tests {
+//     use std::{path::PathBuf, str::FromStr};
+
+//     use cjseq::CityJSONFeature;
+//     use static_btree::{FixedStringKey, Float, KeyType, Operator};
+
+//     use crate::error::Result;
 //     use crate::HttpFcbReader;
 
 //     #[tokio::test]
-//     async fn fgb_max_request_size() {
-//         let (fgb, stats) = HttpFcbReader::mock_from_file("../../test/data/UScounties.fgb")
-//             .await
-//             .unwrap();
-
-//         {
-//             // The read guard needs to be in a scoped block, else we won't release the lock and the test will hang when
-//             // the actual FGB client code tries to update the stats.
-//             let stats = stats.read().unwrap();
-//             assert_eq!(stats.request_count, 1);
-//             // This number might change a little if the test data or logic changes, but they should be in the same ballpark.
-//             assert_eq!(stats.bytes_requested, 12944);
+//     async fn fcb_http_reader_test() -> Result<()> {
+//         #[derive(Debug)]
+//         struct QueryTestCase {
+//             test_name: &'static str,
+//             query: Vec<(String, Operator, KeyType)>,
+//             expected_count: usize,
+//             validator: fn(&CityJSONFeature) -> bool,
 //         }
 
-//         // This bbox covers a large swathe of the dataset. The idea is that at least one request should be limited by the
-//         // max request size `DEFAULT_HTTP_FETCH_SIZE`, but that we should still have a reasonable number of requests.
-//         let mut iter = fgb.select_bbox(-118.0, 42.0, -100.0, 47.0).await.unwrap();
+//         let test_cases = vec![
+//                     // Test case: Expect one matching feature with b3_h_dak_50p > 2.0 and matching identificatie.
+//                     QueryTestCase {
+//                         test_name: "test_attr_index_multiple_queries: b3_h_dak_50p > 2.0 and identificatie == NL.IMBAG.Pand.0503100000012869",
+//                         query: vec![
+//                             (
+//                                 "b3_h_dak_50p".to_string(),
+//                                 Operator::Gt,
+//                                 KeyType::Float64(Float::<f64>(2.0)),
+//                             ),
+//                             (
+//                                 "identificatie".to_string(),
+//                                 Operator::Eq,
+//                                 KeyType::StringKey50(FixedStringKey::from_str(
+//                                     "NL.IMBAG.Pand.0503100000012869",
+//                                 )),
+//                             ),
+//                         ],
+//                         expected_count: 1,
+//                         validator: |feature: &CityJSONFeature| {
+//                             let mut valid_b3 = false;
+//                             let mut valid_ident = false;
+//                             for co in feature.city_objects.values() {
+//                                 if let Some(attrs) = &co.attributes {
+//                                     if let Some(val) = attrs.get("b3_h_dak_50p") {
+//                                         if val.as_f64().unwrap() > 2.0 {
+//                                             valid_b3 = true;
+//                                         }
+//                                     }
+//                                     if let Some(ident) = attrs.get("identificatie") {
+//                                         if ident.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
+//                                             valid_ident = true;
+//                                         }
+//                                     }
+//                                 }
+//                             }
+//                             valid_b3 && valid_ident
+//                         },
+//                     },
+//                     // Test case: Expect zero features where tijdstipregistratie is before 2008-01-01.
+//                     QueryTestCase {
+//                         test_name: "test_attr_index_multiple_queries: tijdstipregistratie < 2008-01-01",
+//                         query: vec![(
+//                             "tijdstipregistratie".to_string(),
+//                             Operator::Lt,
+//                             KeyType::DateTime(chrono::DateTime::<chrono::Utc>::from_str(
+//                                 "2008-01-01T00:00:00Z",
+//                             )
+//                             .unwrap()),
+//                         )],
+//                         expected_count: 0,
+//                         validator: |feature: &CityJSONFeature| {
+//                             let mut valid_tijdstip = true;
+//                             let query_tijdstip = chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0);
+//                             for co in feature.city_objects.values() {
+//                                 if let Some(attrs) = &co.attributes {
+//                                     if let Some(val) = attrs.get("tijdstipregistratie") {
+//                                         let val_tijdstip = chrono::NaiveDateTime::parse_from_str(
+//                                             val.as_str().unwrap(),
+//                                             "%Y-%m-%dT%H:%M:%S",
+//                                         )
+//                                         .unwrap();
+//                                         if val_tijdstip < query_tijdstip {
+//                                             valid_tijdstip = false;
+//                                         }
+//                                     }
+//                                 }
+//                             }
+//                             valid_tijdstip
+//                         },
+//                     },
+//                     // Test case: Expect zero features where tijdstipregistratie is after 2008-01-01.
+//                     QueryTestCase {
+//                         test_name: "test_attr_index_multiple_queries: tijdstipregistratie > 2008-01-01",
+//                         query: vec![(
+//                             "tijdstipregistratie".to_string(),
+//                             Operator::Gt,
+//                             KeyType::DateTime(chrono::DateTime::<chrono::Utc>::from_utc(
+//                                 chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0),
+//                                 chrono::Utc,
+//                             )),
+//                         )],
+//                         expected_count: 3,
+//                         validator: |feature: &CityJSONFeature| {
+//                             let mut valid_tijdstip = false;
+//                             let query_tijdstip = chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0);
+//                             for co in feature.city_objects.values() {
+//                                 if let Some(attrs) = &co.attributes {
+//                                     if let Some(val) = attrs.get("tijdstipregistratie") {
+//                                         let val_tijdstip =
+//                                             chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap())
+//                                                 .map_err(|e| eprintln!("Failed to parse datetime: {}", e))
+//                                                 .map(|dt| dt.naive_utc())
+//                                                 .unwrap_or_else(|_| {
+//                                                     chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
+//                                                 });
+//                                         if val_tijdstip > query_tijdstip {
+//                                             valid_tijdstip = true;
+//                                         }
+//                                     }
+//                                 }
+//                             }
+//                             valid_tijdstip
+//                         },
+//                     },
+//                 ];
 
-//         let mut feature_count = 0;
-//         while let Some(_feature) = iter.next().await.unwrap() {
-//             feature_count += 1;
-//         }
-//         assert_eq!(feature_count, 169);
+//         for test_case in test_cases {
+//             let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//             let input_file_path = manifest_dir.join("tests/data/small.fcb");
 
-//         {
-//             // The read guard needs to be in a scoped block, else we won't release the lock and the test will hang when
-//             // the actual FGB client code tries to update the stats.
-//             let stats = stats.read().unwrap();
-//             // These numbers might change a little if the test data or logic changes, but they should be in the same ballpark.
-//             assert_eq!(stats.request_count, 5);
-//             assert_eq!(stats.bytes_requested, 2131152);
+//             let (fcb, stats) = HttpFcbReader::mock_from_file(&input_file_path.to_str().unwrap())
+//                 .await
+//                 .unwrap();
+
+//             // {
+//             //     // The read guard needs to be in a scoped block, else we won't release the lock and the test will hang when
+//             //     // the actual FGB client code tries to update the stats.
+//             //     let stats = stats.read().unwrap();
+//             //     assert_eq!(stats.request_count, 1);
+//             //     // This number might change a little if the test data or logic changes, but they should be in the same ballpark.
+//             //     assert_eq!(stats.bytes_requested, 12944);
+//             // }
+
+//             let query = test_case.query;
+//             let mut iter = fcb.select_attr_query(&query).await.unwrap();
+
+//             let mut features = Vec::new();
+//             while let Some(feat_buf) = iter.next().await.unwrap() {
+//                 let feature = feat_buf.cj_feature()?;
+//                 features.push(feature);
+//             }
+//             assert_eq!(features.len(), test_case.expected_count);
+
+//             for feature in features {
+//                 assert!(
+//                     (test_case.validator)(&feature),
+//                     "Failed to validate feature in test case: {}",
+//                     test_case.test_name
+//                 );
+//             }
 //         }
+
+//         // {
+//         //     let stats = stats.read().unwrap();
+
+//         //     assert_eq!(stats.request_count, 5);
+//         //     assert_eq!(stats.bytes_requested, 2131152);
+//         // }
+//         Ok(())
 //     }
 // }

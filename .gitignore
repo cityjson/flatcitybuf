@@ -69,4 +69,4 @@ src/rust/fcb_core/tests/data/*.json
 
 *.plist
 flamegraph*
-.roo/
+.roo

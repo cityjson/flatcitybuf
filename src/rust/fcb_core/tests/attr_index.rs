@@ -1,21 +1,22 @@
 use anyhow::Result;
-
-use bst::{ByteSerializableValue, Operator};
 use cjseq::CityJSONFeature;
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     header_writer::HeaderWriterOptions,
-    read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
+    read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter, Operator,
 };
-use ordered_float::OrderedFloat;
 use std::{
     fs::File,
     io::{BufReader, Cursor, Seek, SeekFrom},
     path::PathBuf,
 };
 
+#[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
+    use fcb_core::{FixedStringKey, Float, KeyType};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -46,7 +47,10 @@ mod tests {
                 }
             }
         }
-        let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
+        let attr_indices = vec![
+            ("b3_h_dak_50p".to_string(), None),
+            ("identificatie".to_string(), None),
+        ];
         let mut fcb = FcbWriter::new(
             original_cj_seq.cj.clone(),
             Some(HeaderWriterOptions {
@@ -63,16 +67,16 @@ mod tests {
         }
         fcb.write(&mut memory_buffer)?;
 
-        let query: Vec<(String, Operator, ByteSerializableValue)> = vec![
+        let query: Vec<(String, Operator, KeyType)> = vec![
             (
                 "b3_h_dak_50p".to_string(),
                 Operator::Gt,
-                ByteSerializableValue::F64(OrderedFloat(2.0)),
+                KeyType::Float64(Float(2.0)),
             ),
             (
                 "identificatie".to_string(),
                 Operator::Eq,
-                ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+                KeyType::StringKey50(FixedStringKey::from_str("NL.IMBAG.Pand.0503100000012869")),
             ),
         ];
         memory_buffer.seek(std::io::SeekFrom::Start(0))?;
@@ -145,7 +149,10 @@ mod tests {
                 }
             }
         }
-        let attr_indices = vec!["b3_h_dak_50p".to_string(), "identificatie".to_string()];
+        let attr_indices = vec![
+            ("b3_h_dak_50p".to_string(), None),
+            ("identificatie".to_string(), None),
+        ];
         let mut fcb = FcbWriter::new(
             original_cj_seq.cj.clone(),
             Some(HeaderWriterOptions {
@@ -162,16 +169,16 @@ mod tests {
         }
         fcb.write(&mut memory_buffer)?;
 
-        let query: Vec<(String, Operator, ByteSerializableValue)> = vec![
+        let query: Vec<(String, Operator, KeyType)> = vec![
             (
                 "b3_h_dak_50p".to_string(),
                 Operator::Gt,
-                ByteSerializableValue::F64(OrderedFloat(2.0)),
+                KeyType::Float64(Float(2.0)),
             ),
             (
                 "identificatie".to_string(),
                 Operator::Eq,
-                ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+                KeyType::StringKey50(FixedStringKey::from_str("NL.IMBAG.Pand.0503100000012869")),
             ),
         ];
         memory_buffer.seek(std::io::SeekFrom::Start(0))?;
@@ -240,9 +247,9 @@ mod tests {
             }
         }
         let attr_indices = vec![
-            "b3_h_dak_50p".to_string(),
-            "identificatie".to_string(),
-            "tijdstipregistratie".to_string(),
+            ("b3_h_dak_50p".to_string(), None),
+            ("identificatie".to_string(), None),
+            ("tijdstipregistratie".to_string(), None),
         ];
         let mut fcb = FcbWriter::new(
             original_cj_seq.cj.clone(),
@@ -266,7 +273,7 @@ mod tests {
         // --- Helper: Run a query test ---
         fn run_query_test(
             data: &[u8],
-            query: &Vec<(String, Operator, ByteSerializableValue)>,
+            query: &Vec<(String, Operator, KeyType)>,
         ) -> Result<Vec<CityJSONFeature>> {
             // Create a new Cursor from the data.
             let mut cursor = Cursor::new(data.to_vec());
@@ -290,7 +297,7 @@ mod tests {
         #[derive(Debug)]
         struct QueryTestCase {
             test_name: &'static str,
-            query: Vec<(String, Operator, ByteSerializableValue)>,
+            query: Vec<(String, Operator, KeyType)>,
             expected_count: usize,
             /// A validator function that returns true if the feature satisfies expected conditions.
             validator: fn(&CityJSONFeature) -> bool,
@@ -304,12 +311,14 @@ mod tests {
                     (
                         "b3_h_dak_50p".to_string(),
                         Operator::Gt,
-                        ByteSerializableValue::F64(OrderedFloat(2.0)),
+                        KeyType::Float64(Float(2.0)),
                     ),
                     (
                         "identificatie".to_string(),
                         Operator::Eq,
-                        ByteSerializableValue::String("NL.IMBAG.Pand.0503100000012869".to_string()),
+                        KeyType::StringKey50(FixedStringKey::from_str(
+                            "NL.IMBAG.Pand.0503100000012869",
+                        )),
                     ),
                 ],
                 expected_count: 1,
@@ -339,13 +348,9 @@ mod tests {
                 query: vec![(
                     "tijdstipregistratie".to_string(),
                     Operator::Lt,
-                    ByteSerializableValue::DateTime(chrono::DateTime::<chrono::Utc>::from_utc(
-                        chrono::NaiveDate::from_ymd_opt(2008, 1, 1)
-                            .unwrap()
-                            .and_hms_opt(0, 0, 0)
-                            .unwrap(),
-                        chrono::Utc,
-                    )),
+                    KeyType::DateTime(chrono::DateTime::<chrono::Utc>::from_str(
+                        "2008-01-01T00:00:00Z",
+                    )?),
                 )],
                 expected_count: 0,
                 validator: |feature: &CityJSONFeature| {
@@ -368,15 +373,16 @@ mod tests {
                     valid_tijdstip
                 },
             },
-            // Test case: Expect zero features where tijdstipregistratie is after 2008-01-01.
+            // // Test case: Expect zero features where tijdstipregistratie is after 2008-01-01.
             QueryTestCase {
                 test_name: "test_attr_index_multiple_queries: tijdstipregistratie > 2008-01-01",
                 query: vec![(
                     "tijdstipregistratie".to_string(),
                     Operator::Gt,
-                    ByteSerializableValue::NaiveDateTime(
+                    KeyType::DateTime(chrono::DateTime::<chrono::Utc>::from_utc(
                         chrono::NaiveDate::from_ymd(2008, 1, 1).and_hms(0, 0, 0),
-                    ),
+                        chrono::Utc,
+                    )),
                 )],
                 expected_count: 3,
                 validator: |feature: &CityJSONFeature| {

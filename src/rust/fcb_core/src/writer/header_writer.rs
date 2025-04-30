@@ -22,6 +22,7 @@ pub struct HeaderWriter<'a> {
 }
 
 /// Configuration options for header writing process
+#[derive(Debug, Clone)]
 pub struct HeaderWriterOptions {
     /// Whether to write index information
     pub write_index: bool,
@@ -29,7 +30,7 @@ pub struct HeaderWriterOptions {
     /// Size of the index node
     pub index_node_size: u16,
     /// Attribute indices
-    pub attribute_indices: Option<Vec<String>>,
+    pub attribute_indices: Option<Vec<(String, Option<u16>)>>, // (field name, branching factor)
     /// Geographical extent
     pub geographical_extent: Option<[f64; 6]>,
 }

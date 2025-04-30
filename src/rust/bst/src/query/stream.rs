@@ -1,235 +1,336 @@
-use crate::sorted_index::{SearchableIndex, ValueOffset};
-use crate::{error, sorted_index, ByteSerializable, ByteSerializableType};
+use crate::sorted_index::ValueOffset;
+use crate::{error, ByteSerializable, ByteSerializableType};
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
 
-use chrono::{DateTime, Utc};
-#[cfg(feature = "http")]
-use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
+use super::{Operator, Query};
 
-#[cfg(feature = "http")]
-use std::ops::Range;
+/// A trait for type-safe streaming access to an index.
+pub trait TypedStreamableIndex<T: Ord + ByteSerializable + Send + Sync + 'static>:
+    Send + Sync
+{
+    /// Returns the size of the index in bytes.
+    fn index_size(&self) -> u64;
 
-/// Comparison operators for queries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Operator {
-    Eq,
-    Ne,
-    Gt,
-    Lt,
-    Ge,
-    Le,
+    /// Returns the offsets for an exact match given a key.
+    /// The reader should be positioned at the start of the index data.
+    fn stream_query_exact<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        key: &T,
+    ) -> std::io::Result<Vec<ValueOffset>>;
+
+    /// Returns the offsets for a range query given optional lower and upper keys.
+    /// The reader should be positioned at the start of the index data.
+    fn stream_query_range<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        lower: Option<&T>,
+        upper: Option<&T>,
+    ) -> std::io::Result<Vec<ValueOffset>>;
 }
 
-/// A condition in a query, consisting of a field name, an operator, and a key value.
-///
-/// The key value is stored as a byte vector, obtained via ByteSerializable::to_bytes.
-#[derive(Debug, Clone)]
-pub struct QueryCondition {
-    /// The field identifier (e.g., "id", "name", etc.)
-    pub field: String,
-    /// The comparison operator.
-    pub operator: Operator,
-    /// The key value as a byte vector (obtained via ByteSerializable::to_bytes).
-    pub key: Vec<u8>,
+/// Metadata for a serialized BufferedIndex, used for streaming access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexMeta<T: Ord + ByteSerializable + Send + Sync + 'static> {
+    /// Number of entries in the index.
+    pub entry_count: u64,
+    /// Total size of the index in bytes.
+    pub size: u64,
+    /// Phantom data to represent the type parameter.
+    pub _phantom: std::marker::PhantomData<T>,
 }
 
-/// A query consisting of one or more conditions.
-#[derive(Debug, Clone)]
-pub struct Query {
-    pub conditions: Vec<QueryCondition>,
-}
-
-/// A multi-index that maps field names to their corresponding indices.
-pub struct MultiIndex {
-    /// A mapping from field names to their corresponding index.
-    pub indices: HashMap<String, Box<dyn SearchableIndex>>,
-}
-
-impl Default for MultiIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MultiIndex {
-    /// Create a new, empty multi-index.
-    pub fn new() -> Self {
+impl<T: Ord + ByteSerializable + Send + Sync + 'static + std::fmt::Debug> IndexMeta<T> {
+    /// Creates a new IndexMeta.
+    pub fn new(entry_count: u64, size: u64) -> Self {
         Self {
-            indices: HashMap::new(),
+            entry_count,
+            size,
+            _phantom: std::marker::PhantomData,
         }
     }
 
-    /// Add an index for a field.
-    pub fn add_index(&mut self, field_name: String, index: Box<dyn SearchableIndex>) {
-        self.indices.insert(field_name, index);
+    /// Read metadata and construct an IndexMeta from a reader.
+    pub fn from_reader<R: Read + Seek>(reader: &mut R, size: u64) -> Result<Self, error::Error> {
+        let start_pos = reader.stream_position()?;
+
+        // Read the type identifier.
+        let mut type_id_bytes = [0u8; 4];
+        reader.read_exact(&mut type_id_bytes)?;
+
+        // Read the number of entries.
+        let mut entry_count_bytes = [0u8; 8];
+        reader.read_exact(&mut entry_count_bytes)?;
+        let entry_count = u64::from_le_bytes(entry_count_bytes);
+
+        // Seek back to the start position.
+        reader.seek(SeekFrom::Start(start_pos))?;
+
+        Ok(Self::new(entry_count, size))
     }
 
-    /// Execute a query against the multi-index.
-    ///
-    /// Returns a vector of offsets for records that match all conditions in the query.
-    pub fn query(&self, query: Query) -> Vec<ValueOffset> {
-        let mut candidate_sets: Vec<HashSet<ValueOffset>> = Vec::new();
+    /// Seek to a specific entry in the index.
+    pub fn seek_to_entry<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        entry_index: u64,
+        start_pos: u64,
+    ) -> std::io::Result<()> {
+        if entry_index >= self.entry_count {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "entry index {} out of bounds (max: {})",
+                    entry_index,
+                    self.entry_count - 1
+                ),
+            ));
+        }
 
-        for condition in query.conditions {
-            if let Some(index) = self.indices.get(&condition.field) {
-                let offsets: Vec<ValueOffset> = match condition.operator {
-                    Operator::Eq => {
-                        // Exactly equal.
-                        index.query_exact_bytes(&condition.key)
+        // Skip the type id (4 bytes) and entry count (8 bytes).
+        let pos = start_pos + 12;
+
+        reader.seek(SeekFrom::Start(pos))?;
+
+        // Skip entries until we reach the desired one.
+        for _ in 0..entry_index {
+            // Read the key length.
+            let mut key_len_bytes = [0u8; 8];
+            reader.read_exact(&mut key_len_bytes)?;
+            let key_len = u64::from_le_bytes(key_len_bytes);
+
+            // Skip the key.
+            reader.seek(SeekFrom::Current(key_len as i64))?;
+
+            // Read the offsets count.
+            let mut offsets_count_bytes = [0u8; 8];
+            reader.read_exact(&mut offsets_count_bytes)?;
+            let offsets_count = u64::from_le_bytes(offsets_count_bytes);
+
+            // Skip the offsets.
+            reader.seek(SeekFrom::Current((offsets_count * 8) as i64))?;
+        }
+
+        Ok(())
+    }
+
+    /// Find the lower bound for a key using binary search.
+    pub fn find_lower_bound<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        key: &T,
+        start_pos: u64,
+    ) -> std::io::Result<u64> {
+        if self.entry_count == 0 {
+            return Ok(0);
+        }
+
+        let mut left = 0;
+        let mut right = self.entry_count - 1;
+
+        while left <= right {
+            let mid = left + (right - left) / 2;
+            self.seek_to_entry(reader, mid, start_pos)?;
+
+            // Read the key length.
+            let mut key_len_bytes = [0u8; 8];
+            reader.read_exact(&mut key_len_bytes)?;
+            let key_len = u64::from_le_bytes(key_len_bytes);
+
+            // Read the key.
+            let mut key_bytes = vec![0u8; key_len as usize];
+            reader.read_exact(&mut key_bytes)?;
+
+            // Deserialize the key and compare.
+            let entry_key = T::from_bytes(&key_bytes);
+            let ordering = entry_key.cmp(key);
+
+            match ordering {
+                std::cmp::Ordering::Equal => return Ok(mid),
+                std::cmp::Ordering::Less => left = mid + 1,
+                std::cmp::Ordering::Greater => {
+                    if mid == 0 {
+                        break;
                     }
-                    Operator::Gt => {
-                        // Keys strictly greater than the boundary:
-                        // Use query_range_bytes(Some(key), None) and remove those equal to key.
-                        let offsets = index.query_range_bytes(Some(&condition.key), None);
-                        let eq = index.query_exact_bytes(&condition.key);
-                        offsets.into_iter().filter(|o| !eq.contains(o)).collect()
-                    }
-                    Operator::Ge => {
-                        // Keys greater than or equal.
-                        index.query_range_bytes(Some(&condition.key), None)
-                    }
-                    Operator::Lt => {
-                        // Keys strictly less than the boundary.
-                        index.query_range_bytes(None, Some(&condition.key))
-                    }
-                    Operator::Le => {
-                        // Keys less than or equal to the boundary:
-                        // Union the keys that are strictly less and those equal to the boundary.
-                        let mut offsets = index.query_range_bytes(None, Some(&condition.key));
-                        let eq = index.query_exact_bytes(&condition.key);
-                        offsets.extend(eq);
-                        // Remove duplicates by collecting into a set.
-                        let set: HashSet<ValueOffset> = offsets.into_iter().collect();
-                        set.into_iter().collect()
-                    }
-                    Operator::Ne => {
-                        // All offsets minus those equal to the boundary.
-                        let all: HashSet<ValueOffset> =
-                            index.query_range_bytes(None, None).into_iter().collect();
-                        let eq: HashSet<ValueOffset> = index
-                            .query_exact_bytes(&condition.key)
-                            .into_iter()
-                            .collect();
-                        all.difference(&eq).cloned().collect::<Vec<_>>()
-                    }
-                };
-                candidate_sets.push(offsets.into_iter().collect());
+                    right = mid - 1;
+                }
             }
         }
 
-        if candidate_sets.is_empty() {
-            return vec![];
-        }
-
-        // Intersect candidate sets.
-        let mut intersection: HashSet<ValueOffset> = candidate_sets.first().unwrap().clone();
-        for set in candidate_sets.iter().skip(1) {
-            intersection = intersection.intersection(set).cloned().collect();
-        }
-
-        let mut result: Vec<ValueOffset> = intersection.into_iter().collect();
-        result.sort();
-        result
+        Ok(left)
     }
 
-    /// Performs a streaming query on the multi-index without loading the entire index into memory.
-    /// This is useful for large indices where loading the entire index would be inefficient.
-    ///
-    /// # Arguments
-    ///
-    /// * `reader` - A reader positioned at the start of the index data
-    /// * `query` - The query to execute
-    /// * `index_offsets` - A map of field names to their byte offsets in the file
-    ///
-    /// # Returns
-    ///
-    /// A vector of value offsets that match the query
-    pub fn stream_query<R: Read + Seek>(
+    /// Find the upper bound for a key using binary search.
+    pub fn find_upper_bound<R: Read + Seek>(
         &self,
         reader: &mut R,
-        query: &Query,
-        index_offsets: &HashMap<String, u64>,
-    ) -> Result<Vec<ValueOffset>, error::Error> {
-        // If there are no conditions, return an empty result.
-        if query.conditions.is_empty() {
-            return Ok(Vec::new());
+        key: &T,
+        start_pos: u64,
+    ) -> std::io::Result<u64> {
+        if self.entry_count == 0 {
+            return Ok(0);
         }
 
-        let field_names: Vec<String> = query.conditions.iter().map(|c| c.field.clone()).collect();
+        let mut left = 0;
+        let mut right = self.entry_count - 1;
 
-        // Only load the indices needed for this query
-        let filtered_offsets: HashMap<String, u64> = index_offsets
-            .iter()
-            .filter(|(k, _)| field_names.contains(k))
-            .map(|(k, v)| (k.clone(), *v))
-            .collect();
+        while left <= right {
+            let mid = left + (right - left) / 2;
+            self.seek_to_entry(reader, mid, start_pos)?;
 
-        let streamable_index = StreamableMultiIndex::from_reader(reader, &filtered_offsets)?;
+            // Read the key length.
+            let mut key_len_bytes = [0u8; 8];
+            reader.read_exact(&mut key_len_bytes)?;
+            let key_len = u64::from_le_bytes(key_len_bytes);
 
-        // Execute the query using the streamable index
-        streamable_index.stream_query(reader, query)
+            // Read the key.
+            let mut key_bytes = vec![0u8; key_len as usize];
+            reader.read_exact(&mut key_bytes)?;
+
+            // Deserialize the key and compare.
+            let entry_key = T::from_bytes(&key_bytes);
+            let ordering = entry_key.cmp(key);
+
+            match ordering {
+                std::cmp::Ordering::Equal | std::cmp::Ordering::Less => left = mid + 1,
+                std::cmp::Ordering::Greater => {
+                    if mid == 0 {
+                        break;
+                    }
+                    right = mid - 1;
+                }
+            }
+        }
+
+        Ok(left)
     }
 
-    #[cfg(feature = "http")]
-    /// Performs a streaming query on the multi-index over HTTP without loading the entire index into memory.
-    /// This is useful for large indices where loading the entire index would be inefficient.
-    ///
-    /// # Arguments
-    ///
-    /// * `client` - An HTTP client for making range requests
-    /// * `query` - The query to execute
-    /// * `index_offsets` - A map of field names to their byte offsets in the file
-    /// * `feature_begin` - The byte offset where the feature data begins
-    ///
-    /// # Returns
-    ///
-    /// A vector of HTTP search result items that match the query
-    pub async fn http_stream_query<T: AsyncHttpRangeClient>(
+    /// Read the offsets for a specific entry.
+    pub fn read_offsets<R: Read + Seek>(
         &self,
-        client: &mut AsyncBufferedHttpRangeClient<T>,
-        query: &Query,
-        index_offsets: &HashMap<String, usize>,
-        feature_begin: usize,
-    ) -> std::io::Result<Vec<HttpSearchResultItem>> {
-        // If there are no conditions, return an empty result.
-        if query.conditions.is_empty() {
+        reader: &mut R,
+        entry_index: u64,
+        start_pos: u64,
+    ) -> std::io::Result<Vec<ValueOffset>> {
+        self.seek_to_entry(reader, entry_index, start_pos)?;
+
+        // Read the key length.
+        let mut key_len_bytes = [0u8; 8];
+        reader.read_exact(&mut key_len_bytes)?;
+        let key_len = u64::from_le_bytes(key_len_bytes);
+
+        // Skip the key.
+        reader.seek(SeekFrom::Current(key_len as i64))?;
+
+        // Read the offsets count.
+        let mut offsets_count_bytes = [0u8; 8];
+        reader.read_exact(&mut offsets_count_bytes)?;
+        let offsets_count = u64::from_le_bytes(offsets_count_bytes);
+
+        // Read the offsets.
+        let mut offsets = Vec::with_capacity(offsets_count as usize);
+        for _ in 0..offsets_count {
+            let mut offset_bytes = [0u8; 8];
+            reader.read_exact(&mut offset_bytes)?;
+            offsets.push(u64::from_le_bytes(offset_bytes));
+        }
+
+        Ok(offsets)
+    }
+}
+
+impl<T: Ord + ByteSerializable + Send + Sync + 'static + std::fmt::Debug> TypedStreamableIndex<T>
+    for IndexMeta<T>
+{
+    fn index_size(&self) -> u64 {
+        self.size
+    }
+
+    fn stream_query_exact<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        key: &T,
+    ) -> std::io::Result<Vec<ValueOffset>> {
+        let start_pos = reader.stream_position()?;
+        let index = self.find_lower_bound(reader, key, start_pos)?;
+
+        if index >= self.entry_count {
             return Ok(Vec::new());
         }
-        todo!()
-    }
-}
 
-#[cfg(feature = "http")]
-#[derive(Debug, Clone)]
-pub enum HttpRange {
-    Range(Range<usize>),
-    RangeFrom(std::ops::RangeFrom<usize>),
-}
+        // Seek to the found entry.
+        self.seek_to_entry(reader, index, start_pos)?;
 
-#[cfg(feature = "http")]
-impl HttpRange {
-    pub fn start(&self) -> usize {
-        match self {
-            HttpRange::Range(range) => range.start,
-            HttpRange::RangeFrom(range) => range.start,
+        // Read the key length.
+        let mut key_len_bytes = [0u8; 8];
+        reader.read_exact(&mut key_len_bytes)?;
+        let key_len = u64::from_le_bytes(key_len_bytes);
+
+        // Read the key.
+        let mut key_bytes = vec![0u8; key_len as usize];
+        reader.read_exact(&mut key_bytes)?;
+
+        // Deserialize the key and check for exact match.
+        let entry_key = T::from_bytes(&key_bytes);
+
+        if &entry_key == key {
+            // Read the offsets count.
+            let mut offsets_count_bytes = [0u8; 8];
+            reader.read_exact(&mut offsets_count_bytes)?;
+            let offsets_count = u64::from_le_bytes(offsets_count_bytes);
+
+            // Read the offsets.
+            let mut offsets = Vec::with_capacity(offsets_count as usize);
+            for _ in 0..offsets_count {
+                let mut offset_bytes = [0u8; 8];
+                reader.read_exact(&mut offset_bytes)?;
+                offsets.push(u64::from_le_bytes(offset_bytes));
+            }
+
+            return Ok(offsets);
         }
+
+        Ok(Vec::new())
     }
 
-    pub fn end(&self) -> Option<usize> {
-        match self {
-            HttpRange::Range(range) => Some(range.end),
-            HttpRange::RangeFrom(_) => None,
+    fn stream_query_range<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        lower: Option<&T>,
+        upper: Option<&T>,
+    ) -> std::io::Result<Vec<ValueOffset>> {
+        let start_pos = reader.stream_position()?;
+        // Find lower bound.
+        let start_index = if let Some(lower_key) = lower {
+            self.find_lower_bound(reader, lower_key, start_pos)?
+        } else {
+            0
+        };
+
+        // Find upper bound.
+        let end_index = if let Some(upper_key) = upper {
+            self.find_upper_bound(reader, upper_key, start_pos)?
+        } else {
+            self.entry_count
+        };
+
+        if start_index >= end_index || start_index >= self.entry_count {
+            return Ok(Vec::new());
         }
-    }
-}
 
-#[cfg(feature = "http")]
-#[derive(Debug, Clone)]
-pub struct HttpSearchResultItem {
-    /// Byte range in the feature data section
-    pub range: HttpRange,
+        let mut all_offsets = Vec::new();
+
+        // Collect all offsets within the range.
+        for entry_index in start_index..end_index.min(self.entry_count) {
+            let offsets = self.read_offsets(reader, entry_index, start_pos)?;
+            all_offsets.extend(offsets);
+        }
+
+        Ok(all_offsets)
+    }
 }
 
 /// Type-erased IndexMeta that can work with any ByteSerializable type.
@@ -247,7 +348,7 @@ pub struct TypeErasedIndexMeta {
 impl TypeErasedIndexMeta {
     /// Create a new TypeErasedIndexMeta from an IndexMeta<T>.
     pub fn from_generic<T: ByteSerializable + Ord + Send + Sync + 'static>(
-        index_meta: &sorted_index::IndexMeta<T>,
+        index_meta: &IndexMeta<T>,
         type_id: ByteSerializableType,
     ) -> Self {
         Self {
@@ -735,40 +836,20 @@ impl StreamableMultiIndex {
 
         Ok(result_vec)
     }
-
-    #[cfg(feature = "http")]
-    pub async fn http_stream_query<T: AsyncHttpRangeClient>(
-        &self,
-        client: &mut AsyncBufferedHttpRangeClient<T>,
-        query: &Query,
-        index_offset: usize,
-        feature_begin: usize,
-    ) -> std::io::Result<Vec<HttpSearchResultItem>> {
-        // TODO: Implement HTTP streaming query
-        unimplemented!("HTTP streaming query not yet implemented for TypeErasedIndexMeta");
-    }
-
-    #[cfg(feature = "http")]
-    pub async fn http_stream_query_batched<T: AsyncHttpRangeClient>(
-        &self,
-        client: &mut AsyncBufferedHttpRangeClient<T>,
-        query: &Query,
-        index_offset: usize,
-        feature_begin: usize,
-        batch_threshold: usize,
-    ) -> std::io::Result<Vec<HttpSearchResultItem>> {
-        // TODO: Implement batched HTTP streaming query
-        unimplemented!("Batched HTTP streaming query not yet implemented for TypeErasedIndexMeta");
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sorted_index::BufferedIndex;
+    use crate::Float;
     use crate::IndexSerializable;
     use crate::KeyValue;
+    use crate::QueryCondition;
+    use crate::TypedSearchableIndex;
 
+    use chrono::NaiveDate;
+    use chrono::NaiveDateTime;
     use ordered_float::OrderedFloat;
     use std::io::Cursor;
 
@@ -832,6 +913,361 @@ mod tests {
         let mut buffer = Vec::new();
         index.serialize(&mut buffer).unwrap();
         buffer
+    }
+
+    fn create_sample_date_index() -> BufferedIndex<NaiveDateTime> {
+        let mut entries = Vec::new();
+        let dates = [
+            (NaiveDate::from_ymd(2020, 1, 1).and_hms(0, 0, 0), vec![0]),
+            (NaiveDate::from_ymd(2020, 1, 2).and_hms(0, 0, 0), vec![1]),
+            (NaiveDate::from_ymd(2020, 1, 3).and_hms(0, 0, 0), vec![2]),
+            (NaiveDate::from_ymd(2020, 1, 4).and_hms(0, 0, 0), vec![3]),
+            (NaiveDate::from_ymd(2020, 1, 5).and_hms(0, 0, 0), vec![4, 5]),
+            (NaiveDate::from_ymd(2020, 1, 7).and_hms(0, 0, 0), vec![6]),
+            (NaiveDate::from_ymd(2020, 1, 8).and_hms(0, 0, 0), vec![7]),
+            (NaiveDate::from_ymd(2020, 1, 9).and_hms(0, 0, 0), vec![8]),
+            (NaiveDate::from_ymd(2020, 1, 10).and_hms(0, 0, 0), vec![9]),
+            (
+                NaiveDate::from_ymd(2020, 1, 11).and_hms(0, 0, 0),
+                vec![10, 11, 12],
+            ),
+            (NaiveDate::from_ymd(2020, 1, 14).and_hms(0, 0, 0), vec![13]),
+            (NaiveDate::from_ymd(2020, 1, 15).and_hms(0, 0, 0), vec![14]),
+            (NaiveDate::from_ymd(2020, 1, 16).and_hms(0, 0, 0), vec![15]),
+            (NaiveDate::from_ymd(2020, 1, 17).and_hms(0, 0, 0), vec![16]),
+            (NaiveDate::from_ymd(2020, 1, 18).and_hms(0, 0, 0), vec![17]),
+            (NaiveDate::from_ymd(2020, 1, 19).and_hms(0, 0, 0), vec![18]),
+            (NaiveDate::from_ymd(2020, 1, 20).and_hms(0, 0, 0), vec![19]),
+        ];
+        for (date, offsets) in dates.iter() {
+            entries.push(KeyValue {
+                key: *date,
+                offsets: offsets.iter().map(|&i| i as u64).collect(),
+            });
+        }
+        let mut index = BufferedIndex::new();
+        index.build_index(entries);
+        index
+    }
+
+    #[test]
+    fn test_stream_query_exact_height() -> Result<(), error::Error> {
+        // Create the index
+        let index = create_sample_height_index();
+
+        // Serialize to a temporary file
+        let mut tmp_file = tempfile::NamedTempFile::new()?;
+        index.serialize(&mut tmp_file)?;
+
+        // Get the size of the serialized index
+        let size = tmp_file.as_file().metadata()?.len();
+
+        // Prepare for reading
+        let mut file = tmp_file.reopen()?;
+        file.seek(SeekFrom::Start(0))?;
+
+        // Read the metadata
+        let index_meta = IndexMeta::<Float<f32>>::from_reader(&mut file, size)?;
+
+        // Reset position
+        file.seek(SeekFrom::Start(0))?;
+
+        // Perform streaming query
+        let test_height = OrderedFloat(74.5);
+        let stream_results = index_meta.stream_query_exact(&mut file, &test_height)?;
+
+        // Also test with in-memory cursor
+        let mut serialized = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut serialized);
+            index.serialize(&mut cursor)?;
+        }
+
+        let mut cursor = Cursor::new(&serialized);
+        let index_meta =
+            IndexMeta::<Float<f32>>::from_reader(&mut cursor, serialized.len() as u64)?;
+
+        cursor.set_position(0);
+        let stream_results = index_meta.stream_query_exact(&mut cursor, &test_height)?;
+
+        // Verify results
+        let typed_results = index.query_exact(&test_height);
+        assert_eq!(
+            stream_results,
+            typed_results.map(|v| v.to_vec()).unwrap_or_default()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_query_range_height() -> Result<(), error::Error> {
+        // Create the index
+        let index = create_sample_height_index();
+
+        // Serialize to a temporary file
+        let mut tmp_file = tempfile::NamedTempFile::new()?;
+        index.serialize(&mut tmp_file)?;
+
+        // Get the size of the serialized index
+        let size = tmp_file.as_file().metadata()?.len();
+
+        // Prepare for reading
+        let mut file = tmp_file.reopen()?;
+        file.seek(SeekFrom::Start(0))?;
+
+        // Read the metadata
+        let index_meta = IndexMeta::<Float<f32>>::from_reader(&mut file, size)?;
+
+        // Reset position
+        file.seek(SeekFrom::Start(0))?;
+
+        // Define range query
+        let lower = OrderedFloat(70.0);
+        let upper = OrderedFloat(75.0);
+
+        // Perform streaming query
+        let stream_results =
+            index_meta.stream_query_range(&mut file, Some(&lower), Some(&upper))?;
+
+        // Also test with in-memory cursor
+        let mut serialized = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut serialized);
+            index.serialize(&mut cursor)?;
+        }
+
+        let mut cursor = Cursor::new(&serialized);
+        let index_meta =
+            IndexMeta::<Float<f32>>::from_reader(&mut cursor, serialized.len() as u64)?;
+
+        cursor.set_position(0);
+        let stream_results =
+            index_meta.stream_query_range(&mut cursor, Some(&lower), Some(&upper))?;
+
+        // Verify results match the typed query
+        let typed_results = index.query_range(Some(&lower), Some(&upper));
+        let typed_flat: Vec<ValueOffset> = typed_results.into_iter().flatten().cloned().collect();
+        assert_eq!(stream_results, typed_flat);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_query_exact_id() -> Result<(), error::Error> {
+        // Create the index
+        let index = create_sample_id_index();
+
+        // Serialize to a temporary file
+        let mut tmp_file = tempfile::NamedTempFile::new()?;
+        index.serialize(&mut tmp_file)?;
+
+        // Get the size of the serialized index
+        let size = tmp_file.as_file().metadata()?.len();
+
+        // Prepare for reading
+        let mut file = tmp_file.reopen()?;
+        file.seek(SeekFrom::Start(0))?;
+
+        // Read the metadata
+        let index_meta = IndexMeta::<String>::from_reader(&mut file, size)?;
+
+        // Reset position
+        file.seek(SeekFrom::Start(0))?;
+
+        // Perform streaming query
+        let test_id = "c3".to_string();
+        let stream_results = index_meta.stream_query_exact(&mut file, &test_id)?;
+
+        let typed_results = index.query_exact(&test_id);
+        assert_eq!(
+            stream_results,
+            typed_results.map(|v| v.to_vec()).unwrap_or_default()
+        );
+
+        // Also test with in-memory cursor
+        let mut serialized = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut serialized);
+            index.serialize(&mut cursor)?;
+        }
+
+        let mut cursor = Cursor::new(&serialized);
+        let index_meta = IndexMeta::<String>::from_reader(&mut cursor, serialized.len() as u64)?;
+
+        cursor.set_position(0);
+        let stream_results = index_meta.stream_query_exact(&mut cursor, &test_id)?;
+
+        // Verify results
+        assert_eq!(
+            stream_results,
+            typed_results.map(|v| v.to_vec()).unwrap_or_default()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_query_range_id() -> Result<(), error::Error> {
+        // Create the index
+        let index = create_sample_id_index();
+
+        // Serialize to a temporary file
+        let mut tmp_file = tempfile::NamedTempFile::new()?;
+        index.serialize(&mut tmp_file)?;
+
+        // Get the size of the serialized index
+        let size = tmp_file.as_file().metadata()?.len();
+
+        // Prepare for reading
+        let mut file = tmp_file.reopen()?;
+        file.seek(SeekFrom::Start(0))?;
+
+        // Read the metadata
+        let index_meta = IndexMeta::<String>::from_reader(&mut file, size)?;
+
+        // Reset position
+        file.seek(SeekFrom::Start(0))?;
+
+        // Define range query
+        let lower = "c1".to_string();
+        let upper = "c4".to_string();
+
+        // Perform streaming query
+        let stream_results =
+            index_meta.stream_query_range(&mut file, Some(&lower), Some(&upper))?;
+        let typed_results = index.query_range(Some(&lower), Some(&upper));
+        let typed_flat: Vec<ValueOffset> = typed_results.into_iter().flatten().cloned().collect();
+
+        assert_eq!(stream_results, typed_flat);
+
+        // Also test with in-memory cursor
+        let mut serialized = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut serialized);
+            index.serialize(&mut cursor)?;
+        }
+
+        let mut cursor = Cursor::new(&serialized);
+        let index_meta = IndexMeta::<String>::from_reader(&mut cursor, serialized.len() as u64)?;
+
+        cursor.set_position(0);
+        let stream_results =
+            index_meta.stream_query_range(&mut cursor, Some(&lower), Some(&upper))?;
+
+        // Verify results match the typed query
+        let typed_results = index.query_range(Some(&lower), Some(&upper));
+        let typed_flat: Vec<ValueOffset> = typed_results.into_iter().flatten().cloned().collect();
+        assert_eq!(stream_results, typed_flat);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_query_range_date() -> Result<(), error::Error> {
+        // Create the index
+        let index = create_sample_date_index();
+
+        // Serialize to a temporary file
+        let mut tmp_file = tempfile::NamedTempFile::new()?;
+        index.serialize(&mut tmp_file)?;
+
+        // Get the size of the serialized index
+        let size = tmp_file.as_file().metadata()?.len();
+
+        // Prepare for reading
+        let mut file = tmp_file.reopen()?;
+        file.seek(SeekFrom::Start(0))?;
+
+        // Read the metadata
+        let index_meta = IndexMeta::<NaiveDateTime>::from_reader(&mut file, size)?;
+
+        // Reset position
+        file.seek(SeekFrom::Start(0))?;
+
+        // Define range query
+        let lower = NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(),
+            chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+        );
+        let upper = NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(2022, 2, 1).unwrap(),
+            chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+        );
+
+        // Perform streaming query
+        let stream_results =
+            index_meta.stream_query_range(&mut file, Some(&lower), Some(&upper))?;
+        let typed_results = index.query_range(Some(&lower), Some(&upper));
+        let typed_flat: Vec<ValueOffset> = typed_results.into_iter().flatten().cloned().collect();
+
+        assert_eq!(stream_results, typed_flat);
+
+        // Also test with in-memory cursor
+        let mut serialized = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut serialized);
+            index.serialize(&mut cursor)?;
+        }
+
+        let mut cursor = Cursor::new(&serialized);
+        let index_meta =
+            IndexMeta::<NaiveDateTime>::from_reader(&mut cursor, serialized.len() as u64)?;
+
+        cursor.set_position(0);
+        let stream_results =
+            index_meta.stream_query_range(&mut cursor, Some(&lower), Some(&upper))?;
+
+        // Verify results match the typed query
+        let typed_results = index.query_range(Some(&lower), Some(&upper));
+        let typed_flat: Vec<ValueOffset> = typed_results.into_iter().flatten().cloned().collect();
+        assert_eq!(stream_results, typed_flat);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_performance_comparison() -> Result<(), error::Error> {
+        // Create a sample height index
+        let index = create_sample_height_index();
+
+        // Serialize to buffer
+        let mut buffer = Vec::new();
+        index.serialize(&mut buffer)?;
+
+        // Generate some test values
+        let test_values = vec![30.0f32, 74.5, 100.0, 150.0, 200.0];
+
+        // Measure direct query performance
+        let direct_start = std::time::Instant::now();
+        for &value in &test_values {
+            let _results = index.query_exact(&OrderedFloat(value));
+        }
+        let direct_duration = direct_start.elapsed();
+
+        // Measure streaming query performance
+        let mut cursor = Cursor::new(buffer.clone());
+        let index_meta = IndexMeta::<Float<f32>>::from_reader(&mut cursor, buffer.len() as u64)?;
+
+        let stream_start = std::time::Instant::now();
+        for &value in &test_values {
+            let test_height = OrderedFloat(value);
+            cursor.seek(SeekFrom::Start(0))?;
+            let _results = index_meta.stream_query_exact(&mut cursor, &test_height)?;
+        }
+        let stream_duration = stream_start.elapsed();
+
+        println!(
+            "Performance comparison:\n\
+           Direct query: {:?}\n\
+           Stream query: {:?}\n\
+           Ratio: {:.2}x",
+            direct_duration,
+            stream_duration,
+            stream_duration.as_secs_f64() / direct_duration.as_secs_f64()
+        );
+
+        Ok(())
     }
 
     #[test]

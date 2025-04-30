@@ -1,13 +1,12 @@
-use anyhow::Result;
-use std::collections::HashMap;
-use std::io::{self, Read, Seek, SeekFrom};
-
-use crate::error::Error;
-use bst::{BufferedIndex, IndexSerializable, OrderedFloat};
-pub use bst::{
-    ByteSerializableValue, MultiIndex, Operator, Query, Query as AttributeQuery, QueryCondition,
-    StreamableMultiIndex,
+use static_btree::{
+    FixedStringKey, Float, KeyType, MemoryIndex, MemoryMultiIndex, MultiIndex, Operator, Query,
+    QueryCondition, StreamIndex, StreamMultiIndex,
 };
+use std::collections::HashMap;
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
+use std::ops::Range;
+
+use crate::error::{Error, Result};
 
 use chrono::{DateTime, Utc};
 
@@ -18,53 +17,71 @@ use super::{
     FcbReader, FeatureIter,
 };
 
-pub type AttrQuery = Vec<(String, Operator, ByteSerializableValue)>;
+pub type AttrQuery = Vec<(String, Operator, KeyType)>;
 
-pub fn process_attr_index_entry<R: Read>(
-    reader: &mut R,
-    multi_index: &mut MultiIndex,
+pub fn add_indices_to_multi_memory_index<R: Read>(
+    mut data: R,
+    multi_index: &mut MemoryMultiIndex,
     columns: &[Column],
     query: &AttrQuery,
     attr_info: &AttributeIndex,
-) -> Result<(), Error> {
+) -> Result<()> {
     let length = attr_info.length();
-    let mut buffer = vec![0; length as usize];
-    reader.read_exact(&mut buffer)?;
-
+    let mut buf = vec![0; length as usize];
+    data.read_exact(&mut buf)?;
+    let mut buf = Cursor::new(buf);
     if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
         if query.iter().any(|(name, _, _)| col.name() == name) {
             match col.type_() {
                 ColumnType::Int => {
-                    let index = BufferedIndex::<i32>::deserialize(&mut buffer.as_slice())?;
-                    multi_index.add_index(col.name().to_string(), Box::new(index));
-                }
-                ColumnType::Long => {
-                    let index = BufferedIndex::<i64>::deserialize(&mut buffer.as_slice())?;
-                    multi_index.add_index(col.name().to_string(), Box::new(index));
+                    let index = MemoryIndex::<i32>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_i32_index(col.name().to_string(), index);
                 }
                 ColumnType::Float => {
-                    let index =
-                        BufferedIndex::<OrderedFloat<f32>>::deserialize(&mut buffer.as_slice())?;
-                    multi_index.add_index(col.name().to_string(), Box::new(index));
+                    let index = MemoryIndex::<Float<f32>>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_f32_index(col.name().to_string(), index);
                 }
                 ColumnType::Double => {
-                    let index =
-                        BufferedIndex::<OrderedFloat<f64>>::deserialize(&mut buffer.as_slice())?;
-                    multi_index.add_index(col.name().to_string(), Box::new(index));
+                    let index = MemoryIndex::<Float<f64>>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_f64_index(col.name().to_string(), index);
                 }
                 ColumnType::String => {
-                    let index = BufferedIndex::<String>::deserialize(&mut buffer.as_slice())?;
-                    multi_index.add_index(col.name().to_string(), Box::new(index));
+                    let index = MemoryIndex::<FixedStringKey<50>>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_string_index50(col.name().to_string(), index);
                 }
                 ColumnType::Bool => {
-                    let index = BufferedIndex::<bool>::deserialize(&mut buffer.as_slice())?;
-                    multi_index.add_index(col.name().to_string(), Box::new(index));
+                    let index = MemoryIndex::<bool>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_bool_index(col.name().to_string(), index);
                 }
                 ColumnType::DateTime => {
-                    let index =
-                        BufferedIndex::<DateTime<Utc>>::deserialize(&mut buffer.as_slice())?;
-                    multi_index.add_index(col.name().to_string(), Box::new(index));
+                    let index = MemoryIndex::<DateTime<Utc>>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_datetime_index(col.name().to_string(), index);
                 }
+                // TODO: add support for other column types
                 _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
             }
         } else {
@@ -74,23 +91,110 @@ pub fn process_attr_index_entry<R: Read>(
     Ok(())
 }
 
+pub fn add_indices_to_multi_stream_index<R: Read + Seek>(
+    multi_index: &mut StreamMultiIndex,
+    columns: &[Column],
+    query: &AttrQuery, // TODO: remove this
+    attr_info: &AttributeIndex,
+    index_begin: usize,
+) -> Result<()> {
+    if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
+        // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
+        let index_begin = index_begin as u64;
+        match col.type_() {
+            ColumnType::Int => {
+                let index = StreamIndex::<i32>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_i32_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::Float => {
+                let index = StreamIndex::<Float<f32>>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_f32_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::Double => {
+                let index = StreamIndex::<Float<f64>>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_f64_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::String => {
+                let index = StreamIndex::<FixedStringKey<50>>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_string_index50(
+                    col.name().to_string(),
+                    index,
+                    attr_info.length() as u64,
+                );
+            }
+            ColumnType::Bool => {
+                let index = StreamIndex::<bool>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_bool_index(
+                    col.name().to_string(),
+                    index,
+                    attr_info.length() as u64,
+                );
+            }
+            ColumnType::DateTime => {
+                let index = StreamIndex::<DateTime<Utc>>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_datetime_index(
+                    col.name().to_string(),
+                    index,
+                    attr_info.length() as u64,
+                );
+            }
+            _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
+        }
+        // }
+        // else {
+        //     println!("  - Skipping index for field: {}", col.name());
+        // }
+    }
+    Ok(())
+}
+
 pub fn build_query(query: &AttrQuery) -> Query {
     let conditions = query
         .iter()
-        .map(|(field, operator, value)| QueryCondition {
-            field: field.clone(),
-            operator: *operator,
-            key: value.to_bytes(),
+        .map(|(field, operator, key)| {
+            let owned_key = key.clone();
+            QueryCondition {
+                field: field.clone(),
+                operator: *operator,
+                key: owned_key,
+            }
         })
         .collect();
     Query { conditions }
 }
 
 impl<R: Read + Seek> FcbReader<R> {
-    pub fn select_attr_query(
-        mut self,
-        query: AttrQuery,
-    ) -> Result<FeatureIter<R, Seekable>, Error> {
+    pub fn select_attr_query(mut self, query: AttrQuery) -> Result<FeatureIter<R, Seekable>> {
         // query: vec<(field_name, operator, value)>
         let header = self.buffer.header();
         let attr_index_entries = header
@@ -103,11 +207,35 @@ impl<R: Read + Seek> FcbReader<R> {
         let mut attr_index_entries: Vec<&AttributeIndex> = attr_index_entries.iter().collect();
         attr_index_entries.sort_by_key(|attr| attr.index());
 
-        let columns = header.columns().ok_or(Error::NoColumnsInHeader)?;
-        let columns: Vec<Column> = columns.iter().collect();
+        let columns = header
+            .columns()
+            .ok_or(Error::NoColumnsInHeader)?
+            .iter()
+            .collect::<Vec<_>>();
+
+        // Range of attribute indices to be processed. HashMap<field_name, Range<usize>>
+        let mut attr_index_range = HashMap::<String, Range<usize>>::new();
+        let mut current_index = 0;
+        for attr_info in attr_index_entries.iter() {
+            let column = columns
+                .iter()
+                .find(|c| c.index() == attr_info.index())
+                .ok_or(Error::AttributeIndexNotFound)?;
+            let field_name = column.name().to_string();
+            let index_begin = current_index;
+            let index_end = index_begin + attr_info.length() as usize;
+            attr_index_range.insert(
+                field_name,
+                Range {
+                    start: index_begin,
+                    end: index_end,
+                },
+            );
+            current_index = index_end;
+        }
 
         // Get the current position (should be at the start of the file)
-        let start_pos = self.reader.stream_position()?;
+        // let start_pos = self.reader.stream_position()?;
 
         // Skip the rtree index bytes; we know the correct offset for that
         let rtree_offset = self.rtree_index_size();
@@ -116,48 +244,37 @@ impl<R: Read + Seek> FcbReader<R> {
         // Now we should be at the start of the attribute indices
         let attr_index_start_pos = self.reader.stream_position()?;
 
-        // Create a mapping from field names to index offsets
-        let mut index_offsets = HashMap::new();
-        let mut current_offset = 0;
-
-        // First pass: build the index_offsets map and skip over all indices
-        for attr_info in attr_index_entries.iter() {
-            let column_idx = attr_info.index();
-            let field_name = columns
-                .iter()
-                .find(|col| col.index() == column_idx)
-                .ok_or(Error::AttributeIndexNotFound)?
-                .name()
-                .to_string();
-            let index_size = attr_info.length() as u64;
-
-            // Store the offset for this field
-            index_offsets.insert(field_name, attr_index_start_pos + current_offset);
-
-            // Skip over this index to position at the next one
-            current_offset += index_size;
-            self.reader.seek(SeekFrom::Current(index_size as i64))?;
-        }
-
         // Reset reader position to the start of attribute indices
         self.reader.seek(SeekFrom::Start(attr_index_start_pos))?;
-
-        // Try to create the StreamableMultiIndex with detailed error handling
-        let streamable_index =
-            match StreamableMultiIndex::from_reader(&mut self.reader, &index_offsets) {
-                Ok(index) => index,
-                Err(e) => {
-                    return Err(Error::IndexCreationError(format!(
-                        "Failed to create streamable index: {}",
-                        e
-                    )));
-                }
-            };
 
         // Create a query from the AttrQuery
         let query_obj = build_query(&query);
 
-        let result = match streamable_index.stream_query(&mut self.reader, &query_obj) {
+        let mut multi_index = StreamMultiIndex::new();
+        // iterate over the columens which are used in the query and is in columns and in attr_index_entries
+        for attr_info in attr_index_entries.iter() {
+            let column_idx = attr_info.index();
+            let column = columns
+                .iter()
+                .find(|c| c.index() == column_idx)
+                .ok_or(Error::AttributeIndexNotFound)?;
+            // if query
+            //     .iter()
+            //     .any(|(name, _, _)| name.as_str() == column.name())
+
+            let index_range = attr_index_range
+                .get(column.name())
+                .ok_or(Error::AttributeIndexNotFound)?;
+            add_indices_to_multi_stream_index::<R>(
+                &mut multi_index,
+                &columns,
+                &query,
+                attr_info,
+                index_range.start,
+            )?;
+        }
+
+        let result = match multi_index.query(&mut self.reader, &query_obj.conditions) {
             Ok(res) => res,
             Err(e) => {
                 return Err(Error::QueryExecutionError(format!(
@@ -181,6 +298,10 @@ impl<R: Read + Seek> FcbReader<R> {
 
         let total_feat_count = result_vec.len() as u64;
 
+        let attr_index_size = self.attr_index_size();
+        self.reader
+            .seek(SeekFrom::Start(attr_index_start_pos + attr_index_size))?;
+
         Ok(FeatureIter::<R, Seekable>::new(
             self.reader,
             self.verify,
@@ -197,15 +318,15 @@ impl<R: Read> FcbReader<R> {
     pub fn select_attr_query_seq(
         mut self,
         query: AttrQuery,
-    ) -> anyhow::Result<FeatureIter<R, NotSeekable>> {
+    ) -> Result<FeatureIter<R, NotSeekable>> {
         // query: vec<(field_name, operator, value)>
         let header = self.buffer.header();
         let attr_index_entries = header
             .attribute_index()
-            .ok_or_else(|| anyhow::anyhow!("attribute index not found"))?;
+            .ok_or(Error::AttributeIndexNotFound)?;
         let columns: Vec<Column> = header
             .columns()
-            .ok_or_else(|| anyhow::anyhow!("no columns found in header"))?
+            .ok_or(Error::NoColumnsInHeader)?
             .iter()
             .collect();
 
@@ -215,7 +336,7 @@ impl<R: Read> FcbReader<R> {
 
         // Since we can't use StreamableMultiIndex with a non-seekable reader,
         // we'll still use MultiIndex but optimize the process to minimize memory usage
-        let mut multi_index = MultiIndex::new();
+        let mut multi_index = MemoryMultiIndex::new();
 
         // Process each attribute index entry, but only load the ones needed for our query
         let query_fields: Vec<String> = query.iter().map(|(field, _, _)| field.clone()).collect();
@@ -226,7 +347,7 @@ impl<R: Read> FcbReader<R> {
 
             // Only process this attribute if it's used in the query
             if query_fields.contains(&field_name) {
-                process_attr_index_entry(
+                add_indices_to_multi_memory_index(
                     &mut self.reader,
                     &mut multi_index,
                     &columns,
@@ -245,7 +366,7 @@ impl<R: Read> FcbReader<R> {
 
         // Build and execute the query
         let query_obj = build_query(&query);
-        let mut result = multi_index.query(query_obj);
+        let mut result = multi_index.query(&query_obj.conditions)?;
         result.sort();
 
         let header_size = self.buffer.header_buf.len();

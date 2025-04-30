@@ -771,12 +771,14 @@ impl<'a> GeographicalExtent {
 // struct AttributeIndex, aligned to 4
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Default)]
-pub struct AttributeIndex(pub [u8; 8]);
+pub struct AttributeIndex(pub [u8; 16]);
 impl core::fmt::Debug for AttributeIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("AttributeIndex")
             .field("index", &self.index())
             .field("length", &self.length())
+            .field("branching_factor", &self.branching_factor())
+            .field("num_unique_items", &self.num_unique_items())
             .finish()
     }
 }
@@ -818,10 +820,12 @@ impl<'a> flatbuffers::Verifiable for AttributeIndex {
 
 impl<'a> AttributeIndex {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(index: u16, length: u32) -> Self {
-        let mut s = Self([0; 8]);
+    pub fn new(index: u16, length: u32, branching_factor: u16, num_unique_items: u32) -> Self {
+        let mut s = Self([0; 16]);
         s.set_index(index);
         s.set_length(length);
+        s.set_branching_factor(branching_factor);
+        s.set_num_unique_items(num_unique_items);
         s
     }
 
@@ -878,6 +882,64 @@ impl<'a> AttributeIndex {
             core::ptr::copy_nonoverlapping(
                 &x_le as *const _ as *const u8,
                 self.0[4..].as_mut_ptr(),
+                core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+
+    pub fn branching_factor(&self) -> u16 {
+        let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[8..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_branching_factor(&mut self, x: u16) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[8..].as_mut_ptr(),
+                core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+            );
+        }
+    }
+
+    pub fn num_unique_items(&self) -> u32 {
+        let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        EndianScalar::from_little_endian(unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.0[12..].as_ptr(),
+                mem.as_mut_ptr() as *mut u8,
+                core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+            );
+            mem.assume_init()
+        })
+    }
+
+    pub fn set_num_unique_items(&mut self, x: u32) {
+        let x_le = x.to_little_endian();
+        // Safety:
+        // Created from a valid Table for this object
+        // Which contains a valid value in this slot
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &x_le as *const _ as *const u8,
+                self.0[12..].as_mut_ptr(),
                 core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
             );
         }

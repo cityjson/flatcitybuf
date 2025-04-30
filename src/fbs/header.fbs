@@ -65,6 +65,8 @@ struct GeographicalExtent {
 struct AttributeIndex {
   index: ushort;
   length: uint;
+  branching_factor: ushort;
+  num_unique_items: uint;
 }
 
 struct Vec2 {
