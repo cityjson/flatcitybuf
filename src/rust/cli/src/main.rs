@@ -13,7 +13,12 @@ use std::{
     path::PathBuf,
 };
 #[derive(Parser)]
-#[command(author, version, about = "CLI tool for CityJSON <-> FCB conversion")]
+#[command(
+    name = "fcb",
+    author,
+    version,
+    about = "CLI tool for CityJSON <-> FCB conversion"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

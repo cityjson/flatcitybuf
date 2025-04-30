@@ -3,6 +3,9 @@ name = "fcb_cli"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "fcb"
+path = "src/main.rs"
 
 [dependencies]
 fcb_core = { path = "../fcb_core", features = ["http"] }
