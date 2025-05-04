@@ -40,6 +40,10 @@ enum Commands {
         #[arg(short = 'a', long)]
         attr_index: Option<String>,
 
+        /// If index all attributes
+        #[arg(short = 'A', long)]
+        index_all_attributes: bool,
+
         /// Branching factor for attribute index
         #[arg(long)]
         attr_branching_factor: Option<u16>,
@@ -110,6 +114,7 @@ fn serialize(
     input: &str,
     output: &str,
     attr_index: Option<String>,
+    index_all_attributes: bool,
     attr_branching_factor: Option<u16>,
     bbox: Option<String>,
     ge: bool,
@@ -176,13 +181,31 @@ fn serialize(
         }
     };
 
-    let attr_index_vec: Option<Vec<(String, Option<u16>)>> = attr_index.map(|s| {
-        s.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .map(|s| (s, attr_branching_factor))
-            .collect::<Vec<(String, Option<u16>)>>()
-    });
+    let attr_index_vec: Option<Vec<(String, Option<u16>)>> =
+        if index_all_attributes && attr_schema.is_some() {
+            // create a vec with all attribute names and branching factor given
+            Some(
+                attr_schema
+                    .clone()
+                    .unwrap()
+                    .iter()
+                    .map(|attr| {
+                        (
+                            attr.0.to_string(),
+                            Some(attr_branching_factor.unwrap_or(256)),
+                        )
+                    })
+                    .collect::<Vec<(String, Option<u16>)>>(),
+            )
+        } else {
+            attr_index.map(|s| {
+                s.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| (s, attr_branching_factor))
+                    .collect::<Vec<(String, Option<u16>)>>()
+            })
+        };
 
     // Calculate geospatial extent if requested
     let geo_extent = if ge {
@@ -464,10 +487,19 @@ fn main() -> Result<(), Error> {
             input,
             output,
             attr_index,
+            index_all_attributes,
             attr_branching_factor,
             bbox,
             ge,
-        } => serialize(&input, &output, attr_index, attr_branching_factor, bbox, ge),
+        } => serialize(
+            &input,
+            &output,
+            attr_index,
+            index_all_attributes,
+            attr_branching_factor,
+            bbox,
+            ge,
+        ),
         Commands::Deser { input, output } => deserialize(&input, &output),
         Commands::Cbor { input, output } => encode_cbor(&input, &output),
         Commands::Bson { input, output } => encode_bson(&input, &output),
