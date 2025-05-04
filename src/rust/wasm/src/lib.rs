@@ -158,7 +158,7 @@ mod wasm {
         }
 
         #[wasm_bindgen]
-        pub fn header(&self) -> Result<JsValue, JsValue> {
+        pub fn cityjson(&self) -> Result<JsValue, JsValue> {
             let header = self.fbs.header();
             info!("header in the function: {:?}", to_cj_metadata(&header));
             info!(
@@ -169,6 +169,16 @@ mod wasm {
             let jsval = to_value(&cj).map_err(|e| JsValue::from_str(&e.to_string()))?;
             info!("jsval: {:?}", jsval);
             Ok(jsval)
+        }
+
+        #[wasm_bindgen]
+        pub fn meta(&self) -> Result<JsValue, JsValue> {
+            let meta = self
+                .fbs
+                .meta()
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let js = to_value(&meta).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            Ok(js)
         }
 
         #[wasm_bindgen]

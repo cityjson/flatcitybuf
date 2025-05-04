@@ -17,6 +17,8 @@ use cjseq::{
     WrapMode as CjWrapMode,
 };
 
+use super::meta::{Column as MetaColumn, ColumnType as MetaColumnType, Meta};
+
 pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
     let mut cj = CityJSON::new();
 
@@ -108,6 +110,50 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
     }
 
     Ok(cj)
+}
+
+pub(crate) fn to_meta(header: Header) -> Result<Meta, Error> {
+    let columns = header.columns().map(|c| {
+        c.iter()
+            .map(|c| {
+                let i = c.index();
+                MetaColumn {
+                    index: i,
+                    name: c.name().to_string(),
+                    _type: match c.type_() {
+                        ColumnType::Int => MetaColumnType::Int,
+                        ColumnType::UInt => MetaColumnType::UInt,
+                        ColumnType::Bool => MetaColumnType::Bool,
+                        ColumnType::Float => MetaColumnType::Float,
+                        ColumnType::Double => MetaColumnType::Double,
+                        ColumnType::String => MetaColumnType::String,
+                        ColumnType::DateTime => MetaColumnType::DateTime,
+                        ColumnType::Json => MetaColumnType::Json,
+                        ColumnType::Binary => MetaColumnType::Binary,
+                        ColumnType::Short => MetaColumnType::Short,
+                        ColumnType::UShort => MetaColumnType::UShort,
+                        ColumnType::Long => MetaColumnType::Long,
+                        ColumnType::ULong => MetaColumnType::ULong,
+                        _ => unreachable!(),
+                    },
+                    title: c.title().map(|t| t.to_string()),
+                    description: c.description().map(|d| d.to_string()),
+                    precision: Some(c.precision()),
+                    scale: Some(c.scale()),
+                    nullable: Some(c.nullable()),
+                    unique: Some(c.unique()),
+                    primary_key: Some(c.primary_key()),
+                    metadata: c.metadata().map(|m| m.to_string()),
+                }
+            })
+            .collect::<Vec<_>>()
+    });
+    if columns.is_none() {
+        return Err(Error::MissingRequiredField("columns".to_string()));
+    }
+    Ok(Meta {
+        columns: columns.unwrap(),
+    })
 }
 
 pub(crate) fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact, Error> {

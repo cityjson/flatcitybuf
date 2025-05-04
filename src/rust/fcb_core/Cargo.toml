@@ -25,6 +25,7 @@ log = { workspace = true }
 packed_rtree = { path = "../packed_rtree" }
 static-btree = { path = "../static-btree" }
 ordered-float = { workspace = true }
+serde = { workspace = true }
 chrono = { workspace = true }
 http-range-client = { workspace = true, default-features = false, optional = true, features = [
   "reqwest-async",

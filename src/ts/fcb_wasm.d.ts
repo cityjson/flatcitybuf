@@ -21,7 +21,8 @@ export class AsyncFeatureIter {
 export class HttpFcbReader {
   free(): void;
   constructor(url: string);
-  header(): any;
+  cityjson(): any;
+  meta(): any;
   free(): void;
   /**
    * Select all features.
@@ -65,7 +66,8 @@ export interface InitOutput {
   readonly __wbg_httpfcbreader_free: (a: number, b: number) => void;
   readonly __wbg_asyncfeatureiter_free: (a: number, b: number) => void;
   readonly httpfcbreader_new: (a: number, b: number) => any;
-  readonly httpfcbreader_header: (a: number) => [number, number, number];
+  readonly httpfcbreader_cityjson: (a: number) => [number, number, number];
+  readonly httpfcbreader_meta: (a: number) => [number, number, number];
   readonly httpfcbreader_free: (a: number) => void;
   readonly httpfcbreader_select_all: (a: number) => any;
   readonly httpfcbreader_select_bbox: (a: number, b: number, c: number, d: number, e: number) => any;

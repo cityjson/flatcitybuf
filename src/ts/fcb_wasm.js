@@ -243,7 +243,7 @@ function __wbg_adapter_38(arg0, arg1, arg2) {
     wasm.closure400_externref_shim(arg0, arg1, arg2);
 }
 
-function __wbg_adapter_142(arg0, arg1, arg2, arg3) {
+function __wbg_adapter_143(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
     wasm.closure440_externref_shim(arg0, arg1, arg2, arg3);
@@ -369,10 +369,22 @@ export class HttpFcbReader {
     /**
      * @returns {any}
      */
-    header() {
+    cityjson() {
         if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
         _assertNum(this.__wbg_ptr);
-        const ret = wasm.httpfcbreader_header(this.__wbg_ptr);
+        const ret = wasm.httpfcbreader_cityjson(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    meta() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.httpfcbreader_meta(this.__wbg_ptr);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -636,7 +648,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wbg_adapter_142(a, state0.b, arg0, arg1);
+                    return __wbg_adapter_143(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -804,7 +816,7 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper5837 = function() { return logError(function (arg0, arg1, arg2) {
+    imports.wbg.__wbindgen_closure_wrapper5918 = function() { return logError(function (arg0, arg1, arg2) {
         const ret = makeMutClosure(arg0, arg1, 401, __wbg_adapter_38);
         return ret;
     }, arguments) };

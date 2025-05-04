@@ -3,6 +3,9 @@ use crate::error::Error;
 use crate::fb::*;
 use cjseq::CityJSONFeature;
 
+use super::deserializer::to_meta;
+use super::Meta;
+
 pub struct FcbBuffer {
     pub header_buf: Vec<u8>,
     pub features_buf: Vec<u8>,
@@ -22,5 +25,9 @@ impl FcbBuffer {
         let fcb_feature = self.feature();
         let root_attr_schema = self.header().columns();
         to_cj_feature(fcb_feature, root_attr_schema)
+    }
+
+    pub fn meta(&self) -> Result<Meta, Error> {
+        to_meta(self.header())
     }
 }

@@ -17,6 +17,8 @@ mod attr_query;
 pub mod geom_decoder;
 pub use attr_query::*;
 use std::marker::PhantomData;
+mod meta;
+pub use meta::*;
 pub struct FcbReader<R> {
     reader: R,
     verify: bool,

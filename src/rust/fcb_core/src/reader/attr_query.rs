@@ -10,7 +10,8 @@ use crate::error::{Error, Result};
 
 use chrono::{DateTime, Utc};
 
-use crate::{AttributeIndex, Column, ColumnType, FeatureOffset};
+use crate::fb::ColumnType;
+use crate::{AttributeIndex, Column, FeatureOffset};
 
 use super::{
     reader_trait::{NotSeekable, Seekable},

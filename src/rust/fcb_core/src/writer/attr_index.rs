@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::error::{Error, Result};
-use crate::ColumnType;
+use crate::fb::ColumnType;
 use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
 use static_btree::{Entry, FixedStringKey, Key, MemoryIndex};
