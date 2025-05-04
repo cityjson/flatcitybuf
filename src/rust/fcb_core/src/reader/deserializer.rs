@@ -153,6 +153,7 @@ pub(crate) fn to_meta(header: Header) -> Result<Meta, Error> {
     }
     Ok(Meta {
         columns: columns.unwrap(),
+        feature_count: header.features_count(),
     })
 }
 
