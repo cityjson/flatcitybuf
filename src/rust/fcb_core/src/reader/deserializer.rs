@@ -144,6 +144,12 @@ pub(crate) fn to_meta(header: Header) -> Result<Meta, Error> {
                     unique: Some(c.unique()),
                     primary_key: Some(c.primary_key()),
                     metadata: c.metadata().map(|m| m.to_string()),
+                    attr_index: Some(
+                        header
+                            .attribute_index()
+                            .map(|attr_indices| attr_indices.iter().any(|i| i.index() == c.index()))
+                            .unwrap_or(false),
+                    ),
                 }
             })
             .collect::<Vec<_>>()

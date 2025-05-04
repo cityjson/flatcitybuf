@@ -11,6 +11,7 @@ pub struct Meta {
 pub struct Column {
     pub index: u16,
     pub name: String,
+    #[serde(rename = "type")]
     pub _type: ColumnType,
     pub title: Option<String>,
     pub description: Option<String>,
@@ -20,6 +21,8 @@ pub struct Column {
     pub unique: Option<bool>,
     pub primary_key: Option<bool>,
     pub metadata: Option<String>,
+    #[serde(rename = "attrIndex")]
+    pub attr_index: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
