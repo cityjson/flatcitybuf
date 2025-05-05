@@ -853,6 +853,10 @@ mod wasm {
                 };
                 tuple.push(&JsValue::from_str(op_str));
                 let val_js = match val {
+                    KeyType::Int8(n) => JsValue::from_f64(*n as f64),
+                    KeyType::UInt8(n) => JsValue::from_f64(*n as f64),
+                    KeyType::Int16(n) => JsValue::from_f64(*n as f64),
+                    KeyType::UInt16(n) => JsValue::from_f64(*n as f64),
                     KeyType::Int64(n) => JsValue::from_f64(*n as f64),
                     KeyType::Int32(n) => JsValue::from_f64(*n as f64),
                     KeyType::UInt64(n) => JsValue::from_f64(*n as f64),

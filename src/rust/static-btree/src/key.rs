@@ -18,6 +18,10 @@ pub enum KeyType {
     Int64(i64),
     UInt32(u32),
     UInt64(u64),
+    Int8(i8),
+    UInt8(u8),
+    Int16(i16),
+    UInt16(u16),
     /// Floating point keys (wrapped in OrderedFloat for total ordering)
     Float32(OrderedFloat<f32>),
     Float64(OrderedFloat<f64>),

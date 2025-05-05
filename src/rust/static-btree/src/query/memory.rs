@@ -150,6 +150,10 @@ macro_rules! impl_typed_search_index {
 // Implement TypedSearchIndex for all supported key types
 impl_typed_search_index!(i32, KeyType::Int32);
 impl_typed_search_index!(i64, KeyType::Int64);
+impl_typed_search_index!(i8, KeyType::Int8);
+impl_typed_search_index!(u8, KeyType::UInt8);
+impl_typed_search_index!(i16, KeyType::Int16);
+impl_typed_search_index!(u16, KeyType::UInt16);
 impl_typed_search_index!(u32, KeyType::UInt32);
 impl_typed_search_index!(u64, KeyType::UInt64);
 impl_typed_search_index!(OrderedFloat<f32>, KeyType::Float32);
@@ -159,43 +163,6 @@ impl_typed_search_index!(DateTime<Utc>, KeyType::DateTime);
 impl_typed_search_index!(FixedStringKey<20>, KeyType::StringKey20);
 impl_typed_search_index!(FixedStringKey<50>, KeyType::StringKey50);
 impl_typed_search_index!(FixedStringKey<100>, KeyType::StringKey100);
-
-// pub trait SerdeIndex {
-//     fn serialize(&self, out: &mut impl Write) -> Result<usize>;
-//     fn deserialize(data: impl Read, num_items: usize, branching_factor: u16) -> Result<Self>
-//     where
-//         Self: Sized;
-// }
-
-// pub trait SerdeIndex: Sized {
-//     fn serialize(&self, out: &mut impl Write) -> Result<usize>;
-//     fn deserialize(data: impl Read, num_items: usize, branching_factor: u16) -> Result<Self>;
-// }
-
-// macro_rules! impl_serde_index {
-//     ($index_type:ty) => {
-//         impl SerdeIndex for MemoryIndex<$index_type> {
-//             fn serialize(&self, out: &mut impl Write) -> Result<usize> {
-//                 self.serialize(out)
-//             }
-//             fn deserialize(data: impl Read, num_items: usize, branching_factor: u16) -> Result<Self> {
-//                 MemoryIndex::<$index_type>::from_buf(data, num_items, branching_factor)
-//             }
-//         }
-//     };
-// }
-
-// impl_serde_index!(i32);
-// impl_serde_index!(i64);
-// impl_serde_index!(u32);
-// impl_serde_index!(u64);
-// impl_serde_index!(OrderedFloat<f32>);
-// impl_serde_index!(OrderedFloat<f64>);
-// impl_serde_index!(bool);
-// impl_serde_index!(DateTime<Utc>);
-// impl_serde_index!(FixedStringKey<20>);
-// impl_serde_index!(FixedStringKey<50>);
-// impl_serde_index!(FixedStringKey<100>);
 
 /// Container for multiple in-memory indices with different key types
 pub struct MemoryMultiIndex {
@@ -265,6 +232,26 @@ impl MemoryMultiIndex {
 
     /// Add a float64 index
     pub fn add_f64_index(&mut self, field: String, index: MemoryIndex<OrderedFloat<f64>>) {
+        self.indices.insert(field, Box::new(index));
+    }
+
+    /// Add a i8 index
+    pub fn add_i8_index(&mut self, field: String, index: MemoryIndex<i8>) {
+        self.indices.insert(field, Box::new(index));
+    }
+
+    /// Add a u8 index
+    pub fn add_u8_index(&mut self, field: String, index: MemoryIndex<u8>) {
+        self.indices.insert(field, Box::new(index));
+    }
+
+    /// Add a i16 index
+    pub fn add_i16_index(&mut self, field: String, index: MemoryIndex<i16>) {
+        self.indices.insert(field, Box::new(index));
+    }
+
+    /// Add a u16 index
+    pub fn add_u16_index(&mut self, field: String, index: MemoryIndex<u16>) {
         self.indices.insert(field, Box::new(index));
     }
 

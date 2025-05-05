@@ -82,7 +82,54 @@ pub fn add_indices_to_multi_memory_index<R: Read>(
                     )?;
                     multi_index.add_datetime_index(col.name().to_string(), index);
                 }
-                // TODO: add support for other column types
+                ColumnType::Short => {
+                    let index = MemoryIndex::<i16>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_i16_index(col.name().to_string(), index);
+                }
+                ColumnType::UShort => {
+                    let index = MemoryIndex::<u16>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_u16_index(col.name().to_string(), index);
+                }
+                ColumnType::UInt => {
+                    let index = MemoryIndex::<u32>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_u32_index(col.name().to_string(), index);
+                }
+                ColumnType::ULong => {
+                    let index = MemoryIndex::<u64>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_u64_index(col.name().to_string(), index);
+                }
+                ColumnType::Byte => {
+                    let index = MemoryIndex::<i8>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_i8_index(col.name().to_string(), index);
+                }
+                ColumnType::UByte => {
+                    let index = MemoryIndex::<u8>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_u8_index(col.name().to_string(), index);
+                }
                 _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
             }
         } else {
@@ -168,6 +215,60 @@ pub fn add_indices_to_multi_stream_index<R: Read + Seek>(
                     index,
                     attr_info.length() as u64,
                 );
+            }
+            ColumnType::Short => {
+                let index = StreamIndex::<i16>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_i16_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::UShort => {
+                let index = StreamIndex::<u16>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_u16_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::UInt => {
+                let index = StreamIndex::<u32>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_u32_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::ULong => {
+                let index = StreamIndex::<u64>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_u64_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::Byte => {
+                let index = StreamIndex::<i8>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_i8_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::UByte => {
+                let index = StreamIndex::<u8>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_u8_index(col.name().to_string(), index, attr_info.length() as u64);
             }
             _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
         }

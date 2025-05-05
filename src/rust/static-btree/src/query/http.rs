@@ -237,6 +237,10 @@ macro_rules! impl_typed_http_search_index {
     };
 }
 
+impl_typed_http_search_index!(i8, KeyType::Int8);
+impl_typed_http_search_index!(u8, KeyType::UInt8);
+impl_typed_http_search_index!(i16, KeyType::Int16);
+impl_typed_http_search_index!(u16, KeyType::UInt16);
 impl_typed_http_search_index!(i32, KeyType::Int32);
 impl_typed_http_search_index!(i64, KeyType::Int64);
 impl_typed_http_search_index!(u32, KeyType::UInt32);

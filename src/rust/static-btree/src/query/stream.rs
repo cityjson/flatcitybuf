@@ -197,6 +197,10 @@ macro_rules! impl_typed_stream_search_index {
 }
 
 // Implement TypedStreamSearchIndex for all supported key types
+impl_typed_stream_search_index!(i8, KeyType::Int8);
+impl_typed_stream_search_index!(u8, KeyType::UInt8);
+impl_typed_stream_search_index!(i16, KeyType::Int16);
+impl_typed_stream_search_index!(u16, KeyType::UInt16);
 impl_typed_stream_search_index!(i32, KeyType::Int32);
 impl_typed_stream_search_index!(i64, KeyType::Int64);
 impl_typed_stream_search_index!(u32, KeyType::UInt32);
@@ -274,6 +278,30 @@ impl StreamMultiIndex {
         index: StreamIndex<FixedStringKey<100>>,
         length: u64,
     ) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
+    }
+
+    /// Add an i8 index
+    pub fn add_i8_index(&mut self, field: String, index: StreamIndex<i8>, length: u64) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
+    }
+
+    /// Add a u8 index
+    pub fn add_u8_index(&mut self, field: String, index: StreamIndex<u8>, length: u64) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
+    }
+
+    /// Add an i16 index
+    pub fn add_i16_index(&mut self, field: String, index: StreamIndex<i16>, length: u64) {
+        self.indices.insert(field.clone(), Box::new(index));
+        self.add_index_offset(field, length);
+    }
+
+    /// Add a u16 index
+    pub fn add_u16_index(&mut self, field: String, index: StreamIndex<u16>, length: u64) {
         self.indices.insert(field.clone(), Box::new(index));
         self.add_index_offset(field, length);
     }
