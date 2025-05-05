@@ -384,7 +384,64 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     );
                     multi_index.add_index(col.name().to_string(), index);
                 }
-                _ => return Err(Error::UnsupportedColumnType(col.name().to_string())),
+                ColumnType::Short => {
+                    let index = HttpIndex::<i16>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                }
+                ColumnType::UShort => {
+                    let index = HttpIndex::<u16>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                }
+                ColumnType::UInt => {
+                    let index = HttpIndex::<u32>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                }
+                ColumnType::ULong => {
+                    let index = HttpIndex::<u64>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                }
+                ColumnType::Byte => {
+                    let index = HttpIndex::<i8>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                }
+                ColumnType::UByte => {
+                    let index = HttpIndex::<u8>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin as usize,
+                        feature_begin as usize,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                }
+
+                _ => {
+                    return Err(Error::UnsupportedColumnType(col.name().to_string()));
+                }
             }
         }
         Ok(())
