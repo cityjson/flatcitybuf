@@ -40,11 +40,6 @@ pub(crate) fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
         }
     }
 
-    println!("solid_count: {}", solid_count);
-    println!("multi_surface_count: {}", multi_surface_count);
-    println!("other_count: {}", other_count);
-    println!("feat_count: {}", feat_count);
-
     Ok((solid_count, multi_surface_count, other_count))
 }
 
@@ -118,11 +113,6 @@ fn read_cjseq(path: &str) -> Result<(u64, u64, u64)> {
         }
     }
 
-    println!("solid_count: {}", solid_count);
-    println!("multi_surface_count: {}", multi_surface_count);
-    println!("other_count: {}", other_count);
-    println!("feat_count: {}", feat_count);
-
     Ok((solid_count, multi_surface_count, other_count))
 }
 
@@ -155,10 +145,6 @@ pub(crate) fn read_cbor(path: &str) -> Result<(u64, u64, u64)> {
             }
         }
     }
-
-    println!("solid_count: {}", solid_count);
-    println!("multi_surface_count: {}", multi_surface_count);
-    println!("other_count: {}", other_count);
 
     Ok((solid_count, multi_surface_count, other_count))
 }
@@ -193,10 +179,6 @@ pub(crate) fn read_bson(path: &str) -> Result<(u64, u64, u64)> {
             }
         }
     }
-
-    println!("solid_count: {}", solid_count);
-    println!("multi_surface_count: {}", multi_surface_count);
-    println!("other_count: {}", other_count);
 
     Ok((solid_count, multi_surface_count, other_count))
 }
@@ -239,69 +221,78 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
             "benchmark_data/3DBV.city.bson",
         ),
     ),
-    // (
-    //     "Helsinki",
-    //     (
-    //         "benchmark_data/Helsinki.city.fcb",
-    //         "benchmark_data/Helsinki.city.jsonl",
-    //         "benchmark_data/Helsinki.city.cbor",
-    //         "benchmark_data/Helsinki.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Ingolstadt",
-    //     (
-    //         "benchmark_data/Ingolstadt.city.fcb",
-    //         "benchmark_data/Ingolstadt.city.jsonl",
-    //         "benchmark_data/Ingolstadt.city.cbor",
-    //         "benchmark_data/Ingolstadt.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Montreal",
-    //     (
-    //         "benchmark_data/Montreal.city.fcb",
-    //         "benchmark_data/Montreal.city.jsonl",
-    //         "benchmark_data/Montreal.city.cbor",
-    //         "benchmark_data/Montreal.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "NYC",
-    //     (
-    //         "benchmark_data/NYC.fcb",
-    //         "benchmark_data/NYC.jsonl",
-    //         "benchmark_data/NYC.cbor",
-    //         "benchmark_data/NYC.bson",
-    //     ),
-    // ),
-    // (
-    //     "Rotterdam",
-    //     (
-    //         "benchmark_data/Rotterdam.fcb",
-    //         "benchmark_data/Rotterdam.jsonl",
-    //         "benchmark_data/Rotterdam.cbor",
-    //         "benchmark_data/Rotterdam.bson",
-    //     ),
-    // ),
-    // (
-    //     "Vienna",
-    //     (
-    //         "benchmark_data/Vienna.city.fcb",
-    //         "benchmark_data/Vienna.city.jsonl",
-    //         "benchmark_data/Vienna.city.cbor",
-    //         "benchmark_data/Vienna.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Zurich",
-    //     (
-    //         "benchmark_data/Zurich.city.fcb",
-    //         "benchmark_data/Zurich.city.jsonl",
-    //         "benchmark_data/Zurich.city.cbor",
-    //         "benchmark_data/Zurich.city.bson",
-    //     ),
-    // ),
+    (
+        "Helsinki",
+        (
+            "benchmark_data/Helsinki.city.fcb",
+            "benchmark_data/Helsinki.city.jsonl",
+            "benchmark_data/Helsinki.city.cbor",
+            "benchmark_data/Helsinki.city.bson",
+        ),
+    ),
+    (
+        "Ingolstadt",
+        (
+            "benchmark_data/Ingolstadt.city.fcb",
+            "benchmark_data/Ingolstadt.city.jsonl",
+            "benchmark_data/Ingolstadt.city.cbor",
+            "benchmark_data/Ingolstadt.city.bson",
+        ),
+    ),
+    (
+        "Montreal",
+        (
+            "benchmark_data/Montreal.city.fcb",
+            "benchmark_data/Montreal.city.jsonl",
+            "benchmark_data/Montreal.city.cbor",
+            "benchmark_data/Montreal.city.bson",
+        ),
+    ),
+    (
+        "NYC",
+        (
+            "benchmark_data/NYC.fcb",
+            "benchmark_data/NYC.jsonl",
+            "benchmark_data/NYC.cbor",
+            "benchmark_data/NYC.bson",
+        ),
+    ),
+    (
+        "Rotterdam",
+        (
+            "benchmark_data/Rotterdam.fcb",
+            "benchmark_data/Rotterdam.jsonl",
+            "benchmark_data/Rotterdam.cbor",
+            "benchmark_data/Rotterdam.bson",
+        ),
+    ),
+    (
+        "Vienna",
+        (
+            "benchmark_data/Vienna.city.fcb",
+            "benchmark_data/Vienna.city.jsonl",
+            "benchmark_data/Vienna.city.cbor",
+            "benchmark_data/Vienna.city.bson",
+        ),
+    ),
+    (
+        "Zurich",
+        (
+            "benchmark_data/Zurich.city.fcb",
+            "benchmark_data/Zurich.city.jsonl",
+            "benchmark_data/Zurich.city.cbor",
+            "benchmark_data/Zurich.city.bson",
+        ),
+    ),
+    (
+        "Subset of Tokyo (PLATEAU)",
+        (
+            "benchmark_data/tokyo_plateau.fcb",
+            "benchmark_data/tokyo_plateau.city.jsonl",
+            "benchmark_data/tokyo_plateau.city.cbor",
+            "benchmark_data/tokyo_plateau.city.bson",
+        ),
+    ),
 ];
 
 fn format_duration(d: Duration) -> String {
@@ -332,34 +323,69 @@ pub fn read_benchmark(c: &mut Criterion) {
     for (size, (fcb_path, cjseq_path, cbor_path, bson_path)) in DATASETS {
         // FCB benchmark
         let start = Instant::now();
-        group.bench_with_input(BenchmarkId::new("fcb", size), fcb_path, |b, path| {
-            b.iter(|| read_fcb(black_box(path)))
-        });
+        group.bench_with_input(
+            BenchmarkId::new("FlatCityBuf", size),
+            fcb_path,
+            |b, path| {
+                b.iter_custom(|iter| {
+                    let start = Instant::now();
+                    let before_memory = memory_stats::memory_stats().unwrap().physical_mem;
+                    for _ in 0..iter {
+                        let _ = read_fcb(black_box(path));
+                    }
+                    let after_memory = memory_stats::memory_stats().unwrap().physical_mem;
+                    let memory_usage = after_memory - before_memory;
+                    start.elapsed()
+                })
+            },
+        );
         results.insert(
             format!("{}_fcb", size),
             BenchResult {
-                format: "FCB".to_string(),
+                format: "FlatCityBuf".to_string(),
                 duration: start.elapsed() / iterations,
             },
         );
 
         // CJSeq benchmark
         let start = Instant::now();
-        group.bench_with_input(BenchmarkId::new("cjseq", size), cjseq_path, |b, path| {
-            b.iter(|| read_cjseq(black_box(path)))
-        });
+        group.bench_with_input(
+            BenchmarkId::new("CityJSONTextSequence", size),
+            cjseq_path,
+            |b, path| {
+                b.iter_custom(|iter| {
+                    let start = Instant::now();
+                    let before_memory = memory_stats::memory_stats().unwrap().physical_mem;
+                    for _ in 0..iter {
+                        let _ = read_cjseq(black_box(path));
+                    }
+                    let after_memory = memory_stats::memory_stats().unwrap().physical_mem;
+                    let memory_usage = after_memory - before_memory;
+                    start.elapsed()
+                })
+            },
+        );
         results.insert(
             format!("{}_cjseq", size),
             BenchResult {
-                format: "CJSeq".to_string(),
+                format: "CityJSONTextSequence".to_string(),
                 duration: start.elapsed() / iterations,
             },
         );
 
         // CBOR benchmark
         let start = Instant::now();
-        group.bench_with_input(BenchmarkId::new("cbor", size), cbor_path, |b, path| {
-            b.iter(|| read_cbor(black_box(path)))
+        group.bench_with_input(BenchmarkId::new("CBOR", size), cbor_path, |b, path| {
+            b.iter_custom(|iter| {
+                let start = Instant::now();
+                let before_memory = memory_stats::memory_stats().unwrap().physical_mem;
+                for _ in 0..iter {
+                    let _ = read_cbor(black_box(path));
+                }
+                let after_memory = memory_stats::memory_stats().unwrap().physical_mem;
+                let memory_usage = after_memory - before_memory;
+                start.elapsed()
+            })
         });
         results.insert(
             format!("{}_cbor", size),
@@ -371,8 +397,17 @@ pub fn read_benchmark(c: &mut Criterion) {
 
         // BSON benchmark
         let start = Instant::now();
-        group.bench_with_input(BenchmarkId::new("bson", size), bson_path, |b, path| {
-            b.iter(|| read_bson(black_box(path)))
+        group.bench_with_input(BenchmarkId::new("BSON", size), bson_path, |b, path| {
+            b.iter_custom(|iter| {
+                let start = Instant::now();
+                let before_memory = memory_stats::memory_stats().unwrap().physical_mem;
+                for _ in 0..iter {
+                    let _ = read_bson(black_box(path));
+                }
+                let after_memory = memory_stats::memory_stats().unwrap().physical_mem;
+                let memory_usage = after_memory - before_memory;
+                start.elapsed()
+            })
         });
         results.insert(
             format!("{}_bson", size),
