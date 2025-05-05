@@ -42,7 +42,11 @@ enum Commands {
 
         /// If index all attributes
         #[arg(short = 'A', long)]
-        index_all_attributes: bool,
+        index_all_attributes: Option<bool>,
+
+        /// If write spatial index. Default is true.
+        #[arg(short = 's', long)]
+        spatial_index: Option<bool>,
 
         /// Branching factor for attribute index
         #[arg(long)]
@@ -54,7 +58,7 @@ enum Commands {
 
         /// Automatically calculate and set geospatial extent in header
         #[arg(short = 'g', long)]
-        ge: bool,
+        ge: Option<bool>,
     },
 
     /// Convert FCB to CityJSON
@@ -114,10 +118,11 @@ fn serialize(
     input: &str,
     output: &str,
     attr_index: Option<String>,
-    index_all_attributes: bool,
+    index_all_attributes: Option<bool>,
+    spatial_index: Option<bool>,
     attr_branching_factor: Option<u16>,
     bbox: Option<String>,
-    ge: bool,
+    ge: Option<bool>,
 ) -> Result<(), Error> {
     let reader = get_reader(input)?;
     let writer = get_writer(output)?;
@@ -182,7 +187,7 @@ fn serialize(
     };
 
     let attr_index_vec: Option<Vec<(String, Option<u16>)>> =
-        if index_all_attributes && attr_schema.is_some() {
+        if index_all_attributes.unwrap_or(false) && attr_schema.is_some() {
             // create a vec with all attribute names and branching factor given
             Some(
                 attr_schema
@@ -208,7 +213,7 @@ fn serialize(
         };
 
     // Calculate geospatial extent if requested
-    let geo_extent = if ge {
+    let geo_extent = if ge.unwrap_or(true) {
         Some(calculate_geospatial_extent(
             &filtered_features,
             &cj.transform,
@@ -218,9 +223,9 @@ fn serialize(
     };
 
     let header_options = HeaderWriterOptions {
-        write_index: true,
+        write_index: spatial_index.unwrap_or(true),
         feature_count: filtered_features.len() as u64,
-        index_node_size: 16,
+        index_node_size: attr_branching_factor.unwrap_or(16),
         attribute_indices: attr_index_vec,
         geographical_extent: geo_extent,
     };
@@ -488,6 +493,7 @@ fn main() -> Result<(), Error> {
             output,
             attr_index,
             index_all_attributes,
+            spatial_index,
             attr_branching_factor,
             bbox,
             ge,
@@ -496,6 +502,7 @@ fn main() -> Result<(), Error> {
             &output,
             attr_index,
             index_all_attributes,
+            spatial_index,
             attr_branching_factor,
             bbox,
             ge,
