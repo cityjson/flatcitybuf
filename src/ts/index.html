@@ -103,8 +103,7 @@
 
   <!-- URL input for the FCB data -->
   <label for="url-input">enter url for httpfcbreader:</label>
-  <input type="text" id="url-input" placeholder="https://example.com/data"
-    value="http://127.0.0.1:5501/src/rust/temp/3dbag_partial.fcb" />
+
   <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
     value="http://127.0.0.1:5501/src/rust/fcb_core/tests/data/delft_attr.fcb" /> -->
   <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
@@ -349,8 +348,8 @@
         log('httpfcbreader instance created.');
 
         log('fetching header...');
-        const header = await currentReader.header();
-        log(`header: ${JSON.stringify(header, null, 2)}`);
+        const cj = await currentReader.cityjson();
+        log(`cj: ${JSON.stringify(cj, null, 2)}`);
 
         // Run the appropriate query based on the current mode
         if (currentQueryMode === 'attr') {

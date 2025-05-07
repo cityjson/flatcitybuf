@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 mod gloo_client;
 
-// #[cfg(target_arch = "wasm32")]
+#[cfg(target_arch = "wasm32")]
 mod wasm {
 
     use crate::gloo_client::WasmHttpClient;
@@ -104,11 +104,10 @@ mod wasm {
 
             // In reality, the header is probably less than half this size, but better to overshoot and
             // fetch an extra kb rather than have to issue a second request.
-            let assumed_header_size = 2024;
+            let assumed_header_size = 4096;
             let min_req_size = assumed_header_size + prefetch_index_bytes;
             client.set_min_req_size(min_req_size);
             debug!("fetching header. min_req_size: {min_req_size} (assumed_header_size: {assumed_header_size}, prefetched_index_bytes: {prefetch_index_bytes})");
-            info!("fetching header. min_req_size: {min_req_size} (assumed_header_size: {assumed_header_size}, prefetched_index_bytes: {prefetch_index_bytes})");
             let mut read_bytes = 0;
             let bytes = client
                 .get_range(read_bytes, MAGIC_BYTES_SIZE)
@@ -147,7 +146,7 @@ mod wasm {
             // verify flatbuffer
             let header = size_prefixed_root_as_header(&header_buf)
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            trace!("completed: opening http reader");
+            debug!("completed: opening http reader");
             Ok(HttpFcbReader {
                 client,
                 fbs: FcbBuffer {
@@ -455,6 +454,62 @@ mod wasm {
                             combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
+                    }
+                    ColumnType::Short => {
+                        let index = HttpIndex::<i16>::new(
+                            attr_info.num_unique_items() as usize,
+                            attr_info.branching_factor(),
+                            index_begin as usize,
+                            feature_begin as usize,
+                            combine_request_threshold,
+                        );
+                    }
+                    ColumnType::UShort => {
+                        let index = HttpIndex::<u16>::new(
+                            attr_info.num_unique_items() as usize,
+                            attr_info.branching_factor(),
+                            index_begin as usize,
+                            feature_begin as usize,
+                            combine_request_threshold,
+                        );
+                    }
+                    ColumnType::UInt => {
+                        let index = HttpIndex::<u32>::new(
+                            attr_info.num_unique_items() as usize,
+                            attr_info.branching_factor(),
+                            index_begin as usize,
+                            feature_begin as usize,
+                            combine_request_threshold,
+                        );
+                    }
+                    ColumnType::ULong => {
+                        println!("Adding u64 index");
+                        println!("attr_info: {:?}", attr_info);
+                        let index = HttpIndex::<u64>::new(
+                            attr_info.num_unique_items() as usize,
+                            attr_info.branching_factor(),
+                            index_begin as usize,
+                            feature_begin as usize,
+                            combine_request_threshold,
+                        );
+                    }
+                    ColumnType::Byte => {
+                        let index = HttpIndex::<i8>::new(
+                            attr_info.num_unique_items() as usize,
+                            attr_info.branching_factor(),
+                            index_begin as usize,
+                            feature_begin as usize,
+                            combine_request_threshold,
+                        );
+                    }
+                    ColumnType::UByte => {
+                        let index = HttpIndex::<u8>::new(
+                            attr_info.num_unique_items() as usize,
+                            attr_info.branching_factor(),
+                            index_begin as usize,
+                            feature_begin as usize,
+                            combine_request_threshold,
+                        );
                     }
                     _ => {
                         return Err(JsValue::from_str(&format!(
