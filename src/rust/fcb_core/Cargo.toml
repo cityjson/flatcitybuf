@@ -8,6 +8,8 @@ edition = "2021"
 [features]
 default = ["http"]
 http = ["http-range-client", "bytes"]
+# Enable heap profiling with dhat (run with `cargo bench --features dhat-heap`)
+dhat-heap = ["dhat"]
 
 
 [dependencies]
@@ -31,6 +33,8 @@ http-range-client = { workspace = true, default-features = false, optional = tru
   "reqwest-async",
 ] }
 thiserror = { workspace = true }
+dhat = { workspace = true, optional = true }
+prettytable = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = { workspace = true }
@@ -42,6 +46,10 @@ path = "src/lib.rs"
 [[bin]]
 name = "read"
 path = "src/bin/read.rs"
+
+[[bin]]
+name = "stats"
+path = "src/bin/stats.rs"
 
 [[bin]]
 name = "read_profile"
@@ -74,7 +82,7 @@ harness = false
 
 [dev-dependencies]
 async-trait = { workspace = true }
-memory-stats = { workspace = true }
+memory-stats.workspace = true
 pretty_assertions = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -83,6 +91,7 @@ env_logger = { workspace = true }
 # --performance comparison
 bson = { workspace = true }
 serde_cbor = { workspace = true }
+sysinfo = "0.35.0"
 
 
 [profile.release]

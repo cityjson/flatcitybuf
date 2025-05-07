@@ -143,8 +143,10 @@ fn serialize(
     };
 
     // Create a CityJSONSeq reader
-    let cj_seq = match read_cityjson_from_reader(reader, CJTypeKind::Seq) {
-        Ok(CJType::Seq(seq)) => seq,
+    let cj_seq = read_cityjson_from_reader(reader, CJTypeKind::Seq)?;
+
+    let CityJSONSeq { cj, features } = match cj_seq {
+        CJType::Seq(cj_seq) => cj_seq,
         _ => {
             return Err(Error::IoError(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -152,8 +154,6 @@ fn serialize(
             )))
         }
     };
-
-    let CityJSONSeq { cj, features } = cj_seq;
 
     // Filter features by bbox if provided
     let filtered_features = if let Some(bbox) = &bbox_parsed {

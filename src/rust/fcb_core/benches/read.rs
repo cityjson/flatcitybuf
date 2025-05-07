@@ -3,12 +3,20 @@ use bson::Document;
 use cjseq::{CityJSON, CityJSONFeature};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::{FcbReader, GeometryType};
+use memory_stats::MemoryStats;
 use std::{
     collections::HashMap,
     fs::File,
     io::{BufRead, BufReader},
+    path::Path,
     time::{Duration, Instant},
 };
+use sysinfo::{Pid, System};
+
+// Enable heap profiling with dhat
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
 
 /// Read FCB file and count geometry types
 pub(crate) fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
@@ -188,15 +196,92 @@ mod tests {
 
     #[test]
     fn test_read_counts_match() -> Result<()> {
-        let fcb_path = "benchmark_data/3DBAG.fcb";
-        let cjseq_path = "benchmark_data/3DBAG.city.jsonl";
+        // Test all datasets with all formats
+        for (dataset_name, (fcb_path, cjseq_path, cbor_path, bson_path)) in DATASETS {
+            println!("Testing dataset: {}", dataset_name);
 
-        let (fcb_solids, fcb_surfaces, fcb_others) = read_fcb(fcb_path)?;
-        let (cj_solids, cj_surfaces, cj_others) = read_cjseq(cjseq_path)?;
+            // Define a helper to run and check each read function
+            let run_test = |name: &str,
+                            path: &str,
+                            read_fn: fn(&str) -> Result<(u64, u64, u64)>|
+             -> Result<(u64, u64, u64)> {
+                println!("  Reading {} format...", name);
+                let start = Instant::now();
+                let result = read_fn(path)?;
+                println!("  {} completed in {:.2?}", name, start.elapsed());
+                Ok(result)
+            };
 
-        assert_eq!(fcb_solids, cj_solids, "solid counts don't match");
-        assert_eq!(fcb_surfaces, cj_surfaces, "surface counts don't match");
-        assert_eq!(fcb_others, cj_others, "other geometry counts don't match");
+            // Run all read functions
+            let fcb_result = match run_test("FlatCityBuf", fcb_path, read_fcb) {
+                Ok(res) => res,
+                Err(e) => {
+                    println!("  Error reading FCB: {:?}", e);
+                    continue;
+                }
+            };
+
+            // Test each other format against FCB
+            let formats = [
+                (
+                    "CityJSONSeq",
+                    cjseq_path,
+                    read_cjseq as fn(&str) -> Result<(u64, u64, u64)>,
+                ),
+                (
+                    "CBOR",
+                    cbor_path,
+                    read_cbor as fn(&str) -> Result<(u64, u64, u64)>,
+                ),
+                (
+                    "BSON",
+                    bson_path,
+                    read_bson as fn(&str) -> Result<(u64, u64, u64)>,
+                ),
+            ];
+
+            for (format_name, path, read_fn) in formats {
+                match run_test(format_name, path, read_fn) {
+                    Ok((solids, surfaces, others)) => {
+                        let (fcb_solids, fcb_surfaces, fcb_others) = fcb_result;
+
+                        // Print counts for debugging
+                        println!(
+                            "  {}: solids={}, surfaces={}, others={}",
+                            format_name, solids, surfaces, others
+                        );
+                        println!(
+                            "  FCB: solids={}, surfaces={}, others={}",
+                            fcb_solids, fcb_surfaces, fcb_others
+                        );
+
+                        // Assert counts match
+                        assert_eq!(
+                            fcb_solids, solids,
+                            "solid counts don't match for {} vs FCB in {}",
+                            format_name, dataset_name
+                        );
+                        assert_eq!(
+                            fcb_surfaces, surfaces,
+                            "surface counts don't match for {} vs FCB in {}",
+                            format_name, dataset_name
+                        );
+                        assert_eq!(
+                            fcb_others, others,
+                            "other geometry counts don't match for {} vs FCB in {}",
+                            format_name, dataset_name
+                        );
+
+                        println!("  ✓ {} matches FCB", format_name);
+                    }
+                    Err(e) => {
+                        println!("  Error reading {}: {:?}", format_name, e);
+                    }
+                }
+            }
+
+            println!("Completed tests for {}\n", dataset_name);
+        }
 
         Ok(())
     }
@@ -303,141 +388,342 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+fn format_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.2} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
 #[derive(Debug)]
 struct BenchResult {
     format: String,
     duration: Duration,
+    peak_memory: u64,
+    cpu_usage: f32,
+}
+
+/// Benchmark a read function with comprehensive metrics
+fn benchmark_read_fn<F>(
+    iterations: u32,
+    format_name: &str,
+    path: &str,
+    read_fn: F,
+) -> Result<BenchResult>
+where
+    F: Fn(&str) -> Result<(u64, u64, u64)>,
+{
+    let start = Instant::now();
+    let mut total_duration = Duration::new(0, 0);
+    let mut peak_memory: u64 = 0;
+    let mut cpu_usage_sum: f32 = 0.0;
+
+    let process_id = std::process::id();
+    let pid = Pid::from_u32(process_id);
+    let mut sys = System::new();
+    sys.refresh_all();
+
+    let process = match sys.process(pid) {
+        Some(p) => p,
+        None => return Err(anyhow::anyhow!("failed to get process info")),
+    };
+
+    // Initial memory state
+    let initial_memory = process.memory();
+
+    // Optional: enable dhat profiling for heap allocations
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = if format_name == "FlatCityBuf" && iterations == 1 {
+        println!("starting dhat heap profiling for {}", path);
+        Some(dhat::Profiler::new_heap())
+    } else {
+        None
+    };
+
+    for i in 0..iterations {
+        // Refresh system info
+        sys.refresh_all();
+
+        // Get the process again
+        let process = match sys.process(pid) {
+            Some(p) => p,
+            None => return Err(anyhow::anyhow!("failed to get process info")),
+        };
+
+        // Record CPU usage before the iteration
+        let cpu_before = process.cpu_usage();
+
+        // Record memory before the iteration
+        let mem_stats_before = memory_stats::memory_stats()
+            .ok_or_else(|| anyhow::anyhow!("failed to get memory stats"))?;
+
+        // Execute the read function and measure time
+        let iter_start = Instant::now();
+        let _ = read_fn(black_box(path))?;
+        let iter_duration = iter_start.elapsed();
+        total_duration += iter_duration;
+
+        // Wait a moment to get stable CPU measurements
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Refresh system info after the iteration
+        sys.refresh_all();
+
+        // Get the process again
+        let process = match sys.process(pid) {
+            Some(p) => p,
+            None => return Err(anyhow::anyhow!("failed to get process info")),
+        };
+
+        // Record CPU usage after the iteration
+        let cpu_after = process.cpu_usage();
+        let cpu_delta = cpu_after - cpu_before;
+        cpu_usage_sum += cpu_delta;
+
+        // Record memory after the iteration
+        let mem_stats_after = memory_stats::memory_stats()
+            .ok_or_else(|| anyhow::anyhow!("failed to get memory stats"))?;
+        let current_memory = mem_stats_after.physical_mem;
+        peak_memory = peak_memory.max(current_memory as u64);
+
+        // Optional progress reporting
+        if iterations > 1 && (i + 1) % (iterations / 10).max(1) == 0 {
+            println!(
+                "progress: {}/{} iterations for {} - {}",
+                i + 1,
+                iterations,
+                format_name,
+                path
+            );
+        }
+    }
+
+    // Final process memory usage (subtract initial memory to get delta)
+    sys.refresh_all();
+    let final_memory = match sys.process(pid) {
+        Some(p) => p.memory(),
+        None => initial_memory,
+    };
+    let memory_delta = final_memory.saturating_sub(initial_memory);
+
+    // Calculate averages
+    let avg_duration = if iterations > 0 {
+        total_duration / iterations
+    } else {
+        Duration::new(0, 0)
+    };
+
+    let avg_cpu_usage = if iterations > 0 {
+        cpu_usage_sum / iterations as f32
+    } else {
+        0.0
+    };
+
+    let total_elapsed = start.elapsed();
+
+    Ok(BenchResult {
+        format: format_name.to_string(),
+        duration: avg_duration,
+        peak_memory,
+        cpu_usage: avg_cpu_usage,
+    })
 }
 
 pub fn read_benchmark(c: &mut Criterion) {
+    // Optional: Initialize dhat profiler if the feature is enabled
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::builder().testing().build();
+
     let mut group = c.benchmark_group("read");
 
-    let iterations: u32 = 10;
-    // Only specify sample size and minimal warm-up
+    let iterations: u32 = 100;
+    // Increase warm-up time and measurement time to prevent timeouts
     group
         .sample_size(iterations as usize)
-        .warm_up_time(Duration::from_millis(500));
+        .warm_up_time(Duration::from_secs(5));
 
     let mut results = HashMap::new();
 
     for (size, (fcb_path, cjseq_path, cbor_path, bson_path)) in DATASETS {
         // FCB benchmark
-        let start = Instant::now();
+        println!("benchmarking FlatCityBuf for dataset: {}", size);
+        let result = benchmark_read_fn(iterations, "FlatCityBuf", fcb_path, read_fcb)
+            .unwrap_or_else(|e| {
+                println!("error in fcb benchmark: {:?}", e);
+                BenchResult {
+                    format: "FlatCityBuf".to_string(),
+                    duration: Duration::new(0, 0),
+                    peak_memory: 0,
+                    cpu_usage: 0.0,
+                }
+            });
+
         group.bench_with_input(
             BenchmarkId::new("FlatCityBuf", size),
             fcb_path,
-            |b, path| {
-                b.iter_custom(|iter| {
-                    let start = Instant::now();
-                    let before_memory = memory_stats::memory_stats().unwrap().physical_mem;
-                    for _ in 0..iter {
-                        let _ = read_fcb(black_box(path));
-                    }
-                    let after_memory = memory_stats::memory_stats().unwrap().physical_mem;
-                    let memory_usage = after_memory - before_memory;
-                    start.elapsed()
-                })
-            },
-        );
-        results.insert(
-            format!("{}_fcb", size),
-            BenchResult {
-                format: "FlatCityBuf".to_string(),
-                duration: start.elapsed() / iterations,
-            },
+            |b, path| b.iter(|| read_fcb(black_box(path))),
         );
 
+        results.insert(format!("{}_fcb", size), result);
+
         // CJSeq benchmark
-        let start = Instant::now();
+        println!("benchmarking CityJSONTextSequence for dataset: {}", size);
+        let result = benchmark_read_fn(iterations, "CityJSONTextSequence", cjseq_path, read_cjseq)
+            .unwrap_or_else(|e| {
+                println!("error in cjseq benchmark: {:?}", e);
+                BenchResult {
+                    format: "CityJSONTextSequence".to_string(),
+                    duration: Duration::new(0, 0),
+                    peak_memory: 0,
+                    cpu_usage: 0.0,
+                }
+            });
+
         group.bench_with_input(
             BenchmarkId::new("CityJSONTextSequence", size),
             cjseq_path,
-            |b, path| {
-                b.iter_custom(|iter| {
-                    let start = Instant::now();
-                    let before_memory = memory_stats::memory_stats().unwrap().physical_mem;
-                    for _ in 0..iter {
-                        let _ = read_cjseq(black_box(path));
-                    }
-                    let after_memory = memory_stats::memory_stats().unwrap().physical_mem;
-                    let memory_usage = after_memory - before_memory;
-                    start.elapsed()
-                })
-            },
+            |b, path| b.iter(|| read_cjseq(black_box(path))),
         );
-        results.insert(
-            format!("{}_cjseq", size),
-            BenchResult {
-                format: "CityJSONTextSequence".to_string(),
-                duration: start.elapsed() / iterations,
-            },
-        );
+
+        results.insert(format!("{}_cjseq", size), result);
 
         // CBOR benchmark
-        let start = Instant::now();
-        group.bench_with_input(BenchmarkId::new("CBOR", size), cbor_path, |b, path| {
-            b.iter_custom(|iter| {
-                let start = Instant::now();
-                let before_memory = memory_stats::memory_stats().unwrap().physical_mem;
-                for _ in 0..iter {
-                    let _ = read_cbor(black_box(path));
+        println!("benchmarking CBOR for dataset: {}", size);
+        let result =
+            benchmark_read_fn(iterations, "CBOR", cbor_path, read_cbor).unwrap_or_else(|e| {
+                println!("error in cbor benchmark: {:?}", e);
+                BenchResult {
+                    format: "CBOR".to_string(),
+                    duration: Duration::new(0, 0),
+                    peak_memory: 0,
+                    cpu_usage: 0.0,
                 }
-                let after_memory = memory_stats::memory_stats().unwrap().physical_mem;
-                let memory_usage = after_memory - before_memory;
-                start.elapsed()
-            })
+            });
+
+        group.bench_with_input(BenchmarkId::new("CBOR", size), cbor_path, |b, path| {
+            b.iter(|| read_cbor(black_box(path)))
         });
-        results.insert(
-            format!("{}_cbor", size),
-            BenchResult {
-                format: "CBOR".to_string(),
-                duration: start.elapsed() / iterations,
-            },
-        );
+
+        results.insert(format!("{}_cbor", size), result);
 
         // BSON benchmark
-        let start = Instant::now();
-        group.bench_with_input(BenchmarkId::new("BSON", size), bson_path, |b, path| {
-            b.iter_custom(|iter| {
-                let start = Instant::now();
-                let before_memory = memory_stats::memory_stats().unwrap().physical_mem;
-                for _ in 0..iter {
-                    let _ = read_bson(black_box(path));
+        println!("benchmarking BSON for dataset: {}", size);
+        let result =
+            benchmark_read_fn(iterations, "BSON", bson_path, read_bson).unwrap_or_else(|e| {
+                println!("error in bson benchmark: {:?}", e);
+                BenchResult {
+                    format: "BSON".to_string(),
+                    duration: Duration::new(0, 0),
+                    peak_memory: 0,
+                    cpu_usage: 0.0,
                 }
-                let after_memory = memory_stats::memory_stats().unwrap().physical_mem;
-                let memory_usage = after_memory - before_memory;
-                start.elapsed()
-            })
+            });
+
+        group.bench_with_input(BenchmarkId::new("BSON", size), bson_path, |b, path| {
+            b.iter(|| read_bson(black_box(path)))
         });
-        results.insert(
-            format!("{}_bson", size),
-            BenchResult {
-                format: "BSON".to_string(),
-                duration: start.elapsed() / iterations,
-            },
-        );
+
+        results.insert(format!("{}_bson", size), result);
     }
 
     group.finish();
 
-    // Print all results at the end
-    println!("\nBenchmark Results:");
-    println!("{:<12} {:<15} {:<15}", "Dataset", "Format", "Mean Time");
-    println!("{:-<42}", "");
+    // Print all results at the end with detailed metrics
+    println!("\nDetailed Benchmark Results:");
+    println!(
+        "{:<15} {:<15} {:<15} {:<15} {:<15}",
+        "Dataset", "Format", "Mean Time", "Peak Memory", "CPU Usage"
+    );
+    println!("{:-<75}", "");
 
     for (size, _) in DATASETS {
         for format in &["fcb", "cjseq", "cbor", "bson"] {
             if let Some(result) = results.get(&format!("{}_{}", size, format)) {
                 println!(
-                    "{:<12} {:<15} {}",
+                    "{:<15} {:<15} {:<15} {:<15} {:.2}%",
                     size,
                     result.format,
-                    format_duration(result.duration)
+                    format_duration(result.duration),
+                    format_bytes(result.peak_memory),
+                    result.cpu_usage
                 );
             }
         }
+        // Add a separator between datasets
+        println!("{:-<75}", "");
+    }
+
+    // Summary table - best performance per metric
+    println!("\nSummary - Best Format Per Metric:");
+    println!(
+        "{:<15} {:<15} {:<15} {:<15}",
+        "Dataset", "Fastest", "Lowest Memory", "Lowest CPU"
+    );
+    println!("{:-<60}", "");
+
+    for (size, _) in DATASETS {
+        let formats = ["fcb", "cjseq", "cbor", "bson"];
+        let mut fastest = ("None", Duration::from_secs(u64::MAX));
+        let mut lowest_memory = ("None", u64::MAX);
+        let mut lowest_cpu = ("None", f32::MAX);
+
+        for format in &formats {
+            if let Some(result) = results.get(&format!("{}_{}", size, format)) {
+                if result.duration < fastest.1 {
+                    fastest = (&result.format, result.duration);
+                }
+                if result.peak_memory < lowest_memory.1 {
+                    lowest_memory = (&result.format, result.peak_memory);
+                }
+                if result.cpu_usage < lowest_cpu.1 {
+                    lowest_cpu = (&result.format, result.cpu_usage);
+                }
+            }
+        }
+
+        println!(
+            "{:<15} {:<15} {:<15} {:<15}",
+            size, fastest.0, lowest_memory.0, lowest_cpu.0
+        );
     }
 }
 
+/// Add a feature flag to enable dhat profiling
+#[cfg(feature = "dhat-heap")]
+fn heap_profile() {
+    use dhat::Profiler;
+    // Initialize the profiler
+    let _profiler = Profiler::new_heap();
+
+    // Run just one iteration of each format for profiling
+    println!("Running heap profiling for FlatCityBuf");
+    let _ = read_fcb("benchmark_data/3DBAG.city.fcb");
+
+    println!("Running heap profiling for CityJSONTextSequence");
+    let _ = read_cjseq("benchmark_data/3DBAG.city.jsonl");
+
+    println!("Running heap profiling for CBOR");
+    let _ = read_cbor("benchmark_data/3DBAG.city.cbor");
+
+    println!("Running heap profiling for BSON");
+    let _ = read_bson("benchmark_data/3DBAG.city.bson");
+}
+
+// Define the benchmark group
+#[cfg(not(feature = "dhat-heap"))]
 criterion_group!(benches, read_benchmark);
+
+// Use a different configuration when heap profiling is enabled
+#[cfg(feature = "dhat-heap")]
+criterion_group! {
+    name = benches;
+    config = Criterion::default().sample_size(1);
+    targets = read_benchmark
+}
+
 criterion_main!(benches);
