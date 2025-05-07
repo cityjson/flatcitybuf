@@ -16,6 +16,8 @@ const PAYLOAD_TAG: Offset = 1u64 << 63;
 /// Mask to clear the tag bit.
 const PAYLOAD_MASK: Offset = !PAYLOAD_TAG;
 
+const DEFAULT_MIN_REQ_SIZE: usize = 1024 * 32;
+
 // This implementation was derived from FlatGeobuf's implemenation.
 
 /// S-Tree node
@@ -102,7 +104,7 @@ async fn read_http_payload_data<T: AsyncHttpRangeClient>(
     client: &mut AsyncBufferedHttpRangeClient<T>,
     offset: usize,
 ) -> Result<PayloadEntry> {
-    let temp_buffered_count_bytes_size = 4096; //This is hueristic, we don't know the size of the payload. TODO: find a better way
+    let temp_buffered_count_bytes_size = DEFAULT_MIN_REQ_SIZE; //This is hueristic, we don't know the size of the payload. TODO: find a better way
 
     debug!("sending request to fetch payload, offset {offset:?}");
 
@@ -305,8 +307,8 @@ async fn batch_resolve_payloads<T: AsyncHttpRangeClient>(
     let mut current_range = (payload_offsets_to_fetch[0], payload_offsets_to_fetch[0]);
 
     for &offset in payload_offsets_to_fetch.iter().skip(1) {
-        // If offsets are close (within 4KB), extend the current range
-        if offset <= current_range.1 + 4096 {
+        // If offsets are close (within DEFAULT_MIN_REQ_SIZE), extend the current range
+        if offset <= current_range.1 + DEFAULT_MIN_REQ_SIZE {
             current_range.1 = offset;
         } else {
             // Otherwise, finish the current range and start a new one
@@ -327,7 +329,7 @@ async fn batch_resolve_payloads<T: AsyncHttpRangeClient>(
     for (start, end) in offset_ranges {
         // Calculate fetch size to include the complete payload entries
         // Add a margin to account for variable-sized payload entries
-        let fetch_size = (end - start) + 4096;
+        let fetch_size = (end - start) + DEFAULT_MIN_REQ_SIZE;
 
         let payload_data = client.get_range(start, fetch_size).await?;
 
@@ -1642,8 +1644,11 @@ impl<K: Key> Stree<K> {
                 if item.key >= lower && item.key <= upper {
                     let off = item.offset;
 
+                    println!("off: {:?}", off);
+
                     if (off & PAYLOAD_TAG) != 0 {
                         let rel = (off & PAYLOAD_MASK) as usize;
+                        println!("rel: {:?}", rel);
                         // Add as indirect reference to be resolved in batch
                         payload_refs.push(PayloadRef::Indirect(rel));
                     } else {
