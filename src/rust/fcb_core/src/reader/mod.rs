@@ -405,8 +405,9 @@ impl<R: Read> FeatureIter<R, NotSeekable> {
     pub fn cur_cj_feature(&self) -> Result<CityJSONFeature, Error> {
         let fcb_feature = self.buffer.feature();
         let root_attr_schema = self.buffer.header().columns();
+        let semantic_attr_schema = self.buffer.header().semantic_columns();
 
-        to_cj_feature(fcb_feature, root_attr_schema)
+        to_cj_feature(fcb_feature, root_attr_schema, semantic_attr_schema)
     }
 
     pub fn get_features(&mut self) -> Result<Vec<CityFeature>, Error> {
@@ -429,12 +430,15 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
     pub fn cur_feature(&self) -> CityFeature {
         self.buffer.feature()
     }
+    pub fn cur_feature_len(&self) -> usize {
+        self.buffer.features_buf.len()
+    }
     /// Return current feature
     pub fn cur_cj_feature(&self) -> Result<CityJSONFeature, Error> {
         let fcb_feature = self.buffer.feature();
         let root_attr_schema = self.buffer.header().columns();
-
-        to_cj_feature(fcb_feature, root_attr_schema)
+        let semantic_attr_schema = self.buffer.header().semantic_columns();
+        to_cj_feature(fcb_feature, root_attr_schema, semantic_attr_schema)
     }
 
     pub fn get_features(&mut self, _: impl Write) -> Result<(), Error> {

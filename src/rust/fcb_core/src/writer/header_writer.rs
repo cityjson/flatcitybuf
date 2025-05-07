@@ -17,6 +17,9 @@ pub struct HeaderWriter<'a> {
     pub header_options: HeaderWriterOptions,
     /// Attribute schema
     pub attr_schema: AttributeSchema,
+
+    /// Semantic attribute schema
+    pub semantic_attr_schema: Option<AttributeSchema>,
     /// Attribute indices
     pub(super) attribute_indices_info: Option<Vec<AttributeIndexInfo>>,
 }
@@ -58,8 +61,14 @@ impl<'a> HeaderWriter<'a> {
         cj: CityJSON,
         header_options: Option<HeaderWriterOptions>,
         attr_schema: AttributeSchema,
+        semantic_attr_schema: Option<AttributeSchema>,
     ) -> HeaderWriter<'a> {
-        Self::new_with_options(header_options.unwrap_or_default(), cj, attr_schema)
+        Self::new_with_options(
+            header_options.unwrap_or_default(),
+            cj,
+            attr_schema,
+            semantic_attr_schema,
+        )
     }
 
     /// Creates a new HeaderWriter with specific configuration
@@ -72,6 +81,7 @@ impl<'a> HeaderWriter<'a> {
         mut options: HeaderWriterOptions,
         cj: CityJSON,
         attr_schema: AttributeSchema,
+        semantic_attr_schema: Option<AttributeSchema>,
     ) -> HeaderWriter<'a> {
         let fbb = FlatBufferBuilder::new();
         let index_node_size = if options.write_index {
@@ -85,6 +95,7 @@ impl<'a> HeaderWriter<'a> {
             cj,
             header_options: options,
             attr_schema,
+            semantic_attr_schema,
             attribute_indices_info: None,
         }
     }
@@ -100,6 +111,7 @@ impl<'a> HeaderWriter<'a> {
             &self.cj,
             self.header_options,
             &self.attr_schema,
+            self.semantic_attr_schema.as_ref(),
             self.attribute_indices_info
                 .as_ref()
                 .filter(|info| !info.is_empty())

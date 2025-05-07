@@ -621,25 +621,25 @@ mod tests {
                 thetype: "WallSurface".to_string(),
                 parent: None,
                 children: Some(vec![2]),
-                other: json!({
+                other: Some(json!({
                     "slope": 33.4,
-                }),
+                })),
             },
             CjSemanticsSurface {
                 thetype: "RoofSurface".to_string(),
                 parent: None,
                 children: None,
-                other: json!({
+                other: Some(json!({
                     "slope": 66.6,
-                }),
+                })),
             },
             CjSemanticsSurface {
                 thetype: "OuterCeilingSurface".to_string(),
                 parent: Some(0),
                 children: None,
-                other: json!({
+                other: Some(json!({
                     "colour": "blue",
-                }),
+                })),
             },
         ];
 
@@ -737,6 +737,7 @@ mod tests {
           }
         }  );
         let composite_solid_geom: CjGeometry = serde_json::from_value(composite_solid_gem_json)?;
+        println!("composite_solid_geom: {:?}", composite_solid_geom);
         let CjGeometry { semantics, .. } = composite_solid_geom;
 
         let encoded_semantics = encode_semantics(&semantics.unwrap());
@@ -746,13 +747,13 @@ mod tests {
                 thetype: "RoofSurface".to_string(),
                 parent: None,
                 children: None,
-                other: json!({}),
+                other: Some(json!({})),
             },
             CjSemanticsSurface {
                 thetype: "WallSurface".to_string(),
                 parent: None,
                 children: None,
-                other: json!({}),
+                other: Some(json!({})),
             },
         ];
 
@@ -829,7 +830,6 @@ mod tests {
         assert_eq!(encoded.len(), 1);
         match &encoded[0] {
             MaterialMapping::Values(values) => {
-                println!("values: {:?}", values);
                 assert_eq!(values.theme, "theme3");
                 assert_eq!(values.solids, vec![2]); // 1 solid with 2 shells
                 assert_eq!(values.shells, vec![3, 3]); // Each shell has 3 surfaces

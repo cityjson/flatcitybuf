@@ -54,6 +54,7 @@ pub(super) fn to_fcb_header<'a>(
     cj: &CityJSON,
     header_options: HeaderWriterOptions,
     attr_schema: &AttributeSchema,
+    semantic_attr_schema: Option<&AttributeSchema>,
     attribute_indices_info: Option<&[AttributeIndexInfo]>,
 ) -> Result<flatbuffers::WIPOffset<Header<'a>>> {
     let version = Some(fbb.create_string(&cj.version));
@@ -112,7 +113,7 @@ pub(super) fn to_fcb_header<'a>(
             let gm_vec = gm
                 .templates
                 .iter()
-                .map(|g| to_geometry(fbb, g))
+                .map(|g| to_geometry(fbb, g, semantic_attr_schema))
                 .collect::<Vec<_>>();
             (Some(fbb.create_vector(&gm_vec)), Some(templates_vertices))
         }
@@ -410,12 +411,13 @@ pub(super) fn to_fcb_city_feature<'a>(
     id: &str,
     city_feature: &CityJSONFeature,
     attr_schema: &AttributeSchema,
+    semantic_attr_schema: Option<&AttributeSchema>,
 ) -> (flatbuffers::WIPOffset<CityFeature<'a>>, NodeItem) {
     let id = Some(fbb.create_string(id));
     let city_objects: Vec<_> = city_feature
         .city_objects
         .iter()
-        .map(|(id, co)| to_city_object(fbb, id, co, attr_schema))
+        .map(|(id, co)| to_city_object(fbb, id, co, attr_schema, semantic_attr_schema))
         .collect();
     let objects = Some(fbb.create_vector(&city_objects));
     let vertices = Some(
@@ -591,6 +593,7 @@ pub(super) fn to_city_object<'a>(
     id: &str,
     co: &CjCityObject,
     attr_schema: &AttributeSchema,
+    semantic_attr_schema: Option<&AttributeSchema>,
 ) -> flatbuffers::WIPOffset<CityObject<'a>> {
     let id = Some(fbb.create_string(id));
 
@@ -608,8 +611,11 @@ pub(super) fn to_city_object<'a>(
             .collect::<Vec<_>>()
     });
     let geometries = {
-        let geometries = geometry_without_instances
-            .map(|gs| gs.iter().map(|g| to_geometry(fbb, g)).collect::<Vec<_>>());
+        let geometries = geometry_without_instances.map(|gs| {
+            gs.iter()
+                .map(|g| to_geometry(fbb, g, semantic_attr_schema))
+                .collect::<Vec<_>>()
+        });
         geometries.map(|geometries| fbb.create_vector(&geometries))
     };
 
@@ -805,6 +811,7 @@ pub(super) fn to_semantic_surface_type(ss_type: &str) -> (SemanticSurfaceType, O
 pub(crate) fn to_geometry<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     geometry: &CjGeometry,
+    semantic_attr_schema: Option<&AttributeSchema>,
 ) -> flatbuffers::WIPOffset<Geometry<'a>> {
     let type_ = to_geom_type(&geometry.thetype);
     let lod = geometry.lod.as_ref().map(|lod| fbb.create_string(lod));
@@ -841,13 +848,19 @@ pub(crate) fn to_geometry<'a>(
 
                     let (type_, extension_type) = to_semantic_surface_type(&s.thetype);
                     let extension_type = extension_type.map(|s| fbb.create_string(&s));
-
+                    let attributes = if let Some(other) = &s.other {
+                        semantic_attr_schema.as_ref().map(|schema| {
+                            fbb.create_vector(&encode_attributes_with_schema(other, schema))
+                        })
+                    } else {
+                        None
+                    };
                     SemanticObject::create(
                         fbb,
                         &SemanticObjectArgs {
                             type_,
                             extension_type,
-                            attributes: None,
+                            attributes,
                             children,
                             parent: s.parent,
                         },
@@ -991,7 +1004,7 @@ pub(super) fn to_templates_vertices<'a>(
     fbb.create_vector(&vertices_vec)
 }
 
-pub(super) fn to_columns<'a>(
+pub(crate) fn to_columns<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>> {
@@ -1068,7 +1081,7 @@ mod tests {
         let mut fbb = FlatBufferBuilder::new();
 
         let (city_feature, _) =
-            to_fcb_city_feature(&mut fbb, "test_id", &cj_city_feature, &attr_schema);
+            to_fcb_city_feature(&mut fbb, "test_id", &cj_city_feature, &attr_schema, None);
 
         fbb.finish(city_feature, None);
         let buf = fbb.finished_data();

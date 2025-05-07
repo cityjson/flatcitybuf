@@ -61,6 +61,7 @@ mod tests {
                 geographical_extent: None,
             }),
             Some(attr_schema),
+            None,
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
@@ -163,6 +164,7 @@ mod tests {
                 geographical_extent: None,
             }),
             Some(attr_schema),
+            None,
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
@@ -261,6 +263,7 @@ mod tests {
                 geographical_extent: None,
             }),
             Some(attr_schema),
+            None,
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;

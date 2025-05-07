@@ -505,16 +505,24 @@ mod wasm {
             // verify flatbuffer
             let feature = size_prefixed_root_as_city_feature(&self.fbs.features_buf)
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            let cj_feature = to_cj_feature(feature, self._header().columns())
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let cj_feature = to_cj_feature(
+                feature,
+                self._header().columns(),
+                self._header().semantic_columns(),
+            )
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
             Ok(Some(to_value(&cj_feature)?))
         }
 
         #[wasm_bindgen]
         pub fn cur_cj_feature(&self) -> Result<JsValue, JsValue> {
-            let cj_feature = to_cj_feature(self.fbs.feature(), self._header().columns())
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let cj_feature = to_cj_feature(
+                self.fbs.feature(),
+                self._header().columns(),
+                self._header().semantic_columns(),
+            )
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
             Ok(to_value(&cj_feature)?)
         }
 

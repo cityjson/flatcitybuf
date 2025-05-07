@@ -5,10 +5,13 @@ use cjseq::{
     TextureValues as CjTextureValues,
 };
 
-use crate::fb::{
-    GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType, TextureMapping,
+use crate::{
+    fb::{GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType, TextureMapping},
+    Column,
 };
 use std::collections::HashMap;
+
+use super::deserializer::decode_attributes;
 
 /// For semantics decoding, we only care about solids and shells.
 /// We stop recursing at d <= 2 which are surfaces, rings and points (meaning we just return semantic_indices).
@@ -171,6 +174,7 @@ pub(crate) fn decode(
 /// Vector of CityJSON semantic surface definitions
 pub(crate) fn decode_semantics_surfaces(
     semantics_objects: &[SemanticObject],
+    semantic_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
 ) -> Vec<SemanticsSurface> {
     let surfaces = semantics_objects.iter().map(|s| {
         let surface_type_str = match s.type_() {
@@ -203,14 +207,17 @@ pub(crate) fn decode_semantics_surfaces(
 
         let children = s.children().map(|c| c.iter().collect::<Vec<_>>());
 
-        // let attributes = None; // FIXME
+        let attributes = if let Some(schema) = semantic_attr_schema {
+            s.attributes().map(|a| decode_attributes(schema, a))
+        } else {
+            None
+        };
 
         SemanticsSurface {
             thetype: surface_type_str,
             parent: s.parent(),
             children,
-            // TODO: Think how to handle `other`
-            other: serde_json::Value::default(),
+            other: attributes,
         }
     });
     surfaces.collect()
@@ -329,8 +336,9 @@ pub(crate) fn decode_semantics(
     geometry_type: GeometryType,
     semantics_objects: Vec<SemanticObject>,
     semantics_values: Vec<u32>,
+    semantic_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
 ) -> Semantics {
-    let surfaces = decode_semantics_surfaces(&semantics_objects);
+    let surfaces = decode_semantics_surfaces(&semantics_objects, semantic_attr_schema);
 
     let mut part_lists = PartLists {
         solids,
@@ -845,6 +853,7 @@ pub(crate) fn decode_textures(
 #[cfg(test)]
 mod tests {
     use crate::{
+        attribute::{AttributeSchema, AttributeSchemaMethods},
         fb::{
             feature_generated::{
                 root_as_city_feature, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
@@ -854,7 +863,8 @@ mod tests {
                 TextureMappingArgs,
             },
         },
-        serializer::to_geometry,
+        serializer::{self, to_geometry},
+        Header, HeaderArgs,
     };
 
     use super::*;
@@ -1037,10 +1047,37 @@ mod tests {
                 }
             });
             let multi_sufaces_geom: CjGeometry = serde_json::from_value(multi_surfaces_gem_json)?;
+            let mut semantic_attr_schema = AttributeSchema::new();
+            for surface in multi_sufaces_geom
+                .semantics
+                .as_ref()
+                .unwrap()
+                .surfaces
+                .iter()
+            {
+                if let Some(other) = &surface.other {
+                    semantic_attr_schema.add_attributes(other);
+                }
+            }
+            let mut header_fbb = FlatBufferBuilder::new();
+            let columns = serializer::to_columns(&mut header_fbb, &semantic_attr_schema.clone());
+            let header = {
+                let header_args = HeaderArgs {
+                    version: Some(fbb.create_string("1.0")),
+                    semantic_columns: Some(columns),
+                    ..Default::default()
+                };
+                Header::create(&mut header_fbb, &header_args)
+            };
+            header_fbb.finish(header, None);
+
+            let header_buf = header_fbb.finished_data();
+            let header = unsafe { flatbuffers::root_unchecked::<Header>(header_buf) };
             let city_feature = {
                 let id = fbb.create_string("test");
 
-                let geometry = to_geometry(&mut fbb, &multi_sufaces_geom);
+                let geometry =
+                    to_geometry(&mut fbb, &multi_sufaces_geom, Some(&semantic_attr_schema));
                 let geometries = fbb.create_vector(&[geometry]);
                 let city_object = CityObject::create(
                     &mut fbb,
@@ -1090,17 +1127,29 @@ mod tests {
                 GeometryType::MultiSurface,
                 geometry.semantics_objects().unwrap().iter().collect(),
                 geometry.semantics().unwrap().iter().collect(),
+                header.semantic_columns(),
             );
 
             // Verify decoded surfaces
             assert_eq!(3, decoded.surfaces.len());
             assert_eq!("WallSurface", decoded.surfaces[0].thetype);
             assert_eq!(Some(vec![2]), decoded.surfaces[0].children);
+            assert_eq!(
+                Some(serde_json::json!({ "slope": 33.4 })),
+                decoded.surfaces[0].other
+            );
             assert_eq!("RoofSurface", decoded.surfaces[1].thetype);
             assert_eq!(None, decoded.surfaces[1].children);
+            assert_eq!(
+                Some(serde_json::json!({ "slope": 66.6 })),
+                decoded.surfaces[1].other
+            );
             assert_eq!("OuterCeilingSurface", decoded.surfaces[2].thetype);
             assert_eq!(Some(0), decoded.surfaces[2].parent);
-
+            assert_eq!(
+                Some(serde_json::json!({ "colour": "blue" })),
+                decoded.surfaces[2].other
+            );
             assert_eq!(
                 SemanticsValues::Indices(vec![Some(0), Some(0), None, Some(1), Some(2)]),
                 decoded.values
@@ -1201,7 +1250,7 @@ mod tests {
             let city_feature = {
                 let id = fbb.create_string("test");
 
-                let geometry = to_geometry(&mut fbb, &composite_solid_geom);
+                let geometry = to_geometry(&mut fbb, &composite_solid_geom, None);
                 let geometries = fbb.create_vector(&[geometry]);
                 let city_object = CityObject::create(
                     &mut fbb,
@@ -1251,6 +1300,7 @@ mod tests {
                 GeometryType::CompositeSolid,
                 geometry.semantics_objects().unwrap().iter().collect(),
                 geometry.semantics().unwrap().iter().collect(),
+                None,
             );
 
             // Verify decoded surfaces

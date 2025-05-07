@@ -36,7 +36,7 @@ pub struct FcbWriter<'a> {
     feat_offsets: Vec<FeatureOffset>,
     feat_nodes: Vec<NodeItem>,
     attr_schema: AttributeSchema,
-
+    semantic_attr_schema: Option<AttributeSchema>,
     // temporary storage for attribute index entries
     attribute_index_entries: HashMap<usize, AttributeFeatureOffset>,
 }
@@ -64,16 +64,24 @@ impl<'a> FcbWriter<'a> {
         cj: CityJSON,
         header_option: Option<HeaderWriterOptions>,
         attr_schema: Option<AttributeSchema>,
+        semantic_attr_schema: Option<AttributeSchema>,
     ) -> Result<Self> {
         let attr_schema = attr_schema.unwrap_or_default();
+
         let transform = cj.transform.clone();
-        let header_writer = HeaderWriter::new(cj, header_option, attr_schema.clone());
+        let header_writer = HeaderWriter::new(
+            cj,
+            header_option,
+            attr_schema.clone(),
+            semantic_attr_schema.clone(),
+        );
         Ok(Self {
             header_writer,
             transform,
             feat_writer: None,
             tmpout: BufWriter::new(tempfile::tempfile()?),
             attr_schema,
+            semantic_attr_schema,
             feat_offsets: Vec::new(),
             feat_nodes: Vec::new(),
             attribute_index_entries: HashMap::new(),
@@ -145,6 +153,7 @@ impl<'a> FcbWriter<'a> {
             self.feat_writer = Some(FeatureWriter::new(
                 feature,
                 self.attr_schema.clone(),
+                self.semantic_attr_schema.clone(),
                 self.header_writer
                     .header_options
                     .attribute_indices

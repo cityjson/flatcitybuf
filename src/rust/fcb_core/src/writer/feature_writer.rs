@@ -17,6 +17,8 @@ pub struct FeatureWriter<'a> {
     fbb: flatbuffers::FlatBufferBuilder<'a>,
     /// The attribute schema to be used for serialization
     attr_schema: AttributeSchema,
+
+    semantic_attr_schema: Option<AttributeSchema>,
     pub(super) bbox: NodeItem,
 
     attr_indices: Option<Vec<String>>,
@@ -40,12 +42,14 @@ impl<'a> FeatureWriter<'a> {
     pub fn new(
         city_feature: &'a CityJSONFeature,
         attr_schema: AttributeSchema,
+        semantic_attr_schema: Option<AttributeSchema>,
         attr_indices: Option<Vec<String>>,
     ) -> FeatureWriter<'a> {
         FeatureWriter {
             city_feature,
             fbb: flatbuffers::FlatBufferBuilder::new(),
             attr_schema,
+            semantic_attr_schema,
             bbox: NodeItem::create(0),
             attr_indices,
             attribute_feature_offsets: AttributeFeatureOffset {
@@ -73,6 +77,7 @@ impl<'a> FeatureWriter<'a> {
             self.city_feature.id.as_str(),
             self.city_feature,
             &self.attr_schema,
+            self.semantic_attr_schema.as_ref(),
         );
         self.bbox = bbox;
         self.fbb.finish_size_prefixed(cf_buf, None);

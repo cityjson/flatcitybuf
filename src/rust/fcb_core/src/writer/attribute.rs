@@ -101,7 +101,7 @@ pub(crate) fn encode_attributes_with_schema(attr: &Value, schema: &AttributeSche
                 if let Some(value) = value {
                     (value.0, value.1)
                 } else {
-                    return Vec::new();
+                    continue;
                 }
             } else {
                 return Vec::new();
@@ -390,7 +390,6 @@ mod tests {
             // Case 1: Same schema
             (
                 json!({
-                    "attributes": {
                         "int": -10,
                         "uint": 5,
                         "bool": true,
@@ -399,8 +398,18 @@ mod tests {
                         "array": [1, 2, 3],
                         "json": {
                             "hoge": "fuga"
-                        },
-                    }
+                        }
+                }),
+                json!({
+                        "int": -10,
+                        "uint": 5,
+                            "bool": true,
+                        "float": 1.0,
+                        "string": "hoge",
+                        "array": [1, 2, 3],
+                        "json": {
+                            "hoge": "fuga"
+                    },
                 }),
                 json!({
                     "attributes": {
@@ -412,7 +421,7 @@ mod tests {
                         "array": [1, 2, 3],
                         "json": {
                             "hoge": "fuga"
-                        },
+                        }
                     }
                 }),
                 "same schema",
@@ -420,8 +429,7 @@ mod tests {
             // Case 2: JSON with null value
             (
                 json!({
-                    "attributes": {
-                        "int": -10,
+                            "int": -10,
                         "uint": 5,
                         "bool": true,
                         "float": 1.0,
@@ -431,7 +439,17 @@ mod tests {
                             "hoge": "fuga"
                         },
                         "exception": null
-                    }
+                }),
+                json!({
+                            "int": -10,
+                        "uint": 5,
+                        "bool": true,
+                        "float": 1.0,
+                        "string": "hoge",
+                        "array": [1, 2, 3],
+                        "json": {
+                            "hoge": "fuga"
+                        },
                 }),
                 json!({
                     "attributes": {
@@ -451,9 +469,8 @@ mod tests {
             ),
             // Case 3: JSON is empty
             (
-                json!({
-                    "attributes": {}
-                }),
+                json!({}),
+                json!({}),
                 json!({
                     "attributes": {
                         "int": -10,
@@ -472,10 +489,10 @@ mod tests {
             ),
         ];
 
-        for (json_data, schema, test_name) in test_cases {
+        for (input, expected, schema, test_name) in test_cases {
             println!("Testing case: {}", test_name);
 
-            let attrs = &json_data["attributes"];
+            let attrs = &input;
             let attr_schema = &schema["attributes"];
 
             // Create and encode with schema
@@ -534,8 +551,9 @@ mod tests {
             let attributes = feature_buf.objects().unwrap().get(0).attributes().unwrap();
 
             let decoded = decode_attributes(header_buf.columns().unwrap(), attributes);
+
             assert_eq!(
-                attrs, &decoded,
+                expected, decoded,
                 "decoded data should match original for {}",
                 test_name
             );

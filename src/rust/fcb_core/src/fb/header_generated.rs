@@ -2489,30 +2489,31 @@ impl<'a> Header<'a> {
     pub const VT_TRANSFORM: flatbuffers::VOffsetT = 4;
     pub const VT_APPEARANCE: flatbuffers::VOffsetT = 6;
     pub const VT_COLUMNS: flatbuffers::VOffsetT = 8;
-    pub const VT_FEATURES_COUNT: flatbuffers::VOffsetT = 10;
-    pub const VT_INDEX_NODE_SIZE: flatbuffers::VOffsetT = 12;
-    pub const VT_ATTRIBUTE_INDEX: flatbuffers::VOffsetT = 14;
-    pub const VT_GEOGRAPHICAL_EXTENT: flatbuffers::VOffsetT = 16;
-    pub const VT_REFERENCE_SYSTEM: flatbuffers::VOffsetT = 18;
-    pub const VT_IDENTIFIER: flatbuffers::VOffsetT = 20;
-    pub const VT_REFERENCE_DATE: flatbuffers::VOffsetT = 22;
-    pub const VT_TITLE: flatbuffers::VOffsetT = 24;
-    pub const VT_TEMPLATES: flatbuffers::VOffsetT = 26;
-    pub const VT_TEMPLATES_VERTICES: flatbuffers::VOffsetT = 28;
-    pub const VT_EXTENSIONS: flatbuffers::VOffsetT = 30;
-    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 32;
-    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 34;
-    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 36;
-    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 38;
-    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 40;
-    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 42;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 44;
-    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 46;
-    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 48;
-    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 50;
-    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 52;
-    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 54;
-    pub const VT_VERSION: flatbuffers::VOffsetT = 56;
+    pub const VT_SEMANTIC_COLUMNS: flatbuffers::VOffsetT = 10;
+    pub const VT_FEATURES_COUNT: flatbuffers::VOffsetT = 12;
+    pub const VT_INDEX_NODE_SIZE: flatbuffers::VOffsetT = 14;
+    pub const VT_ATTRIBUTE_INDEX: flatbuffers::VOffsetT = 16;
+    pub const VT_GEOGRAPHICAL_EXTENT: flatbuffers::VOffsetT = 18;
+    pub const VT_REFERENCE_SYSTEM: flatbuffers::VOffsetT = 20;
+    pub const VT_IDENTIFIER: flatbuffers::VOffsetT = 22;
+    pub const VT_REFERENCE_DATE: flatbuffers::VOffsetT = 24;
+    pub const VT_TITLE: flatbuffers::VOffsetT = 26;
+    pub const VT_TEMPLATES: flatbuffers::VOffsetT = 28;
+    pub const VT_TEMPLATES_VERTICES: flatbuffers::VOffsetT = 30;
+    pub const VT_EXTENSIONS: flatbuffers::VOffsetT = 32;
+    pub const VT_POC_CONTACT_NAME: flatbuffers::VOffsetT = 34;
+    pub const VT_POC_CONTACT_TYPE: flatbuffers::VOffsetT = 36;
+    pub const VT_POC_ROLE: flatbuffers::VOffsetT = 38;
+    pub const VT_POC_PHONE: flatbuffers::VOffsetT = 40;
+    pub const VT_POC_EMAIL: flatbuffers::VOffsetT = 42;
+    pub const VT_POC_WEBSITE: flatbuffers::VOffsetT = 44;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NUMBER: flatbuffers::VOffsetT = 46;
+    pub const VT_POC_ADDRESS_THOROUGHFARE_NAME: flatbuffers::VOffsetT = 48;
+    pub const VT_POC_ADDRESS_LOCALITY: flatbuffers::VOffsetT = 50;
+    pub const VT_POC_ADDRESS_POSTCODE: flatbuffers::VOffsetT = 52;
+    pub const VT_POC_ADDRESS_COUNTRY: flatbuffers::VOffsetT = 54;
+    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 56;
+    pub const VT_VERSION: flatbuffers::VOffsetT = 58;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -2591,6 +2592,9 @@ impl<'a> Header<'a> {
         if let Some(x) = args.attribute_index {
             builder.add_attribute_index(x);
         }
+        if let Some(x) = args.semantic_columns {
+            builder.add_semantic_columns(x);
+        }
         if let Some(x) = args.columns {
             builder.add_columns(x);
         }
@@ -2632,6 +2636,19 @@ impl<'a> Header<'a> {
             self._tab.get::<flatbuffers::ForwardsUOffset<
                 flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column>>,
             >>(Header::VT_COLUMNS, None)
+        }
+    }
+    #[inline]
+    pub fn semantic_columns(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column>>,
+            >>(Header::VT_SEMANTIC_COLUMNS, None)
         }
     }
     #[inline]
@@ -2917,6 +2934,9 @@ impl flatbuffers::Verifiable for Header<'_> {
             .visit_field::<flatbuffers::ForwardsUOffset<
                 flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column>>,
             >>("columns", Self::VT_COLUMNS, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column>>,
+            >>("semantic_columns", Self::VT_SEMANTIC_COLUMNS, false)?
             .visit_field::<u64>("features_count", Self::VT_FEATURES_COUNT, false)?
             .visit_field::<u16>("index_node_size", Self::VT_INDEX_NODE_SIZE, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, AttributeIndex>>>(
@@ -3027,6 +3047,9 @@ pub struct HeaderArgs<'a> {
     pub columns: Option<
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>>,
     >,
+    pub semantic_columns: Option<
+        flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>>,
+    >,
     pub features_count: u64,
     pub index_node_size: u16,
     pub attribute_index: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, AttributeIndex>>>,
@@ -3065,6 +3088,7 @@ impl Default for HeaderArgs<'_> {
             transform: None,
             appearance: None,
             columns: None,
+            semantic_columns: None,
             features_count: 0,
             index_node_size: 16,
             attribute_index: None,
@@ -3120,6 +3144,18 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HeaderBuilder<'a, 'b, A> {
     ) {
         self.fbb_
             .push_slot_always::<flatbuffers::WIPOffset<_>>(Header::VT_COLUMNS, columns);
+    }
+    #[inline]
+    pub fn add_semantic_columns(
+        &mut self,
+        semantic_columns: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Column<'b>>>,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+            Header::VT_SEMANTIC_COLUMNS,
+            semantic_columns,
+        );
     }
     #[inline]
     pub fn add_features_count(&mut self, features_count: u64) {
@@ -3325,6 +3361,7 @@ impl core::fmt::Debug for Header<'_> {
         ds.field("transform", &self.transform());
         ds.field("appearance", &self.appearance());
         ds.field("columns", &self.columns());
+        ds.field("semantic_columns", &self.semantic_columns());
         ds.field("features_count", &self.features_count());
         ds.field("index_node_size", &self.index_node_size());
         ds.field("attribute_index", &self.attribute_index());

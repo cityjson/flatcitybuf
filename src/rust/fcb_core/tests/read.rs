@@ -45,6 +45,7 @@ fn read_bbox() -> Result<()> {
             geographical_extent: None,
         }),
         Some(attr_schema),
+        None,
     )?;
 
     for feature in original_cj_seq.features.iter() {
@@ -153,6 +154,7 @@ fn read_bbox_nonseekable() -> anyhow::Result<()> {
             geographical_extent: None,
         }),
         Some(attr_schema),
+        None,
     )?;
 
     for feature in original_cj_seq.features.iter() {

@@ -3,12 +3,10 @@ use bson::Document;
 use cjseq::{CityJSON, CityJSONFeature};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::{FcbReader, GeometryType};
-use memory_stats::MemoryStats;
 use std::{
     collections::HashMap,
     fs::File,
     io::{BufRead, BufReader},
-    path::Path,
     time::{Duration, Instant},
 };
 use sysinfo::{Pid, System};

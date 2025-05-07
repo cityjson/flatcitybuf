@@ -56,6 +56,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                 geographical_extent: None,
             }),
             Some(attr_schema),
+            None,
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
@@ -294,8 +295,8 @@ fn test_geometry_template_cycle() -> Result<()> {
                         if let Some(semantics) = &geom.semantics {
                             for surface in &semantics.surfaces {
                                 // Assuming 'other' holds attributes, adjust if needed
-                                if !surface.other.is_null() {
-                                    attr_schema.add_attributes(&surface.other);
+                                if let Some(other) = &surface.other {
+                                    attr_schema.add_attributes(other);
                                 }
                             }
                         }
@@ -308,8 +309,8 @@ fn test_geometry_template_cycle() -> Result<()> {
             for template_geom in &gt.templates {
                 if let Some(semantics) = &template_geom.semantics {
                     for surface in &semantics.surfaces {
-                        if !surface.other.is_null() {
-                            attr_schema.add_attributes(&surface.other);
+                        if let Some(other) = &surface.other {
+                            attr_schema.add_attributes(other);
                         }
                     }
                 }
@@ -326,6 +327,7 @@ fn test_geometry_template_cycle() -> Result<()> {
                 geographical_extent: None,
             }),
             Some(attr_schema),
+            None,
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
@@ -503,6 +505,7 @@ fn test_extension_serialization_cycle() -> Result<()> {
                 geographical_extent: None,
             }),
             Some(attr_schema),
+            None,
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;

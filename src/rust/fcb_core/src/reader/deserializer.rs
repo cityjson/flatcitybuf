@@ -21,7 +21,7 @@ use super::meta::{Column as MetaColumn, ColumnType as MetaColumnType, Meta};
 
 pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
     let mut cj = CityJSON::new();
-
+    let semantic_attr_schema = header.semantic_columns();
     if let Some(transform) = header.transform() {
         let (scale, translate) = (transform.scale(), transform.translate());
         cj.transform = CjTransform {
@@ -95,7 +95,7 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
     {
         let templates = fb_templates
             .iter()
-            .map(|g| decode_geometry(g)) // Use local decode_geometry
+            .map(|g| decode_geometry(g, semantic_attr_schema)) // Use local decode_geometry
             .collect::<Result<Vec<_>, _>>()?;
 
         let vertices_templates = fb_vertices
@@ -374,18 +374,13 @@ pub(crate) fn decode_attributes(
         }
     }
 
-    // check if there is any column that is not in the map, and set it to null
-    for col in columns.iter() {
-        if !map.contains_key(col.name()) {
-            map.insert(col.name().to_string(), serde_json::Value::Null);
-        }
-    }
     serde_json::Value::Object(map)
 }
 
 pub fn to_cj_feature(
     feature: CityFeature,
     root_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
+    semantic_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
 ) -> Result<CityJSONFeature, Error> {
     // Ensure function returns Result
     let mut cj = CityJSONFeature::new();
@@ -412,7 +407,7 @@ pub fn to_cj_feature(
                 if let Some(standard_geometries) = co.geometry() {
                     let decoded_standard = standard_geometries
                         .iter()
-                        .map(|g| decode_geometry(g)) // Returns Result<CjGeometry, Error>
+                        .map(|g| decode_geometry(g, semantic_attr_schema)) // Returns Result<CjGeometry, Error>
                         .collect::<Result<Vec<_>, _>>()?; // Collect Results, propagate error
                     all_geometries.extend(decoded_standard);
                 }
@@ -571,7 +566,10 @@ pub fn to_cj_feature(
     Ok(cj) // Return Result
 }
 
-pub(crate) fn decode_geometry(g: Geometry) -> Result<CjGeometry, Error> {
+pub(crate) fn decode_geometry(
+    g: Geometry,
+    semantic_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
+) -> Result<CjGeometry, Error> {
     let solids = g
         .solids()
         .map(|v| v.iter().collect::<Vec<_>>())
@@ -604,6 +602,7 @@ pub(crate) fn decode_geometry(g: Geometry) -> Result<CjGeometry, Error> {
             g.type_(),
             semantics_objects,
             semantics,
+            semantic_attr_schema,
         ))
     } else {
         None

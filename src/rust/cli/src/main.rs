@@ -186,6 +186,29 @@ fn serialize(
         }
     };
 
+    let semantic_attr_schema = {
+        let mut schema = AttributeSchema::new();
+        for feature in filtered_features.iter() {
+            for (_, co) in feature.city_objects.iter() {
+                if let Some(geometry) = &co.geometry {
+                    for geom in geometry.iter() {
+                        if let Some(semantics) = geom.semantics.as_ref() {
+                            for sem_obj in semantics.surfaces.iter() {
+                                if let Some(other) = &sem_obj.other {
+                                    schema.add_attributes(other);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if schema.is_empty() {
+            None
+        } else {
+            Some(schema)
+        }
+    };
     let attr_index_vec: Option<Vec<(String, Option<u16>)>> =
         if index_all_attributes.unwrap_or(false) && attr_schema.is_some() {
             // create a vec with all attribute names and branching factor given
@@ -232,7 +255,7 @@ fn serialize(
 
     println!("header_options in cli: {:?}", header_options);
 
-    let mut fcb = FcbWriter::new(cj, Some(header_options), attr_schema)?;
+    let mut fcb = FcbWriter::new(cj, Some(header_options), attr_schema, semantic_attr_schema)?;
 
     for feature in filtered_features.iter() {
         fcb.add_feature(feature)?;

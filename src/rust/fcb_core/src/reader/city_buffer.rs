@@ -24,7 +24,8 @@ impl FcbBuffer {
     pub fn cj_feature(&self) -> Result<CityJSONFeature, Error> {
         let fcb_feature = self.feature();
         let root_attr_schema = self.header().columns();
-        to_cj_feature(fcb_feature, root_attr_schema)
+        let semantic_attr_schema = self.header().semantic_columns();
+        to_cj_feature(fcb_feature, root_attr_schema, semantic_attr_schema)
     }
 
     pub fn meta(&self) -> Result<Meta, Error> {

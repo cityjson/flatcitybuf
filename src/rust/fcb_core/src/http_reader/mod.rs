@@ -260,11 +260,6 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             .collect();
         attr_index_entries.sort_by_key(|attr_info| attr_info.index());
 
-        // debug!("attr_index_entries: {attr_index_entries:?}");
-        // debug print detail of attr_index_entries
-        for attr_info in attr_index_entries.iter() {
-            debug!("attr_info: {attr_info:?}");
-        }
         // Build the query
         let query = build_query(&query);
 
@@ -289,6 +284,8 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
 
         let count = result.len();
 
+        // println!("result: {:?}", result);
+
         let http_ranges: Vec<HttpRange> = result
             .into_iter()
             .map(|item| match item.range {
@@ -301,6 +298,8 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             "completed: select_attr_query via http reader, matched features: {}",
             count
         );
+
+        println!("http_ranges: {:?}", http_ranges);
         Ok(AsyncFeatureIter {
             client: self.client,
             fbs: self.fbs,
@@ -320,6 +319,7 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         feature_begin: usize,
     ) -> Result<()> {
         if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
+            println!("Adding index for column: {:?}", col.name());
             // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
             let index_begin = index_begin as u64;
             match col.type_() {
@@ -412,6 +412,8 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     );
                 }
                 ColumnType::ULong => {
+                    println!("Adding u64 index");
+                    println!("attr_info: {:?}", attr_info);
                     let index = HttpIndex::<u64>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
@@ -440,6 +442,7 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                 }
 
                 _ => {
+                    println!("Unsupported column type: {:?}", col.type_());
                     return Err(Error::UnsupportedColumnType(col.name().to_string()));
                 }
             }
@@ -478,7 +481,11 @@ impl<T: AsyncHttpRangeClient + Send + Sync> AsyncFeatureIter<T> {
     }
 
     pub fn cur_cj_feature(&self) -> Result<CityJSONFeature> {
-        let cj_feature = to_cj_feature(self.cur_feature().feature(), self.header().columns())?;
+        let cj_feature = to_cj_feature(
+            self.cur_feature().feature(),
+            self.header().columns(),
+            self.header().semantic_columns(),
+        )?;
         Ok(cj_feature)
     }
 }
@@ -673,11 +680,13 @@ impl SelectAttr {
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
     ) -> Result<Option<Bytes>> {
+        println!("self.range_pos: {:?}", self.range_pos);
         let Some(range) = self.ranges.get(self.range_pos) else {
             return Ok(None);
         };
         let mut feature_buffer = BytesMut::from(client.get_range(range.start(), 4).await?);
         let feature_size = LittleEndian::read_u32(&feature_buffer) as usize;
+        println!("feature_size: {:?}", feature_size);
         feature_buffer.put(client.get_range(range.start() + 4, feature_size).await?);
         self.range_pos += 1;
         Ok(Some(feature_buffer.freeze()))
