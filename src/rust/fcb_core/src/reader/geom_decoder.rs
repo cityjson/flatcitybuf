@@ -207,7 +207,7 @@ pub(crate) fn decode_semantics_surfaces(
 
         let children = s.children().map(|c| c.iter().collect::<Vec<_>>());
 
-        let attributes = if let Some(schema) = semantic_attr_schema {
+        let attributes = if let Some(schema) = &semantic_attr_schema {
             s.attributes().map(|a| decode_attributes(schema, a))
         } else {
             None

@@ -61,6 +61,7 @@ pub(super) fn to_fcb_header<'a>(
     let transform = to_transform(&cj.transform);
     let features_count: u64 = header_options.feature_count;
     let columns = Some(to_columns(fbb, attr_schema));
+    let semantic_columns = semantic_attr_schema.map(|schema| to_columns(fbb, schema));
     let index_node_size = header_options.index_node_size;
     let attribute_index = {
         if let Some(attribute_indices_info) = attribute_indices_info {
@@ -176,6 +177,7 @@ pub(super) fn to_fcb_header<'a>(
             &HeaderArgs {
                 transform: Some(transform).as_ref(),
                 columns,
+                semantic_columns,
                 features_count,
                 index_node_size,
                 geographical_extent: geographical_extent.as_ref(),
@@ -201,7 +203,6 @@ pub(super) fn to_fcb_header<'a>(
                 templates,
                 templates_vertices,
                 extensions,
-                ..Default::default()
             },
         ))
     } else {
@@ -210,6 +211,7 @@ pub(super) fn to_fcb_header<'a>(
             &HeaderArgs {
                 transform: Some(transform).as_ref(),
                 columns,
+                semantic_columns,
                 features_count,
                 index_node_size,
                 geographical_extent: geographical_extent_from_options.as_ref(),

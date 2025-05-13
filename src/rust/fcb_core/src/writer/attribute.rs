@@ -550,7 +550,7 @@ mod tests {
             let feature_buf = root_as_city_feature(finished_data).unwrap();
             let attributes = feature_buf.objects().unwrap().get(0).attributes().unwrap();
 
-            let decoded = decode_attributes(header_buf.columns().unwrap(), attributes);
+            let decoded = decode_attributes(&header_buf.columns().unwrap(), attributes);
 
             assert_eq!(
                 expected, decoded,

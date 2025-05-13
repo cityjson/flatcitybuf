@@ -3,6 +3,7 @@ use bson::Document;
 use cjseq::{CityJSON, CityJSONFeature};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::{FcbReader, GeometryType};
+use prettytable::{Cell, Row, Table};
 use std::{
     collections::HashMap,
     fs::File,
@@ -191,7 +192,11 @@ pub(crate) fn read_bson(path: &str) -> Result<(u64, u64, u64)> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
 
+    use anyhow::Result;
+
+    use crate::{read_bson, read_cbor, read_cjseq, read_fcb, DATASETS};
     #[test]
     fn test_read_counts_match() -> Result<()> {
         // Test all datasets with all formats
@@ -376,6 +381,51 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
             "benchmark_data/tokyo_plateau.city.bson",
         ),
     ),
+    (
+        "Takeshiba (PLATEAU) Brid",
+        (
+            "benchmark_data/plateau_takeshiba_brid.fcb",
+            "benchmark_data/plateau_takeshiba_brid.city.jsonl",
+            "benchmark_data/plateau_takeshiba_brid.city.cbor",
+            "benchmark_data/plateau_takeshiba_brid.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Rail way",
+        (
+            "benchmark_data/plateau_takeshiba_rwy.fcb",
+            "benchmark_data/plateau_takeshiba_rwy.city.jsonl",
+            "benchmark_data/plateau_takeshiba_rwy.city.cbor",
+            "benchmark_data/plateau_takeshiba_rwy.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Transport",
+        (
+            "benchmark_data/plateau_takeshiba_tran.fcb",
+            "benchmark_data/plateau_takeshiba_tran.city.jsonl",
+            "benchmark_data/plateau_takeshiba_tran.city.cbor",
+            "benchmark_data/plateau_takeshiba_tran.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Tunnel",
+        (
+            "benchmark_data/plateau_takeshiba_tun.fcb",
+            "benchmark_data/plateau_takeshiba_tun.city.jsonl",
+            "benchmark_data/plateau_takeshiba_tun.city.cbor",
+            "benchmark_data/plateau_takeshiba_tun.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Vegetation",
+        (
+            "benchmark_data/plateau_takeshiba_bldg.fcb",
+            "benchmark_data/plateau_takeshiba_bldg.city.jsonl",
+            "benchmark_data/plateau_takeshiba_bldg.city.cbor",
+            "benchmark_data/plateau_takeshiba_bldg.city.bson",
+        ),
+    ),
 ];
 
 fn format_duration(d: Duration) -> String {
@@ -539,13 +589,21 @@ pub fn read_benchmark(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("read");
 
-    let iterations: u32 = 100;
+    let iterations: u32 = 1;
     // Increase warm-up time and measurement time to prevent timeouts
     group
         .sample_size(iterations as usize)
-        .warm_up_time(Duration::from_secs(5));
+        .warm_up_time(Duration::from_secs(2));
 
     let mut results = HashMap::new();
+
+    // Print table headers for real-time results
+    println!("\nBenchmark Results (Real-time):");
+    println!(
+        "{:<15} {:<20} {:<15} {:<15} {:<15}",
+        "Dataset", "Format", "Mean Time", "Peak Memory", "CPU Usage"
+    );
+    println!("{:-<80}", "");
 
     for (size, (fcb_path, cjseq_path, cbor_path, bson_path)) in DATASETS {
         // FCB benchmark
@@ -560,6 +618,16 @@ pub fn read_benchmark(c: &mut Criterion) {
                     cpu_usage: 0.0,
                 }
             });
+
+        // Print real-time result
+        println!(
+            "{:<15} {:<20} {:<15} {:<15} {:.2}%",
+            size,
+            result.format,
+            format_duration(result.duration),
+            format_bytes(result.peak_memory),
+            result.cpu_usage
+        );
 
         group.bench_with_input(
             BenchmarkId::new("FlatCityBuf", size),
@@ -582,6 +650,16 @@ pub fn read_benchmark(c: &mut Criterion) {
                 }
             });
 
+        // Print real-time result
+        println!(
+            "{:<15} {:<20} {:<15} {:<15} {:.2}%",
+            size,
+            result.format,
+            format_duration(result.duration),
+            format_bytes(result.peak_memory),
+            result.cpu_usage
+        );
+
         group.bench_with_input(
             BenchmarkId::new("CityJSONTextSequence", size),
             cjseq_path,
@@ -603,6 +681,16 @@ pub fn read_benchmark(c: &mut Criterion) {
                 }
             });
 
+        // Print real-time result
+        println!(
+            "{:<15} {:<20} {:<15} {:<15} {:.2}%",
+            size,
+            result.format,
+            format_duration(result.duration),
+            format_bytes(result.peak_memory),
+            result.cpu_usage
+        );
+
         group.bench_with_input(BenchmarkId::new("CBOR", size), cbor_path, |b, path| {
             b.iter(|| read_cbor(black_box(path)))
         });
@@ -622,47 +710,72 @@ pub fn read_benchmark(c: &mut Criterion) {
                 }
             });
 
+        // Print real-time result
+        println!(
+            "{:<15} {:<20} {:<15} {:<15} {:.2}%",
+            size,
+            result.format,
+            format_duration(result.duration),
+            format_bytes(result.peak_memory),
+            result.cpu_usage
+        );
+
         group.bench_with_input(BenchmarkId::new("BSON", size), bson_path, |b, path| {
             b.iter(|| read_bson(black_box(path)))
         });
 
         results.insert(format!("{}_bson", size), result);
+
+        // Add a separator between datasets
+        println!("{:-<80}", "");
     }
 
     group.finish();
 
-    // Print all results at the end with detailed metrics
-    println!("\nDetailed Benchmark Results:");
-    println!(
-        "{:<15} {:<15} {:<15} {:<15} {:<15}",
-        "Dataset", "Format", "Mean Time", "Peak Memory", "CPU Usage"
-    );
-    println!("{:-<75}", "");
+    // Print comprehensive results summary table
+    print_benchmark_results(&results);
+}
+
+/// Print comprehensive benchmark results to standard output
+fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
+    println!("\nComprehensive Benchmark Results:");
+    let mut summary_table = Table::new();
+    // Add header row
+    summary_table.add_row(Row::new(vec![
+        Cell::new("Dataset"),
+        Cell::new("Format"),
+        Cell::new("Mean Time"),
+        Cell::new("Peak Memory"),
+        Cell::new("CPU Usage"),
+    ]));
+    // println!("{:-<75}", "");
 
     for (size, _) in DATASETS {
         for format in &["fcb", "cjseq", "cbor", "bson"] {
             if let Some(result) = results.get(&format!("{}_{}", size, format)) {
-                println!(
-                    "{:<15} {:<15} {:<15} {:<15} {:.2}%",
-                    size,
-                    result.format,
-                    format_duration(result.duration),
-                    format_bytes(result.peak_memory),
-                    result.cpu_usage
-                );
+                summary_table.add_row(Row::new(vec![
+                    Cell::new(size),
+                    Cell::new(&result.format),
+                    Cell::new(&format_duration(result.duration)),
+                    Cell::new(&format_bytes(result.peak_memory)),
+                    Cell::new(&format!("{:.2}%", result.cpu_usage)),
+                ]));
             }
         }
         // Add a separator between datasets
         println!("{:-<75}", "");
     }
+    summary_table.printstd();
 
     // Summary table - best performance per metric
     println!("\nSummary - Best Format Per Metric:");
-    println!(
-        "{:<15} {:<15} {:<15} {:<15}",
-        "Dataset", "Fastest", "Lowest Memory", "Lowest CPU"
-    );
-    println!("{:-<60}", "");
+    summary_table.add_row(Row::new(vec![
+        Cell::new("Dataset"),
+        Cell::new("Fastest"),
+        Cell::new("Lowest Memory"),
+        Cell::new("Lowest CPU"),
+    ]));
+    // println!("{:-<60}", "");
 
     for (size, _) in DATASETS {
         let formats = ["fcb", "cjseq", "cbor", "bson"];
@@ -684,11 +797,18 @@ pub fn read_benchmark(c: &mut Criterion) {
             }
         }
 
-        println!(
-            "{:<15} {:<15} {:<15} {:<15}",
-            size, fastest.0, lowest_memory.0, lowest_cpu.0
-        );
+        summary_table.add_row(Row::new(vec![
+            Cell::new(size),
+            Cell::new(fastest.0),
+            Cell::new(lowest_memory.0),
+            Cell::new(lowest_cpu.0),
+        ]));
+        // println!(
+        //     "{:<15} {:<15} {:<15} {:<15}",
+        //     size, fastest.0, lowest_memory.0, lowest_cpu.0
+        // );
     }
+    summary_table.printstd();
 }
 
 /// Add a feature flag to enable dhat profiling

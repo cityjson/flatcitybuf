@@ -8,6 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11"
 flatbuffers = "^24.3.25"
+cjio = "^0.10.1"
 
 
 [tool.poetry.group.dev.dependencies]

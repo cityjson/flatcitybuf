@@ -37,6 +37,10 @@ deser:
 fcb_info:
 	cargo run -p fcb_cli info -i fcb_core/tests/data/delft_bbox.fcb
 
+.PHONY: file_stats
+file_stats:
+	cargo run -p fcb_core --bin stats -- -d fcb_core/benchmark_data/ -f csv
+
 .PHONY: bench
 bench:
 	cargo bench -p fcb_core --bench read

@@ -246,8 +246,8 @@ pub(crate) fn to_cj_co_type(co_type: CityObjectType, extension_type: Option<&str
     }
 }
 
-pub(crate) fn decode_attributes(
-    columns: flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>,
+pub fn decode_attributes(
+    columns: &flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>,
     attributes: flatbuffers::Vector<'_, u8>,
 ) -> serde_json::Value {
     if attributes.is_empty() {
@@ -431,7 +431,7 @@ pub fn to_cj_feature(
                     None
                 } else {
                     co.attributes().map(|a| {
-                        decode_attributes(co.columns().unwrap_or(root_attr_schema.unwrap()), a)
+                        decode_attributes(&co.columns().unwrap_or(root_attr_schema.unwrap()), a)
                     })
                 };
 
