@@ -347,7 +347,7 @@ mod wasm {
                 current_index_begin += attr_info.length() as usize;
             }
 
-            self.client.set_min_req_size(combine_request_threshold);
+            // self.client.set_min_req_size(combine_request_threshold);
             let result = http_multi_index
                 .query(&mut self.client, &query.conditions)
                 .await
@@ -391,6 +391,11 @@ mod wasm {
             combine_request_threshold: usize,
         ) -> Result<(), JsValue> {
             if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
+                info!(
+                    "Adding index for column: {:?}, {:?}",
+                    col.name(),
+                    col.type_()
+                );
                 // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
                 let index_begin = index_begin as u64;
                 match col.type_() {
@@ -463,7 +468,9 @@ mod wasm {
                             feature_begin as usize,
                             combine_request_threshold,
                         );
+                        multi_index.add_index(col.name().to_string(), index);
                     }
+
                     ColumnType::UShort => {
                         let index = HttpIndex::<u16>::new(
                             attr_info.num_unique_items() as usize,
@@ -472,6 +479,7 @@ mod wasm {
                             feature_begin as usize,
                             combine_request_threshold,
                         );
+                        multi_index.add_index(col.name().to_string(), index);
                     }
                     ColumnType::UInt => {
                         let index = HttpIndex::<u32>::new(
@@ -481,10 +489,10 @@ mod wasm {
                             feature_begin as usize,
                             combine_request_threshold,
                         );
+                        multi_index.add_index(col.name().to_string(), index);
                     }
                     ColumnType::ULong => {
-                        println!("Adding u64 index");
-                        println!("attr_info: {:?}", attr_info);
+                        info!("Adding u64 index");
                         let index = HttpIndex::<u64>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
@@ -492,6 +500,7 @@ mod wasm {
                             feature_begin as usize,
                             combine_request_threshold,
                         );
+                        multi_index.add_index(col.name().to_string(), index);
                     }
                     ColumnType::Byte => {
                         let index = HttpIndex::<i8>::new(
@@ -501,6 +510,7 @@ mod wasm {
                             feature_begin as usize,
                             combine_request_threshold,
                         );
+                        multi_index.add_index(col.name().to_string(), index);
                     }
                     ColumnType::UByte => {
                         let index = HttpIndex::<u8>::new(
@@ -510,6 +520,7 @@ mod wasm {
                             feature_begin as usize,
                             combine_request_threshold,
                         );
+                        multi_index.add_index(col.name().to_string(), index);
                     }
                     _ => {
                         return Err(JsValue::from_str(&format!(
