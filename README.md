@@ -1,5 +1,7 @@
 # flatcitybuf
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/HideBa/flatcitybuf)
+
 a cloud-optimized binary format for storing and retrieving 3d city models based on the cityjson standard.
 
 ## overview
