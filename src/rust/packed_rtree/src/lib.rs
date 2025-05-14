@@ -146,6 +146,37 @@ impl NodeItem {
         }
         true
     }
+
+    /// Check if a point is inside or on the boundary of this NodeItem's bounding box
+    pub fn contains_point(&self, x: f64, y: f64) -> bool {
+        x >= self.min_x && x <= self.max_x && y >= self.min_y && y <= self.max_y
+    }
+
+    /// Calculate the squared Euclidean distance from a point to the centroid of this NodeItem
+    pub fn centroid_distance_squared(&self, x: f64, y: f64) -> f64 {
+        let centroid_x = (self.min_x + self.max_x) / 2.0;
+        let centroid_y = (self.min_y + self.max_y) / 2.0;
+        let dx = x - centroid_x;
+        let dy = y - centroid_y;
+        dx * dx + dy * dy
+    }
+
+    /// Calculate the minimum squared distance from a point to this NodeItem's bounding box
+    /// Returns 0 if the point is inside the bbox
+    pub fn min_distance_squared(&self, x: f64, y: f64) -> f64 {
+        if self.contains_point(x, y) {
+            return 0.0;
+        }
+
+        // Calculate closest point on the bbox
+        let closest_x = x.clamp(self.min_x, self.max_x);
+        let closest_y = y.clamp(self.min_y, self.max_y);
+
+        // Calculate squared distance
+        let dx = x - closest_x;
+        let dy = y - closest_y;
+        dx * dx + dy * dy
+    }
 }
 
 /// Read full capacity of vec from data stream
@@ -193,6 +224,13 @@ async fn read_http_node_items<T: AsyncHttpRangeClient>(
         node_items.push(NodeItem::from_bytes(node_item_bytes)?);
     }
     Ok(node_items)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Query {
+    BBox(f64, f64, f64, f64),
+    PointIntersects(f64, f64),
+    PointNearest(f64, f64),
 }
 
 #[derive(Debug)]
@@ -465,60 +503,192 @@ impl PackedRTree {
         Ok(tree)
     }
 
-    pub fn search(
-        &self,
-        min_x: f64,
-        min_y: f64,
-        max_x: f64,
-        max_y: f64,
-    ) -> Result<Vec<SearchResultItem>, Error> {
+    /// Search the R-Tree using a specific query type
+    pub fn search(&self, query: Query) -> Result<Vec<SearchResultItem>, Error> {
         let leaf_nodes_offset = self
             .level_bounds
             .first()
             .expect("RTree has at least one level when node_size >= 2 and num_items > 0")
             .start;
-        let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
-        let mut results = Vec::new();
-        let mut queue = VecDeque::new();
-        queue.push_back((0, self.level_bounds.len() - 1));
-        while let Some(next) = queue.pop_front() {
-            let node_index = next.0;
-            let level = next.1;
-            let is_leaf_node = node_index >= self.num_nodes() - self.num_leaf_nodes;
-            // find the end index of the node
-            let end = min(
-                node_index + self.branching_factor as usize,
-                self.level_bounds[level].end,
-            );
-            // search through child nodes
-            for pos in node_index..end {
-                let node_item = &self.node_items[pos];
-                if !bounds.intersects(node_item) {
-                    continue;
+
+        match query {
+            Query::BBox(min_x, min_y, max_x, max_y) => {
+                // Standard bounding box query
+                let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
+                let mut results = Vec::new();
+                let mut queue = VecDeque::new();
+                queue.push_back((0, self.level_bounds.len() - 1));
+
+                while let Some(next) = queue.pop_front() {
+                    let node_index = next.0;
+                    let level = next.1;
+                    let is_leaf_node = node_index >= self.num_nodes() - self.num_leaf_nodes;
+                    // find the end index of the node
+                    let end = min(
+                        node_index + self.branching_factor as usize,
+                        self.level_bounds[level].end,
+                    );
+                    // search through child nodes
+                    for pos in node_index..end {
+                        let node_item = &self.node_items[pos];
+                        if !bounds.intersects(node_item) {
+                            continue;
+                        }
+                        if is_leaf_node {
+                            results.push(SearchResultItem {
+                                offset: node_item.offset as usize,
+                                index: pos - leaf_nodes_offset,
+                            });
+                        } else {
+                            queue.push_back((node_item.offset as usize, level - 1));
+                        }
+                    }
                 }
-                if is_leaf_node {
-                    results.push(SearchResultItem {
-                        offset: node_item.offset as usize,
-                        index: pos - leaf_nodes_offset,
-                    });
-                } else {
-                    queue.push_back((node_item.offset as usize, level - 1));
+                Ok(results)
+            }
+            Query::PointIntersects(x, y) => {
+                // Point intersection query - find all bboxes that contain the point
+                // Create a point as a degenerate bbox
+                let point_bounds = NodeItem::bounds(x, y, x, y);
+                let mut results = Vec::new();
+                let mut queue = VecDeque::new();
+                queue.push_back((0, self.level_bounds.len() - 1));
+
+                while let Some(next) = queue.pop_front() {
+                    let node_index = next.0;
+                    let level = next.1;
+                    let is_leaf_node = node_index >= self.num_nodes() - self.num_leaf_nodes;
+                    // find the end index of the node
+                    let end = min(
+                        node_index + self.branching_factor as usize,
+                        self.level_bounds[level].end,
+                    );
+                    // search through child nodes
+                    for pos in node_index..end {
+                        let node_item = &self.node_items[pos];
+                        if !node_item.contains_point(x, y) {
+                            continue;
+                        }
+                        if is_leaf_node {
+                            results.push(SearchResultItem {
+                                offset: node_item.offset as usize,
+                                index: pos - leaf_nodes_offset,
+                            });
+                        } else {
+                            queue.push_back((node_item.offset as usize, level - 1));
+                        }
+                    }
                 }
+                Ok(results)
+            }
+            Query::PointNearest(x, y) => {
+                // Nearest neighbor query
+                // We use a priority queue to visit nodes in order of minimum distance
+                use std::cmp::Reverse;
+                use std::collections::BinaryHeap;
+
+                #[derive(PartialEq)]
+                struct QueueItem {
+                    distance: f64,
+                    node_index: usize,
+                    level: usize,
+                }
+
+                impl Eq for QueueItem {}
+
+                impl PartialOrd for QueueItem {
+                    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                        self.distance.partial_cmp(&other.distance)
+                    }
+                }
+
+                impl Ord for QueueItem {
+                    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                        self.partial_cmp(other).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                }
+
+                let mut nearest: Option<(f64, SearchResultItem)> = None;
+                let mut queue = BinaryHeap::new();
+
+                // Start with the root node
+                queue.push(Reverse(QueueItem {
+                    distance: 0.0,
+                    node_index: 0,
+                    level: self.level_bounds.len() - 1,
+                }));
+
+                while let Some(Reverse(next)) = queue.pop() {
+                    // If we have a nearest item and its distance is less than this node's,
+                    // we can stop searching
+                    if let Some((best_dist, _)) = nearest {
+                        if next.distance > best_dist {
+                            break;
+                        }
+                    }
+
+                    let node_index = next.node_index;
+                    let level = next.level;
+                    let is_leaf_node = node_index >= self.num_nodes() - self.num_leaf_nodes;
+                    // find the end index of the node
+                    let end = min(
+                        node_index + self.branching_factor as usize,
+                        self.level_bounds[level].end,
+                    );
+
+                    // search through child nodes
+                    for pos in node_index..end {
+                        let node_item = &self.node_items[pos];
+                        let dist = node_item.min_distance_squared(x, y);
+
+                        // If we have a nearest item, only consider this node if it's closer
+                        if let Some((best_dist, _)) = nearest {
+                            if dist >= best_dist {
+                                continue;
+                            }
+                        }
+
+                        if is_leaf_node {
+                            // Update nearest if this leaf node is closer
+                            let result = SearchResultItem {
+                                offset: node_item.offset as usize,
+                                index: pos - leaf_nodes_offset,
+                            };
+
+                            // For leaf nodes, use centroid distance as the final measure
+                            let centroid_dist = node_item.centroid_distance_squared(x, y);
+
+                            match nearest {
+                                None => nearest = Some((centroid_dist, result)),
+                                Some((best_dist, _)) if centroid_dist < best_dist => {
+                                    nearest = Some((centroid_dist, result))
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            // Add this node to the queue with its minimum distance
+                            queue.push(Reverse(QueueItem {
+                                distance: dist,
+                                node_index: node_item.offset as usize,
+                                level: level - 1,
+                            }));
+                        }
+                    }
+                }
+
+                // Return the nearest item, or empty vector if none found
+                Ok(nearest.map(|(_, item)| vec![item]).unwrap_or_default())
             }
         }
-        Ok(results)
     }
 
+    /// Search the R-Tree using a specific query type with streaming
     pub fn stream_search<R: Read + Seek>(
         data: &mut R,
         num_items: usize,
         node_size: u16,
-        min_x: f64,
-        min_y: f64,
-        max_x: f64,
-        max_y: f64,
+        query: Query,
     ) -> Result<Vec<SearchResultItem>, Error> {
-        let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
         let level_bounds = PackedRTree::generate_level_bounds(num_items, node_size);
         let Range {
             start: leaf_nodes_offset,
@@ -530,174 +700,189 @@ impl PackedRTree {
         // current position must be start of index
         let index_base = data.stream_position()?;
 
-        // use ordered search queue to make index traversal in sequential order
-        let mut queue = VecDeque::new();
-        queue.push_back((0, level_bounds.len() - 1));
-        let mut results = Vec::new();
+        match query {
+            Query::BBox(min_x, min_y, max_x, max_y) => {
+                let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
 
-        while let Some(next) = queue.pop_front() {
-            let node_index = next.0;
-            let level = next.1;
-            // println!("popped next node_index: {node_index}, level: {level}");
-            let is_leaf_node = node_index >= num_nodes - num_items;
-            // find the end index of the node
-            let end = min(node_index + node_size as usize, level_bounds[level].end);
-            let length = end - node_index;
-            let node_items = read_node_items(data, index_base, node_index, length)?;
-            // search through child nodes
-            for pos in node_index..end {
-                let node_pos = pos - node_index;
-                let node_item = &node_items[node_pos];
-                if !bounds.intersects(node_item) {
-                    continue;
-                }
-                if is_leaf_node {
-                    let index = pos - leaf_nodes_offset;
-                    let offset = node_item.offset as usize;
-                    // println!("pushing leaf node. index: {index}, offset: {offset}");
-                    results.push(SearchResultItem { offset, index });
-                } else {
-                    let offset = node_item.offset as usize;
-                    let prev_level = level - 1;
-                    // println!("pushing branch node. prev_level: {prev_level}, offset: {offset}");
-                    queue.push_back((offset, prev_level));
-                }
-            }
-        }
-        // Skip rest of index
-        data.seek(SeekFrom::Start(
-            index_base + (num_nodes * size_of::<NodeItem>()) as u64,
-        ))?;
-        Ok(results)
-    }
+                // use ordered search queue to make index traversal in sequential order
+                let mut queue = VecDeque::new();
+                queue.push_back((0, level_bounds.len() - 1));
+                let mut results = Vec::new();
 
-    #[cfg(feature = "http")]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn http_stream_search<T: AsyncHttpRangeClient>(
-        client: &mut AsyncBufferedHttpRangeClient<T>,
-        index_begin: usize,
-        attr_index_size: usize,
-        num_items: usize,
-        branching_factor: u16,
-        min_x: f64,
-        min_y: f64,
-        max_x: f64,
-        max_y: f64,
-        combine_request_threshold: usize,
-    ) -> Result<Vec<HttpSearchResultItem>, Error> {
-        use tracing::debug;
-
-        let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
-        if num_items == 0 {
-            return Ok(vec![]);
-        }
-        let level_bounds = PackedRTree::generate_level_bounds(num_items, branching_factor);
-        let feature_begin =
-            index_begin + attr_index_size + PackedRTree::index_size(num_items, branching_factor);
-        debug!("http_stream_search - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, GPS bounds:[({min_x}, {min_y}), ({max_x},{max_y})]");
-
-        #[derive(Debug, PartialEq, Eq)]
-        struct NodeRange {
-            level: usize,
-            nodes: Range<usize>,
-        }
-
-        let mut queue = VecDeque::new();
-        queue.push_back(NodeRange {
-            nodes: 0..1,
-            level: level_bounds.len() - 1,
-        });
-        let mut results = Vec::new();
-
-        while let Some(node_range) = queue.pop_front() {
-            debug!("next: {node_range:?}. {} items left in queue", queue.len());
-            let node_items = read_http_node_items(client, index_begin, &node_range.nodes).await?;
-            for (node_pos, node_item) in node_items.iter().enumerate() {
-                if !bounds.intersects(node_item) {
-                    continue;
-                }
-
-                if node_range.level == 0 {
-                    // leaf node
-                    let start = feature_begin + node_item.offset as usize;
-                    if let Some(next_node_item) = &node_items.get(node_pos + 1) {
-                        let end = feature_begin + next_node_item.offset as usize;
-                        results.push(HttpSearchResultItem {
-                            range: HttpRange::Range(start..end),
-                        });
-                    } else {
-                        debug_assert_eq!(node_pos, num_items - 1);
-                        results.push(HttpSearchResultItem {
-                            range: HttpRange::RangeFrom(start..),
-                        });
-                    }
-                } else {
-                    let children_level = node_range.level - 1;
-                    let mut children_nodes = node_item.offset as usize
-                        ..(node_item.offset + branching_factor as u64) as usize;
-                    if children_level == 0 {
-                        // These children are leaf nodes.
-                        //
-                        // We can right-size our feature requests if we know the size of each feature.
-                        //
-                        // To infer the length of *this* feature, we need the start of the *next*
-                        // feature, so we get an extra node here.
-                        children_nodes.end += 1;
-                    }
-                    // always stay within level's bounds
-                    children_nodes.end = min(children_nodes.end, level_bounds[children_level].end);
-
-                    let children_range = NodeRange {
-                        nodes: children_nodes,
-                        level: children_level,
-                    };
-
-                    let Some(tail) = queue.back_mut() else {
-                        debug!("Adding new request onto empty queue: {children_range:?}");
-                        queue.push_back(children_range);
-                        continue;
-                    };
-
-                    if tail.level != children_level {
-                        debug!("Adding new request for new level: {children_range:?} (existing queue tail: {tail:?})");
-                        queue.push_back(children_range);
-                        continue;
-                    }
-
-                    let wasted_bytes = {
-                        if children_range.nodes.start >= tail.nodes.end {
-                            (children_range.nodes.start - tail.nodes.end) * size_of::<NodeItem>()
-                        } else {
-                            // To compute feature size, we fetch an extra leaf node, but computing
-                            // wasted_bytes for adjacent ranges will overflow in that case, so
-                            // we skip that computation.
-                            //
-                            // But let's make sure we're in the state we think we are:
-                            debug_assert_eq!(
-                                children_range.nodes.start + 1,
-                                tail.nodes.end,
-                                "we only ever fetch one extra node"
-                            );
-                            debug_assert_eq!(
-                                children_level, 0,
-                                "extra node fetching only happens with leaf nodes"
-                            );
-                            0
+                while let Some(next) = queue.pop_front() {
+                    let node_index = next.0;
+                    let level = next.1;
+                    let is_leaf_node = node_index >= num_nodes - num_items;
+                    // find the end index of the node
+                    let end = min(node_index + node_size as usize, level_bounds[level].end);
+                    let length = end - node_index;
+                    let node_items = read_node_items(data, index_base, node_index, length)?;
+                    // search through child nodes
+                    for pos in node_index..end {
+                        let node_pos = pos - node_index;
+                        let node_item = &node_items[node_pos];
+                        if !bounds.intersects(node_item) {
+                            continue;
                         }
-                    };
-                    if wasted_bytes > combine_request_threshold {
-                        debug!("Adding new request for: {children_range:?} rather than merging with distant NodeRange: {tail:?} (would waste {wasted_bytes} bytes)");
-                        queue.push_back(children_range);
-                        continue;
+                        if is_leaf_node {
+                            let index = pos - leaf_nodes_offset;
+                            let offset = node_item.offset as usize;
+                            results.push(SearchResultItem { offset, index });
+                        } else {
+                            let offset = node_item.offset as usize;
+                            let prev_level = level - 1;
+                            queue.push_back((offset, prev_level));
+                        }
+                    }
+                }
+
+                // Skip rest of index
+                data.seek(SeekFrom::Start(
+                    index_base + (num_nodes * size_of::<NodeItem>()) as u64,
+                ))?;
+                Ok(results)
+            }
+            Query::PointIntersects(x, y) => {
+                // use ordered search queue to make index traversal in sequential order
+                let mut queue = VecDeque::new();
+                queue.push_back((0, level_bounds.len() - 1));
+                let mut results = Vec::new();
+
+                while let Some(next) = queue.pop_front() {
+                    let node_index = next.0;
+                    let level = next.1;
+                    let is_leaf_node = node_index >= num_nodes - num_items;
+                    // find the end index of the node
+                    let end = min(node_index + node_size as usize, level_bounds[level].end);
+                    let length = end - node_index;
+                    let node_items = read_node_items(data, index_base, node_index, length)?;
+                    // search through child nodes
+                    for pos in node_index..end {
+                        let node_pos = pos - node_index;
+                        let node_item = &node_items[node_pos];
+                        if !node_item.contains_point(x, y) {
+                            continue;
+                        }
+                        if is_leaf_node {
+                            let index = pos - leaf_nodes_offset;
+                            let offset = node_item.offset as usize;
+                            results.push(SearchResultItem { offset, index });
+                        } else {
+                            let offset = node_item.offset as usize;
+                            let prev_level = level - 1;
+                            queue.push_back((offset, prev_level));
+                        }
+                    }
+                }
+
+                // Skip rest of index
+                data.seek(SeekFrom::Start(
+                    index_base + (num_nodes * size_of::<NodeItem>()) as u64,
+                ))?;
+                Ok(results)
+            }
+            Query::PointNearest(x, y) => {
+                use std::cmp::Reverse;
+                use std::collections::BinaryHeap;
+
+                #[derive(PartialEq)]
+                struct QueueItem {
+                    distance: f64,
+                    node_index: usize,
+                    level: usize,
+                }
+
+                impl Eq for QueueItem {}
+
+                impl PartialOrd for QueueItem {
+                    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                        self.distance.partial_cmp(&other.distance)
+                    }
+                }
+
+                impl Ord for QueueItem {
+                    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                        self.partial_cmp(other).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                }
+
+                let mut nearest: Option<(f64, SearchResultItem)> = None;
+                let mut queue = BinaryHeap::new();
+
+                // Start with the root node
+                queue.push(Reverse(QueueItem {
+                    distance: 0.0,
+                    node_index: 0,
+                    level: level_bounds.len() - 1,
+                }));
+
+                while let Some(Reverse(next)) = queue.pop() {
+                    // If we have a nearest item and its distance is less than this node's,
+                    // we can stop searching
+                    if let Some((best_dist, _)) = nearest {
+                        if next.distance > best_dist {
+                            break;
+                        }
                     }
 
-                    // Merge the ranges to avoid an extra request
-                    debug!("Extending existing request {tail:?} with nearby children: {:?} (wastes {wasted_bytes} bytes)", &children_range.nodes);
-                    tail.nodes.end = children_range.nodes.end;
+                    let node_index = next.node_index;
+                    let level = next.level;
+                    let is_leaf_node = node_index >= num_nodes - num_items;
+
+                    // Get the node items
+                    let end = min(node_index + node_size as usize, level_bounds[level].end);
+                    let length = end - node_index;
+                    let node_items = read_node_items(data, index_base, node_index, length)?;
+
+                    // search through child nodes
+                    for pos in node_index..end {
+                        let node_pos = pos - node_index;
+                        let node_item = &node_items[node_pos];
+                        let dist = node_item.min_distance_squared(x, y);
+
+                        // If we have a nearest item, only consider this node if it's closer
+                        if let Some((best_dist, _)) = nearest {
+                            if dist >= best_dist {
+                                continue;
+                            }
+                        }
+
+                        if is_leaf_node {
+                            // Update nearest if this leaf node is closer
+                            let index = pos - leaf_nodes_offset;
+                            let offset = node_item.offset as usize;
+                            let result = SearchResultItem { offset, index };
+
+                            // For leaf nodes, use centroid distance as the final measure
+                            let centroid_dist = node_item.centroid_distance_squared(x, y);
+
+                            match nearest {
+                                None => nearest = Some((centroid_dist, result)),
+                                Some((best_dist, _)) if centroid_dist < best_dist => {
+                                    nearest = Some((centroid_dist, result))
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            // Add this node to the queue with its minimum distance
+                            queue.push(Reverse(QueueItem {
+                                distance: dist,
+                                node_index: node_item.offset as usize,
+                                level: level - 1,
+                            }));
+                        }
+                    }
                 }
+
+                // Skip rest of index
+                data.seek(SeekFrom::Start(
+                    index_base + (num_nodes * size_of::<NodeItem>()) as u64,
+                ))?;
+
+                // Return the nearest item, or empty vector if none found
+                Ok(nearest.map(|(_, item)| vec![item]).unwrap_or_default())
             }
         }
-        Ok(results)
     }
 
     pub fn size(&self) -> usize {
@@ -735,6 +920,354 @@ impl PackedRTree {
 
     pub fn extent(&self) -> NodeItem {
         self.extent.clone()
+    }
+
+    #[cfg(feature = "http")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn http_stream_search<T: AsyncHttpRangeClient>(
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        index_begin: usize,
+        attr_index_size: usize,
+        num_items: usize,
+        branching_factor: u16,
+        query: Query,
+        combine_request_threshold: usize,
+    ) -> Result<Vec<HttpSearchResultItem>, Error> {
+        use tracing::debug;
+
+        if num_items == 0 {
+            return Ok(vec![]);
+        }
+
+        let level_bounds = PackedRTree::generate_level_bounds(num_items, branching_factor);
+        let feature_begin =
+            index_begin + attr_index_size + PackedRTree::index_size(num_items, branching_factor);
+
+        match query {
+            Query::BBox(min_x, min_y, max_x, max_y) => {
+                debug!("http_stream_search - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, GPS bounds:[({min_x}, {min_y}), ({max_x},{max_y})]");
+
+                let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
+
+                #[derive(Debug, PartialEq, Eq)]
+                struct NodeRange {
+                    level: usize,
+                    nodes: Range<usize>,
+                }
+
+                let mut queue = VecDeque::new();
+                queue.push_back(NodeRange {
+                    nodes: 0..1,
+                    level: level_bounds.len() - 1,
+                });
+                let mut results = Vec::new();
+
+                while let Some(node_range) = queue.pop_front() {
+                    debug!("next: {node_range:?}. {} items left in queue", queue.len());
+                    let node_items =
+                        read_http_node_items(client, index_begin, &node_range.nodes).await?;
+                    for (node_pos, node_item) in node_items.iter().enumerate() {
+                        if !bounds.intersects(node_item) {
+                            continue;
+                        }
+
+                        if node_range.level == 0 {
+                            // leaf node
+                            let start = feature_begin + node_item.offset as usize;
+                            if let Some(next_node_item) = &node_items.get(node_pos + 1) {
+                                let end = feature_begin + next_node_item.offset as usize;
+                                results.push(HttpSearchResultItem {
+                                    range: HttpRange::Range(start..end),
+                                });
+                            } else {
+                                debug_assert_eq!(node_pos, num_items - 1);
+                                results.push(HttpSearchResultItem {
+                                    range: HttpRange::RangeFrom(start..),
+                                });
+                            }
+                        } else {
+                            let children_level = node_range.level - 1;
+                            let mut children_nodes = node_item.offset as usize
+                                ..(node_item.offset + branching_factor as u64) as usize;
+                            if children_level == 0 {
+                                // These children are leaf nodes.
+                                //
+                                // We can right-size our feature requests if we know the size of each feature.
+                                //
+                                // To infer the length of *this* feature, we need the start of the *next*
+                                // feature, so we get an extra node here.
+                                children_nodes.end += 1;
+                            }
+                            // always stay within level's bounds
+                            children_nodes.end =
+                                min(children_nodes.end, level_bounds[children_level].end);
+
+                            let children_range = NodeRange {
+                                nodes: children_nodes,
+                                level: children_level,
+                            };
+
+                            let Some(tail) = queue.back_mut() else {
+                                debug!("Adding new request onto empty queue: {children_range:?}");
+                                queue.push_back(children_range);
+                                continue;
+                            };
+
+                            if tail.level != children_level {
+                                debug!("Adding new request for new level: {children_range:?} (existing queue tail: {tail:?})");
+                                queue.push_back(children_range);
+                                continue;
+                            }
+
+                            let wasted_bytes = {
+                                if children_range.nodes.start >= tail.nodes.end {
+                                    (children_range.nodes.start - tail.nodes.end)
+                                        * size_of::<NodeItem>()
+                                } else {
+                                    // To compute feature size, we fetch an extra leaf node, but computing
+                                    // wasted_bytes for adjacent ranges will overflow in that case, so
+                                    // we skip that computation.
+                                    //
+                                    // But let's make sure we're in the state we think we are:
+                                    debug_assert_eq!(
+                                        children_range.nodes.start + 1,
+                                        tail.nodes.end,
+                                        "we only ever fetch one extra node"
+                                    );
+                                    debug_assert_eq!(
+                                        children_level, 0,
+                                        "extra node fetching only happens with leaf nodes"
+                                    );
+                                    0
+                                }
+                            };
+                            if wasted_bytes > combine_request_threshold {
+                                debug!("Adding new request for: {children_range:?} rather than merging with distant NodeRange: {tail:?} (would waste {wasted_bytes} bytes)");
+                                queue.push_back(children_range);
+                                continue;
+                            }
+
+                            // Merge the ranges to avoid an extra request
+                            debug!("Extending existing request {tail:?} with nearby children: {:?} (wastes {wasted_bytes} bytes)", &children_range.nodes);
+                            tail.nodes.end = children_range.nodes.end;
+                        }
+                    }
+                }
+                Ok(results)
+            }
+            Query::PointIntersects(x, y) => {
+                debug!("http_stream_search point intersects - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, point: ({x}, {y})");
+
+                #[derive(Debug, PartialEq, Eq)]
+                struct NodeRange {
+                    level: usize,
+                    nodes: Range<usize>,
+                }
+
+                let mut queue = VecDeque::new();
+                queue.push_back(NodeRange {
+                    nodes: 0..1,
+                    level: level_bounds.len() - 1,
+                });
+                let mut results = Vec::new();
+
+                while let Some(node_range) = queue.pop_front() {
+                    debug!("next: {node_range:?}. {} items left in queue", queue.len());
+                    let node_items =
+                        read_http_node_items(client, index_begin, &node_range.nodes).await?;
+                    for (node_pos, node_item) in node_items.iter().enumerate() {
+                        if !node_item.contains_point(x, y) {
+                            continue;
+                        }
+
+                        if node_range.level == 0 {
+                            // leaf node
+                            let start = feature_begin + node_item.offset as usize;
+                            if let Some(next_node_item) = &node_items.get(node_pos + 1) {
+                                let end = feature_begin + next_node_item.offset as usize;
+                                results.push(HttpSearchResultItem {
+                                    range: HttpRange::Range(start..end),
+                                });
+                            } else {
+                                debug_assert_eq!(node_pos, num_items - 1);
+                                results.push(HttpSearchResultItem {
+                                    range: HttpRange::RangeFrom(start..),
+                                });
+                            }
+                        } else {
+                            let children_level = node_range.level - 1;
+                            let mut children_nodes = node_item.offset as usize
+                                ..(node_item.offset + branching_factor as u64) as usize;
+                            if children_level == 0 {
+                                children_nodes.end += 1;
+                            }
+                            children_nodes.end =
+                                min(children_nodes.end, level_bounds[children_level].end);
+
+                            let children_range = NodeRange {
+                                nodes: children_nodes,
+                                level: children_level,
+                            };
+
+                            let Some(tail) = queue.back_mut() else {
+                                debug!("Adding new request onto empty queue: {children_range:?}");
+                                queue.push_back(children_range);
+                                continue;
+                            };
+
+                            if tail.level != children_level {
+                                debug!("Adding new request for new level: {children_range:?} (existing queue tail: {tail:?})");
+                                queue.push_back(children_range);
+                                continue;
+                            }
+
+                            let wasted_bytes = {
+                                if children_range.nodes.start >= tail.nodes.end {
+                                    (children_range.nodes.start - tail.nodes.end)
+                                        * size_of::<NodeItem>()
+                                } else {
+                                    debug_assert_eq!(
+                                        children_range.nodes.start + 1,
+                                        tail.nodes.end,
+                                        "we only ever fetch one extra node"
+                                    );
+                                    debug_assert_eq!(
+                                        children_level, 0,
+                                        "extra node fetching only happens with leaf nodes"
+                                    );
+                                    0
+                                }
+                            };
+                            if wasted_bytes > combine_request_threshold {
+                                debug!("Adding new request for: {children_range:?} rather than merging with distant NodeRange: {tail:?} (would waste {wasted_bytes} bytes)");
+                                queue.push_back(children_range);
+                                continue;
+                            }
+
+                            tail.nodes.end = children_range.nodes.end;
+                        }
+                    }
+                }
+                Ok(results)
+            }
+            Query::PointNearest(x, y) => {
+                debug!("http_stream_search nearest neighbor - index_begin: {index_begin}, feature_begin: {feature_begin} num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, point: ({x}, {y})");
+
+                use std::cmp::Reverse;
+                use std::collections::BinaryHeap;
+
+                #[derive(PartialEq)]
+                struct QueueItem {
+                    distance: f64,
+                    level: usize,
+                    nodes: Range<usize>,
+                }
+
+                impl Eq for QueueItem {}
+
+                impl PartialOrd for QueueItem {
+                    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                        self.distance.partial_cmp(&other.distance)
+                    }
+                }
+
+                impl Ord for QueueItem {
+                    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                        self.partial_cmp(other).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                }
+
+                let mut nearest: Option<(f64, HttpSearchResultItem)> = None;
+                let mut queue = BinaryHeap::new();
+
+                // Start with the root node
+                queue.push(Reverse(QueueItem {
+                    distance: 0.0,
+                    nodes: 0..1,
+                    level: level_bounds.len() - 1,
+                }));
+
+                while let Some(Reverse(next)) = queue.pop() {
+                    // If we have a nearest item and its distance is less than this node's,
+                    // we can stop searching
+                    if let Some((best_dist, _)) = nearest {
+                        if next.distance > best_dist {
+                            break;
+                        }
+                    }
+
+                    debug!(
+                        "next: node dist: {}, level: {}, nodes: {:?}, {} items left in queue",
+                        next.distance,
+                        next.level,
+                        next.nodes,
+                        queue.len()
+                    );
+                    let node_items = read_http_node_items(client, index_begin, &next.nodes).await?;
+
+                    for (node_pos, node_item) in node_items.iter().enumerate() {
+                        let dist = node_item.min_distance_squared(x, y);
+
+                        // If we have a nearest item, only consider this node if it's closer
+                        if let Some((best_dist, _)) = nearest {
+                            if dist >= best_dist {
+                                continue;
+                            }
+                        }
+
+                        if next.level == 0 {
+                            // Leaf node - use centroid distance as the final measure
+                            let centroid_dist = node_item.centroid_distance_squared(x, y);
+
+                            // Create range for the result
+                            let start = feature_begin + node_item.offset as usize;
+                            let result = if let Some(next_node_item) = &node_items.get(node_pos + 1)
+                            {
+                                let end = feature_begin + next_node_item.offset as usize;
+                                HttpSearchResultItem {
+                                    range: HttpRange::Range(start..end),
+                                }
+                            } else {
+                                debug_assert_eq!(node_pos, num_items - 1);
+                                HttpSearchResultItem {
+                                    range: HttpRange::RangeFrom(start..),
+                                }
+                            };
+
+                            match nearest {
+                                None => nearest = Some((centroid_dist, result)),
+                                Some((best_dist, _)) if centroid_dist < best_dist => {
+                                    nearest = Some((centroid_dist, result))
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            // Not a leaf node - add children to the queue
+                            let children_level = next.level - 1;
+                            let mut children_nodes = node_item.offset as usize
+                                ..(node_item.offset + branching_factor as u64) as usize;
+
+                            if children_level == 0 {
+                                children_nodes.end += 1;
+                            }
+
+                            // Always stay within level bounds
+                            children_nodes.end =
+                                min(children_nodes.end, level_bounds[children_level].end);
+
+                            queue.push(Reverse(QueueItem {
+                                distance: dist,
+                                nodes: children_nodes,
+                                level: children_level,
+                            }));
+                        }
+                    }
+                }
+
+                // Return the nearest item, or empty vector if none found
+                Ok(nearest.map(|(_, item)| vec![item]).unwrap_or_default())
+            }
+        }
     }
 }
 
@@ -812,9 +1345,201 @@ mod tests {
         assert!(nodes[1].intersects(&NodeItem::bounds(0.0, 0.0, 1.0, 1.0)));
         assert!(nodes[0].intersects(&NodeItem::bounds(2.0, 2.0, 3.0, 3.0)));
         let tree = PackedRTree::build(&nodes, &extent, PackedRTree::DEFAULT_NODE_SIZE)?;
-        let list = tree.search(0.0, 0.0, 1.0, 1.0)?;
+        let list = tree.search(Query::BBox(0.0, 0.0, 1.0, 1.0))?;
         assert_eq!(list.len(), 1);
         assert!(nodes[list[0].index].intersects(&NodeItem::bounds(0.0, 0.0, 1.0, 1.0)));
+        Ok(())
+    }
+
+    #[test]
+    fn test_point_intersects_query() -> Result<()> {
+        // Create a simple tree with some test nodes
+        let mut nodes = Vec::new();
+        nodes.push(NodeItem::bounds(0.0, 0.0, 1.0, 1.0)); // Node 0: Small box at origin
+        nodes.push(NodeItem::bounds(2.0, 2.0, 3.0, 3.0)); // Node 1: Small box at (2,2)
+        nodes.push(NodeItem::bounds(5.0, 5.0, 10.0, 10.0)); // Node 2: Larger box
+        nodes.push(NodeItem::bounds(-10.0, -10.0, 10.0, 10.0)); // Node 3: Large box covering others
+
+        let extent = calc_extent(&nodes);
+        hilbert_sort(&mut nodes, &extent);
+
+        // Set offsets to match node indices
+        let mut offset = 0;
+        for node in &mut nodes {
+            node.offset = offset;
+            offset += size_of::<NodeItem>() as u64;
+        }
+
+        let tree = PackedRTree::build(&nodes, &extent, PackedRTree::DEFAULT_NODE_SIZE)?;
+
+        // Test point (0.5, 0.5) should be in the first box and the large box
+        let results = tree.search(Query::PointIntersects(0.5, 0.5))?;
+        assert_eq!(results.len(), 2, "Point (0.5, 0.5) should be in 2 bboxes");
+
+        // Test point at corner (1.0, 1.0) should be on the boundary of the first box and the large box
+        let results = tree.search(Query::PointIntersects(1.0, 1.0))?;
+        assert_eq!(results.len(), 2, "Point (1.0, 1.0) should be in 2 bboxes");
+
+        // Test point (7.5, 7.5) should be in the larger box and the large box
+        let results = tree.search(Query::PointIntersects(7.5, 7.5))?;
+        assert_eq!(results.len(), 2, "Point (7.5, 7.5) should be in 2 bboxes");
+
+        // Test point (20.0, 20.0) should be in no boxes
+        let results = tree.search(Query::PointIntersects(20.0, 20.0))?;
+        assert_eq!(results.len(), 0, "Point (20.0, 20.0) should be in 0 bboxes");
+
+        // Test with streaming query
+        let mut tree_data: Vec<u8> = Vec::new();
+        tree.stream_write(&mut tree_data)?;
+
+        let mut reader = Cursor::new(&tree_data);
+        let results = PackedRTree::stream_search(
+            &mut reader,
+            nodes.len(),
+            PackedRTree::DEFAULT_NODE_SIZE,
+            Query::PointIntersects(0.5, 0.5),
+        )?;
+        assert_eq!(
+            results.len(),
+            2,
+            "Stream query: Point (0.5, 0.5) should be in 2 bboxes"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_nearest_neighbor_query() -> Result<()> {
+        // Create a simple tree with some test nodes
+        let mut nodes = Vec::new();
+        nodes.push(NodeItem::bounds(0.0, 0.0, 1.0, 1.0)); // Node 0: Small box at origin
+        nodes.push(NodeItem::bounds(2.0, 2.0, 3.0, 3.0)); // Node 1: Small box at (2,2)
+        nodes.push(NodeItem::bounds(5.0, 5.0, 10.0, 10.0)); // Node 2: Larger box
+        nodes.push(NodeItem::bounds(-10.0, -10.0, -5.0, -5.0)); // Node 3: Box in negative quadrant
+
+        let extent = calc_extent(&nodes);
+        hilbert_sort(&mut nodes, &extent);
+
+        // Set offsets to match node indices
+        let mut offset = 0;
+        for node in &mut nodes {
+            node.offset = offset;
+            offset += size_of::<NodeItem>() as u64;
+        }
+
+        let tree = PackedRTree::build(&nodes, &extent, PackedRTree::DEFAULT_NODE_SIZE)?;
+
+        // Test nearest to point (0.0, 0.0) should be the box at origin
+        let results = tree.search(Query::PointNearest(0.0, 0.0))?;
+        assert_eq!(results.len(), 1, "Should find exactly one nearest node");
+
+        // The node at (0.0, 0.0) has the smallest distance to (0.0, 0.0)
+        let node0_centroid = (0.5, 0.5); // Center of node 0
+        let node3_centroid = (-7.5, -7.5); // Center of node 3
+
+        let dist_to_node0 = (node0_centroid.0 - 0.0) * (node0_centroid.0 - 0.0)
+            + (node0_centroid.1 - 0.0) * (node0_centroid.1 - 0.0);
+        let dist_to_node3 = (node3_centroid.0 - 0.0) * (node3_centroid.0 - 0.0)
+            + (node3_centroid.1 - 0.0) * (node3_centroid.1 - 0.0);
+
+        assert!(
+            dist_to_node0 < dist_to_node3,
+            "Node 0 should be closer than Node 3"
+        );
+
+        // Test nearest to point (4.0, 4.0) should be the box at (2.0, 2.0, 3.0, 3.0) or (5.0, 5.0, 10.0, 10.0)
+        // Let's calculate which one should be closer:
+        let node1_centroid = (2.5, 2.5); // Center of node 1
+        let node2_centroid = (7.5, 7.5); // Center of node 2
+
+        let dist_to_node1: f64 = (node1_centroid.0 - 4.0) * (node1_centroid.0 - 4.0)
+            + (node1_centroid.1 - 4.0) * (node1_centroid.1 - 4.0);
+        let dist_to_node2: f64 = (node2_centroid.0 - 4.0) * (node2_centroid.0 - 4.0)
+            + (node2_centroid.1 - 4.0) * (node2_centroid.1 - 4.0);
+
+        let expected_closest_distance = dist_to_node1.min(dist_to_node2);
+
+        // Get the result
+        let results = tree.search(Query::PointNearest(4.0, 4.0))?;
+        assert_eq!(results.len(), 1, "Should find exactly one nearest node");
+
+        // Test with streaming query
+        let mut tree_data: Vec<u8> = Vec::new();
+        tree.stream_write(&mut tree_data)?;
+
+        let mut reader = Cursor::new(&tree_data);
+        let results = PackedRTree::stream_search(
+            &mut reader,
+            nodes.len(),
+            PackedRTree::DEFAULT_NODE_SIZE,
+            Query::PointNearest(0.0, 0.0),
+        )?;
+        assert_eq!(
+            results.len(),
+            1,
+            "Stream query: Should find exactly one nearest node"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_node_item_helper_methods() -> Result<()> {
+        // Test contains_point
+        let node = NodeItem::bounds(0.0, 0.0, 5.0, 5.0);
+
+        assert!(
+            node.contains_point(0.0, 0.0),
+            "Origin point should be contained (boundary)"
+        );
+        assert!(
+            node.contains_point(5.0, 5.0),
+            "Corner point should be contained (boundary)"
+        );
+        assert!(
+            node.contains_point(2.5, 2.5),
+            "Center point should be contained"
+        );
+        assert!(
+            !node.contains_point(-1.0, 2.5),
+            "Point outside should not be contained"
+        );
+        assert!(
+            !node.contains_point(6.0, 2.5),
+            "Point outside should not be contained"
+        );
+
+        // Test min_distance_squared
+        assert_eq!(
+            node.min_distance_squared(2.5, 2.5),
+            0.0,
+            "Point inside should have zero distance"
+        );
+        assert_eq!(
+            node.min_distance_squared(0.0, 0.0),
+            0.0,
+            "Point on boundary should have zero distance"
+        );
+
+        let dist_to_outside_point = node.min_distance_squared(7.0, 8.0);
+        let expected_dist = (7.0 - 5.0) * (7.0 - 5.0) + (8.0 - 5.0) * (8.0 - 5.0); // Distance to closest point (5,5)
+        assert_eq!(
+            dist_to_outside_point, expected_dist,
+            "Distance to outside point"
+        );
+
+        // Test centroid_distance_squared
+        let centroid_x = 2.5; // (0.0 + 5.0) / 2.0
+        let centroid_y = 2.5; // (0.0 + 5.0) / 2.0
+
+        let dist_to_point = node.centroid_distance_squared(0.0, 0.0);
+        let expected_dist =
+            (0.0 - centroid_x) * (0.0 - centroid_x) + (0.0 - centroid_y) * (0.0 - centroid_y);
+        assert_eq!(
+            dist_to_point, expected_dist,
+            "Centroid distance calculation"
+        );
+
         Ok(())
     }
 
@@ -850,7 +1575,7 @@ mod tests {
             offset += size_of::<NodeItem>() as u64;
         }
         let tree = PackedRTree::build(&nodes, &extent, PackedRTree::DEFAULT_NODE_SIZE)?;
-        let list = tree.search(102.0, 102.0, 103.0, 103.0)?;
+        let list = tree.search(Query::BBox(102.0, 102.0, 103.0, 103.0))?;
         assert_eq!(list.len(), 4);
 
         let indexes: Vec<usize> = list.iter().map(|item| item.index).collect();
@@ -868,7 +1593,7 @@ mod tests {
             nodes.len(),
             PackedRTree::DEFAULT_NODE_SIZE,
         )?;
-        let list = tree2.search(102.0, 102.0, 103.0, 103.0)?;
+        let list = tree2.search(Query::BBox(102.0, 102.0, 103.0, 103.0))?;
         assert_eq!(list.len(), 4);
 
         let indexes: Vec<usize> = list.iter().map(|item| item.index).collect();
@@ -880,10 +1605,7 @@ mod tests {
             &mut reader,
             nodes.len(),
             PackedRTree::DEFAULT_NODE_SIZE,
-            102.0,
-            102.0,
-            103.0,
-            103.0,
+            Query::BBox(102.0, 102.0, 103.0, 103.0),
         )?;
         assert_eq!(list.len(), 4);
 
@@ -912,7 +1634,7 @@ mod tests {
         let extent = calc_extent(&nodes);
         hilbert_sort(&mut nodes, &extent);
         let tree = PackedRTree::build(&nodes, &extent, PackedRTree::DEFAULT_NODE_SIZE)?;
-        let list = tree.search(690407.0, 6063692.0, 811682.0, 6176467.0)?;
+        let list = tree.search(Query::BBox(690407.0, 6063692.0, 811682.0, 6176467.0))?;
 
         for i in 0..list.len() {
             assert!(nodes[list[i].index]
@@ -928,10 +1650,7 @@ mod tests {
             &mut reader,
             nodes.len(),
             PackedRTree::DEFAULT_NODE_SIZE,
-            690407.0,
-            6063692.0,
-            811682.0,
-            6176467.0,
+            Query::BBox(690407.0, 6063692.0, 811682.0, 6176467.0),
         )?;
         assert_eq!(list2.len(), list.len());
         for i in 0..list2.len() {

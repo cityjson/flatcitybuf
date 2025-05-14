@@ -31,7 +31,7 @@ export class HttpFcbReader {
   /**
    * Select features within a bounding box.
    */
-  select_bbox(min_x: number, min_y: number, max_x: number, max_y: number): Promise<AsyncFeatureIter>;
+  select_query(query: WasmSpatialQuery): Promise<AsyncFeatureIter>;
   select_attr_query(query: WasmAttrQuery): Promise<AsyncFeatureIter>;
 }
 /**
@@ -58,6 +58,18 @@ export class WasmAttrQuery {
    */
   readonly inner: any;
 }
+export class WasmSpatialQuery {
+  free(): void;
+  constructor(js_value: any);
+  to_js(): any;
+  readonly query_type: string;
+  readonly min_x: number | undefined;
+  readonly min_y: number | undefined;
+  readonly max_x: number | undefined;
+  readonly max_y: number | undefined;
+  readonly x: number | undefined;
+  readonly y: number | undefined;
+}
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -70,13 +82,23 @@ export interface InitOutput {
   readonly httpfcbreader_meta: (a: number) => [number, number, number];
   readonly httpfcbreader_free: (a: number) => void;
   readonly httpfcbreader_select_all: (a: number) => any;
-  readonly httpfcbreader_select_bbox: (a: number, b: number, c: number, d: number, e: number) => any;
+  readonly httpfcbreader_select_query: (a: number, b: number) => any;
   readonly httpfcbreader_select_attr_query: (a: number, b: number) => any;
   readonly asyncfeatureiter_header: (a: number) => [number, number, number];
   readonly asyncfeatureiter_features_count: (a: number) => number;
   readonly asyncfeatureiter_next: (a: number) => any;
   readonly asyncfeatureiter_cur_cj_feature: (a: number) => [number, number, number];
   readonly asyncfeatureiter_free: (a: number) => void;
+  readonly __wbg_wasmspatialquery_free: (a: number, b: number) => void;
+  readonly wasmspatialquery_new: (a: any) => [number, number, number];
+  readonly wasmspatialquery_query_type: (a: number) => [number, number];
+  readonly wasmspatialquery_min_x: (a: number) => [number, number];
+  readonly wasmspatialquery_min_y: (a: number) => [number, number];
+  readonly wasmspatialquery_max_x: (a: number) => [number, number];
+  readonly wasmspatialquery_max_y: (a: number) => [number, number];
+  readonly wasmspatialquery_x: (a: number) => [number, number];
+  readonly wasmspatialquery_y: (a: number) => [number, number];
+  readonly wasmspatialquery_to_js: (a: number) => any;
   readonly __wbg_wasmattrquery_free: (a: number, b: number) => void;
   readonly wasmattrquery_new: (a: any) => [number, number, number];
   readonly wasmattrquery_inner: (a: number) => any;
@@ -87,8 +109,9 @@ export interface InitOutput {
   readonly __wbindgen_export_4: WebAssembly.Table;
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure446_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure486_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+  readonly closure447_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure487_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

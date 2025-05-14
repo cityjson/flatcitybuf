@@ -86,6 +86,10 @@
 - Implements a **Packed Hilbert R-tree** to:
   - Maximally fill the available space in the node.
   - Enable **selective data retrieval** within a bounding box.
+  - Support **three types of spatial queries**:
+    - **Bounding Box (bbox)**: Find all features that intersect with a given bounding box.
+    - **Point Intersection**: Find all features whose bounding box contains a given point.
+    - **Nearest Neighbor**: Find the feature whose bounding box centroid is nearest to a given point.
 
 ### **4.2 Attribute Indexing**
 
@@ -123,6 +127,7 @@
 - **HTTP Range Requests**:
   - Supports **on-demand downloading** of CityJSON objects.
   - **Eliminates need to load entire datasets in memory**.
+  - **Optimized for all spatial query types** (bbox, point intersection, nearest neighbor).
 
 - **Comparison with CityJSONSeq**:
   - CityJSONSeq **supports streaming but is still text-based**.

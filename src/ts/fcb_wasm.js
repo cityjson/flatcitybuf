@@ -240,13 +240,13 @@ function _assertClass(instance, klass) {
 function __wbg_adapter_38(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure446_externref_shim(arg0, arg1, arg2);
+    wasm.closure447_externref_shim(arg0, arg1, arg2);
 }
 
-function __wbg_adapter_143(arg0, arg1, arg2, arg3) {
+function __wbg_adapter_152(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure486_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure487_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -409,17 +409,18 @@ export class HttpFcbReader {
     }
     /**
      * Select features within a bounding box.
-     * @param {number} min_x
-     * @param {number} min_y
-     * @param {number} max_x
-     * @param {number} max_y
+     * @param {WasmSpatialQuery} query
      * @returns {Promise<AsyncFeatureIter>}
      */
-    select_bbox(min_x, min_y, max_x, max_y) {
+    select_query(query) {
         if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
         const ptr = this.__destroy_into_raw();
         _assertNum(ptr);
-        const ret = wasm.httpfcbreader_select_bbox(ptr, min_x, min_y, max_x, max_y);
+        _assertClass(query, WasmSpatialQuery);
+        if (query.__wbg_ptr === 0) {
+            throw new Error('Attempt to use a moved value');
+        }
+        const ret = wasm.httpfcbreader_select_query(ptr, query.__wbg_ptr);
         return ret;
     }
     /**
@@ -489,6 +490,117 @@ export class WasmAttrQuery {
         if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
         _assertNum(this.__wbg_ptr);
         const ret = wasm.wasmattrquery_inner(this.__wbg_ptr);
+        return ret;
+    }
+}
+
+const WasmSpatialQueryFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmspatialquery_free(ptr >>> 0, 1));
+
+export class WasmSpatialQuery {
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmSpatialQueryFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmspatialquery_free(ptr, 0);
+    }
+    /**
+     * @param {any} js_value
+     */
+    constructor(js_value) {
+        const ret = wasm.wasmspatialquery_new(js_value);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0] >>> 0;
+        WasmSpatialQueryFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {string}
+     */
+    get query_type() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+            _assertNum(this.__wbg_ptr);
+            const ret = wasm.wasmspatialquery_query_type(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {number | undefined}
+     */
+    get min_x() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.wasmspatialquery_min_x(this.__wbg_ptr);
+        return ret[0] === 0 ? undefined : ret[1];
+    }
+    /**
+     * @returns {number | undefined}
+     */
+    get min_y() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.wasmspatialquery_min_y(this.__wbg_ptr);
+        return ret[0] === 0 ? undefined : ret[1];
+    }
+    /**
+     * @returns {number | undefined}
+     */
+    get max_x() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.wasmspatialquery_max_x(this.__wbg_ptr);
+        return ret[0] === 0 ? undefined : ret[1];
+    }
+    /**
+     * @returns {number | undefined}
+     */
+    get max_y() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.wasmspatialquery_max_y(this.__wbg_ptr);
+        return ret[0] === 0 ? undefined : ret[1];
+    }
+    /**
+     * @returns {number | undefined}
+     */
+    get x() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.wasmspatialquery_x(this.__wbg_ptr);
+        return ret[0] === 0 ? undefined : ret[1];
+    }
+    /**
+     * @returns {number | undefined}
+     */
+    get y() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.wasmspatialquery_y(this.__wbg_ptr);
+        return ret[0] === 0 ? undefined : ret[1];
+    }
+    /**
+     * @returns {any}
+     */
+    to_js() {
+        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+        _assertNum(this.__wbg_ptr);
+        const ret = wasm.wasmspatialquery_to_js(this.__wbg_ptr);
         return ret;
     }
 }
@@ -572,6 +684,10 @@ function __wbg_get_imports() {
         const ret = arg0.getTime();
         return ret;
     }, arguments) };
+    imports.wbg.__wbg_get_67b2ba62fc30de12 = function() { return handleError(function (arg0, arg1) {
+        const ret = Reflect.get(arg0, arg1);
+        return ret;
+    }, arguments) };
     imports.wbg.__wbg_get_b9b93047fe3cf45b = function() { return logError(function (arg0, arg1) {
         const ret = arg0[arg1 >>> 0];
         return ret;
@@ -648,7 +764,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wbg_adapter_143(a, state0.b, arg0, arg1);
+                    return __wbg_adapter_152(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -739,6 +855,11 @@ function __wbg_get_imports() {
         const ret = arg0.set(arg1, arg2);
         return ret;
     }, arguments) };
+    imports.wbg.__wbg_set_bb8cecf6a62b9f46 = function() { return handleError(function (arg0, arg1, arg2) {
+        const ret = Reflect.set(arg0, arg1, arg2);
+        _assertBoolean(ret);
+        return ret;
+    }, arguments) };
     imports.wbg.__wbg_setheaders_834c0bdb6a8949ad = function() { return logError(function (arg0, arg1) {
         arg0.headers = arg1;
     }, arguments) };
@@ -816,8 +937,8 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper6563 = function() { return logError(function (arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 447, __wbg_adapter_38);
+    imports.wbg.__wbindgen_closure_wrapper6664 = function() { return logError(function (arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 448, __wbg_adapter_38);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {

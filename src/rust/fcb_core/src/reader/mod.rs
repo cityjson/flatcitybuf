@@ -11,7 +11,7 @@ use crate::{
     check_magic_bytes, size_prefixed_root_as_header, Column, Header, HEADER_MAX_BUFFER_SIZE,
 };
 use fallible_streaming_iterator::FallibleStreamingIterator;
-use packed_rtree::PackedRTree;
+use packed_rtree::{PackedRTree, Query};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 mod attr_query;
 pub mod geom_decoder;
@@ -143,13 +143,7 @@ impl<R: Read> FcbReader<R> {
         ))
     }
 
-    pub fn select_bbox_seq(
-        mut self,
-        min_x: f64,
-        min_y: f64,
-        max_x: f64,
-        max_y: f64,
-    ) -> Result<FeatureIter<R, NotSeekable>, Error> {
+    pub fn select_query_seq(mut self, query: Query) -> Result<FeatureIter<R, NotSeekable>, Error> {
         // Read R-Tree index and build filter for features within bbox
         let header = self.buffer.header();
         if header.index_node_size() == 0 || header.features_count() == 0 {
@@ -160,8 +154,7 @@ impl<R: Read> FcbReader<R> {
             header.features_count() as usize,
             header.index_node_size(),
         )?;
-        let (min_x, min_y, max_x, max_y) = (min_x as i64, min_y as i64, max_x as i64, max_y as i64);
-        let list = index.search(min_x as f64, min_y as f64, max_x as f64, max_y as f64)?;
+        let list = index.search(query)?;
         debug_assert!(
             list.windows(2).all(|w| w[0].offset < w[1].offset),
             "Since the tree is traversed breadth first, list should be sorted by construction."
@@ -211,27 +204,17 @@ impl<R: Read + Seek> FcbReader<R> {
         ))
     }
 
-    pub fn select_bbox(
-        mut self,
-        min_x: f64,
-        min_y: f64,
-        max_x: f64,
-        max_y: f64,
-    ) -> Result<FeatureIter<R, Seekable>, Error> {
+    pub fn select_query(mut self, query: Query) -> Result<FeatureIter<R, Seekable>, Error> {
         // Read R-Tree index and build filter for features within bbox
         let header = self.buffer.header();
         if header.index_node_size() == 0 || header.features_count() == 0 {
             return Err(Error::NoIndex);
         }
-        let (min_x, min_y, max_x, max_y) = (min_x as i64, min_y as i64, max_x as i64, max_y as i64);
         let list = PackedRTree::stream_search(
             &mut self.reader,
             header.features_count() as usize,
             PackedRTree::DEFAULT_NODE_SIZE,
-            min_x as f64,
-            min_y as f64,
-            max_x as f64,
-            max_y as f64,
+            query,
         )?;
         debug_assert!(
             list.windows(2).all(|w| w[0].offset < w[1].offset),

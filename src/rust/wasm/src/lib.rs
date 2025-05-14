@@ -3,7 +3,7 @@ mod gloo_client;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
-
+    #[cfg(target_arch = "wasm32")]
     use crate::gloo_client::WasmHttpClient;
     use fcb_core::{size_prefixed_root_as_header, Header, Operator};
     use js_sys::Array;
@@ -32,7 +32,9 @@ mod wasm {
 
     use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
 
-    use packed_rtree::{http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree};
+    use packed_rtree::{
+        http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree, Query as SpatialQuery,
+    };
     use std::collections::VecDeque;
     use std::ops::Range;
 
@@ -46,7 +48,10 @@ mod wasm {
     /// FlatCityBuf dataset HTTP reader
     #[wasm_bindgen]
     pub struct HttpFcbReader {
+        #[cfg(target_arch = "wasm32")]
         client: AsyncBufferedHttpRangeClient<WasmHttpClient>,
+        #[cfg(not(target_arch = "wasm32"))]
+        client: (),
         // feature reading requires header access, therefore
         // header_buf is included in the FcbBuffer struct.
         fbs: FcbBuffer,
@@ -54,7 +59,10 @@ mod wasm {
 
     #[wasm_bindgen]
     pub struct AsyncFeatureIter {
+        #[cfg(target_arch = "wasm32")]
         client: AsyncBufferedHttpRangeClient<WasmHttpClient>,
+        #[cfg(not(target_arch = "wasm32"))]
+        client: (),
         // feature reading requires header access, therefore
         // header_buf is included in the FcbBuffer struct.
         fbs: FcbBuffer,
@@ -77,10 +85,18 @@ mod wasm {
             }
 
             trace!("starting: opening http reader, reading header");
+            #[cfg(target_arch = "wasm32")]
             let client = WasmHttpClient::new(&url);
-            Self::_open(client).await
+            #[cfg(target_arch = "wasm32")]
+            let result = Self::_open(client).await;
+            #[cfg(not(target_arch = "wasm32"))]
+            let result = Err(JsValue::from_str(
+                "WasmHttpClient only available in wasm32 target",
+            ));
+            result
         }
 
+        #[cfg(target_arch = "wasm32")]
         async fn _open(
             mut client: AsyncBufferedHttpRangeClient<WasmHttpClient>,
         ) -> Result<HttpFcbReader, JsValue> {
@@ -244,14 +260,11 @@ mod wasm {
         }
         /// Select features within a bounding box.
         #[wasm_bindgen]
-        pub async fn select_bbox(
+        pub async fn select_query(
             mut self,
-            min_x: f64,
-            min_y: f64,
-            max_x: f64,
-            max_y: f64,
+            query: &WasmSpatialQuery,
         ) -> Result<AsyncFeatureIter, JsValue> {
-            trace!("starting: select_bbox, traversing index");
+            trace!("starting: select_query, traversing index");
             // Read R-Tree index and build filter for features within bbox
             let header = self.fbs.header();
             if header.index_node_size() == 0 || header.features_count() == 0 {
@@ -264,16 +277,16 @@ mod wasm {
             let combine_request_threshold = 256 * 1024;
             let attr_index_size = self.attr_index_size() as usize;
 
+            // Clone the inner query value
+            let inner_query = query.get_inner();
+
             let list = PackedRTree::http_stream_search(
                 &mut self.client,
                 header_len,
                 attr_index_size,
                 count,
                 PackedRTree::DEFAULT_NODE_SIZE,
-                min_x,
-                min_y,
-                max_x,
-                max_y,
+                inner_query,
                 combine_request_threshold,
             )
             .await
@@ -289,7 +302,7 @@ mod wasm {
                 .await
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
             let selection = FeatureSelection::SelectBbox(SelectBbox { feature_batches });
-            trace!("completed: select_bbox");
+            trace!("completed: select_query");
             Ok(AsyncFeatureIter {
                 client: self.client,
                 fbs: self.fbs,
@@ -336,7 +349,10 @@ mod wasm {
             let mut current_index_begin = attr_index_begin;
             for attr_info in attr_index_entries.iter() {
                 Self::add_indices_to_multi_http_index(
+                    #[cfg(target_arch = "wasm32")]
                     &mut http_multi_index,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    &mut HttpMultiIndex::new(),
                     &columns,
                     attr_info,
                     current_index_begin,
@@ -383,7 +399,8 @@ mod wasm {
         }
 
         fn add_indices_to_multi_http_index(
-            multi_index: &mut HttpMultiIndex<WasmHttpClient>,
+            #[cfg(target_arch = "wasm32")] multi_index: &mut HttpMultiIndex<WasmHttpClient>,
+            #[cfg(not(target_arch = "wasm32"))] multi_index: &mut HttpMultiIndex<()>,
             columns: &[Column],
             attr_info: &AttributeIndex,
             index_begin: usize,
@@ -465,7 +482,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -476,7 +493,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -486,7 +503,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -497,7 +514,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -507,7 +524,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -517,7 +534,7 @@ mod wasm {
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
                             index_begin as usize,
-                            feature_begin as usize,
+                            feature_begin,
                             combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
@@ -821,6 +838,210 @@ mod wasm {
             self.range_pos += 1;
             Ok(Some(feature_buffer.freeze()))
         }
+    }
+
+    #[wasm_bindgen]
+    pub struct WasmSpatialQuery {
+        // Making inner private to hide it from WASM - don't expose SpatialQuery type
+        #[wasm_bindgen(skip)]
+        inner: SpatialQuery,
+    }
+
+    #[wasm_bindgen]
+    impl WasmSpatialQuery {
+        #[wasm_bindgen(constructor)]
+        pub fn new(js_value: &JsValue) -> Result<WasmSpatialQuery, JsValue> {
+            // Parse the JS object to extract query parameters
+            let obj = js_sys::Object::from(js_value.clone());
+
+            // Get the query type
+            let query_type = js_sys::Reflect::get(&obj, &JsValue::from_str("type"))
+                .map_err(|_| JsValue::from_str("Missing 'type' field in query object"))?
+                .as_string()
+                .ok_or_else(|| JsValue::from_str("Query type must be a string"))?;
+
+            // Build the appropriate query based on type
+            let query = match query_type.as_str() {
+                "bbox" => {
+                    // Extract bbox coordinates
+                    let min_x = get_number_property(&obj, "minX")?;
+                    let min_y = get_number_property(&obj, "minY")?;
+                    let max_x = get_number_property(&obj, "maxX")?;
+                    let max_y = get_number_property(&obj, "maxY")?;
+
+                    packed_rtree::Query::BBox(min_x, min_y, max_x, max_y)
+                }
+                "pointIntersects" => {
+                    // Extract point coordinates
+                    let x = get_number_property(&obj, "x")?;
+                    let y = get_number_property(&obj, "y")?;
+
+                    packed_rtree::Query::PointIntersects(x, y)
+                }
+                "pointNearest" => {
+                    // Extract point coordinates
+                    let x = get_number_property(&obj, "x")?;
+                    let y = get_number_property(&obj, "y")?;
+
+                    packed_rtree::Query::PointNearest(x, y)
+                }
+                _ => {
+                    return Err(JsValue::from_str(&format!(
+                        "Unsupported query type: {}",
+                        query_type
+                    )))
+                }
+            };
+
+            Ok(WasmSpatialQuery { inner: query })
+        }
+
+        // Instead of exposing inner directly, expose its components via getter methods
+        #[wasm_bindgen(getter)]
+        pub fn query_type(&self) -> String {
+            match self.inner {
+                SpatialQuery::BBox(_, _, _, _) => "bbox".to_string(),
+                SpatialQuery::PointIntersects(_, _) => "pointIntersects".to_string(),
+                SpatialQuery::PointNearest(_, _) => "pointNearest".to_string(),
+            }
+        }
+
+        #[wasm_bindgen(getter)]
+        pub fn min_x(&self) -> Option<f64> {
+            match self.inner {
+                SpatialQuery::BBox(min_x, _, _, _) => Some(min_x),
+                _ => None,
+            }
+        }
+
+        #[wasm_bindgen(getter)]
+        pub fn min_y(&self) -> Option<f64> {
+            match self.inner {
+                SpatialQuery::BBox(_, min_y, _, _) => Some(min_y),
+                _ => None,
+            }
+        }
+
+        #[wasm_bindgen(getter)]
+        pub fn max_x(&self) -> Option<f64> {
+            match self.inner {
+                SpatialQuery::BBox(_, _, max_x, _) => Some(max_x),
+                _ => None,
+            }
+        }
+
+        #[wasm_bindgen(getter)]
+        pub fn max_y(&self) -> Option<f64> {
+            match self.inner {
+                SpatialQuery::BBox(_, _, _, max_y) => Some(max_y),
+                _ => None,
+            }
+        }
+
+        #[wasm_bindgen(getter)]
+        pub fn x(&self) -> Option<f64> {
+            match self.inner {
+                SpatialQuery::PointIntersects(x, _) | SpatialQuery::PointNearest(x, _) => Some(x),
+                _ => None,
+            }
+        }
+
+        #[wasm_bindgen(getter)]
+        pub fn y(&self) -> Option<f64> {
+            match self.inner {
+                SpatialQuery::PointIntersects(_, y) | SpatialQuery::PointNearest(_, y) => Some(y),
+                _ => None,
+            }
+        }
+
+        // Method to get the query data in a JS-friendly format
+        pub fn to_js(&self) -> JsValue {
+            match self.inner {
+                SpatialQuery::BBox(min_x, min_y, max_x, max_y) => {
+                    let obj = js_sys::Object::new();
+                    js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("type"),
+                        &JsValue::from_str("bbox"),
+                    )
+                    .unwrap();
+                    js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("minX"),
+                        &JsValue::from_f64(min_x),
+                    )
+                    .unwrap();
+                    js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("minY"),
+                        &JsValue::from_f64(min_y),
+                    )
+                    .unwrap();
+                    js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("maxX"),
+                        &JsValue::from_f64(max_x),
+                    )
+                    .unwrap();
+                    js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("maxY"),
+                        &JsValue::from_f64(max_y),
+                    )
+                    .unwrap();
+                    obj.into()
+                }
+                SpatialQuery::PointIntersects(x, y) => {
+                    let obj = js_sys::Object::new();
+                    js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("type"),
+                        &JsValue::from_str("pointIntersects"),
+                    )
+                    .unwrap();
+                    js_sys::Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from_f64(x))
+                        .unwrap();
+                    js_sys::Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from_f64(y))
+                        .unwrap();
+                    obj.into()
+                }
+                SpatialQuery::PointNearest(x, y) => {
+                    let obj = js_sys::Object::new();
+                    js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("type"),
+                        &JsValue::from_str("pointNearest"),
+                    )
+                    .unwrap();
+                    js_sys::Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from_f64(x))
+                        .unwrap();
+                    js_sys::Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from_f64(y))
+                        .unwrap();
+                    obj.into()
+                }
+            }
+        }
+
+        // Internal helper for other methods to access the inner query
+        fn get_inner(&self) -> SpatialQuery {
+            match self.inner {
+                SpatialQuery::BBox(min_x, min_y, max_x, max_y) => {
+                    SpatialQuery::BBox(min_x, min_y, max_x, max_y)
+                }
+                SpatialQuery::PointIntersects(x, y) => SpatialQuery::PointIntersects(x, y),
+                SpatialQuery::PointNearest(x, y) => SpatialQuery::PointNearest(x, y),
+            }
+        }
+    }
+
+    // Helper function to extract number properties from JS objects
+    fn get_number_property(obj: &js_sys::Object, property: &str) -> Result<f64, JsValue> {
+        let property_value = js_sys::Reflect::get(obj, &JsValue::from_str(property))
+            .map_err(|_| JsValue::from_str(&format!("Missing '{}' field", property)))?;
+
+        property_value
+            .as_f64()
+            .ok_or_else(|| JsValue::from_str(&format!("'{}' must be a number", property)))
     }
 
     /// A wasm‑friendly wrapper over `AttrQuery`, which is defined as:

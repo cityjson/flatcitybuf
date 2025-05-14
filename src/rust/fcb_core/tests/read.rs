@@ -4,6 +4,7 @@ use fcb_core::{
     header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
+use packed_rtree::Query;
 use std::{
     fs::File,
     io::{BufReader, Cursor, Seek},
@@ -61,7 +62,8 @@ fn read_bbox() -> Result<()> {
     let maxx = 85323.23;
     let maxy = 446334.69;
 
-    let mut fcb = FcbReader::open(&mut memory_buffer)?.select_bbox(minx, miny, maxx, maxy)?;
+    let mut fcb =
+        FcbReader::open(&mut memory_buffer)?.select_query(Query::BBox(minx, miny, maxx, maxy))?;
 
     assert_ne!(fcb.features_count(), None);
     let mut features = Vec::new();
@@ -174,7 +176,8 @@ fn read_bbox_nonseekable() -> anyhow::Result<()> {
     let maxy = 446334.69;
 
     // open non‑seekable fcb reader and select features within the provided bbox.
-    let mut fcb = FcbReader::open(nonseekable_reader)?.select_bbox_seq(minx, miny, maxx, maxy)?;
+    let mut fcb = FcbReader::open(nonseekable_reader)?
+        .select_query_seq(Query::BBox(minx, miny, maxx, maxy))?;
 
     assert_ne!(fcb.features_count(), None);
     let mut bbox_cnt = 0;

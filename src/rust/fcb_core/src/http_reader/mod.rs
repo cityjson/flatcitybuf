@@ -14,6 +14,7 @@ use cjseq::CityJSONFeature;
 use http_range_client::BufferedHttpRangeClient;
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
 use log::debug;
+use packed_rtree::Query;
 use reqwest;
 use static_btree::{FixedStringKey, Float, KeyType, Operator};
 
@@ -184,13 +185,7 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         })
     }
     /// Select features within a bounding box.
-    pub async fn select_bbox(
-        mut self,
-        min_x: f64,
-        min_y: f64,
-        max_x: f64,
-        max_y: f64,
-    ) -> Result<AsyncFeatureIter<T>> {
+    pub async fn select_query(mut self, query: Query) -> Result<AsyncFeatureIter<T>> {
         trace!("starting: select_bbox, traversing index");
         // Read R-Tree index and build filter for features within bbox
         let header = self.fbs.header();
@@ -209,10 +204,7 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             attr_index_size,
             count,
             PackedRTree::DEFAULT_NODE_SIZE,
-            min_x,
-            min_y,
-            max_x,
-            max_y,
+            query,
             combine_request_threshold,
         )
         .await?;

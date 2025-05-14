@@ -338,7 +338,6 @@ impl<T: AsyncHttpRangeClient> HttpMultiIndex<T> {
     {
         self.indices.insert(field, Box::new(index));
     }
-
     /// Execute a multi-condition query by AND-ing all conditions
     pub async fn query(
         &self,
@@ -349,7 +348,10 @@ impl<T: AsyncHttpRangeClient> HttpMultiIndex<T> {
             return Err(Error::QueryError("query cannot be empty".to_string()));
         }
         let mut result_sets = Vec::with_capacity(conditions.len());
+
         for cond in conditions {
+            // print the field name of condition and indices names
+
             let idx = self.indices.get(&cond.field).ok_or_else(|| {
                 Error::QueryError(format!("no index found for field '{}'", cond.field))
             })?;

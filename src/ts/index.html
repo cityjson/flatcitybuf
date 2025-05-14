@@ -91,8 +91,23 @@
       gap: 10px;
     }
 
-    .bbox-input-group label {
+    .point-input-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .bbox-input-group label,
+    .point-input-group label {
       margin-bottom: 5px;
+      display: block;
+    }
+
+    .spatial-inputs {
+      display: none;
+    }
+
+    .spatial-inputs.active {
       display: block;
     }
   </style>
@@ -115,7 +130,7 @@
   <div class="query-section">
     <div class="query-mode">
       <div id="attr-mode-btn" class="mode-btn active">attribute query</div>
-      <div id="bbox-mode-btn" class="mode-btn">bbox query</div>
+      <div id="spatial-mode-btn" class="mode-btn">spatial query</div>
     </div>
 
     <!-- Attribute query inputs -->
@@ -126,24 +141,61 @@
       </textarea>
     </div>
 
-    <!-- BBox query inputs -->
-    <div id="bbox-query-inputs" class="query-inputs">
-      <div class="bbox-input-group">
-        <div>
-          <label for="min-x-input">min x:</label>
-          <input type="number" id="min-x-input" value="68989.19384501831" step="0.000001" />
+    <!-- Spatial query inputs -->
+    <div id="spatial-query-inputs" class="query-inputs">
+      <div class="spatial-type-selection query-mode">
+        <div id="bbox-type-btn" class="mode-btn active">bbox</div>
+        <div id="point-intersect-type-btn" class="mode-btn">point intersect</div>
+        <div id="nearest-type-btn" class="mode-btn">nearest</div>
+      </div>
+
+      <!-- BBox query inputs -->
+      <div id="bbox-inputs" class="spatial-inputs active">
+        <div class="bbox-input-group">
+          <div>
+            <label for="min-x-input">min x:</label>
+            <input type="number" id="min-x-input" value="68989.19384501831" step="0.000001" />
+          </div>
+          <div>
+            <label for="min-y-input">min y:</label>
+            <input type="number" id="min-y-input" value="444614.3991728433" step="0.000001" />
+          </div>
+          <div>
+            <label for="max-x-input">max x:</label>
+            <input type="number" id="max-x-input" value="70685.16687543111" step="0.000001" />
+          </div>
+          <div>
+            <label for="max-y-input">max y:</label>
+            <input type="number" id="max-y-input" value="446023.6031208569" step="0.000001" />
+          </div>
         </div>
-        <div>
-          <label for="min-y-input">min y:</label>
-          <input type="number" id="min-y-input" value="444614.3991728433" step="0.000001" />
+      </div>
+
+      <!-- Point Intersect query inputs -->
+      <div id="point-intersect-inputs" class="spatial-inputs">
+        <div class="point-input-group">
+          <div>
+            <label for="intersect-x-input">x coordinate:</label>
+            <input type="number" id="intersect-x-input" value="69500.0" step="0.000001" />
+          </div>
+          <div>
+            <label for="intersect-y-input">y coordinate:</label>
+            <input type="number" id="intersect-y-input" value="445000.0" step="0.000001" />
+          </div>
         </div>
-        <div>
-          <label for="max-x-input">max x:</label>
-          <input type="number" id="max-x-input" value="70685.16687543111" step="0.000001" />
-        </div>
-        <div>
-          <label for="max-y-input">max y:</label>
-          <input type="number" id="max-y-input" value="446023.6031208569" step="0.000001" />
+      </div>
+
+      <!-- Nearest Neighbor query inputs -->
+      <div id="nearest-inputs" class="spatial-inputs">
+        <div class="point-input-group">
+          <div>
+            <label for="nearest-x-input">x coordinate:</label>
+            <input type="number" id="nearest-x-input" value="69500.0" step="0.000001" />
+          </div>
+          <div>
+            <label for="nearest-y-input">y coordinate:</label>
+            <input type="number" id="nearest-y-input" value="445000.0" step="0.000001" />
+          </div>
         </div>
       </div>
     </div>
@@ -157,14 +209,15 @@
   <pre id="output"></pre>
 
   <script type="module">
-    import init, { HttpFcbReader, WasmAttrQuery } from './fcb_wasm.js';
+    import init, { HttpFcbReader, WasmAttrQuery, WasmSpatialQuery } from './fcb_wasm.js';
 
     // Initialize the WASM module once at the beginning
     let wasmInitialized = false;
     let currentReader = null;
     let currentIter = null;
     let currentQuery = null;
-    let currentQueryMode = 'attr'; // 'attr' or 'bbox'
+    let currentQueryMode = 'attr'; // 'attr' or 'spatial'
+    let currentSpatialType = 'bbox'; // 'bbox', 'point-intersect', or 'nearest'
 
     /**
      * Appends a message to the output area.
@@ -294,25 +347,73 @@
     }
 
     /**
-     * Runs the bbox query test
+     * Runs the spatial query test
      * @param {string} url - The URL to the FCB data
      */
-    async function runBboxQuery(url) {
-      const minX = parseFloat(document.getElementById('min-x-input').value);
-      const minY = parseFloat(document.getElementById('min-y-input').value);
-      const maxX = parseFloat(document.getElementById('max-x-input').value);
-      const maxY = parseFloat(document.getElementById('max-y-input').value);
+    async function runSpatialQuery(url) {
+      let queryObject;
 
-      if (isNaN(minX) || isNaN(minY) || isNaN(maxX) || isNaN(maxY)) {
-        log('error: invalid bbox coordinates. please enter valid numbers.');
-        return;
+      if (currentSpatialType === 'bbox') {
+        const minX = parseFloat(document.getElementById('min-x-input').value);
+        const minY = parseFloat(document.getElementById('min-y-input').value);
+        const maxX = parseFloat(document.getElementById('max-x-input').value);
+        const maxY = parseFloat(document.getElementById('max-y-input').value);
+
+        if (isNaN(minX) || isNaN(minY) || isNaN(maxX) || isNaN(maxY)) {
+          log('error: invalid bbox coordinates. please enter valid numbers.');
+          return;
+        }
+
+        log(`running bbox query with: [${minX}, ${minY}, ${maxX}, ${maxY}]`);
+        queryObject = {
+          type: 'bbox',
+          minX: minX,
+          minY: minY,
+          maxX: maxX,
+          maxY: maxY
+        };
+      }
+      else if (currentSpatialType === 'point-intersect') {
+        const x = parseFloat(document.getElementById('intersect-x-input').value);
+        const y = parseFloat(document.getElementById('intersect-y-input').value);
+
+        if (isNaN(x) || isNaN(y)) {
+          log('error: invalid point coordinates. please enter valid numbers.');
+          return;
+        }
+
+        log(`running point intersect query with: [${x}, ${y}]`);
+        queryObject = {
+          type: 'pointIntersects',
+          x: x,
+          y: y
+        };
+      }
+      else if (currentSpatialType === 'nearest') {
+        const x = parseFloat(document.getElementById('nearest-x-input').value);
+        const y = parseFloat(document.getElementById('nearest-y-input').value);
+
+        if (isNaN(x) || isNaN(y)) {
+          log('error: invalid point coordinates. please enter valid numbers.');
+          return;
+        }
+
+        log(`running nearest neighbor query with: [${x}, ${y}]`);
+        queryObject = {
+          type: 'pointNearest',
+          x: x,
+          y: y
+        };
       }
 
-      log(`running bbox query with: [${minX}, ${minY}, ${maxX}, ${maxY}]`);
+      // Create the spatial query object
+      log(`constructing spatial query: ${JSON.stringify(queryObject)}`);
+      currentQuery = new WasmSpatialQuery(queryObject);
+      log('calling select_query()...');
 
-      // Call the select_bbox method
-      currentIter = await currentReader.select_bbox(minX, minY, maxX, maxY);
-      currentReader = null; // Reader is consumed by select_bbox
+      // The select_query method consumes the reader in Rust
+      currentIter = await currentReader.select_query(currentQuery);
+      currentReader = null; // Reader is consumed by select_query
 
       await iterateFeatures(currentIter);
     }
@@ -323,7 +424,7 @@
      * 2. Creating a HttpFcbReader from the given URL.
      * 3. Based on the query mode, either:
      *    a. Parsing the query JSON and constructing a WasmAttrQuery.
-     *    b. Getting the bbox coordinates and calling select_bbox.
+     *    b. Creating a spatial query based on the selected type.
      * 4. Iterating over the results.
      */
     async function runQueryTest() {
@@ -354,8 +455,8 @@
         // Run the appropriate query based on the current mode
         if (currentQueryMode === 'attr') {
           await runAttributeQuery(url);
-        } else if (currentQueryMode === 'bbox') {
-          await runBboxQuery(url);
+        } else if (currentQueryMode === 'spatial') {
+          await runSpatialQuery(url);
         }
 
         log('query test completed successfully.');
@@ -368,36 +469,81 @@
     }
 
     /**
-     * Switches between attribute and bbox query modes
-     * @param {string} mode - The mode to switch to ('attr' or 'bbox')
+     * Switches between attribute and spatial query modes
+     * @param {string} mode - The mode to switch to ('attr' or 'spatial')
      */
     function switchQueryMode(mode) {
       currentQueryMode = mode;
 
       // Update UI
       const attrModeBtn = document.getElementById('attr-mode-btn');
-      const bboxModeBtn = document.getElementById('bbox-mode-btn');
+      const spatialModeBtn = document.getElementById('spatial-mode-btn');
       const attrInputs = document.getElementById('attr-query-inputs');
-      const bboxInputs = document.getElementById('bbox-query-inputs');
+      const spatialInputs = document.getElementById('spatial-query-inputs');
 
       if (mode === 'attr') {
         attrModeBtn.classList.add('active');
-        bboxModeBtn.classList.remove('active');
+        spatialModeBtn.classList.remove('active');
         attrInputs.classList.add('active');
-        bboxInputs.classList.remove('active');
+        spatialInputs.classList.remove('active');
       } else {
         attrModeBtn.classList.remove('active');
-        bboxModeBtn.classList.add('active');
+        spatialModeBtn.classList.add('active');
         attrInputs.classList.remove('active');
+        spatialInputs.classList.add('active');
+      }
+    }
+
+    /**
+     * Switches between spatial query types
+     * @param {string} type - The type to switch to ('bbox', 'point-intersect', or 'nearest')
+     */
+    function switchSpatialType(type) {
+      currentSpatialType = type;
+
+      // Update UI
+      const bboxTypeBtn = document.getElementById('bbox-type-btn');
+      const pointIntersectTypeBtn = document.getElementById('point-intersect-type-btn');
+      const nearestTypeBtn = document.getElementById('nearest-type-btn');
+
+      const bboxInputs = document.getElementById('bbox-inputs');
+      const pointIntersectInputs = document.getElementById('point-intersect-inputs');
+      const nearestInputs = document.getElementById('nearest-inputs');
+
+      // Reset all classes
+      bboxTypeBtn.classList.remove('active');
+      pointIntersectTypeBtn.classList.remove('active');
+      nearestTypeBtn.classList.remove('active');
+
+      bboxInputs.classList.remove('active');
+      pointIntersectInputs.classList.remove('active');
+      nearestInputs.classList.remove('active');
+
+      // Set active classes based on selected type
+      if (type === 'bbox') {
+        bboxTypeBtn.classList.add('active');
         bboxInputs.classList.add('active');
+      } else if (type === 'point-intersect') {
+        pointIntersectTypeBtn.classList.add('active');
+        pointIntersectInputs.classList.add('active');
+      } else if (type === 'nearest') {
+        nearestTypeBtn.classList.add('active');
+        nearestInputs.classList.add('active');
       }
     }
 
     // Attach the event listeners
     document.getElementById('query-test-btn').addEventListener('click', runQueryTest);
     document.getElementById('clear-output-btn').addEventListener('click', clearOutput);
+
+    // Main mode selection
     document.getElementById('attr-mode-btn').addEventListener('click', () => switchQueryMode('attr'));
-    document.getElementById('bbox-mode-btn').addEventListener('click', () => switchQueryMode('bbox'));
+    document.getElementById('spatial-mode-btn').addEventListener('click', () => switchQueryMode('spatial'));
+
+    // Spatial type selection
+    document.getElementById('bbox-type-btn').addEventListener('click', () => switchSpatialType('bbox'));
+    document.getElementById('point-intersect-type-btn').addEventListener('click', () => switchSpatialType('point-intersect'));
+    document.getElementById('nearest-type-btn').addEventListener('click', () => switchSpatialType('nearest'));
 
     // Initialize WASM on page load
     initializeWasm().catch(err => {

@@ -14,6 +14,7 @@ pub use cj_utils::*;
 pub use const_vars::*;
 pub use error::*;
 pub use fb::*;
+pub use packed_rtree::Query as SpatialQuery;
 pub use reader::*;
 pub use static_btree::{
     Entry, FixedStringKey, Float, Key, KeyType, MemoryIndex, MemoryMultiIndex, MultiIndex,

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use fcb_core::{deserializer::decode_attributes, FcbReader, GeometryType};
+use fcb_core::{FcbReader, GeometryType};
 use prettytable::{format, Cell, Row, Table};
 use std::{
     collections::HashMap,
@@ -193,7 +193,7 @@ fn print_benchmark_results(results: &HashMap<String, HashMap<String, BenchResult
 
     // Add a row for each dataset showing relative performance
     for dataset in &datasets {
-        let mut row_cells = vec![Cell::new(*dataset)];
+        let mut row_cells = vec![Cell::new(dataset)];
 
         // Find fastest function for this dataset to use as baseline
         let mut baseline_duration = Duration::from_secs(u64::MAX);
