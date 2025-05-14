@@ -7,7 +7,7 @@ use prettytable::{Cell, Row, Table};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Write},
     time::{Duration, Instant},
 };
 use sysinfo::{Pid, System};
@@ -192,11 +192,7 @@ pub(crate) fn read_bson(path: &str) -> Result<(u64, u64, u64)> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
 
-    use anyhow::Result;
-
-    use crate::{read_bson, read_cbor, read_cjseq, read_fcb, DATASETS};
     #[test]
     fn test_read_counts_match() -> Result<()> {
         // Test all datasets with all formats
@@ -589,7 +585,7 @@ pub fn read_benchmark(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("read");
 
-    let iterations: u32 = 1;
+    let iterations: u32 = 10;
     // Increase warm-up time and measurement time to prevent timeouts
     group
         .sample_size(iterations as usize)
@@ -738,9 +734,13 @@ pub fn read_benchmark(c: &mut Criterion) {
 
 /// Print comprehensive benchmark results to standard output
 fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
-    println!("\nComprehensive Benchmark Results:");
+    // Build a string buffer to capture all output for writing to file later
+    let mut output_buffer = String::new();
+
+    output_buffer.push_str("\nComprehensive Benchmark Results:\n");
+
+    // Original table (keeping as reference)
     let mut summary_table = Table::new();
-    // Add header row
     summary_table.add_row(Row::new(vec![
         Cell::new("Dataset"),
         Cell::new("Format"),
@@ -748,7 +748,6 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
         Cell::new("Peak Memory"),
         Cell::new("CPU Usage"),
     ]));
-    // println!("{:-<75}", "");
 
     for (size, _) in DATASETS {
         for format in &["fcb", "cjseq", "cbor", "bson"] {
@@ -762,20 +761,90 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
                 ]));
             }
         }
-        // Add a separator between datasets
-        println!("{:-<75}", "");
     }
     summary_table.printstd();
 
-    // Summary table - best performance per metric
+    // Capture table to string
+    let mut summary_table_string = Vec::new();
+    summary_table.print(&mut summary_table_string).unwrap();
+    output_buffer.push_str(&String::from_utf8_lossy(&summary_table_string));
+    output_buffer.push_str("\n");
+
+    // Create comparison tables for each format vs FlatCityBuf
+    let formats_to_compare = ["cjseq", "cbor", "bson"];
+    let format_names = ["CityJSONSeq", "CBOR", "BSON"];
+
+    for (idx, format) in formats_to_compare.iter().enumerate() {
+        output_buffer.push_str(&format!(
+            "\n{} vs FlatCityBuf Comparison:\n",
+            format_names[idx]
+        ));
+        println!("\n{} vs FlatCityBuf Comparison:", format_names[idx]);
+        let mut comparison_table = Table::new();
+
+        // Header row
+        comparison_table.add_row(Row::new(vec![
+            Cell::new("Dataset"),
+            Cell::new(&format!("{} CPU", format_names[idx])),
+            Cell::new("FlatCityBuf CPU"),
+            Cell::new("CPU Ratio"),
+            Cell::new(&format!("{} Time", format_names[idx])),
+            Cell::new("FlatCityBuf Time"),
+            Cell::new("Time Ratio"),
+            Cell::new(&format!("{} Memory", format_names[idx])),
+            Cell::new("FlatCityBuf Memory"),
+            Cell::new("Memory Ratio"),
+        ]));
+
+        for (size, _) in DATASETS {
+            let fcb_key = format!("{}_fcb", size);
+            let format_key = format!("{}_{}", size, format);
+
+            if let (Some(fcb_result), Some(format_result)) =
+                (results.get(&fcb_key), results.get(&format_key))
+            {
+                // Calculate ratios
+                let cpu_ratio = format_result.cpu_usage / fcb_result.cpu_usage;
+                let time_ratio =
+                    format_result.duration.as_secs_f64() / fcb_result.duration.as_secs_f64();
+                let memory_ratio = format_result.peak_memory as f64 / fcb_result.peak_memory as f64;
+
+                comparison_table.add_row(Row::new(vec![
+                    Cell::new(size),
+                    Cell::new(&format!("{:.2}%", format_result.cpu_usage)),
+                    Cell::new(&format!("{:.2}%", fcb_result.cpu_usage)),
+                    Cell::new(&format!("{:.2}x", cpu_ratio)),
+                    Cell::new(&format_duration(format_result.duration)),
+                    Cell::new(&format_duration(fcb_result.duration)),
+                    Cell::new(&format!("{:.2}x", time_ratio)),
+                    Cell::new(&format_bytes(format_result.peak_memory)),
+                    Cell::new(&format_bytes(fcb_result.peak_memory)),
+                    Cell::new(&format!("{:.2}x", memory_ratio)),
+                ]));
+            }
+        }
+
+        comparison_table.printstd();
+
+        // Capture table to string
+        let mut comparison_table_string = Vec::new();
+        comparison_table
+            .print(&mut comparison_table_string)
+            .unwrap();
+        output_buffer.push_str(&String::from_utf8_lossy(&comparison_table_string));
+        output_buffer.push_str("\n");
+    }
+
+    // Summary table showing best performer per metric
+    output_buffer.push_str("\nSummary - Best Format Per Metric:\n");
     println!("\nSummary - Best Format Per Metric:");
-    summary_table.add_row(Row::new(vec![
+    let mut best_format_table = Table::new();
+    best_format_table.add_row(Row::new(vec![
         Cell::new("Dataset"),
         Cell::new("Fastest"),
         Cell::new("Lowest Memory"),
         Cell::new("Lowest CPU"),
     ]));
-    // println!("{:-<60}", "");
 
     for (size, _) in DATASETS {
         let formats = ["fcb", "cjseq", "cbor", "bson"];
@@ -797,18 +866,94 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
             }
         }
 
-        summary_table.add_row(Row::new(vec![
+        best_format_table.add_row(Row::new(vec![
             Cell::new(size),
             Cell::new(fastest.0),
             Cell::new(lowest_memory.0),
             Cell::new(lowest_cpu.0),
         ]));
-        // println!(
-        //     "{:<15} {:<15} {:<15} {:<15}",
-        //     size, fastest.0, lowest_memory.0, lowest_cpu.0
-        // );
     }
-    summary_table.printstd();
+    best_format_table.printstd();
+
+    // Capture table to string
+    let mut best_format_table_string = Vec::new();
+    best_format_table
+        .print(&mut best_format_table_string)
+        .unwrap();
+    output_buffer.push_str(&String::from_utf8_lossy(&best_format_table_string));
+
+    // Export results
+    export_results_to_file(&output_buffer);
+    export_raw_data_to_csv(results);
+}
+
+/// Export benchmark results to a text file
+fn export_results_to_file(results: &str) {
+    // Create timestamp for filename
+    let now = chrono::Local::now();
+    let timestamp = now.format("%Y%m%d_%H%M%S");
+    let filename = format!("benchmark_results_{}.txt", timestamp);
+
+    // Write to file
+    match File::create(&filename) {
+        Ok(mut file) => {
+            if let Err(e) = file.write_all(results.as_bytes()) {
+                println!("error writing results to file: {:?}", e);
+            } else {
+                println!("\nbenchmark results saved to: {}", filename);
+            }
+        }
+        Err(e) => {
+            println!("error creating result file: {:?}", e);
+        }
+    }
+}
+
+/// Export benchmark raw data to CSV file for further analysis
+fn export_raw_data_to_csv(results: &HashMap<String, BenchResult>) {
+    // Create timestamp for filename
+    let now = chrono::Local::now();
+    let timestamp = now.format("%Y%m%d_%H%M%S");
+    let filename = format!("benchmark_raw_data_{}.csv", timestamp);
+
+    // Write to file
+    match File::create(&filename) {
+        Ok(mut file) => {
+            // Write CSV header
+            if let Err(e) = writeln!(
+                file,
+                "Dataset,Format,MeanTimeMs,PeakMemoryBytes,CpuUsagePercent"
+            ) {
+                println!("error writing CSV header: {:?}", e);
+                return;
+            }
+
+            // Write each benchmark result as a CSV row
+            for (size, _) in DATASETS {
+                for format in &["fcb", "cjseq", "cbor", "bson"] {
+                    if let Some(result) = results.get(&format!("{}_{}", size, format)) {
+                        // Convert duration to milliseconds for easier analysis
+                        let time_ms = result.duration.as_secs() * 1000
+                            + result.duration.subsec_millis() as u64;
+
+                        // Write CSV row
+                        if let Err(e) = writeln!(
+                            file,
+                            "{},{},{},{},{}",
+                            size, result.format, time_ms, result.peak_memory, result.cpu_usage
+                        ) {
+                            println!("error writing CSV row: {:?}", e);
+                            return;
+                        }
+                    }
+                }
+            }
+            println!("benchmark raw data saved to: {}", filename);
+        }
+        Err(e) => {
+            println!("error creating CSV file: {:?}", e);
+        }
+    }
 }
 
 /// Add a feature flag to enable dhat profiling
@@ -840,7 +985,7 @@ criterion_group!(benches, read_benchmark);
 #[cfg(feature = "dhat-heap")]
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(1);
+    config = Criterion::default().sample_size(10);
     targets = read_benchmark
 }
 
