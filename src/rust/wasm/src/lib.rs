@@ -1,7 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 mod gloo_client;
 
-#[cfg(target_arch = "wasm32")]
 mod wasm {
     #[cfg(target_arch = "wasm32")]
     use crate::gloo_client::WasmHttpClient;
@@ -48,10 +47,7 @@ mod wasm {
     /// FlatCityBuf dataset HTTP reader
     #[wasm_bindgen]
     pub struct HttpFcbReader {
-        #[cfg(target_arch = "wasm32")]
         client: AsyncBufferedHttpRangeClient<WasmHttpClient>,
-        #[cfg(not(target_arch = "wasm32"))]
-        client: (),
         // feature reading requires header access, therefore
         // header_buf is included in the FcbBuffer struct.
         fbs: FcbBuffer,
@@ -59,10 +55,7 @@ mod wasm {
 
     #[wasm_bindgen]
     pub struct AsyncFeatureIter {
-        #[cfg(target_arch = "wasm32")]
         client: AsyncBufferedHttpRangeClient<WasmHttpClient>,
-        #[cfg(not(target_arch = "wasm32"))]
-        client: (),
         // feature reading requires header access, therefore
         // header_buf is included in the FcbBuffer struct.
         fbs: FcbBuffer,
@@ -85,18 +78,11 @@ mod wasm {
             }
 
             trace!("starting: opening http reader, reading header");
-            #[cfg(target_arch = "wasm32")]
             let client = WasmHttpClient::new(&url);
-            #[cfg(target_arch = "wasm32")]
             let result = Self::_open(client).await;
-            #[cfg(not(target_arch = "wasm32"))]
-            let result = Err(JsValue::from_str(
-                "WasmHttpClient only available in wasm32 target",
-            ));
             result
         }
 
-        #[cfg(target_arch = "wasm32")]
         async fn _open(
             mut client: AsyncBufferedHttpRangeClient<WasmHttpClient>,
         ) -> Result<HttpFcbReader, JsValue> {
@@ -196,26 +182,21 @@ mod wasm {
             Ok(js)
         }
 
-        #[wasm_bindgen]
-        pub fn free(self) {
-            println!("freeing reader");
-        }
-
         fn header_len(&self) -> usize {
             MAGIC_BYTES_SIZE + self.fbs.header_buf.len()
         }
 
-        fn rtree_index_size(&self) -> u64 {
+        fn rtree_index_size(&self) -> usize {
             let header = self.fbs.header();
             let feat_count = header.features_count() as usize;
             if header.index_node_size() > 0 && feat_count > 0 {
-                PackedRTree::index_size(feat_count, header.index_node_size()) as u64
+                PackedRTree::index_size(feat_count, header.index_node_size()) as usize
             } else {
                 0
             }
         }
 
-        fn attr_index_size(&self) -> u64 {
+        fn attr_index_size(&self) -> usize {
             let header = self.fbs.header();
             header
                 .attribute_index()
@@ -230,12 +211,12 @@ mod wasm {
                                 Ok(acc + len)
                             }
                         }) // sum of all attribute index lengths
-                        .unwrap_or(0) as u64
+                        .unwrap_or(0) as usize
                 })
                 .unwrap_or(0)
         }
 
-        fn index_size(&self) -> u64 {
+        fn index_size(&self) -> usize {
             self.rtree_index_size() + self.attr_index_size()
         }
 
@@ -349,10 +330,7 @@ mod wasm {
             let mut current_index_begin = attr_index_begin;
             for attr_info in attr_index_entries.iter() {
                 Self::add_indices_to_multi_http_index(
-                    #[cfg(target_arch = "wasm32")]
                     &mut http_multi_index,
-                    #[cfg(not(target_arch = "wasm32"))]
-                    &mut HttpMultiIndex::new(),
                     &columns,
                     attr_info,
                     current_index_begin,
@@ -399,8 +377,7 @@ mod wasm {
         }
 
         fn add_indices_to_multi_http_index(
-            #[cfg(target_arch = "wasm32")] multi_index: &mut HttpMultiIndex<WasmHttpClient>,
-            #[cfg(not(target_arch = "wasm32"))] multi_index: &mut HttpMultiIndex<()>,
+            multi_index: &mut HttpMultiIndex<WasmHttpClient>,
             columns: &[Column],
             attr_info: &AttributeIndex,
             index_begin: usize,
