@@ -411,8 +411,15 @@
       currentQuery = new WasmSpatialQuery(queryObject);
       log('calling select_query()...');
 
+      const header = await currentReader.cityjson();
+      console.log(`header: ${JSON.stringify(header, null, 2)}`);
+
+      const meta = await currentReader.meta();
+      console.log(`meta: ${JSON.stringify(meta, null, 2)}`);
+
       // The select_query method consumes the reader in Rust
       currentIter = await currentReader.select_query(currentQuery);
+
       currentReader = null; // Reader is consumed by select_query
 
       await iterateFeatures(currentIter);
@@ -451,6 +458,9 @@
         log('fetching header...');
         const cj = await currentReader.cityjson();
         log(`cj: ${JSON.stringify(cj, null, 2)}`);
+
+        const meta = await currentReader.meta();
+        log(`meta: ${JSON.stringify(meta, null, 2)}`);
 
         // Run the appropriate query based on the current mode
         if (currentQueryMode === 'attr') {
