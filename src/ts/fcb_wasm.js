@@ -243,7 +243,7 @@ function __wbg_adapter_38(arg0, arg1, arg2) {
     wasm.closure447_externref_shim(arg0, arg1, arg2);
 }
 
-function __wbg_adapter_151(arg0, arg1, arg2, arg3) {
+function __wbg_adapter_150(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
     wasm.closure487_externref_shim(arg0, arg1, arg2, arg3);
@@ -321,12 +321,6 @@ export class AsyncFeatureIter {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
-    }
-    free() {
-        if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
-        const ptr = this.__destroy_into_raw();
-        _assertNum(ptr);
-        wasm.asyncfeatureiter_free(ptr);
     }
 }
 
@@ -406,7 +400,7 @@ export class HttpFcbReader {
      * @param {WasmSpatialQuery} query
      * @returns {Promise<AsyncFeatureIter>}
      */
-    select_query(query) {
+    select_spatial(query) {
         if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
         const ptr = this.__destroy_into_raw();
         _assertNum(ptr);
@@ -414,7 +408,7 @@ export class HttpFcbReader {
         if (query.__wbg_ptr === 0) {
             throw new Error('Attempt to use a moved value');
         }
-        const ret = wasm.httpfcbreader_select_query(ptr, query.__wbg_ptr);
+        const ret = wasm.httpfcbreader_select_spatial(ptr, query.__wbg_ptr);
         return ret;
     }
     /**
@@ -758,7 +752,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wbg_adapter_151(a, state0.b, arg0, arg1);
+                    return __wbg_adapter_150(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -931,7 +925,7 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper6660 = function() { return logError(function (arg0, arg1, arg2) {
+    imports.wbg.__wbindgen_closure_wrapper6657 = function() { return logError(function (arg0, arg1, arg2) {
         const ret = makeMutClosure(arg0, arg1, 448, __wbg_adapter_38);
         return ret;
     }, arguments) };

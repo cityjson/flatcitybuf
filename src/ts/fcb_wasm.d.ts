@@ -13,7 +13,6 @@ export class AsyncFeatureIter {
    */
   next(): Promise<any | undefined>;
   cur_cj_feature(): any;
-  free(): void;
 }
 /**
  * FlatCityBuf dataset HTTP reader
@@ -30,7 +29,7 @@ export class HttpFcbReader {
   /**
    * Select features within a bounding box.
    */
-  select_query(query: WasmSpatialQuery): Promise<AsyncFeatureIter>;
+  select_spatial(query: WasmSpatialQuery): Promise<AsyncFeatureIter>;
   select_attr_query(query: WasmAttrQuery): Promise<AsyncFeatureIter>;
 }
 /**
@@ -80,13 +79,12 @@ export interface InitOutput {
   readonly httpfcbreader_cityjson: (a: number) => [number, number, number];
   readonly httpfcbreader_meta: (a: number) => [number, number, number];
   readonly httpfcbreader_select_all: (a: number) => any;
-  readonly httpfcbreader_select_query: (a: number, b: number) => any;
+  readonly httpfcbreader_select_spatial: (a: number, b: number) => any;
   readonly httpfcbreader_select_attr_query: (a: number, b: number) => any;
   readonly asyncfeatureiter_header: (a: number) => [number, number, number];
   readonly asyncfeatureiter_features_count: (a: number) => number;
   readonly asyncfeatureiter_next: (a: number) => any;
   readonly asyncfeatureiter_cur_cj_feature: (a: number) => [number, number, number];
-  readonly asyncfeatureiter_free: (a: number) => void;
   readonly __wbg_wasmspatialquery_free: (a: number, b: number) => void;
   readonly wasmspatialquery_new: (a: any) => [number, number, number];
   readonly wasmspatialquery_query_type: (a: number) => [number, number];

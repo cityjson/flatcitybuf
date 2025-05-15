@@ -241,11 +241,11 @@ mod wasm {
         }
         /// Select features within a bounding box.
         #[wasm_bindgen]
-        pub async fn select_query(
+        pub async fn select_spatial(
             mut self,
             query: &WasmSpatialQuery,
         ) -> Result<AsyncFeatureIter, JsValue> {
-            trace!("starting: select_query, traversing index");
+            trace!("starting: select_spatial, traversing index");
             // Read R-Tree index and build filter for features within bbox
             let header = self.fbs.header();
             if header.index_node_size() == 0 || header.features_count() == 0 {
@@ -282,8 +282,8 @@ mod wasm {
             let feature_batches = FeatureBatch::make_batches(list, combine_request_threshold)
                 .await
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            let selection = FeatureSelection::SelectBbox(SelectBbox { feature_batches });
-            trace!("completed: select_query");
+            let selection = FeatureSelection::SelectSpatial(SelectSpatial { feature_batches });
+            trace!("completed: select_spatial");
             Ok(AsyncFeatureIter {
                 client: self.client,
                 fbs: self.fbs,
@@ -585,16 +585,11 @@ mod wasm {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
             Ok(to_value(&cj_feature)?)
         }
-
-        #[wasm_bindgen]
-        pub fn free(self) {
-            println!("freeing iterator");
-        }
     }
 
     enum FeatureSelection {
         SelectAll(SelectAll),
-        SelectBbox(SelectBbox),
+        SelectSpatial(SelectSpatial),
         SelectAttr(SelectAttr),
     }
 
@@ -605,7 +600,9 @@ mod wasm {
         ) -> Result<Option<Bytes>, Error> {
             match self {
                 FeatureSelection::SelectAll(select_all) => select_all.next_buffer(client).await,
-                FeatureSelection::SelectBbox(select_bbox) => select_bbox.next_buffer(client).await,
+                FeatureSelection::SelectSpatial(select_spatial) => {
+                    select_spatial.next_buffer(client).await
+                }
                 FeatureSelection::SelectAttr(select_attr) => select_attr.next_buffer(client).await,
             }
         }
@@ -647,12 +644,12 @@ mod wasm {
         }
     }
 
-    struct SelectBbox {
+    struct SelectSpatial {
         /// Selected features
         feature_batches: Vec<FeatureBatch>,
     }
 
-    impl SelectBbox {
+    impl SelectSpatial {
         async fn next_buffer<T: AsyncHttpRangeClient>(
             &mut self,
             client: &mut AsyncBufferedHttpRangeClient<T>,
