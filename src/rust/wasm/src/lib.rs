@@ -79,8 +79,8 @@ mod wasm {
 
             trace!("starting: opening http reader, reading header");
             let client = WasmHttpClient::new(&url);
-            let result = Self::_open(client).await;
-            result
+
+            Self::_open(client).await
         }
 
         async fn _open(
@@ -190,7 +190,7 @@ mod wasm {
             let header = self.fbs.header();
             let feat_count = header.features_count() as usize;
             if header.index_node_size() > 0 && feat_count > 0 {
-                PackedRTree::index_size(feat_count, header.index_node_size()) as usize
+                PackedRTree::index_size(feat_count, header.index_node_size())
             } else {
                 0
             }
@@ -203,15 +203,15 @@ mod wasm {
                 .map(|attr_index| {
                     attr_index
                         .iter()
-                        .try_fold(0u32, |acc, ai| {
-                            let len = ai.length();
-                            if len > u32::MAX - acc {
+                        .try_fold(0, |acc, ai| {
+                            let len = ai.length() as usize;
+                            if len > usize::MAX - acc {
                                 Err(JsValue::from_str("attribute index size overflow"))
                             } else {
                                 Ok(acc + len)
                             }
                         }) // sum of all attribute index lengths
-                        .unwrap_or(0) as usize
+                        .unwrap_or(0)
                 })
                 .unwrap_or(0)
         }
@@ -228,7 +228,7 @@ mod wasm {
             // TODO: support reading with unknown feature count
             let index_size = self.index_size();
             // Skip index
-            let feature_base = self.header_len() + index_size as usize;
+            let feature_base = self.header_len() + index_size;
             Ok(AsyncFeatureIter {
                 client: self.client,
                 fbs: self.fbs,
@@ -256,7 +256,7 @@ mod wasm {
 
             // request up to this many extra bytes if it means we can eliminate an extra request
             let combine_request_threshold = 256 * 1024;
-            let attr_index_size = self.attr_index_size() as usize;
+            let attr_index_size = self.attr_index_size();
 
             // Clone the inner query value
             let inner_query = query.get_inner();
@@ -304,8 +304,8 @@ mod wasm {
 
             // file structure:
             // magic_bytes + header + rtree_index + attr_index1 + attr_index2 + ... + features
-            let rtree_index_size = self.rtree_index_size() as usize;
-            let attr_index_size = self.attr_index_size() as usize;
+            let rtree_index_size = self.rtree_index_size();
+            let attr_index_size = self.attr_index_size();
             let attr_index_begin = header_len + rtree_index_size;
             let feature_begin = header_len + rtree_index_size + attr_index_size;
 
@@ -326,7 +326,6 @@ mod wasm {
 
             // Create a StreamableMultiIndex from HTTP range requests
             let mut http_multi_index = HttpMultiIndex::new();
-
             let mut current_index_begin = attr_index_begin;
             for attr_info in attr_index_entries.iter() {
                 Self::add_indices_to_multi_http_index(
@@ -338,15 +337,18 @@ mod wasm {
                     combine_request_threshold,
                 )
                 .map_err(|e| JsValue::from_str(&format!("failed to add index: {:?}", e)))?;
+                info!("before current index begin: {}", current_index_begin);
                 current_index_begin += attr_info.length() as usize;
+                info!("after current index begin: {}", current_index_begin);
             }
-
+            info!("current index begin: {}", current_index_begin);
             // self.client.set_min_req_size(combine_request_threshold);
             let result = http_multi_index
                 .query(&mut self.client, &query.conditions)
                 .await
                 .map_err(|e| JsValue::from_str(&format!("failed to query index: {:?}", e)))?;
 
+            info!("result: {:?}", result);
             let count = result.len();
 
             let http_ranges: Vec<HttpRange> = result
@@ -385,19 +387,19 @@ mod wasm {
             combine_request_threshold: usize,
         ) -> Result<(), JsValue> {
             if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
+                // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
+                let index_begin = index_begin;
                 info!(
-                    "Adding index for column: {:?}, {:?}",
+                    "tring to add index for column: {:?}, {:?}",
                     col.name(),
                     col.type_()
                 );
-                // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
-                let index_begin = index_begin as u64;
                 match col.type_() {
                     ColumnType::Int => {
                         let index = HttpIndex::<i32>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -407,7 +409,7 @@ mod wasm {
                         let index = HttpIndex::<Float<f32>>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -417,7 +419,7 @@ mod wasm {
                         let index = HttpIndex::<Float<f64>>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -427,7 +429,7 @@ mod wasm {
                         let index = HttpIndex::<FixedStringKey<50>>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -438,7 +440,7 @@ mod wasm {
                         let index = HttpIndex::<bool>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -448,7 +450,7 @@ mod wasm {
                         let index = HttpIndex::<chrono::DateTime<chrono::Utc>>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -458,7 +460,7 @@ mod wasm {
                         let index = HttpIndex::<i16>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -469,7 +471,7 @@ mod wasm {
                         let index = HttpIndex::<u16>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -479,18 +481,17 @@ mod wasm {
                         let index = HttpIndex::<u32>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
                         multi_index.add_index(col.name().to_string(), index);
                     }
                     ColumnType::ULong => {
-                        info!("Adding u64 index");
                         let index = HttpIndex::<u64>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -500,7 +501,7 @@ mod wasm {
                         let index = HttpIndex::<i8>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -510,7 +511,7 @@ mod wasm {
                         let index = HttpIndex::<u8>::new(
                             attr_info.num_unique_items() as usize,
                             attr_info.branching_factor(),
-                            index_begin as usize,
+                            index_begin,
                             feature_begin,
                             combine_request_threshold,
                         );
@@ -523,6 +524,7 @@ mod wasm {
                         )))
                     }
                 }
+                info!("Added index for column: {:?}", col.name());
             }
             Ok(())
         }

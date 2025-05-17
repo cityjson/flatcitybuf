@@ -133,37 +133,37 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         MAGIC_BYTES_SIZE + self.fbs.header_buf.len()
     }
 
-    fn rtree_index_size(&self) -> u64 {
+    fn rtree_index_size(&self) -> usize {
         let header = self.fbs.header();
         let feat_count = header.features_count() as usize;
         if header.index_node_size() > 0 && feat_count > 0 {
-            PackedRTree::index_size(feat_count, header.index_node_size()) as u64
+            PackedRTree::index_size(feat_count, header.index_node_size())
         } else {
             0
         }
     }
 
-    fn attr_index_size(&self) -> u64 {
+    fn attr_index_size(&self) -> usize {
         let header = self.fbs.header();
         header
             .attribute_index()
             .map(|attr_index| {
                 attr_index
                     .iter()
-                    .try_fold(0u32, |acc, ai| {
-                        let len = ai.length();
-                        if len > u32::MAX - acc {
+                    .try_fold(0, |acc, ai| {
+                        let len = ai.length() as usize;
+                        if len > usize::MAX - acc {
                             Err(Error::AttributeIndexSizeOverflow)
                         } else {
                             Ok(acc + len)
                         }
                     }) // sum of all attribute index lengths
-                    .unwrap_or(0) as u64
+                    .unwrap_or(0)
             })
-            .unwrap_or(0) as u64
+            .unwrap_or(0)
     }
 
-    fn index_size(&self) -> u64 {
+    fn index_size(&self) -> usize {
         self.rtree_index_size() + self.attr_index_size()
     }
 
@@ -311,16 +311,14 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         feature_begin: usize,
     ) -> Result<()> {
         if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
-            println!("Adding index for column: {:?}", col.name());
             // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
-            let index_begin = index_begin as u64;
             match col.type_() {
                 ColumnType::Int => {
                     let index = HttpIndex::<i32>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
                     multi_index.add_index(col.name().to_string(), index);
@@ -329,8 +327,8 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     let index = HttpIndex::<Float<f32>>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
                     multi_index.add_index(col.name().to_string(), index);
@@ -339,8 +337,8 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     let index = HttpIndex::<Float<f64>>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
                     multi_index.add_index(col.name().to_string(), index);
@@ -349,8 +347,8 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     let index = HttpIndex::<FixedStringKey<50>>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
                     multi_index.add_index(col.name().to_string(), index);
@@ -360,8 +358,8 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     let index = HttpIndex::<bool>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
                     multi_index.add_index(col.name().to_string(), index);
@@ -370,8 +368,8 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     let index = HttpIndex::<DateTime<Utc>>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
                     multi_index.add_index(col.name().to_string(), index);
@@ -380,57 +378,61 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     let index = HttpIndex::<i16>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
+                    multi_index.add_index(col.name().to_string(), index);
                 }
                 ColumnType::UShort => {
                     let index = HttpIndex::<u16>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
+                    multi_index.add_index(col.name().to_string(), index);
                 }
                 ColumnType::UInt => {
                     let index = HttpIndex::<u32>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
+                    multi_index.add_index(col.name().to_string(), index);
                 }
                 ColumnType::ULong => {
-                    println!("Adding u64 index");
-                    println!("attr_info: {:?}", attr_info);
                     let index = HttpIndex::<u64>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
+                    multi_index.add_index(col.name().to_string(), index);
                 }
                 ColumnType::Byte => {
                     let index = HttpIndex::<i8>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
+                    multi_index.add_index(col.name().to_string(), index);
                 }
                 ColumnType::UByte => {
                     let index = HttpIndex::<u8>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
-                        index_begin as usize,
-                        feature_begin as usize,
+                        index_begin,
+                        feature_begin,
                         1024 * 1024, // combine_request_threshold
                     );
+                    multi_index.add_index(col.name().to_string(), index);
                 }
 
                 _ => {
