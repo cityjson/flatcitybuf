@@ -25,7 +25,7 @@ use static_btree::{
 use static_btree::{HttpIndex, HttpMultiIndex};
 use std::collections::HashMap;
 use std::collections::VecDeque;
-use std::ops::Range;
+use std::ops::{Range, RangeFrom};
 use tracing::trace;
 
 #[cfg(test)]
@@ -277,28 +277,34 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         let count = result.len();
 
         // println!("result: {:?}", result);
-
-        let http_ranges: Vec<HttpRange> = result
+        // TODO: make better conversion
+        let mut result = result
             .into_iter()
-            .map(|item| match item.range {
-                AttrHttpRange::Range(range) => HttpRange::Range(range.start..range.end),
-                AttrHttpRange::RangeFrom(range) => HttpRange::RangeFrom(range.start..),
+            .map(|item| packed_rtree::http::HttpSearchResultItem {
+                range: match item.range {
+                    static_btree::http::HttpRange::Range(range) => {
+                        packed_rtree::http::HttpRange::Range(range)
+                    }
+                    static_btree::http::HttpRange::RangeFrom(range) => {
+                        packed_rtree::http::HttpRange::RangeFrom(range)
+                    }
+                },
             })
-            .collect();
+            .collect::<Vec<packed_rtree::http::HttpSearchResultItem>>();
+        result.sort_by_key(|item| item.range.start());
+        let combine_request_threshold = 1024 * 1024;
+        let feature_batches =
+            FeatureBatch::make_batches_discontinuous(result, combine_request_threshold).await?;
 
         trace!(
             "completed: select_attr_query via http reader, matched features: {}",
             count
         );
 
-        println!("http_ranges: {:?}", http_ranges);
         Ok(AsyncFeatureIter {
             client: self.client,
             fbs: self.fbs,
-            selection: FeatureSelection::SelectAttr(SelectAttr {
-                ranges: http_ranges,
-                range_pos: 0,
-            }),
+            selection: FeatureSelection::SelectAttr(SelectAttr { feature_batches }),
             count,
         })
     }
@@ -612,6 +618,71 @@ impl FeatureBatch {
         batches.reverse();
         Ok(batches)
     }
+    async fn make_batches_discontinuous(
+        feature_ranges: Vec<HttpSearchResultItem>,
+        combine_request_threshold: usize,
+    ) -> Result<Vec<Self>> {
+        let mut batched_ranges = vec![];
+
+        for search_result_item in feature_ranges.into_iter() {
+            let Some(latest_batch) = batched_ranges.last_mut() else {
+                let mut new_batch = VecDeque::new();
+                new_batch.push_back(search_result_item.range);
+                batched_ranges.push(new_batch);
+                continue;
+            };
+
+            debug!("latest_batch: {:?}", latest_batch);
+
+            let previous_item = latest_batch.back().expect("we never push an empty batch");
+
+            debug!("previous_item: {:?}", previous_item);
+
+            match previous_item {
+                HttpRange::Range(Range { end: prev_end, .. }) => {
+                    let wasted_bytes = search_result_item.range.start() - prev_end;
+                    debug!("difference: {:?}", wasted_bytes);
+                    if wasted_bytes < combine_request_threshold {
+                        if wasted_bytes == 0 {
+                            trace!("adjacent feature");
+                        } else {
+                            trace!("wasting {wasted_bytes} to avoid an extra request");
+                        }
+                        latest_batch.push_back(search_result_item.range);
+                    } else {
+                        let mut new_batch = VecDeque::new();
+                        new_batch.push_back(search_result_item.range);
+                        batched_ranges.push(new_batch);
+                    }
+                }
+                HttpRange::RangeFrom(RangeFrom {
+                    start: prev_start, ..
+                }) => {
+                    // here we only know the start ot prev item and start of current item. We calculate if the difference is less than combine_request_threshold. If so, we add the current item to the latest batch. If not, we create a new batch.
+                    let wasted_bytes = search_result_item.range.start() - prev_start;
+                    debug!("difference: {:?}", wasted_bytes);
+                    if wasted_bytes < combine_request_threshold {
+                        if wasted_bytes < 5 * 1024 {
+                            debug!("maybe adjacent feature");
+                        } else {
+                            debug!("wasting {wasted_bytes} to avoid an extra request");
+                        }
+                        latest_batch.push_back(search_result_item.range);
+                    } else {
+                        let mut new_batch = VecDeque::new();
+                        new_batch.push_back(search_result_item.range);
+                        batched_ranges.push(new_batch);
+                    }
+                }
+            }
+        }
+
+        debug!("batched_ranges: {:?}", batched_ranges);
+        let mut batches: Vec<_> = batched_ranges.into_iter().map(FeatureBatch::new).collect();
+        batches.reverse();
+        debug!("batches length: {:?}", batches.len());
+        Ok(batches)
+    }
 
     fn new(feature_ranges: VecDeque<HttpRange>) -> Self {
         Self { feature_ranges }
@@ -665,8 +736,7 @@ impl FeatureBatch {
 
 struct SelectAttr {
     // TODO: change this implementation so it can batch features
-    ranges: Vec<HttpRange>,
-    range_pos: usize,
+    feature_batches: Vec<FeatureBatch>,
 }
 
 impl SelectAttr {
@@ -674,16 +744,22 @@ impl SelectAttr {
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
     ) -> Result<Option<Bytes>> {
-        println!("self.range_pos: {:?}", self.range_pos);
-        let Some(range) = self.ranges.get(self.range_pos) else {
-            return Ok(None);
-        };
-        let mut feature_buffer = BytesMut::from(client.get_range(range.start(), 4).await?);
-        let feature_size = LittleEndian::read_u32(&feature_buffer) as usize;
-        println!("feature_size: {:?}", feature_size);
-        feature_buffer.put(client.get_range(range.start() + 4, feature_size).await?);
-        self.range_pos += 1;
-        Ok(Some(feature_buffer.freeze()))
+        let mut next_buffer = None;
+        while next_buffer.is_none() {
+            let Some(feature_batch) = self.feature_batches.last_mut() else {
+                break;
+            };
+            let Some(buffer) = feature_batch.next_buffer(client).await? else {
+                // done with this batch
+                self.feature_batches
+                    .pop()
+                    .expect("already asserted feature_batches was non-empty");
+                continue;
+            };
+            next_buffer = Some(buffer)
+        }
+
+        Ok(next_buffer)
     }
 }
 

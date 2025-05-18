@@ -121,6 +121,8 @@
 
   <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
     value="http://127.0.0.1:5501/src/rust/fcb_core/tests/data/delft_attr.fcb" /> -->
+  <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
+    value="https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb" /> -->
   <input type="text" id="url-input" placeholder="https://example.com/data"
     value="https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb" />
   <!-- <input type="text" id="url-input" placeholder="https://example.com/data"
@@ -137,9 +139,10 @@
     <div id="attr-query-inputs" class="query-inputs active">
       <label for="query-input">enter query (as json array):</label>
       <textarea id="query-input" rows="3">
-        [["b3_extrusive", "Gt", 2.0], ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"]]
+        [["b3_h_dak_50p", "Gt", 2.0]]
       </textarea>
     </div>
+    <!-- [["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"]] -->
 
     <!-- Spatial query inputs -->
     <div id="spatial-query-inputs" class="query-inputs">
@@ -273,7 +276,7 @@
           log(`feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
           count++;
           // Limit iteration to avoid excessive logs
-          if (count >= 10) {
+          if (count >= 100) {
             log('reached feature iteration limit (10).');
             break;
           }
@@ -340,7 +343,7 @@
 
       // The select_attr_query method consumes the reader in Rust
       // After this call, currentReader is no longer valid
-      currentIter = await currentReader.select_attr_query(currentQuery);
+      currentIter = await currentReader.select_attr_query(currentQuery, 10);
       currentReader = null; // Reader is consumed by select_attr_query
 
       await iterateFeatures(currentIter);
@@ -418,7 +421,7 @@
       console.log(`meta: ${JSON.stringify(meta, null, 2)}`);
 
       // The select_query method consumes the reader in Rust
-      currentIter = await currentReader.select_query(currentQuery);
+      currentIter = await currentReader.select_spatial(currentQuery);
 
       currentReader = null; // Reader is consumed by select_query
 

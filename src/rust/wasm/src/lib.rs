@@ -35,7 +35,7 @@ mod wasm {
         http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree, Query as SpatialQuery,
     };
     use std::collections::VecDeque;
-    use std::ops::Range;
+    use std::ops::{Range, RangeFrom};
 
     // The largest request we'll speculatively make.
     // If a single huge feature requires, we'll necessarily exceed this limit.
@@ -296,6 +296,7 @@ mod wasm {
         pub async fn select_attr_query(
             mut self,
             query: &WasmAttrQuery,
+            limit: Option<usize>,
         ) -> Result<AsyncFeatureIter, JsValue> {
             trace!("starting: select_attr_query via http reader");
             let header = self.fbs.header();
@@ -309,7 +310,7 @@ mod wasm {
             let attr_index_begin = header_len + rtree_index_size;
             let feature_begin = header_len + rtree_index_size + attr_index_size;
 
-            let combine_request_threshold = 1024 * 1024; // TODO: make this configurable
+            let combine_request_threshold = 512 * 1024;
             let attr_index_entries = header
                 .attribute_index()
                 .ok_or_else(|| JsValue::from_str("attribute index not found"))?;
@@ -342,38 +343,43 @@ mod wasm {
                 info!("after current index begin: {}", current_index_begin);
             }
             info!("current index begin: {}", current_index_begin);
-            // self.client.set_min_req_size(combine_request_threshold);
-            let result = http_multi_index
+            let mut result = http_multi_index
                 .query(&mut self.client, &query.conditions)
                 .await
                 .map_err(|e| JsValue::from_str(&format!("failed to query index: {:?}", e)))?;
 
-            info!("result: {:?}", result);
+            if let Some(limit) = limit {
+                result.truncate(limit);
+            }
+
             let count = result.len();
 
-            let http_ranges: Vec<HttpRange> = result
+            // self.client.set_min_req_size(combine_request_threshold);
+            let mut result = result
                 .into_iter()
-                .map(|item| match item.range {
-                    static_btree::http::HttpRange::Range(range) => {
-                        HttpRange::Range(range.start..range.end)
-                    }
-                    static_btree::http::HttpRange::RangeFrom(range) => {
-                        HttpRange::RangeFrom(range.start..)
-                    }
+                .map(|item| packed_rtree::http::HttpSearchResultItem {
+                    range: match item.range {
+                        static_btree::http::HttpRange::Range(range) => {
+                            packed_rtree::http::HttpRange::Range(range)
+                        }
+                        static_btree::http::HttpRange::RangeFrom(range) => {
+                            packed_rtree::http::HttpRange::RangeFrom(range)
+                        }
+                    },
                 })
-                .collect();
+                .collect::<Vec<packed_rtree::http::HttpSearchResultItem>>();
+            result.sort_by_key(|item| item.range.start());
+            let combine_request_threshold = 3 * 1024 * 1024; // 3MB, this is temporary assumption that many cityjson features are less than 3MB
+            info!("result: {:?}", result.len());
+            let feature_batches =
+                FeatureBatch::make_batches_discontinuous(result, combine_request_threshold)
+                    .await
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-            trace!(
-                "completed: select_attr_query via http reader, matched features: {}",
-                count
-            );
             Ok(AsyncFeatureIter {
                 client: self.client,
                 fbs: self.fbs,
-                selection: FeatureSelection::SelectAttr(SelectAttr {
-                    ranges: http_ranges,
-                    range_pos: 0,
-                }),
+                selection: FeatureSelection::SelectAttr(SelectAttr { feature_batches }),
                 count,
             })
         }
@@ -603,9 +609,13 @@ mod wasm {
             match self {
                 FeatureSelection::SelectAll(select_all) => select_all.next_buffer(client).await,
                 FeatureSelection::SelectSpatial(select_spatial) => {
+                    debug!("selecting spatial");
                     select_spatial.next_buffer(client).await
                 }
-                FeatureSelection::SelectAttr(select_attr) => select_attr.next_buffer(client).await,
+                FeatureSelection::SelectAttr(select_attr) => {
+                    debug!("selecting attr");
+                    select_attr.next_buffer(client).await
+                }
             }
         }
     }
@@ -675,6 +685,7 @@ mod wasm {
         }
     }
 
+    #[derive(Debug)]
     struct FeatureBatch {
         /// The byte location of each feature within the file
         feature_ranges: VecDeque<HttpRange>,
@@ -695,9 +706,17 @@ mod wasm {
                     continue;
                 };
 
+                debug!("latest_batch: {:?}", latest_batch);
+
                 let previous_item = latest_batch.back().expect("we never push an empty batch");
 
+                debug!("previous_item: {:?}", previous_item);
+
                 let HttpRange::Range(Range { end: prev_end, .. }) = previous_item else {
+                    debug!(
+                        "previous_item is not a range, range start: {:?}",
+                        previous_item.start()
+                    );
                     debug_assert!(false, "This shouldn't happen. Only the very last feature is expected to have an unknown length");
                     let mut new_batch = VecDeque::new();
                     new_batch.push_back(search_result_item.range);
@@ -706,6 +725,7 @@ mod wasm {
                 };
 
                 let wasted_bytes = search_result_item.range.start() - prev_end;
+                debug!("wasted_bytes: {:?}", wasted_bytes);
                 if wasted_bytes < combine_request_threshold {
                     if wasted_bytes == 0 {
                         trace!("adjacent feature");
@@ -723,8 +743,76 @@ mod wasm {
                 }
             }
 
+            info!("batched_ranges: {:?}", batched_ranges);
             let mut batches: Vec<_> = batched_ranges.into_iter().map(FeatureBatch::new).collect();
             batches.reverse();
+            info!("batches: {:?}", batches);
+            Ok(batches)
+        }
+
+        async fn make_batches_discontinuous(
+            feature_ranges: Vec<HttpSearchResultItem>,
+            combine_request_threshold: usize,
+        ) -> Result<Vec<Self>, Error> {
+            let mut batched_ranges = vec![];
+
+            for search_result_item in feature_ranges.into_iter() {
+                let Some(latest_batch) = batched_ranges.last_mut() else {
+                    let mut new_batch = VecDeque::new();
+                    new_batch.push_back(search_result_item.range);
+                    batched_ranges.push(new_batch);
+                    continue;
+                };
+
+                debug!("latest_batch: {:?}", latest_batch);
+
+                let previous_item = latest_batch.back().expect("we never push an empty batch");
+
+                debug!("previous_item: {:?}", previous_item);
+
+                match previous_item {
+                    HttpRange::Range(Range { end: prev_end, .. }) => {
+                        let wasted_bytes = search_result_item.range.start() - prev_end;
+                        debug!("difference: {:?}", wasted_bytes);
+                        if wasted_bytes < combine_request_threshold {
+                            if wasted_bytes == 0 {
+                                trace!("adjacent feature");
+                            } else {
+                                trace!("wasting {wasted_bytes} to avoid an extra request");
+                            }
+                            latest_batch.push_back(search_result_item.range);
+                        } else {
+                            let mut new_batch = VecDeque::new();
+                            new_batch.push_back(search_result_item.range);
+                            batched_ranges.push(new_batch);
+                        }
+                    }
+                    HttpRange::RangeFrom(RangeFrom {
+                        start: prev_start, ..
+                    }) => {
+                        // here we only know the start ot prev item and start of current item. We calculate if the difference is less than combine_request_threshold. If so, we add the current item to the latest batch. If not, we create a new batch.
+                        let wasted_bytes = search_result_item.range.start() - prev_start;
+                        debug!("difference: {:?}", wasted_bytes);
+                        if wasted_bytes < combine_request_threshold {
+                            if wasted_bytes < 5 * 1024 {
+                                debug!("maybe adjacent feature");
+                            } else {
+                                debug!("wasting {wasted_bytes} to avoid an extra request");
+                            }
+                            latest_batch.push_back(search_result_item.range);
+                        } else {
+                            let mut new_batch = VecDeque::new();
+                            new_batch.push_back(search_result_item.range);
+                            batched_ranges.push(new_batch);
+                        }
+                    }
+                }
+            }
+
+            info!("batched_ranges: {:?}", batched_ranges);
+            let mut batches: Vec<_> = batched_ranges.into_iter().map(FeatureBatch::new).collect();
+            batches.reverse();
+            debug!("batches length: {:?}", batches.len());
             Ok(batches)
         }
 
@@ -785,9 +873,7 @@ mod wasm {
     }
 
     struct SelectAttr {
-        // TODO: change this implementation so it can batch features
-        ranges: Vec<HttpRange>,
-        range_pos: usize,
+        feature_batches: Vec<FeatureBatch>,
     }
 
     impl SelectAttr {
@@ -795,24 +881,22 @@ mod wasm {
             &mut self,
             client: &mut AsyncBufferedHttpRangeClient<T>,
         ) -> Result<Option<Bytes>, Error> {
-            let Some(range) = self.ranges.get(self.range_pos) else {
-                return Ok(None);
-            };
-            let mut feature_buffer = BytesMut::from(
-                client
-                    .get_range(range.start(), 4)
-                    .await
-                    .map_err(|_| Error)?,
-            );
-            let feature_size = LittleEndian::read_u32(&feature_buffer) as usize;
-            feature_buffer.put(
-                client
-                    .get_range(range.start() + 4, feature_size)
-                    .await
-                    .map_err(|_| Error)?,
-            );
-            self.range_pos += 1;
-            Ok(Some(feature_buffer.freeze()))
+            let mut next_buffer = None;
+            while next_buffer.is_none() {
+                let Some(feature_batch) = self.feature_batches.last_mut() else {
+                    break;
+                };
+                let Some(buffer) = feature_batch.next_buffer(client).await? else {
+                    // done with this batch
+                    self.feature_batches
+                        .pop()
+                        .expect("already asserted feature_batches was non-empty");
+                    continue;
+                };
+                next_buffer = Some(buffer)
+            }
+
+            Ok(next_buffer)
         }
     }
 

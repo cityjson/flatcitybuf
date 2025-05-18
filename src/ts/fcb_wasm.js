@@ -240,13 +240,13 @@ function _assertClass(instance, klass) {
 function __wbg_adapter_38(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure451_externref_shim(arg0, arg1, arg2);
+    wasm.closure454_externref_shim(arg0, arg1, arg2);
 }
 
 function __wbg_adapter_150(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure491_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure494_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -413,9 +413,10 @@ export class HttpFcbReader {
     }
     /**
      * @param {WasmAttrQuery} query
+     * @param {number | null} [limit]
      * @returns {Promise<AsyncFeatureIter>}
      */
-    select_attr_query(query) {
+    select_attr_query(query, limit) {
         if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
         const ptr = this.__destroy_into_raw();
         _assertNum(ptr);
@@ -423,7 +424,10 @@ export class HttpFcbReader {
         if (query.__wbg_ptr === 0) {
             throw new Error('Attempt to use a moved value');
         }
-        const ret = wasm.httpfcbreader_select_attr_query(ptr, query.__wbg_ptr);
+        if (!isLikeNone(limit)) {
+            _assertNum(limit);
+        }
+        const ret = wasm.httpfcbreader_select_attr_query(ptr, query.__wbg_ptr, isLikeNone(limit) ? 0x100000001 : (limit) >>> 0);
         return ret;
     }
 }
@@ -925,8 +929,8 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper6669 = function() { return logError(function (arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 452, __wbg_adapter_38);
+    imports.wbg.__wbindgen_closure_wrapper6723 = function() { return logError(function (arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 455, __wbg_adapter_38);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {
