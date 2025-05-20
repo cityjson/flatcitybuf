@@ -697,7 +697,7 @@ mod wasm {
             combine_request_threshold: usize,
         ) -> Result<Vec<Self>, Error> {
             let mut batched_ranges = vec![];
-
+            info!("feature_ranges: {:?}", feature_ranges.len());
             for search_result_item in feature_ranges.into_iter() {
                 let Some(latest_batch) = batched_ranges.last_mut() else {
                     let mut new_batch = VecDeque::new();
@@ -746,7 +746,7 @@ mod wasm {
             info!("batched_ranges: {:?}", batched_ranges);
             let mut batches: Vec<_> = batched_ranges.into_iter().map(FeatureBatch::new).collect();
             batches.reverse();
-            info!("batches: {:?}", batches);
+            info!("batches: {:?}", batches.len());
             Ok(batches)
         }
 
@@ -773,7 +773,7 @@ mod wasm {
                 match previous_item {
                     HttpRange::Range(Range { end: prev_end, .. }) => {
                         let wasted_bytes = search_result_item.range.start() - prev_end;
-                        debug!("difference: {:?}", wasted_bytes);
+                        debug!("difference in MB: {:?}", wasted_bytes / (1024 * 1024));
                         if wasted_bytes < combine_request_threshold {
                             if wasted_bytes == 0 {
                                 trace!("adjacent feature");
@@ -792,7 +792,7 @@ mod wasm {
                     }) => {
                         // here we only know the start ot prev item and start of current item. We calculate if the difference is less than combine_request_threshold. If so, we add the current item to the latest batch. If not, we create a new batch.
                         let wasted_bytes = search_result_item.range.start() - prev_start;
-                        debug!("difference: {:?}", wasted_bytes);
+                        debug!("difference in MB: {:?}", wasted_bytes / (1024 * 1024));
                         if wasted_bytes < combine_request_threshold {
                             if wasted_bytes < 5 * 1024 {
                                 debug!("maybe adjacent feature");
@@ -851,6 +851,7 @@ mod wasm {
             client: &mut AsyncBufferedHttpRangeClient<T>,
         ) -> Result<Option<Bytes>, Error> {
             let request_size = self.request_size();
+            debug!("request_size: {:?}", request_size);
             client.set_min_req_size(request_size);
             let Some(feature_range) = self.feature_ranges.pop_front() else {
                 return Ok(None);
