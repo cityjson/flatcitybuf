@@ -16,7 +16,7 @@ packed_rtree = { path = "../packed_rtree" }
 static-btree = { path = "../static-btree" }
 bytes = { workspace = true }
 fcb_core = { path = "../fcb_core", features = ["http"] }
-getrandom = { workspace = true, features = ["js"] }
+getrandom = { workspace = true, features = ["wasm_js"] }
 gloo-net = { workspace = true }
 http-range-client = { workspace = true, default-features = false }
 js-sys = { workspace = true }
@@ -34,6 +34,7 @@ console_error_panic_hook = { workspace = true }
 console_log = { workspace = true }
 log = { workspace = true }
 chrono = { workspace = true }
+cjseq = { workspace = true }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -41,7 +42,7 @@ packed_rtree = { path = "../packed_rtree" }
 static-btree = { path = "../static-btree" }
 bytes = { workspace = true }
 fcb_core = { path = "../fcb_core", features = ["http"] }
-getrandom = { workspace = true, features = ["js"] }
+getrandom = { workspace = true, features = ["wasm_js"] }
 gloo-net = { workspace = true }
 http-range-client = { workspace = true, default-features = false }
 js-sys = { workspace = true }
@@ -59,3 +60,4 @@ console_error_panic_hook = { workspace = true }
 console_log = { workspace = true }
 log = { workspace = true }
 chrono = { workspace = true }
+cjseq = { workspace = true }

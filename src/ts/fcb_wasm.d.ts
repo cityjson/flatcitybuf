@@ -1,5 +1,18 @@
 /* tslint:disable */
 /* eslint-disable */
+/**
+ * Converts a CityJSON object to OBJ format.
+ *
+ * # Arguments
+ *
+ * * `city_json_js` - JsValue containing a CityJSON object that will be deserialized
+ *   using serde_wasm_bindgen into the CityJSON struct defined by cjseq
+ *
+ * # Returns
+ *
+ * A string containing the OBJ data or an error
+ */
+export function cjToObj(city_json_js: any): string;
 export class AsyncFeatureIter {
   private constructor();
   free(): void;
@@ -98,6 +111,7 @@ export interface InitOutput {
   readonly __wbg_wasmattrquery_free: (a: number, b: number) => void;
   readonly wasmattrquery_new: (a: any) => [number, number, number];
   readonly wasmattrquery_inner: (a: number) => any;
+  readonly cjToObj: (a: any) => [number, number, number, number];
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;
@@ -106,8 +120,8 @@ export interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-  readonly closure451_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure491_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure533_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure572_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

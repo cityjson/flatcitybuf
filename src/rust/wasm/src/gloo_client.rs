@@ -1,14 +1,24 @@
-#![cfg(target_arch = "wasm32")]
-
 use async_trait::async_trait;
 use bytes::Bytes;
-use gloo_net::http::RequestBuilder as GlooRequest;
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient, HttpError, Result};
+
+#[cfg(target_arch = "wasm32")]
+use gloo_net::http::RequestBuilder as GlooRequest;
 
 pub struct WasmHttpClient {}
 
+#[cfg(target_arch = "wasm32")]
 impl WasmHttpClient {
     pub fn new(url: &str) -> AsyncBufferedHttpRangeClient<WasmHttpClient> {
+        AsyncBufferedHttpRangeClient::with(WasmHttpClient {}, url)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WasmHttpClient {
+    pub fn new(url: &str) -> AsyncBufferedHttpRangeClient<WasmHttpClient> {
+        // This is a mock implementation for non-wasm targets
+        // It will never be called in production, but enables compilation
         AsyncBufferedHttpRangeClient::with(WasmHttpClient {}, url)
     }
 }
@@ -43,5 +53,24 @@ impl AsyncHttpRangeClient for WasmHttpClient {
         } else {
             Ok(None)
         }
+    }
+}
+
+// Mock implementation for non-wasm targets
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait]
+impl AsyncHttpRangeClient for WasmHttpClient {
+    async fn get_range(&self, _url: &str, _range: &str) -> Result<Bytes> {
+        // Mock implementation that will never be called
+        Err(HttpError::HttpError(
+            "Not implemented for non-wasm targets".to_string(),
+        ))
+    }
+
+    async fn head_response_header(&self, _url: &str, _header: &str) -> Result<Option<String>> {
+        // Mock implementation that will never be called
+        Err(HttpError::HttpError(
+            "Not implemented for non-wasm targets".to_string(),
+        ))
     }
 }

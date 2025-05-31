@@ -1,9 +1,12 @@
 #[cfg(target_arch = "wasm32")]
 mod gloo_client;
+#[cfg(target_arch = "wasm32")]
+mod util;
 
 mod wasm {
     #[cfg(target_arch = "wasm32")]
     use crate::gloo_client::WasmHttpClient;
+
     use fcb_core::{size_prefixed_root_as_header, Header, Operator};
     use js_sys::Array;
     use log::Level;
@@ -1148,5 +1151,7 @@ mod wasm {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub use util::convert_cityjson_to_obj;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::*;
