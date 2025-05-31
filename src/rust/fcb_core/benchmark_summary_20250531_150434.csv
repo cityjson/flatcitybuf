@@ -1,0 +1,16 @@
+Dataset,Fastest_Format,Fastest_Mean_Ms,Most_Consistent_Format,Lowest_StdDev_Ms,Lowest_Memory_Format,Lowest_Memory_Bytes,Lowest_CPU_Format,Lowest_CPU_Percent
+3DBAG,FlatCityBuf,6,FlatCityBuf,0,FlatCityBuf,5685248,CB,98.42
+3DBV,FlatCityBuf,120,FlatCityBuf,3,FlatCityBuf,61882368,CB,93.75
+Helsinki,FlatCityBuf,127,FlatCityBuf,1,FlatCityBuf,4915200,BS,95.96
+Ingolstadt,FlatCityBuf,0,FlatCityBuf,0,FlatCityBuf,9420800,BS,96.72
+Montreal,FlatCityBuf,0,FlatCityBuf,0,FlatCityBuf,10928128,CB,98.66
+NYC,FlatCityBuf,42,FlatCityBuf,1,FlatCityBuf,6897664,Ci,95.22
+Rotterdam,FlatCityBuf,1,FlatCityBuf,0,FlatCityBuf,4521984,Ci,97.82
+Vienna,FlatCityBuf,1,FlatCityBuf,0,FlatCityBuf,6012928,Ci,98.20
+Zurich,FlatCityBuf,149,FlatCityBuf,3,FlatCityBuf,6193152,BS,97.82
+Subset of Tokyo (PLATEAU),FlatCityBuf,94,FlatCityBuf,2,FlatCityBuf,15613952,BS,80.37
+Takeshiba (PLATEAU) Brid,FlatCityBuf,0,FlatCityBuf,0,FlatCityBuf,20086784,Fl,92.04
+Takeshiba (PLATEAU) Rail way,FlatCityBuf,2,FlatCityBuf,0,FlatCityBuf,4882432,BS,97.37
+Takeshiba (PLATEAU) Transport,FlatCityBuf,14,FlatCityBuf,1,FlatCityBuf,24150016,BS,93.93
+Takeshiba (PLATEAU) Tunnel,FlatCityBuf,2,FlatCityBuf,0,FlatCityBuf,14909440,Ci,96.17
+Takeshiba (PLATEAU) Vegetation,FlatCityBuf,33,FlatCityBuf,3,FlatCityBuf,73842688,Ci,95.69

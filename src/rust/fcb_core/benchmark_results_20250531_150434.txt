@@ -1,0 +1,129 @@
+FLATCITYBUF BENCHMARK RESULTS WITH STATISTICS
+Generated: 2025-05-31 15:04:34
+Iterations per test: 100
+========================================================================================================================
+
+ALL RESULTS:
+------------------------------------------------------------------------------------------------------------------------
+Dataset              Format                  Mean Time  Median Time      Std Dev          Memory      CPU %
+------------------------------------------------------------------------------------------------------------------------
+3DBAG                FlatCityBuf                6.00ms       6.00ms       0.00ms         5.42 MB     99.66%
+3DBAG                CityJSONTextSequence      54.00ms      53.00ms       5.00ms        25.67 MB     98.70%
+3DBAG                CBOR                      73.00ms      72.00ms       6.00ms       263.33 MB     98.42%
+3DBAG                BSON                     113.00ms     111.00ms      10.00ms       323.19 MB     98.51%
+3DBV                 FlatCityBuf              120.00ms     119.00ms       3.00ms        59.02 MB     99.42%
+3DBV                 CityJSONTextSequence        3.79s        3.78s      42.00ms       352.33 MB     99.61%
+3DBV                 CBOR                        5.05s        5.01s     226.00ms         6.72 GB     93.75%
+3DBV                 BSON                        8.82s        8.79s     288.00ms         7.44 GB     95.91%
+Helsinki             FlatCityBuf              127.00ms     127.00ms       1.00ms         4.69 MB     99.85%
+Helsinki             CityJSONTextSequence        3.48s        3.47s      41.00ms        16.11 MB     99.52%
+Helsinki             CBOR                        6.30s        6.33s     232.00ms         6.96 GB     97.56%
+Helsinki             BSON                        9.69s        9.61s     389.00ms         7.42 GB     95.96%
+Ingolstadt           FlatCityBuf                0.00ms       0.00ms       0.00ms         8.98 MB     97.74%
+Ingolstadt           CityJSONTextSequence      37.00ms      36.00ms       1.00ms        35.95 MB     99.02%
+Ingolstadt           CBOR                      46.00ms      45.00ms       2.00ms       219.66 MB     98.40%
+Ingolstadt           BSON                      81.00ms      79.00ms       9.00ms       323.39 MB     96.72%
+Montreal             FlatCityBuf                0.00ms       0.00ms       0.00ms        10.42 MB     99.40%
+Montreal             CityJSONTextSequence      50.00ms      50.00ms       1.00ms        41.36 MB     99.09%
+Montreal             CBOR                      59.00ms      58.00ms       5.00ms       304.58 MB     98.66%
+Montreal             BSON                     152.00ms     150.00ms       7.00ms       526.86 MB     99.06%
+NYC                  FlatCityBuf               42.00ms      41.00ms       1.00ms         6.58 MB     99.17%
+NYC                  CityJSONTextSequence     949.00ms     914.00ms      90.00ms        22.69 MB     95.22%
+NYC                  CBOR                        1.40s        1.38s      56.00ms         1.68 GB     98.56%
+NYC                  BSON                        1.78s        1.76s      68.00ms         2.48 GB     99.15%
+Rotterdam            FlatCityBuf                1.00ms       1.00ms       0.00ms         4.31 MB     99.32%
+Rotterdam            CityJSONTextSequence      21.00ms      20.00ms       5.00ms        10.81 MB     97.82%
+Rotterdam            CBOR                      31.00ms      30.00ms       2.00ms       205.97 MB     99.07%
+Rotterdam            BSON                      66.00ms      66.00ms       2.00ms       339.94 MB     99.36%
+Vienna               FlatCityBuf                1.00ms       1.00ms       0.00ms         5.73 MB     99.66%
+Vienna               CityJSONTextSequence      46.00ms      45.00ms       5.00ms        18.66 MB     98.20%
+Vienna               CBOR                      59.00ms      58.00ms       3.00ms       221.39 MB     98.65%
+Vienna               BSON                      81.00ms      81.00ms       2.00ms       287.27 MB     99.37%
+Zurich               FlatCityBuf              149.00ms     148.00ms       3.00ms         5.91 MB     99.29%
+Zurich               CityJSONTextSequence        1.88s        1.86s      57.00ms        31.20 MB     98.58%
+Zurich               CBOR                        3.44s        3.42s     100.00ms         4.57 GB     98.88%
+Zurich               BSON                        5.25s        5.13s     372.00ms         7.19 GB     97.82%
+Subset of Tokyo (PLATEAU) FlatCityBuf               94.00ms      93.00ms       2.00ms        14.89 MB     99.39%
+Subset of Tokyo (PLATEAU) CityJSONTextSequence        1.95s        1.94s      48.00ms        71.94 MB     98.92%
+Subset of Tokyo (PLATEAU) CBOR                        3.12s        2.77s        1.55s         4.13 GB     89.48%
+Subset of Tokyo (PLATEAU) BSON                        9.74s        9.06s        3.97s         7.26 GB     80.37%
+Takeshiba (PLATEAU) Brid FlatCityBuf                0.00ms       0.00ms       0.00ms        19.16 MB     92.04%
+Takeshiba (PLATEAU) Brid CityJSONTextSequence      89.00ms      86.00ms      10.00ms        80.28 MB     94.00%
+Takeshiba (PLATEAU) Brid CBOR                      71.00ms      69.00ms      12.00ms       287.25 MB     95.39%
+Takeshiba (PLATEAU) Brid BSON                     179.00ms     177.00ms       6.00ms       503.44 MB     97.96%
+Takeshiba (PLATEAU) Rail way FlatCityBuf                2.00ms       2.00ms       0.00ms         4.66 MB     98.40%
+Takeshiba (PLATEAU) Rail way CityJSONTextSequence      38.00ms      38.00ms       1.00ms        16.81 MB     98.06%
+Takeshiba (PLATEAU) Rail way CBOR                      47.00ms      47.00ms       0.00ms       112.14 MB     98.69%
+Takeshiba (PLATEAU) Rail way BSON                      85.00ms      84.00ms       4.00ms       284.06 MB     97.37%
+Takeshiba (PLATEAU) Transport FlatCityBuf               14.00ms      13.00ms       1.00ms        23.03 MB     97.27%
+Takeshiba (PLATEAU) Transport CityJSONTextSequence     259.00ms     254.00ms      15.00ms        76.72 MB     96.63%
+Takeshiba (PLATEAU) Transport CBOR                     344.00ms     332.00ms      28.00ms       562.38 MB     95.11%
+Takeshiba (PLATEAU) Transport BSON                     603.00ms     584.00ms      60.00ms         1.04 GB     93.93%
+Takeshiba (PLATEAU) Tunnel FlatCityBuf                2.00ms       2.00ms       0.00ms        14.22 MB     96.90%
+Takeshiba (PLATEAU) Tunnel CityJSONTextSequence      50.00ms      49.00ms       7.00ms        81.78 MB     96.17%
+Takeshiba (PLATEAU) Tunnel CBOR                     156.00ms     153.00ms      10.00ms       389.53 MB     96.39%
+Takeshiba (PLATEAU) Tunnel BSON                     251.00ms     249.00ms       7.00ms       617.97 MB     97.85%
+Takeshiba (PLATEAU) Vegetation FlatCityBuf               33.00ms      33.00ms       3.00ms        70.42 MB     97.39%
+Takeshiba (PLATEAU) Vegetation CityJSONTextSequence     900.00ms     875.00ms      95.00ms       197.47 MB     95.69%
+Takeshiba (PLATEAU) Vegetation CBOR                        1.05s        1.04s      66.00ms         1.73 GB     96.67%
+Takeshiba (PLATEAU) Vegetation BSON                        2.15s        2.13s      69.00ms         3.84 GB     97.09%
+
+CityJSONTextSequence vs FlatCityBuf Comparison (Mean Times):
+--------------------------------------------------------------------------------------------------------------------------------------------
+Dataset              CityJSONTextSequence Mean     FCB Mean Time Ratio CityJSONTextSequence StdDev   FCB StdDev CityJSONTextSequence Mem   FCB Memory  Mem Ratio
+--------------------------------------------------------------------------------------------------------------------------------------------
+3DBAG                     54.00ms       6.00ms      9.00x       5.00ms       0.00ms     25.67 MB      5.42 MB      4.73x
+3DBV                        3.79s     120.00ms     31.56x      42.00ms       3.00ms    352.33 MB     59.02 MB      5.97x
+Helsinki                    3.48s     127.00ms     27.44x      41.00ms       1.00ms     16.11 MB      4.69 MB      3.44x
+Ingolstadt                37.00ms       0.00ms       infx       1.00ms       0.00ms     35.95 MB      8.98 MB      4.00x
+Montreal                  50.00ms       0.00ms       infx       1.00ms       0.00ms     41.36 MB     10.42 MB      3.97x
+NYC                      949.00ms      42.00ms     22.60x      90.00ms       1.00ms     22.69 MB      6.58 MB      3.45x
+Rotterdam                 21.00ms       1.00ms     21.00x       5.00ms       0.00ms     10.81 MB      4.31 MB      2.51x
+Vienna                    46.00ms       1.00ms     46.00x       5.00ms       0.00ms     18.66 MB      5.73 MB      3.25x
+Zurich                      1.88s     149.00ms     12.60x      57.00ms       3.00ms     31.20 MB      5.91 MB      5.28x
+Subset of Tokyo (PLATEAU)        1.95s      94.00ms     20.78x      48.00ms       2.00ms     71.94 MB     14.89 MB      4.83x
+Takeshiba (PLATEAU) Brid      89.00ms       0.00ms       infx      10.00ms       0.00ms     80.28 MB     19.16 MB      4.19x
+Takeshiba (PLATEAU) Rail way      38.00ms       2.00ms     19.00x       1.00ms       0.00ms     16.81 MB      4.66 MB      3.61x
+Takeshiba (PLATEAU) Transport     259.00ms      14.00ms     18.50x      15.00ms       1.00ms     76.72 MB     23.03 MB      3.33x
+Takeshiba (PLATEAU) Tunnel      50.00ms       2.00ms     25.00x       7.00ms       0.00ms     81.78 MB     14.22 MB      5.75x
+Takeshiba (PLATEAU) Vegetation     900.00ms      33.00ms     27.27x      95.00ms       3.00ms    197.47 MB     70.42 MB      2.80x
+
+CBOR vs FlatCityBuf Comparison (Mean Times):
+--------------------------------------------------------------------------------------------------------------------------------------------
+Dataset                 CBOR Mean     FCB Mean Time Ratio  CBOR StdDev   FCB StdDev     CBOR Mem   FCB Memory  Mem Ratio
+--------------------------------------------------------------------------------------------------------------------------------------------
+3DBAG                     73.00ms       6.00ms     12.17x       6.00ms       0.00ms    263.33 MB      5.42 MB     48.57x
+3DBV                        5.05s     120.00ms     42.08x     226.00ms       3.00ms      6.72 GB     59.02 MB    116.56x
+Helsinki                    6.30s     127.00ms     49.65x     232.00ms       1.00ms      6.96 GB      4.69 MB   1521.47x
+Ingolstadt                46.00ms       0.00ms       infx       2.00ms       0.00ms    219.66 MB      8.98 MB     24.45x
+Montreal                  59.00ms       0.00ms       infx       5.00ms       0.00ms    304.58 MB     10.42 MB     29.22x
+NYC                         1.40s      42.00ms     33.21x      56.00ms       1.00ms      1.68 GB      6.58 MB    262.21x
+Rotterdam                 31.00ms       1.00ms     31.00x       2.00ms       0.00ms    205.97 MB      4.31 MB     47.76x
+Vienna                    59.00ms       1.00ms     59.00x       3.00ms       0.00ms    221.39 MB      5.73 MB     38.61x
+Zurich                      3.44s     149.00ms     23.11x     100.00ms       3.00ms      4.57 GB      5.91 MB    792.51x
+Subset of Tokyo (PLATEAU)        3.12s      94.00ms     33.20x        1.55s       2.00ms      4.13 GB     14.89 MB    284.33x
+Takeshiba (PLATEAU) Brid      71.00ms       0.00ms       infx      12.00ms       0.00ms    287.25 MB     19.16 MB     15.00x
+Takeshiba (PLATEAU) Rail way      47.00ms       2.00ms     23.50x       0.00ms       0.00ms    112.14 MB      4.66 MB     24.08x
+Takeshiba (PLATEAU) Transport     344.00ms      14.00ms     24.57x      28.00ms       1.00ms    562.38 MB     23.03 MB     24.42x
+Takeshiba (PLATEAU) Tunnel     156.00ms       2.00ms     78.00x      10.00ms       0.00ms    389.53 MB     14.22 MB     27.40x
+Takeshiba (PLATEAU) Vegetation        1.05s      33.00ms     31.97x      66.00ms       3.00ms      1.73 GB     70.42 MB     25.16x
+
+BSON vs FlatCityBuf Comparison (Mean Times):
+--------------------------------------------------------------------------------------------------------------------------------------------
+Dataset                 BSON Mean     FCB Mean Time Ratio  BSON StdDev   FCB StdDev     BSON Mem   FCB Memory  Mem Ratio
+--------------------------------------------------------------------------------------------------------------------------------------------
+3DBAG                    113.00ms       6.00ms     18.83x      10.00ms       0.00ms    323.19 MB      5.42 MB     59.61x
+3DBV                        8.82s     120.00ms     73.53x     288.00ms       3.00ms      7.44 GB     59.02 MB    129.07x
+Helsinki                    9.69s     127.00ms     76.32x     389.00ms       1.00ms      7.42 GB      4.69 MB   1620.90x
+Ingolstadt                81.00ms       0.00ms       infx       9.00ms       0.00ms    323.39 MB      8.98 MB     35.99x
+Montreal                 152.00ms       0.00ms       infx       7.00ms       0.00ms    526.86 MB     10.42 MB     50.55x
+NYC                         1.78s      42.00ms     42.43x      68.00ms       1.00ms      2.48 GB      6.58 MB    385.52x
+Rotterdam                 66.00ms       1.00ms     66.00x       2.00ms       0.00ms    339.94 MB      4.31 MB     78.83x
+Vienna                    81.00ms       1.00ms     81.00x       2.00ms       0.00ms    287.27 MB      5.73 MB     50.10x
+Zurich                      5.25s     149.00ms     35.25x     372.00ms       3.00ms      7.19 GB      5.91 MB   1245.80x
+Subset of Tokyo (PLATEAU)        9.74s      94.00ms    103.61x        3.97s       2.00ms      7.26 GB     14.89 MB    499.47x
+Takeshiba (PLATEAU) Brid     179.00ms       0.00ms       infx       6.00ms       0.00ms    503.44 MB     19.16 MB     26.28x
+Takeshiba (PLATEAU) Rail way      85.00ms       2.00ms     42.50x       4.00ms       0.00ms    284.06 MB      4.66 MB     61.01x
+Takeshiba (PLATEAU) Transport     603.00ms      14.00ms     43.07x      60.00ms       1.00ms      1.04 GB     23.03 MB     46.04x
+Takeshiba (PLATEAU) Tunnel     251.00ms       2.00ms    125.50x       7.00ms       0.00ms    617.97 MB     14.22 MB     43.46x
+Takeshiba (PLATEAU) Vegetation        2.15s      33.00ms     65.27x      69.00ms       3.00ms      3.84 GB     70.42 MB     55.87x
