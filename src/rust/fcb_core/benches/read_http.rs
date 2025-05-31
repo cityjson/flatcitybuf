@@ -1,13 +1,14 @@
 use anyhow::{Context, Result};
 use fcb_core::{FixedStringKey, HttpFcbReader, KeyType, Operator};
+use packed_rtree::Query;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 // Configuration for the benchmark
-const ITERATIONS: u32 = 5;
-const WARMUP_ITERATIONS: u32 = 1;
+const ITERATIONS: u32 = 50;
+const WARMUP_ITERATIONS: u32 = 10;
 const FCB_URL: &str = "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb";
 const THREEBAG_API_URL: &str = "https://api.3dbag.nl/collections/pand/items";
 
@@ -19,6 +20,9 @@ const TEST_FEATURE_IDS: &[&str] = &[
     "NL.IMBAG.Pand.0772100000295227", //Eindhoven station
     "NL.IMBAG.Pand.0153100000261851", //Enschede station
 ];
+
+// Bounding box for bbox benchmark (minx, miny, maxx, maxy) 1km x 1km
+const BBOX_COORDS: (f64, f64, f64, f64) = (84000.0, 444000.0, 86000.0, 446000.0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BenchmarkResult {
@@ -41,8 +45,22 @@ struct PandResponse {
     links: Vec<Value>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct BboxResponse {
+    #[serde(rename = "type")]
+    response_type: String,
+    features: Vec<Value>,
+    #[serde(rename = "numberMatched")]
+    number_matched: Option<u64>,
+    #[serde(rename = "numberReturned")]
+    number_returned: Option<u64>,
+    links: Vec<Value>,
+    #[serde(rename = "timeStamp")]
+    time_stamp: Option<String>,
+}
+
 /// Benchmark FlatCityBuf HTTP reading for a specific feature
-async fn http_read_fcb(feature_id: &str) -> Result<(Duration, u64)> {
+async fn http_read_fcb_pand(feature_id: &str) -> Result<(Duration, u64)> {
     let start = Instant::now();
 
     let http_reader = HttpFcbReader::open(FCB_URL)
@@ -78,8 +96,54 @@ async fn http_read_fcb(feature_id: &str) -> Result<(Duration, u64)> {
     Ok((duration, total_bytes))
 }
 
+/// Benchmark FlatCityBuf HTTP reading for bounding box query
+async fn http_read_fcb_bbox() -> Result<(Duration, u64)> {
+    let start = Instant::now();
+
+    let http_reader = HttpFcbReader::open(FCB_URL)
+        .await
+        .context("failed to open FCB HTTP reader")?;
+
+    let (minx, miny, maxx, maxy) = BBOX_COORDS;
+    let mut iter = http_reader
+        .select_query(Query::BBox(minx, miny, maxx, maxy))
+        .await
+        .context("failed to execute bbox query")?;
+
+    let mut features_found = 0;
+    let mut total_bytes = 0u64;
+
+    // Limit to max 10 features as requested
+    loop {
+        if features_found >= 10 {
+            break;
+        }
+
+        match iter.next().await? {
+            Some(feature) => {
+                let bytes = feature.features_buf.len();
+                total_bytes += bytes as u64;
+                features_found += 1;
+            }
+            None => break,
+        }
+    }
+
+    let duration = start.elapsed();
+
+    if features_found == 0 {
+        return Err(anyhow::anyhow!("no features found in bbox"));
+    }
+
+    println!("  found {} features in bbox", features_found);
+    Ok((duration, total_bytes))
+}
+
 /// Benchmark 3DBAG API reading for a specific feature
-async fn http_read_3dbag(client: &reqwest::Client, feature_id: &str) -> Result<(Duration, u64)> {
+async fn http_read_3dbag_pand(
+    client: &reqwest::Client,
+    feature_id: &str,
+) -> Result<(Duration, u64)> {
     let start = Instant::now();
 
     let url = format!("{}/{}", THREEBAG_API_URL, feature_id);
@@ -113,6 +177,57 @@ async fn http_read_3dbag(client: &reqwest::Client, feature_id: &str) -> Result<(
     if response_data.feature.is_null() {
         return Err(anyhow::anyhow!("no features found for ID: {}", feature_id));
     }
+
+    // Use actual response size if content-length wasn't available
+    let bytes_transferred = if content_length > 0 {
+        content_length
+    } else {
+        response_text.len() as u64
+    };
+
+    Ok((duration, bytes_transferred))
+}
+
+/// Benchmark 3DBAG API reading for bounding box query
+async fn http_read_3dbag_bbox(client: &reqwest::Client) -> Result<(Duration, u64)> {
+    let start = Instant::now();
+
+    let (minx, miny, maxx, maxy) = BBOX_COORDS;
+    let url = format!(
+        "{}?bbox={},{},{},{}&limit=10",
+        THREEBAG_API_URL, minx, miny, maxx, maxy
+    );
+
+    let response = client
+        .get(&url)
+        .header("Accept", "application/city+json")
+        .send()
+        .await
+        .context("failed to send bbox request to 3DBAG API")?;
+
+    let content_length = response.content_length().unwrap_or(0);
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "3DBAG API returned status: {}",
+            response.status()
+        ));
+    }
+
+    let response_text = response
+        .text()
+        .await
+        .context("failed to read response body")?;
+
+    let response_data: BboxResponse =
+        serde_json::from_str(&response_text).context("failed to parse 3DBAG bbox API response")?;
+
+    let duration = start.elapsed();
+
+    if response_data.number_returned.is_none() {
+        return Err(anyhow::anyhow!("no features found in bbox"));
+    }
+    println!("  number returned: {:?}", response_data.number_returned);
 
     // Use actual response size if content-length wasn't available
     let bytes_transferred = if content_length > 0 {
@@ -175,8 +290,10 @@ async fn run_benchmark(
     println!("  performing {} warm-up iterations...", WARMUP_ITERATIONS);
     for i in 0..WARMUP_ITERATIONS {
         let result = match method {
-            "FlatCityBuf" => http_read_fcb(feature_id).await,
-            "3DBAG_API" => http_read_3dbag(client, feature_id).await,
+            "FlatCityBuf" => http_read_fcb_pand(feature_id).await,
+            "3DBAG_API" => http_read_3dbag_pand(client, feature_id).await,
+            "FlatCityBuf_BBox" => http_read_fcb_bbox().await,
+            "3DBAG_API_BBox" => http_read_3dbag_bbox(client).await,
             _ => return Err(anyhow::anyhow!("unknown method: {}", method)),
         };
 
@@ -197,8 +314,10 @@ async fn run_benchmark(
         }
 
         let result = match method {
-            "FlatCityBuf" => http_read_fcb(feature_id).await,
-            "3DBAG_API" => http_read_3dbag(client, feature_id).await,
+            "FlatCityBuf" => http_read_fcb_pand(feature_id).await,
+            "3DBAG_API" => http_read_3dbag_pand(client, feature_id).await,
+            "FlatCityBuf_BBox" => http_read_fcb_bbox().await,
+            "3DBAG_API_BBox" => http_read_3dbag_bbox(client).await,
             _ => return Err(anyhow::anyhow!("unknown method: {}", method)),
         };
 
@@ -413,6 +532,7 @@ async fn main() -> Result<()> {
     println!("starting HTTP benchmark: FlatCityBuf vs 3DBAG API");
     println!("iterations: {}, warm-up: {}", ITERATIONS, WARMUP_ITERATIONS);
     println!("test features: {:?}", TEST_FEATURE_IDS);
+    println!("bbox coordinates: {:?}", BBOX_COORDS);
     println!();
 
     // Create HTTP client for 3DBAG API
@@ -440,6 +560,21 @@ async fn main() -> Result<()> {
         }
 
         println!();
+    }
+
+    // Run bbox benchmarks
+    println!("testing bbox query");
+
+    // Benchmark FlatCityBuf BBox
+    match run_benchmark("FlatCityBuf_BBox", "bbox_query", &client).await {
+        Ok(result) => all_results.push(result),
+        Err(e) => eprintln!("FlatCityBuf bbox benchmark failed: {:?}", e),
+    }
+
+    // Benchmark 3DBAG API BBox
+    match run_benchmark("3DBAG_API_BBox", "bbox_query", &client).await {
+        Ok(result) => all_results.push(result),
+        Err(e) => eprintln!("3DBAG API bbox benchmark failed: {:?}", e),
     }
 
     // Print and export results

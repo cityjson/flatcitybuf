@@ -294,15 +294,15 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
             "benchmark_data/3DBAG.city.bson",
         ),
     ),
-    // (
-    //     "3DBV",
-    //     (
-    //         "benchmark_data/3DBV.city.fcb",
-    //         "benchmark_data/3DBV.city.jsonl",
-    //         "benchmark_data/3DBV.city.cbor",
-    //         "benchmark_data/3DBV.city.bson",
-    //     ),
-    // ),
+    (
+        "3DBV",
+        (
+            "benchmark_data/3DBV.city.fcb",
+            "benchmark_data/3DBV.city.jsonl",
+            "benchmark_data/3DBV.city.cbor",
+            "benchmark_data/3DBV.city.bson",
+        ),
+    ),
     (
         "Helsinki",
         (
@@ -312,114 +312,114 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
             "benchmark_data/Helsinki.city.bson",
         ),
     ),
-    // (
-    //     "Ingolstadt",
-    //     (
-    //         "benchmark_data/Ingolstadt.city.fcb",
-    //         "benchmark_data/Ingolstadt.city.jsonl",
-    //         "benchmark_data/Ingolstadt.city.cbor",
-    //         "benchmark_data/Ingolstadt.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Montreal",
-    //     (
-    //         "benchmark_data/Montreal.city.fcb",
-    //         "benchmark_data/Montreal.city.jsonl",
-    //         "benchmark_data/Montreal.city.cbor",
-    //         "benchmark_data/Montreal.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "NYC",
-    //     (
-    //         "benchmark_data/NYC.fcb",
-    //         "benchmark_data/NYC.jsonl",
-    //         "benchmark_data/NYC.cbor",
-    //         "benchmark_data/NYC.bson",
-    //     ),
-    // ),
-    // (
-    //     "Rotterdam",
-    //     (
-    //         "benchmark_data/Rotterdam.fcb",
-    //         "benchmark_data/Rotterdam.jsonl",
-    //         "benchmark_data/Rotterdam.cbor",
-    //         "benchmark_data/Rotterdam.bson",
-    //     ),
-    // ),
-    // (
-    //     "Vienna",
-    //     (
-    //         "benchmark_data/Vienna.city.fcb",
-    //         "benchmark_data/Vienna.city.jsonl",
-    //         "benchmark_data/Vienna.city.cbor",
-    //         "benchmark_data/Vienna.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Zurich",
-    //     (
-    //         "benchmark_data/Zurich.city.fcb",
-    //         "benchmark_data/Zurich.city.jsonl",
-    //         "benchmark_data/Zurich.city.cbor",
-    //         "benchmark_data/Zurich.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Subset of Tokyo (PLATEAU)",
-    //     (
-    //         "benchmark_data/tokyo_plateau.fcb",
-    //         "benchmark_data/tokyo_plateau.city.jsonl",
-    //         "benchmark_data/tokyo_plateau.city.cbor",
-    //         "benchmark_data/tokyo_plateau.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Takeshiba (PLATEAU) Brid",
-    //     (
-    //         "benchmark_data/plateau_takeshiba_brid.city.fcb",
-    //         "benchmark_data/plateau_takeshiba_brid.city.jsonl",
-    //         "benchmark_data/plateau_takeshiba_brid.city.cbor",
-    //         "benchmark_data/plateau_takeshiba_brid.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Takeshiba (PLATEAU) Rail way",
-    //     (
-    //         "benchmark_data/plateau_takeshiba_rwy.city.fcb",
-    //         "benchmark_data/plateau_takeshiba_rwy.city.jsonl",
-    //         "benchmark_data/plateau_takeshiba_rwy.city.cbor",
-    //         "benchmark_data/plateau_takeshiba_rwy.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Takeshiba (PLATEAU) Transport",
-    //     (
-    //         "benchmark_data/plateau_takeshiba_tran.city.fcb",
-    //         "benchmark_data/plateau_takeshiba_tran.city.jsonl",
-    //         "benchmark_data/plateau_takeshiba_tran.city.cbor",
-    //         "benchmark_data/plateau_takeshiba_tran.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Takeshiba (PLATEAU) Tunnel",
-    //     (
-    //         "benchmark_data/plateau_takeshiba_tun.city.fcb",
-    //         "benchmark_data/plateau_takeshiba_tun.city.jsonl",
-    //         "benchmark_data/plateau_takeshiba_tun.city.cbor",
-    //         "benchmark_data/plateau_takeshiba_tun.city.bson",
-    //     ),
-    // ),
-    // (
-    //     "Takeshiba (PLATEAU) Vegetation",
-    //     (
-    //         "benchmark_data/plateau_takeshiba_bldg.city.fcb",
-    //         "benchmark_data/plateau_takeshiba_bldg.city.jsonl",
-    //         "benchmark_data/plateau_takeshiba_bldg.city.cbor",
-    //         "benchmark_data/plateau_takeshiba_bldg.city.bson",
-    //     ),
-    // ),
+    (
+        "Ingolstadt",
+        (
+            "benchmark_data/Ingolstadt.city.fcb",
+            "benchmark_data/Ingolstadt.city.jsonl",
+            "benchmark_data/Ingolstadt.city.cbor",
+            "benchmark_data/Ingolstadt.city.bson",
+        ),
+    ),
+    (
+        "Montreal",
+        (
+            "benchmark_data/Montreal.city.fcb",
+            "benchmark_data/Montreal.city.jsonl",
+            "benchmark_data/Montreal.city.cbor",
+            "benchmark_data/Montreal.city.bson",
+        ),
+    ),
+    (
+        "NYC",
+        (
+            "benchmark_data/NYC.fcb",
+            "benchmark_data/NYC.jsonl",
+            "benchmark_data/NYC.cbor",
+            "benchmark_data/NYC.bson",
+        ),
+    ),
+    (
+        "Rotterdam",
+        (
+            "benchmark_data/Rotterdam.fcb",
+            "benchmark_data/Rotterdam.jsonl",
+            "benchmark_data/Rotterdam.cbor",
+            "benchmark_data/Rotterdam.bson",
+        ),
+    ),
+    (
+        "Vienna",
+        (
+            "benchmark_data/Vienna.city.fcb",
+            "benchmark_data/Vienna.city.jsonl",
+            "benchmark_data/Vienna.city.cbor",
+            "benchmark_data/Vienna.city.bson",
+        ),
+    ),
+    (
+        "Zurich",
+        (
+            "benchmark_data/Zurich.city.fcb",
+            "benchmark_data/Zurich.city.jsonl",
+            "benchmark_data/Zurich.city.cbor",
+            "benchmark_data/Zurich.city.bson",
+        ),
+    ),
+    (
+        "Subset of Tokyo (PLATEAU)",
+        (
+            "benchmark_data/tokyo_plateau.fcb",
+            "benchmark_data/tokyo_plateau.city.jsonl",
+            "benchmark_data/tokyo_plateau.city.cbor",
+            "benchmark_data/tokyo_plateau.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Brid",
+        (
+            "benchmark_data/plateau_takeshiba_brid.city.fcb",
+            "benchmark_data/plateau_takeshiba_brid.city.jsonl",
+            "benchmark_data/plateau_takeshiba_brid.city.cbor",
+            "benchmark_data/plateau_takeshiba_brid.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Rail way",
+        (
+            "benchmark_data/plateau_takeshiba_rwy.city.fcb",
+            "benchmark_data/plateau_takeshiba_rwy.city.jsonl",
+            "benchmark_data/plateau_takeshiba_rwy.city.cbor",
+            "benchmark_data/plateau_takeshiba_rwy.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Transport",
+        (
+            "benchmark_data/plateau_takeshiba_tran.city.fcb",
+            "benchmark_data/plateau_takeshiba_tran.city.jsonl",
+            "benchmark_data/plateau_takeshiba_tran.city.cbor",
+            "benchmark_data/plateau_takeshiba_tran.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Tunnel",
+        (
+            "benchmark_data/plateau_takeshiba_tun.city.fcb",
+            "benchmark_data/plateau_takeshiba_tun.city.jsonl",
+            "benchmark_data/plateau_takeshiba_tun.city.cbor",
+            "benchmark_data/plateau_takeshiba_tun.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Vegetation",
+        (
+            "benchmark_data/plateau_takeshiba_bldg.city.fcb",
+            "benchmark_data/plateau_takeshiba_bldg.city.jsonl",
+            "benchmark_data/plateau_takeshiba_bldg.city.cbor",
+            "benchmark_data/plateau_takeshiba_bldg.city.bson",
+        ),
+    ),
 ];
 
 /// Result emitted by each child process.
