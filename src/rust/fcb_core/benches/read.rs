@@ -1,21 +1,19 @@
 use anyhow::Result;
+use anyhow::{bail, Context};
 use bson::Document;
 use cjseq::{CityJSON, CityJSONFeature};
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::{FcbReader, GeometryType};
 use prettytable::{Cell, Row, Table};
+use serde::{Deserialize, Serialize};
+use std::mem::MaybeUninit;
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::{
     collections::HashMap,
     fs::File,
     io::{BufRead, BufReader, Write},
     time::{Duration, Instant},
 };
-use sysinfo::{Pid, System};
-
-// Enable heap profiling with dhat
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
 
 /// Read FCB file and count geometry types
 pub(crate) fn read_fcb(path: &str) -> Result<(u64, u64, u64)> {
@@ -296,15 +294,15 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
             "benchmark_data/3DBAG.city.bson",
         ),
     ),
-    (
-        "3DBV",
-        (
-            "benchmark_data/3DBV.city.fcb",
-            "benchmark_data/3DBV.city.jsonl",
-            "benchmark_data/3DBV.city.cbor",
-            "benchmark_data/3DBV.city.bson",
-        ),
-    ),
+    // (
+    //     "3DBV",
+    //     (
+    //         "benchmark_data/3DBV.city.fcb",
+    //         "benchmark_data/3DBV.city.jsonl",
+    //         "benchmark_data/3DBV.city.cbor",
+    //         "benchmark_data/3DBV.city.bson",
+    //     ),
+    // ),
     (
         "Helsinki",
         (
@@ -314,115 +312,127 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
             "benchmark_data/Helsinki.city.bson",
         ),
     ),
-    (
-        "Ingolstadt",
-        (
-            "benchmark_data/Ingolstadt.city.fcb",
-            "benchmark_data/Ingolstadt.city.jsonl",
-            "benchmark_data/Ingolstadt.city.cbor",
-            "benchmark_data/Ingolstadt.city.bson",
-        ),
-    ),
-    (
-        "Montreal",
-        (
-            "benchmark_data/Montreal.city.fcb",
-            "benchmark_data/Montreal.city.jsonl",
-            "benchmark_data/Montreal.city.cbor",
-            "benchmark_data/Montreal.city.bson",
-        ),
-    ),
-    (
-        "NYC",
-        (
-            "benchmark_data/NYC.fcb",
-            "benchmark_data/NYC.jsonl",
-            "benchmark_data/NYC.cbor",
-            "benchmark_data/NYC.bson",
-        ),
-    ),
-    (
-        "Rotterdam",
-        (
-            "benchmark_data/Rotterdam.fcb",
-            "benchmark_data/Rotterdam.jsonl",
-            "benchmark_data/Rotterdam.cbor",
-            "benchmark_data/Rotterdam.bson",
-        ),
-    ),
-    (
-        "Vienna",
-        (
-            "benchmark_data/Vienna.city.fcb",
-            "benchmark_data/Vienna.city.jsonl",
-            "benchmark_data/Vienna.city.cbor",
-            "benchmark_data/Vienna.city.bson",
-        ),
-    ),
-    (
-        "Zurich",
-        (
-            "benchmark_data/Zurich.city.fcb",
-            "benchmark_data/Zurich.city.jsonl",
-            "benchmark_data/Zurich.city.cbor",
-            "benchmark_data/Zurich.city.bson",
-        ),
-    ),
-    (
-        "Subset of Tokyo (PLATEAU)",
-        (
-            "benchmark_data/tokyo_plateau.fcb",
-            "benchmark_data/tokyo_plateau.city.jsonl",
-            "benchmark_data/tokyo_plateau.city.cbor",
-            "benchmark_data/tokyo_plateau.city.bson",
-        ),
-    ),
-    (
-        "Takeshiba (PLATEAU) Brid",
-        (
-            "benchmark_data/plateau_takeshiba_brid.fcb",
-            "benchmark_data/plateau_takeshiba_brid.city.jsonl",
-            "benchmark_data/plateau_takeshiba_brid.city.cbor",
-            "benchmark_data/plateau_takeshiba_brid.city.bson",
-        ),
-    ),
-    (
-        "Takeshiba (PLATEAU) Rail way",
-        (
-            "benchmark_data/plateau_takeshiba_rwy.fcb",
-            "benchmark_data/plateau_takeshiba_rwy.city.jsonl",
-            "benchmark_data/plateau_takeshiba_rwy.city.cbor",
-            "benchmark_data/plateau_takeshiba_rwy.city.bson",
-        ),
-    ),
-    (
-        "Takeshiba (PLATEAU) Transport",
-        (
-            "benchmark_data/plateau_takeshiba_tran.fcb",
-            "benchmark_data/plateau_takeshiba_tran.city.jsonl",
-            "benchmark_data/plateau_takeshiba_tran.city.cbor",
-            "benchmark_data/plateau_takeshiba_tran.city.bson",
-        ),
-    ),
-    (
-        "Takeshiba (PLATEAU) Tunnel",
-        (
-            "benchmark_data/plateau_takeshiba_tun.fcb",
-            "benchmark_data/plateau_takeshiba_tun.city.jsonl",
-            "benchmark_data/plateau_takeshiba_tun.city.cbor",
-            "benchmark_data/plateau_takeshiba_tun.city.bson",
-        ),
-    ),
-    (
-        "Takeshiba (PLATEAU) Vegetation",
-        (
-            "benchmark_data/plateau_takeshiba_bldg.fcb",
-            "benchmark_data/plateau_takeshiba_bldg.city.jsonl",
-            "benchmark_data/plateau_takeshiba_bldg.city.cbor",
-            "benchmark_data/plateau_takeshiba_bldg.city.bson",
-        ),
-    ),
+    // (
+    //     "Ingolstadt",
+    //     (
+    //         "benchmark_data/Ingolstadt.city.fcb",
+    //         "benchmark_data/Ingolstadt.city.jsonl",
+    //         "benchmark_data/Ingolstadt.city.cbor",
+    //         "benchmark_data/Ingolstadt.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Montreal",
+    //     (
+    //         "benchmark_data/Montreal.city.fcb",
+    //         "benchmark_data/Montreal.city.jsonl",
+    //         "benchmark_data/Montreal.city.cbor",
+    //         "benchmark_data/Montreal.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "NYC",
+    //     (
+    //         "benchmark_data/NYC.fcb",
+    //         "benchmark_data/NYC.jsonl",
+    //         "benchmark_data/NYC.cbor",
+    //         "benchmark_data/NYC.bson",
+    //     ),
+    // ),
+    // (
+    //     "Rotterdam",
+    //     (
+    //         "benchmark_data/Rotterdam.fcb",
+    //         "benchmark_data/Rotterdam.jsonl",
+    //         "benchmark_data/Rotterdam.cbor",
+    //         "benchmark_data/Rotterdam.bson",
+    //     ),
+    // ),
+    // (
+    //     "Vienna",
+    //     (
+    //         "benchmark_data/Vienna.city.fcb",
+    //         "benchmark_data/Vienna.city.jsonl",
+    //         "benchmark_data/Vienna.city.cbor",
+    //         "benchmark_data/Vienna.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Zurich",
+    //     (
+    //         "benchmark_data/Zurich.city.fcb",
+    //         "benchmark_data/Zurich.city.jsonl",
+    //         "benchmark_data/Zurich.city.cbor",
+    //         "benchmark_data/Zurich.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Subset of Tokyo (PLATEAU)",
+    //     (
+    //         "benchmark_data/tokyo_plateau.fcb",
+    //         "benchmark_data/tokyo_plateau.city.jsonl",
+    //         "benchmark_data/tokyo_plateau.city.cbor",
+    //         "benchmark_data/tokyo_plateau.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Takeshiba (PLATEAU) Brid",
+    //     (
+    //         "benchmark_data/plateau_takeshiba_brid.city.fcb",
+    //         "benchmark_data/plateau_takeshiba_brid.city.jsonl",
+    //         "benchmark_data/plateau_takeshiba_brid.city.cbor",
+    //         "benchmark_data/plateau_takeshiba_brid.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Takeshiba (PLATEAU) Rail way",
+    //     (
+    //         "benchmark_data/plateau_takeshiba_rwy.city.fcb",
+    //         "benchmark_data/plateau_takeshiba_rwy.city.jsonl",
+    //         "benchmark_data/plateau_takeshiba_rwy.city.cbor",
+    //         "benchmark_data/plateau_takeshiba_rwy.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Takeshiba (PLATEAU) Transport",
+    //     (
+    //         "benchmark_data/plateau_takeshiba_tran.city.fcb",
+    //         "benchmark_data/plateau_takeshiba_tran.city.jsonl",
+    //         "benchmark_data/plateau_takeshiba_tran.city.cbor",
+    //         "benchmark_data/plateau_takeshiba_tran.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Takeshiba (PLATEAU) Tunnel",
+    //     (
+    //         "benchmark_data/plateau_takeshiba_tun.city.fcb",
+    //         "benchmark_data/plateau_takeshiba_tun.city.jsonl",
+    //         "benchmark_data/plateau_takeshiba_tun.city.cbor",
+    //         "benchmark_data/plateau_takeshiba_tun.city.bson",
+    //     ),
+    // ),
+    // (
+    //     "Takeshiba (PLATEAU) Vegetation",
+    //     (
+    //         "benchmark_data/plateau_takeshiba_bldg.city.fcb",
+    //         "benchmark_data/plateau_takeshiba_bldg.city.jsonl",
+    //         "benchmark_data/plateau_takeshiba_bldg.city.cbor",
+    //         "benchmark_data/plateau_takeshiba_bldg.city.bson",
+    //     ),
+    // ),
 ];
+
+/// Result emitted by each child process.
+#[derive(Serialize, Deserialize)]
+struct Metrics {
+    duration_ms: f64,
+    peak_rss_bytes: u64,
+    cpu_usage_percent: f64,
+    iterations: u32,
+    mean_duration_ms: f64,
+    median_duration_ms: f64,
+    std_dev_duration_ms: f64,
+}
 
 fn format_duration(d: Duration) -> String {
     if d.as_secs() > 0 {
@@ -444,318 +454,169 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BenchResult {
     format: String,
     duration: Duration,
     peak_memory: u64,
-    cpu_usage: f32,
+    cpu_usage: f64,
+    iterations: u32,
+    mean_duration: Duration,
+    median_duration: Duration,
+    std_dev_duration: Duration,
 }
 
-/// Benchmark a read function with comprehensive metrics
-fn benchmark_read_fn<F>(
-    iterations: u32,
-    format_name: &str,
-    path: &str,
-    read_fn: F,
-) -> Result<BenchResult>
-where
-    F: Fn(&str) -> Result<(u64, u64, u64)>,
-{
-    let start = Instant::now();
-    let mut total_duration = Duration::new(0, 0);
-    let mut peak_memory: u64 = 0;
-    let mut cpu_usage_sum: f32 = 0.0;
+fn main() -> Result<()> {
+    let mut args = std::env::args();
+    let is_child = matches!(args.nth(1).as_deref(), Some("--child"));
 
-    let process_id = std::process::id();
-    let pid = Pid::from_u32(process_id);
-    let mut sys = System::new();
-    sys.refresh_all();
-
-    let process = match sys.process(pid) {
-        Some(p) => p,
-        None => return Err(anyhow::anyhow!("failed to get process info")),
-    };
-
-    // Initial memory state
-    let initial_memory = process.memory();
-
-    // Optional: enable dhat profiling for heap allocations
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = if format_name == "FlatCityBuf" && iterations == 1 {
-        println!("starting dhat heap profiling for {}", path);
-        Some(dhat::Profiler::new_heap())
+    if is_child {
+        // `--child <dataset-path> <format> <iterations> <warmup>`
+        let dataset = args.next().context("missing dataset path")?;
+        let format = args.next().context("missing format")?;
+        let iterations: u32 = args
+            .next()
+            .context("missing iterations")?
+            .parse()
+            .context("invalid iterations number")?;
+        let warmup: u32 = args
+            .next()
+            .context("missing warmup")?
+            .parse()
+            .context("invalid warmup number")?;
+        run_child(Path::new(&dataset), &format, iterations, warmup)?;
     } else {
-        None
-    };
+        coordinator()?;
+    }
+    Ok(())
+}
 
-    for i in 0..iterations {
-        // Refresh system info
-        sys.refresh_all();
+// ───────────────────────────────── Coordinator ──────────────────────────────
 
-        // Get the process again
-        let process = match sys.process(pid) {
-            Some(p) => p,
-            None => return Err(anyhow::anyhow!("failed to get process info")),
-        };
+fn coordinator() -> Result<()> {
+    let mut all_results = HashMap::new();
 
-        // Record CPU usage before the iteration
-        let cpu_before = process.cpu_usage();
+    // Benchmark configuration
+    const ITERATIONS: u32 = 100;
+    const WARMUP_ITERATIONS: u32 = 10;
 
-        // Record memory before the iteration
-        let mem_stats_before = memory_stats::memory_stats()
-            .ok_or_else(|| anyhow::anyhow!("failed to get memory stats"))?;
+    println!(
+        "running benchmarks with {} iterations and {} warmup iterations...\n",
+        ITERATIONS, WARMUP_ITERATIONS
+    );
+    println!("this may take several minutes depending on dataset sizes...\n");
 
-        // Execute the read function and measure time
-        let iter_start = Instant::now();
-        let _ = read_fn(black_box(path))?;
-        let iter_duration = iter_start.elapsed();
-        total_duration += iter_duration;
+    for (dataset_name, formats) in DATASETS {
+        println!("processing dataset: {}", dataset_name);
+        let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
 
-        // Wait a moment to get stable CPU measurements
-        std::thread::sleep(Duration::from_millis(10));
+        for (i, path) in [formats.0, formats.1, formats.2, formats.3]
+            .iter()
+            .enumerate()
+        {
+            let format_name = format_names[i];
+            print!(
+                "  running {} benchmark ({} iterations + {} warmup)... ",
+                format_name, ITERATIONS, WARMUP_ITERATIONS
+            );
 
-        // Refresh system info after the iteration
-        sys.refresh_all();
+            let start = Instant::now();
+            let output = Command::new(std::env::current_exe()?)
+                .args([
+                    "--child",
+                    *path,
+                    format_name,
+                    &ITERATIONS.to_string(),
+                    &WARMUP_ITERATIONS.to_string(),
+                ])
+                .stdout(Stdio::piped())
+                .spawn()?
+                .wait_with_output()?;
 
-        // Get the process again
-        let process = match sys.process(pid) {
-            Some(p) => p,
-            None => return Err(anyhow::anyhow!("failed to get process info")),
-        };
+            if !output.status.success() {
+                println!("failed!");
+                eprintln!(
+                    "child failed for {dataset_name} / {format_name}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                continue;
+            }
 
-        // Record CPU usage after the iteration
-        let cpu_after = process.cpu_usage();
-        let cpu_delta = cpu_after - cpu_before;
-        cpu_usage_sum += cpu_delta;
+            let m: Metrics = match serde_json::from_slice(&output.stdout) {
+                Ok(metrics) => metrics,
+                Err(e) => {
+                    println!("failed to parse results!");
+                    eprintln!("failed to parse child JSON: {}", e);
+                    continue;
+                }
+            };
 
-        // Record memory after the iteration
-        let mem_stats_after = memory_stats::memory_stats()
-            .ok_or_else(|| anyhow::anyhow!("failed to get memory stats"))?;
-        let current_memory = mem_stats_after.physical_mem;
-        peak_memory = peak_memory.max(current_memory as u64);
+            let duration = Duration::from_millis(m.duration_ms as u64);
+            let mean_duration = Duration::from_millis(m.mean_duration_ms as u64);
+            let median_duration = Duration::from_millis(m.median_duration_ms as u64);
+            let std_dev_duration = Duration::from_millis(m.std_dev_duration_ms as u64);
 
-        // Optional progress reporting
-        if iterations > 1 && (i + 1) % (iterations / 10).max(1) == 0 {
+            let result = BenchResult {
+                format: format_name.to_string(),
+                duration,
+                peak_memory: m.peak_rss_bytes,
+                cpu_usage: m.cpu_usage_percent,
+                iterations: m.iterations,
+                mean_duration,
+                median_duration,
+                std_dev_duration,
+            };
+
+            all_results.insert(format!("{}_{}", dataset_name, format_name), result);
             println!(
-                "progress: {}/{} iterations for {} - {}",
-                i + 1,
-                iterations,
-                format_name,
-                path
+                "completed in {} (mean: {}, median: {}, std dev: {})",
+                format_duration(duration),
+                format_duration(mean_duration),
+                format_duration(median_duration),
+                format_duration(std_dev_duration)
             );
         }
+        println!();
     }
 
-    // Final process memory usage (subtract initial memory to get delta)
-    sys.refresh_all();
-    let final_memory = match sys.process(pid) {
-        Some(p) => p.memory(),
-        None => initial_memory,
-    };
-    let memory_delta = final_memory.saturating_sub(initial_memory);
-
-    // Calculate averages
-    let avg_duration = if iterations > 0 {
-        total_duration / iterations
-    } else {
-        Duration::new(0, 0)
-    };
-
-    let avg_cpu_usage = if iterations > 0 {
-        cpu_usage_sum / iterations as f32
-    } else {
-        0.0
-    };
-
-    let total_elapsed = start.elapsed();
-
-    Ok(BenchResult {
-        format: format_name.to_string(),
-        duration: avg_duration,
-        peak_memory,
-        cpu_usage: avg_cpu_usage,
-    })
-}
-
-pub fn read_benchmark(c: &mut Criterion) {
-    // Optional: Initialize dhat profiler if the feature is enabled
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::builder().testing().build();
-
-    let mut group = c.benchmark_group("read");
-
-    let iterations: u32 = 10;
-    // Increase warm-up time and measurement time to prevent timeouts
-    group
-        .sample_size(iterations as usize)
-        .warm_up_time(Duration::from_secs(2));
-
-    let mut results = HashMap::new();
-
-    // Print table headers for real-time results
-    println!("\nBenchmark Results (Real-time):");
-    println!(
-        "{:<15} {:<20} {:<15} {:<15} {:<15}",
-        "Dataset", "Format", "Mean Time", "Peak Memory", "CPU Usage"
-    );
-    println!("{:-<80}", "");
-
-    for (size, (fcb_path, cjseq_path, cbor_path, bson_path)) in DATASETS {
-        // FCB benchmark
-        println!("benchmarking FlatCityBuf for dataset: {}", size);
-        let result = benchmark_read_fn(iterations, "FlatCityBuf", fcb_path, read_fcb)
-            .unwrap_or_else(|e| {
-                println!("error in fcb benchmark: {:?}", e);
-                BenchResult {
-                    format: "FlatCityBuf".to_string(),
-                    duration: Duration::new(0, 0),
-                    peak_memory: 0,
-                    cpu_usage: 0.0,
-                }
-            });
-
-        // Print real-time result
-        println!(
-            "{:<15} {:<20} {:<15} {:<15} {:.2}%",
-            size,
-            result.format,
-            format_duration(result.duration),
-            format_bytes(result.peak_memory),
-            result.cpu_usage
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("FlatCityBuf", size),
-            fcb_path,
-            |b, path| b.iter(|| read_fcb(black_box(path))),
-        );
-
-        results.insert(format!("{}_fcb", size), result);
-
-        // CJSeq benchmark
-        println!("benchmarking CityJSONTextSequence for dataset: {}", size);
-        let result = benchmark_read_fn(iterations, "CityJSONTextSequence", cjseq_path, read_cjseq)
-            .unwrap_or_else(|e| {
-                println!("error in cjseq benchmark: {:?}", e);
-                BenchResult {
-                    format: "CityJSONTextSequence".to_string(),
-                    duration: Duration::new(0, 0),
-                    peak_memory: 0,
-                    cpu_usage: 0.0,
-                }
-            });
-
-        // Print real-time result
-        println!(
-            "{:<15} {:<20} {:<15} {:<15} {:.2}%",
-            size,
-            result.format,
-            format_duration(result.duration),
-            format_bytes(result.peak_memory),
-            result.cpu_usage
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("CityJSONTextSequence", size),
-            cjseq_path,
-            |b, path| b.iter(|| read_cjseq(black_box(path))),
-        );
-
-        results.insert(format!("{}_cjseq", size), result);
-
-        // CBOR benchmark
-        println!("benchmarking CBOR for dataset: {}", size);
-        let result =
-            benchmark_read_fn(iterations, "CBOR", cbor_path, read_cbor).unwrap_or_else(|e| {
-                println!("error in cbor benchmark: {:?}", e);
-                BenchResult {
-                    format: "CBOR".to_string(),
-                    duration: Duration::new(0, 0),
-                    peak_memory: 0,
-                    cpu_usage: 0.0,
-                }
-            });
-
-        // Print real-time result
-        println!(
-            "{:<15} {:<20} {:<15} {:<15} {:.2}%",
-            size,
-            result.format,
-            format_duration(result.duration),
-            format_bytes(result.peak_memory),
-            result.cpu_usage
-        );
-
-        group.bench_with_input(BenchmarkId::new("CBOR", size), cbor_path, |b, path| {
-            b.iter(|| read_cbor(black_box(path)))
-        });
-
-        results.insert(format!("{}_cbor", size), result);
-
-        // BSON benchmark
-        println!("benchmarking BSON for dataset: {}", size);
-        let result =
-            benchmark_read_fn(iterations, "BSON", bson_path, read_bson).unwrap_or_else(|e| {
-                println!("error in bson benchmark: {:?}", e);
-                BenchResult {
-                    format: "BSON".to_string(),
-                    duration: Duration::new(0, 0),
-                    peak_memory: 0,
-                    cpu_usage: 0.0,
-                }
-            });
-
-        // Print real-time result
-        println!(
-            "{:<15} {:<20} {:<15} {:<15} {:.2}%",
-            size,
-            result.format,
-            format_duration(result.duration),
-            format_bytes(result.peak_memory),
-            result.cpu_usage
-        );
-
-        group.bench_with_input(BenchmarkId::new("BSON", size), bson_path, |b, path| {
-            b.iter(|| read_bson(black_box(path)))
-        });
-
-        results.insert(format!("{}_bson", size), result);
-
-        // Add a separator between datasets
-        println!("{:-<80}", "");
-    }
-
-    group.finish();
-
-    // Print comprehensive results summary table
-    print_benchmark_results(&results);
+    // Display comprehensive results
+    print_benchmark_results(&all_results);
+    Ok(())
 }
 
 /// Print comprehensive benchmark results to standard output
 fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
-    // Build a string buffer to capture all output for writing to file later
-    let mut output_buffer = String::new();
+    println!("\n{:=<100}", "");
+    println!("COMPREHENSIVE BENCHMARK RESULTS WITH STATISTICS");
+    println!("{:=<100}", "");
 
-    output_buffer.push_str("\nComprehensive Benchmark Results:\n");
-
-    // Original table (keeping as reference)
+    // Main results table with statistics
+    println!(
+        "\nAll Results (with {} iterations each):",
+        results.values().next().map(|r| r.iterations).unwrap_or(0)
+    );
     let mut summary_table = Table::new();
     summary_table.add_row(Row::new(vec![
         Cell::new("Dataset"),
         Cell::new("Format"),
         Cell::new("Mean Time"),
-        Cell::new("Peak Memory"),
-        Cell::new("CPU Usage"),
+        Cell::new("Median Time"),
+        Cell::new("Std Dev"),
+        Cell::new("Memory"),
+        Cell::new("CPU %"),
     ]));
 
-    for (size, _) in DATASETS {
-        for format in &["fcb", "cjseq", "cbor", "bson"] {
-            if let Some(result) = results.get(&format!("{}_{}", size, format)) {
+    for (dataset_name, _) in DATASETS {
+        let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
+        for format_name in &format_names {
+            let key = format!("{}_{}", dataset_name, format_name);
+            if let Some(result) = results.get(&key) {
                 summary_table.add_row(Row::new(vec![
-                    Cell::new(size),
+                    Cell::new(dataset_name),
                     Cell::new(&result.format),
-                    Cell::new(&format_duration(result.duration)),
+                    Cell::new(&format_duration(result.mean_duration)),
+                    Cell::new(&format_duration(result.median_duration)),
+                    Cell::new(&format_duration(result.std_dev_duration)),
                     Cell::new(&format_bytes(result.peak_memory)),
                     Cell::new(&format!("{:.2}%", result.cpu_usage)),
                 ]));
@@ -764,59 +625,45 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
     }
     summary_table.printstd();
 
-    // Capture table to string
-    let mut summary_table_string = Vec::new();
-    summary_table.print(&mut summary_table_string).unwrap();
-    output_buffer.push_str(&String::from_utf8_lossy(&summary_table_string));
-    output_buffer.push_str("\n");
+    // Comparison tables for each format vs FlatCityBuf (using mean times)
+    let formats_to_compare = ["CityJSONTextSequence", "CBOR", "BSON"];
 
-    // Create comparison tables for each format vs FlatCityBuf
-    let formats_to_compare = ["cjseq", "cbor", "bson"];
-    let format_names = ["CityJSONSeq", "CBOR", "BSON"];
-
-    for (idx, format) in formats_to_compare.iter().enumerate() {
-        output_buffer.push_str(&format!(
-            "\n{} vs FlatCityBuf Comparison:\n",
-            format_names[idx]
-        ));
-        println!("\n{} vs FlatCityBuf Comparison:", format_names[idx]);
+    for format in formats_to_compare {
+        println!("\n{} vs FlatCityBuf Comparison (Mean Times):", format);
         let mut comparison_table = Table::new();
 
         // Header row
         comparison_table.add_row(Row::new(vec![
             Cell::new("Dataset"),
-            Cell::new(&format!("{} CPU", format_names[idx])),
-            Cell::new("FlatCityBuf CPU"),
-            Cell::new("CPU Ratio"),
-            Cell::new(&format!("{} Time", format_names[idx])),
-            Cell::new("FlatCityBuf Time"),
+            Cell::new(&format!("{} Mean", format)),
+            Cell::new("FCB Mean"),
             Cell::new("Time Ratio"),
-            Cell::new(&format!("{} Memory", format_names[idx])),
-            Cell::new("FlatCityBuf Memory"),
+            Cell::new(&format!("{} Std Dev", format)),
+            Cell::new("FCB Std Dev"),
+            Cell::new(&format!("{} Memory", format)),
+            Cell::new("FCB Memory"),
             Cell::new("Memory Ratio"),
         ]));
 
-        for (size, _) in DATASETS {
-            let fcb_key = format!("{}_fcb", size);
-            let format_key = format!("{}_{}", size, format);
+        for (dataset_name, _) in DATASETS {
+            let fcb_key = format!("{}_FlatCityBuf", dataset_name);
+            let format_key = format!("{}_{}", dataset_name, format);
 
             if let (Some(fcb_result), Some(format_result)) =
                 (results.get(&fcb_key), results.get(&format_key))
             {
-                // Calculate ratios
-                let cpu_ratio = format_result.cpu_usage / fcb_result.cpu_usage;
-                let time_ratio =
-                    format_result.duration.as_secs_f64() / fcb_result.duration.as_secs_f64();
+                // Calculate ratios using mean times
+                let time_ratio = format_result.mean_duration.as_secs_f64()
+                    / fcb_result.mean_duration.as_secs_f64();
                 let memory_ratio = format_result.peak_memory as f64 / fcb_result.peak_memory as f64;
 
                 comparison_table.add_row(Row::new(vec![
-                    Cell::new(size),
-                    Cell::new(&format!("{:.2}%", format_result.cpu_usage)),
-                    Cell::new(&format!("{:.2}%", fcb_result.cpu_usage)),
-                    Cell::new(&format!("{:.2}x", cpu_ratio)),
-                    Cell::new(&format_duration(format_result.duration)),
-                    Cell::new(&format_duration(fcb_result.duration)),
+                    Cell::new(dataset_name),
+                    Cell::new(&format_duration(format_result.mean_duration)),
+                    Cell::new(&format_duration(fcb_result.mean_duration)),
                     Cell::new(&format!("{:.2}x", time_ratio)),
+                    Cell::new(&format_duration(format_result.std_dev_duration)),
+                    Cell::new(&format_duration(fcb_result.std_dev_duration)),
                     Cell::new(&format_bytes(format_result.peak_memory)),
                     Cell::new(&format_bytes(fcb_result.peak_memory)),
                     Cell::new(&format!("{:.2}x", memory_ratio)),
@@ -825,37 +672,34 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
         }
 
         comparison_table.printstd();
-
-        // Capture table to string
-        let mut comparison_table_string = Vec::new();
-        comparison_table
-            .print(&mut comparison_table_string)
-            .unwrap();
-        output_buffer.push_str(&String::from_utf8_lossy(&comparison_table_string));
-        output_buffer.push_str("\n");
     }
 
-    // Summary table showing best performer per metric
-    output_buffer.push_str("\nSummary - Best Format Per Metric:\n");
-    println!("\nSummary - Best Format Per Metric:");
+    // Summary table showing best performer per metric (using mean values)
+    println!("\nSummary - Best Format Per Metric (Mean Values):");
     let mut best_format_table = Table::new();
     best_format_table.add_row(Row::new(vec![
         Cell::new("Dataset"),
-        Cell::new("Fastest"),
+        Cell::new("Fastest (Mean)"),
+        Cell::new("Most Consistent"),
         Cell::new("Lowest Memory"),
         Cell::new("Lowest CPU"),
     ]));
 
-    for (size, _) in DATASETS {
-        let formats = ["fcb", "cjseq", "cbor", "bson"];
+    for (dataset_name, _) in DATASETS {
+        let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
         let mut fastest = ("None", Duration::from_secs(u64::MAX));
+        let mut most_consistent = ("None", Duration::from_secs(u64::MAX));
         let mut lowest_memory = ("None", u64::MAX);
-        let mut lowest_cpu = ("None", f32::MAX);
+        let mut lowest_cpu = ("None", f64::MAX);
 
-        for format in &formats {
-            if let Some(result) = results.get(&format!("{}_{}", size, format)) {
-                if result.duration < fastest.1 {
-                    fastest = (&result.format, result.duration);
+        for format_name in &format_names {
+            let key = format!("{}_{}", dataset_name, format_name);
+            if let Some(result) = results.get(&key) {
+                if result.mean_duration < fastest.1 {
+                    fastest = (&result.format, result.mean_duration);
+                }
+                if result.std_dev_duration < most_consistent.1 {
+                    most_consistent = (&result.format, result.std_dev_duration);
                 }
                 if result.peak_memory < lowest_memory.1 {
                     lowest_memory = (&result.format, result.peak_memory);
@@ -867,126 +711,461 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
         }
 
         best_format_table.add_row(Row::new(vec![
-            Cell::new(size),
+            Cell::new(dataset_name),
             Cell::new(fastest.0),
+            Cell::new(most_consistent.0),
             Cell::new(lowest_memory.0),
             Cell::new(lowest_cpu.0),
         ]));
     }
     best_format_table.printstd();
 
-    // Capture table to string
-    let mut best_format_table_string = Vec::new();
-    best_format_table
-        .print(&mut best_format_table_string)
-        .unwrap();
-    output_buffer.push_str(&String::from_utf8_lossy(&best_format_table_string));
+    // Export results to files
+    export_results_to_csv(results);
 
-    // Export results
-    export_results_to_file(&output_buffer);
-    export_raw_data_to_csv(results);
-}
-
-/// Export benchmark results to a text file
-fn export_results_to_file(results: &str) {
-    // Create timestamp for filename
-    let now = chrono::Local::now();
-    let timestamp = now.format("%Y%m%d_%H%M%S");
-    let filename = format!("benchmark_results_{}.txt", timestamp);
-
-    // Write to file
-    match File::create(&filename) {
-        Ok(mut file) => {
-            if let Err(e) = file.write_all(results.as_bytes()) {
-                println!("error writing results to file: {:?}", e);
-            } else {
-                println!("\nbenchmark results saved to: {}", filename);
-            }
-        }
-        Err(e) => {
-            println!("error creating result file: {:?}", e);
-        }
-    }
+    println!("\n{:=<100}", "");
+    println!("BENCHMARK COMPLETED");
+    println!("{:=<100}", "");
 }
 
 /// Export benchmark raw data to CSV file for further analysis
-fn export_raw_data_to_csv(results: &HashMap<String, BenchResult>) {
-    // Create timestamp for filename
-    let now = chrono::Local::now();
-    let timestamp = now.format("%Y%m%d_%H%M%S");
-    let filename = format!("benchmark_raw_data_{}.csv", timestamp);
+fn export_results_to_csv(results: &HashMap<String, BenchResult>) {
+    use std::io::Write;
 
-    // Write to file
-    match File::create(&filename) {
+    // Export main results CSV with statistics
+    let filename = "benchmark_results.csv";
+    match File::create(filename) {
         Ok(mut file) => {
-            // Write CSV header
             if let Err(e) = writeln!(
                 file,
-                "Dataset,Format,MeanTimeMs,PeakMemoryBytes,CpuUsagePercent"
+                "Dataset,Format,Iterations,MeanTimeMs,MedianTimeMs,StdDevTimeMs,MemoryBytes,CpuPercent"
             ) {
-                println!("error writing CSV header: {:?}", e);
+                eprintln!("error writing CSV header: {:?}", e);
                 return;
             }
 
-            // Write each benchmark result as a CSV row
-            for (size, _) in DATASETS {
-                for format in &["fcb", "cjseq", "cbor", "bson"] {
-                    if let Some(result) = results.get(&format!("{}_{}", size, format)) {
-                        // Convert duration to milliseconds for easier analysis
-                        let time_ms = result.duration.as_secs() * 1000
-                            + result.duration.subsec_millis() as u64;
-
-                        // Write CSV row
+            for (dataset_name, _) in DATASETS {
+                let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
+                for format_name in &format_names {
+                    let key = format!("{}_{}", dataset_name, format_name);
+                    if let Some(result) = results.get(&key) {
+                        let mean_time_ms = result.mean_duration.as_millis();
+                        let median_time_ms = result.median_duration.as_millis();
+                        let std_dev_time_ms = result.std_dev_duration.as_millis();
                         if let Err(e) = writeln!(
                             file,
-                            "{},{},{},{},{}",
-                            size, result.format, time_ms, result.peak_memory, result.cpu_usage
+                            "{},{},{},{},{},{},{},{}",
+                            dataset_name,
+                            result.format,
+                            result.iterations,
+                            mean_time_ms,
+                            median_time_ms,
+                            std_dev_time_ms,
+                            result.peak_memory,
+                            result.cpu_usage
                         ) {
-                            println!("error writing CSV row: {:?}", e);
+                            eprintln!("error writing CSV row: {:?}", e);
                             return;
                         }
                     }
                 }
             }
-            println!("benchmark raw data saved to: {}", filename);
+            println!("benchmark raw data with statistics saved to: {}", filename);
         }
         Err(e) => {
-            println!("error creating CSV file: {:?}", e);
+            eprintln!("error creating CSV file: {:?}", e);
+        }
+    }
+
+    // Export detailed comparison tables
+    export_comparison_tables(results);
+}
+
+/// Export detailed comparison tables to text and CSV files
+fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
+    use chrono::Local;
+    use std::io::Write;
+
+    let now = Local::now();
+    let timestamp = now.format("%Y%m%d_%H%M%S");
+    let iterations = results.values().next().map(|r| r.iterations).unwrap_or(0);
+
+    // Export comprehensive text report
+    let text_filename = format!("benchmark_results_{}.txt", timestamp);
+    match File::create(&text_filename) {
+        Ok(mut file) => {
+            writeln!(file, "FLATCITYBUF BENCHMARK RESULTS WITH STATISTICS").unwrap();
+            writeln!(file, "Generated: {}", now.format("%Y-%m-%d %H:%M:%S")).unwrap();
+            writeln!(file, "Iterations per test: {}", iterations).unwrap();
+            writeln!(file, "{:=<120}", "").unwrap();
+
+            // Main results table
+            writeln!(file, "\nALL RESULTS:").unwrap();
+            writeln!(file, "{:-<120}", "").unwrap();
+            writeln!(
+                file,
+                "{:<20} {:<20} {:>12} {:>12} {:>12} {:>15} {:>10}",
+                "Dataset", "Format", "Mean Time", "Median Time", "Std Dev", "Memory", "CPU %"
+            )
+            .unwrap();
+            writeln!(file, "{:-<120}", "").unwrap();
+
+            for (dataset_name, _) in DATASETS {
+                let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
+                for format_name in &format_names {
+                    let key = format!("{}_{}", dataset_name, format_name);
+                    if let Some(result) = results.get(&key) {
+                        writeln!(
+                            file,
+                            "{:<20} {:<20} {:>12} {:>12} {:>12} {:>15} {:>9.2}%",
+                            dataset_name,
+                            result.format,
+                            format_duration(result.mean_duration),
+                            format_duration(result.median_duration),
+                            format_duration(result.std_dev_duration),
+                            format_bytes(result.peak_memory),
+                            result.cpu_usage
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+
+            // Detailed comparison tables
+            let formats_to_compare = ["CityJSONTextSequence", "CBOR", "BSON"];
+            for format in formats_to_compare {
+                writeln!(file, "\n{} vs FlatCityBuf Comparison (Mean Times):", format).unwrap();
+                writeln!(file, "{:-<140}", "").unwrap();
+                writeln!(
+                    file,
+                    "{:<20} {:>12} {:>12} {:>10} {:>12} {:>12} {:>12} {:>12} {:>10}",
+                    "Dataset",
+                    format!("{} Mean", format),
+                    "FCB Mean",
+                    "Time Ratio",
+                    format!("{} StdDev", format),
+                    "FCB StdDev",
+                    format!("{} Mem", format),
+                    "FCB Memory",
+                    "Mem Ratio"
+                )
+                .unwrap();
+                writeln!(file, "{:-<140}", "").unwrap();
+
+                for (dataset_name, _) in DATASETS {
+                    let fcb_key = format!("{}_FlatCityBuf", dataset_name);
+                    let format_key = format!("{}_{}", dataset_name, format);
+
+                    if let (Some(fcb_result), Some(format_result)) =
+                        (results.get(&fcb_key), results.get(&format_key))
+                    {
+                        let time_ratio = format_result.mean_duration.as_secs_f64()
+                            / fcb_result.mean_duration.as_secs_f64();
+                        let memory_ratio =
+                            format_result.peak_memory as f64 / fcb_result.peak_memory as f64;
+
+                        writeln!(
+                            file,
+                            "{:<20} {:>12} {:>12} {:>9.2}x {:>12} {:>12} {:>12} {:>12} {:>9.2}x",
+                            dataset_name,
+                            format_duration(format_result.mean_duration),
+                            format_duration(fcb_result.mean_duration),
+                            time_ratio,
+                            format_duration(format_result.std_dev_duration),
+                            format_duration(fcb_result.std_dev_duration),
+                            format_bytes(format_result.peak_memory),
+                            format_bytes(fcb_result.peak_memory),
+                            memory_ratio
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+
+            println!("comprehensive benchmark report saved to: {}", text_filename);
+        }
+        Err(e) => {
+            eprintln!("error creating text report: {:?}", e);
+        }
+    }
+
+    // Export comparison CSV files with statistics
+    let formats_to_compare = ["CityJSONTextSequence", "CBOR", "BSON"];
+    for format in formats_to_compare {
+        let csv_filename = format!("comparison_{}_{}.csv", format.to_lowercase(), timestamp);
+        match File::create(&csv_filename) {
+            Ok(mut file) => {
+                // Write detailed comparison CSV header with statistics
+                writeln!(file, "Dataset,{}_Mean_Ms,FCB_Mean_Ms,Time_Ratio,{}_Median_Ms,FCB_Median_Ms,{}_StdDev_Ms,FCB_StdDev_Ms,{}_Memory_Bytes,FCB_Memory_Bytes,Memory_Ratio,{}_CPU_Percent,FCB_CPU_Percent",
+                    format, format, format, format, format).unwrap();
+
+                for (dataset_name, _) in DATASETS {
+                    let fcb_key = format!("{}_FlatCityBuf", dataset_name);
+                    let format_key = format!("{}_{}", dataset_name, format);
+
+                    if let (Some(fcb_result), Some(format_result)) =
+                        (results.get(&fcb_key), results.get(&format_key))
+                    {
+                        let time_ratio = format_result.mean_duration.as_secs_f64()
+                            / fcb_result.mean_duration.as_secs_f64();
+                        let memory_ratio =
+                            format_result.peak_memory as f64 / fcb_result.peak_memory as f64;
+
+                        writeln!(
+                            file,
+                            "{},{},{},{:.3},{},{},{},{},{},{},{:.3},{:.2},{:.2}",
+                            dataset_name,
+                            format_result.mean_duration.as_millis(),
+                            fcb_result.mean_duration.as_millis(),
+                            time_ratio,
+                            format_result.median_duration.as_millis(),
+                            fcb_result.median_duration.as_millis(),
+                            format_result.std_dev_duration.as_millis(),
+                            fcb_result.std_dev_duration.as_millis(),
+                            format_result.peak_memory,
+                            fcb_result.peak_memory,
+                            memory_ratio,
+                            format_result.cpu_usage,
+                            fcb_result.cpu_usage
+                        )
+                        .unwrap();
+                    }
+                }
+                println!("comparison CSV with statistics saved to: {}", csv_filename);
+            }
+            Err(e) => {
+                eprintln!("error creating comparison CSV {}: {:?}", csv_filename, e);
+            }
+        }
+    }
+
+    // Export summary CSV with statistics
+    let summary_filename = format!("benchmark_summary_{}.csv", timestamp);
+    match File::create(&summary_filename) {
+        Ok(mut file) => {
+            writeln!(file, "Dataset,Fastest_Format,Fastest_Mean_Ms,Most_Consistent_Format,Lowest_StdDev_Ms,Lowest_Memory_Format,Lowest_Memory_Bytes,Lowest_CPU_Format,Lowest_CPU_Percent").unwrap();
+
+            for (dataset_name, _) in DATASETS {
+                let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
+                let mut fastest = ("None", Duration::from_secs(u64::MAX));
+                let mut most_consistent = ("None", Duration::from_secs(u64::MAX));
+                let mut lowest_memory = ("None", u64::MAX);
+                let mut lowest_cpu = ("None", f64::MAX);
+
+                for format_name in &format_names {
+                    let key = format!("{}_{}", dataset_name, format_name);
+                    if let Some(result) = results.get(&key) {
+                        if result.mean_duration < fastest.1 {
+                            fastest = (&result.format, result.mean_duration);
+                        }
+                        if result.std_dev_duration < most_consistent.1 {
+                            most_consistent = (&result.format, result.std_dev_duration);
+                        }
+                        if result.peak_memory < lowest_memory.1 {
+                            lowest_memory = (&result.format, result.peak_memory);
+                        }
+                        if result.cpu_usage < lowest_cpu.1 {
+                            lowest_cpu = (&result.format, result.cpu_usage);
+                        }
+                    }
+                }
+
+                writeln!(
+                    file,
+                    "{},{},{},{},{},{},{},{:.2},{:.2}",
+                    dataset_name,
+                    fastest.0,
+                    fastest.1.as_millis(),
+                    most_consistent.0,
+                    most_consistent.1.as_millis(),
+                    lowest_memory.0,
+                    lowest_memory.1,
+                    lowest_cpu.0,
+                    lowest_cpu.1
+                )
+                .unwrap();
+            }
+            println!(
+                "benchmark summary with statistics saved to: {}",
+                summary_filename
+            );
+        }
+        Err(e) => {
+            eprintln!("error creating summary CSV: {:?}", e);
         }
     }
 }
 
-/// Add a feature flag to enable dhat profiling
-#[cfg(feature = "dhat-heap")]
-fn heap_profile() {
-    use dhat::Profiler;
-    // Initialize the profiler
-    let _profiler = Profiler::new_heap();
+// ───────────────────────────────── Child process ────────────────────────────
 
-    // Run just one iteration of each format for profiling
-    println!("Running heap profiling for FlatCityBuf");
-    let _ = read_fcb("benchmark_data/3DBAG.city.fcb");
+fn run_child(dataset: &Path, format: &str, iterations: u32, warmup: u32) -> Result<()> {
+    let path_str = dataset.to_str().context("invalid path")?;
 
-    println!("Running heap profiling for CityJSONTextSequence");
-    let _ = read_cjseq("benchmark_data/3DBAG.city.jsonl");
+    // Warm-up iterations (not measured)
+    for i in 0..warmup {
+        if i == 0 {
+            eprintln!("performing {} warm-up iterations...", warmup);
+        }
+        read_dataset_internal(path_str, format)?;
+    }
 
-    println!("Running heap profiling for CBOR");
-    let _ = read_cbor("benchmark_data/3DBAG.city.cbor");
+    eprintln!("starting {} measured iterations...", iterations);
 
-    println!("Running heap profiling for BSON");
-    let _ = read_bson("benchmark_data/3DBAG.city.bson");
+    let mut durations = Vec::with_capacity(iterations as usize);
+    let mut peak_rss_values = Vec::with_capacity(iterations as usize);
+    let mut cpu_usage_values = Vec::with_capacity(iterations as usize);
+
+    let overall_start = Instant::now();
+    let overall_usage_before = rusage();
+
+    // Measured iterations
+    for i in 0..iterations {
+        if i % 10 == 0 && i > 0 {
+            eprintln!("completed {}/{} iterations", i, iterations);
+        }
+
+        let usage_before = rusage();
+        let start = Instant::now();
+
+        // Perform the actual read
+        read_dataset_internal(path_str, format).with_context(|| {
+            format!(
+                "while reading dataset '{}' using format '{}' (iteration {})",
+                dataset.display(),
+                format,
+                i + 1
+            )
+        })?;
+
+        let dur = start.elapsed();
+        let usage_after = rusage();
+        let peak_rss = platform_rss_bytes(&usage_after);
+
+        let cpu_user =
+            timeval_to_secs(usage_after.ru_utime) - timeval_to_secs(usage_before.ru_utime);
+        let cpu_sys =
+            timeval_to_secs(usage_after.ru_stime) - timeval_to_secs(usage_before.ru_stime);
+        let cpu_time = cpu_user + cpu_sys;
+        let cpu_pct = cpu_time / dur.as_secs_f64() * 100.0;
+
+        durations.push(dur);
+        peak_rss_values.push(peak_rss);
+        cpu_usage_values.push(cpu_pct);
+    }
+
+    let overall_dur = overall_start.elapsed();
+    let overall_usage_after = rusage();
+    let overall_peak_rss = platform_rss_bytes(&overall_usage_after);
+
+    let overall_cpu_user = timeval_to_secs(overall_usage_after.ru_utime)
+        - timeval_to_secs(overall_usage_before.ru_utime);
+    let overall_cpu_sys = timeval_to_secs(overall_usage_after.ru_stime)
+        - timeval_to_secs(overall_usage_before.ru_stime);
+    let overall_cpu_time = overall_cpu_user + overall_cpu_sys;
+    let overall_cpu_pct = overall_cpu_time / overall_dur.as_secs_f64() * 100.0;
+
+    // Calculate statistics
+    let mean_duration = calculate_mean(&durations);
+    let median_duration = calculate_median(&mut durations.clone());
+    let std_dev_duration = calculate_std_dev(&durations, mean_duration);
+
+    let mean_peak_rss = peak_rss_values.iter().sum::<u64>() / peak_rss_values.len() as u64;
+    let mean_cpu_usage = cpu_usage_values.iter().sum::<f64>() / cpu_usage_values.len() as f64;
+
+    eprintln!("benchmark completed: {} iterations", iterations);
+    eprintln!(
+        "mean duration: {:.2}ms, median: {:.2}ms, std dev: {:.2}ms",
+        mean_duration.as_secs_f64() * 1000.0,
+        median_duration.as_secs_f64() * 1000.0,
+        std_dev_duration.as_secs_f64() * 1000.0
+    );
+
+    let result = Metrics {
+        duration_ms: overall_dur.as_secs_f64() * 1e3,
+        peak_rss_bytes: overall_peak_rss.max(mean_peak_rss), // Use the higher of overall or mean
+        cpu_usage_percent: overall_cpu_pct,
+        iterations,
+        mean_duration_ms: mean_duration.as_secs_f64() * 1e3,
+        median_duration_ms: median_duration.as_secs_f64() * 1e3,
+        std_dev_duration_ms: std_dev_duration.as_secs_f64() * 1e3,
+    };
+    println!("{}", serde_json::to_string(&result)?);
+    Ok(())
 }
 
-// Define the benchmark group
-#[cfg(not(feature = "dhat-heap"))]
-criterion_group!(benches, read_benchmark);
-
-// Use a different configuration when heap profiling is enabled
-#[cfg(feature = "dhat-heap")]
-criterion_group! {
-    name = benches;
-    config = Criterion::default().sample_size(10);
-    targets = read_benchmark
+// Statistical calculation functions
+fn calculate_mean(durations: &[Duration]) -> Duration {
+    let total_nanos: u128 = durations.iter().map(|d| d.as_nanos()).sum();
+    Duration::from_nanos((total_nanos / durations.len() as u128) as u64)
 }
 
-criterion_main!(benches);
+fn calculate_median(durations: &mut [Duration]) -> Duration {
+    durations.sort();
+    let len = durations.len();
+    if len % 2 == 0 {
+        let mid1 = durations[len / 2 - 1].as_nanos();
+        let mid2 = durations[len / 2].as_nanos();
+        Duration::from_nanos(((mid1 + mid2) / 2) as u64)
+    } else {
+        durations[len / 2]
+    }
+}
+
+fn calculate_std_dev(durations: &[Duration], mean: Duration) -> Duration {
+    let mean_nanos = mean.as_nanos() as f64;
+    let variance: f64 = durations
+        .iter()
+        .map(|d| {
+            let diff = d.as_nanos() as f64 - mean_nanos;
+            diff * diff
+        })
+        .sum::<f64>()
+        / durations.len() as f64;
+
+    Duration::from_nanos(variance.sqrt() as u64)
+}
+
+// ───────────────────────────── Platform helpers ─────────────────────────────
+
+#[cfg(target_os = "linux")]
+fn platform_rss_bytes(ru: &libc::rusage) -> u64 {
+    ru.ru_maxrss as u64 * 1024 // ru_maxrss is kB on Linux
+}
+#[cfg(not(target_os = "linux"))]
+fn platform_rss_bytes(ru: &libc::rusage) -> u64 {
+    ru.ru_maxrss as u64 // already bytes on macOS / *BSD
+}
+
+fn timeval_to_secs(tv: libc::timeval) -> f64 {
+    tv.tv_sec as f64 + tv.tv_usec as f64 / 1_000_000.0
+}
+
+fn rusage() -> libc::rusage {
+    unsafe {
+        let mut ru = MaybeUninit::<libc::rusage>::uninit();
+        libc::getrusage(libc::RUSAGE_SELF, ru.as_mut_ptr());
+        ru.assume_init()
+    }
+}
+
+fn read_dataset_internal(path: &str, format: &str) -> Result<()> {
+    match format {
+        "FlatCityBuf" => {
+            read_fcb(path)?;
+            Ok(())
+        }
+        "CityJSONTextSequence" => {
+            read_cjseq(path)?;
+            Ok(())
+        }
+        "CBOR" => {
+            read_cbor(path)?;
+            Ok(())
+        }
+        "BSON" => {
+            read_bson(path)?;
+            Ok(())
+        }
+        _ => bail!("unknown format: {format}"),
+    }
+}
