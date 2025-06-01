@@ -43,7 +43,7 @@ file_stats:
 
 .PHONY: bench
 bench:
-	cargo bench -p fcb_core --bench read
+	cargo bench -p fcb_core --bench read -- --release
 
 .PHONY: build-fcb_core
 build-fcb_core:

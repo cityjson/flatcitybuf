@@ -385,15 +385,6 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
         ),
     ),
     (
-        "Takeshiba (PLATEAU) Rail way",
-        (
-            "benchmark_data/plateau_takeshiba_rwy.city.fcb",
-            "benchmark_data/plateau_takeshiba_rwy.city.jsonl",
-            "benchmark_data/plateau_takeshiba_rwy.city.cbor",
-            "benchmark_data/plateau_takeshiba_rwy.city.bson",
-        ),
-    ),
-    (
         "Takeshiba (PLATEAU) Transport",
         (
             "benchmark_data/plateau_takeshiba_tran.city.fcb",
@@ -423,7 +414,7 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
 ];
 
 /// Result emitted by each child process.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Metrics {
     duration_ms: f64,
     peak_rss_bytes: u64,
@@ -438,7 +429,7 @@ fn format_duration(d: Duration) -> String {
     if d.as_secs() > 0 {
         format!("{:.2}s", d.as_secs_f64())
     } else {
-        format!("{:.2}ms", d.as_millis() as f64)
+        format!("{:.2}ms", d.as_secs_f64() * 1000.0)
     }
 }
 
@@ -497,8 +488,8 @@ fn coordinator() -> Result<()> {
     let mut all_results = HashMap::new();
 
     // Benchmark configuration
-    const ITERATIONS: u32 = 100;
-    const WARMUP_ITERATIONS: u32 = 10;
+    const ITERATIONS: u32 = 50;
+    const WARMUP_ITERATIONS: u32 = 5;
 
     println!(
         "running benchmarks with {} iterations and {} warmup iterations...\n",
@@ -551,10 +542,10 @@ fn coordinator() -> Result<()> {
                 }
             };
 
-            let duration = Duration::from_millis(m.duration_ms as u64);
-            let mean_duration = Duration::from_millis(m.mean_duration_ms as u64);
-            let median_duration = Duration::from_millis(m.median_duration_ms as u64);
-            let std_dev_duration = Duration::from_millis(m.std_dev_duration_ms as u64);
+            let duration = Duration::from_secs_f64(m.duration_ms / 1000.0);
+            let mean_duration = Duration::from_secs_f64(m.mean_duration_ms / 1000.0);
+            let median_duration = Duration::from_secs_f64(m.median_duration_ms / 1000.0);
+            let std_dev_duration = Duration::from_secs_f64(m.std_dev_duration_ms / 1000.0);
 
             let result = BenchResult {
                 format: format_name.to_string(),
@@ -608,6 +599,7 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
 
     for (dataset_name, _) in DATASETS {
         let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
+
         for format_name in &format_names {
             let key = format!("{}_{}", dataset_name, format_name);
             if let Some(result) = results.get(&key) {
@@ -652,9 +644,11 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
             if let (Some(fcb_result), Some(format_result)) =
                 (results.get(&fcb_key), results.get(&format_key))
             {
+                println!("fcb_result: {:?}", fcb_result);
                 // Calculate ratios using mean times
                 let time_ratio = format_result.mean_duration.as_secs_f64()
                     / fcb_result.mean_duration.as_secs_f64();
+
                 let memory_ratio = format_result.peak_memory as f64 / fcb_result.peak_memory as f64;
 
                 comparison_table.add_row(Row::new(vec![
@@ -749,9 +743,9 @@ fn export_results_to_csv(results: &HashMap<String, BenchResult>) {
                 for format_name in &format_names {
                     let key = format!("{}_{}", dataset_name, format_name);
                     if let Some(result) = results.get(&key) {
-                        let mean_time_ms = result.mean_duration.as_millis();
-                        let median_time_ms = result.median_duration.as_millis();
-                        let std_dev_time_ms = result.std_dev_duration.as_millis();
+                        let mean_time_ms = result.mean_duration.as_secs_f64() * 1000.0;
+                        let median_time_ms = result.median_duration.as_secs_f64() * 1000.0;
+                        let std_dev_time_ms = result.std_dev_duration.as_secs_f64() * 1000.0;
                         if let Err(e) = writeln!(
                             file,
                             "{},{},{},{},{},{},{},{}",
@@ -915,13 +909,13 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
                             file,
                             "{},{},{},{:.3},{},{},{},{},{},{},{:.3},{:.2},{:.2}",
                             dataset_name,
-                            format_result.mean_duration.as_millis(),
-                            fcb_result.mean_duration.as_millis(),
+                            format_result.mean_duration.as_secs_f64() * 1000.0,
+                            fcb_result.mean_duration.as_secs_f64() * 1000.0,
                             time_ratio,
-                            format_result.median_duration.as_millis(),
-                            fcb_result.median_duration.as_millis(),
-                            format_result.std_dev_duration.as_millis(),
-                            fcb_result.std_dev_duration.as_millis(),
+                            format_result.median_duration.as_secs_f64() * 1000.0,
+                            fcb_result.median_duration.as_secs_f64() * 1000.0,
+                            format_result.std_dev_duration.as_secs_f64() * 1000.0,
+                            fcb_result.std_dev_duration.as_secs_f64() * 1000.0,
                             format_result.peak_memory,
                             fcb_result.peak_memory,
                             memory_ratio,
@@ -975,9 +969,9 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
                     "{},{},{},{},{},{},{},{:.2},{:.2}",
                     dataset_name,
                     fastest.0,
-                    fastest.1.as_millis(),
+                    fastest.1.as_secs_f64() * 1000.0,
                     most_consistent.0,
-                    most_consistent.1.as_millis(),
+                    most_consistent.1.as_secs_f64() * 1000.0,
                     lowest_memory.0,
                     lowest_memory.1,
                     lowest_cpu.0,
