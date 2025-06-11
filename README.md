@@ -1,87 +1,203 @@
-# flatcitybuf
+# FlatCityBuf 🏙️
+
+<div align="center">
+
+![FlatCityBuf Logo](./docs/logo.png)
+
+**A cloud-optimized binary format for storing and retrieving 3D city models**
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/HideBa/flatcitybuf)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat&logo=webassembly&logoColor=white)](https://webassembly.org/)
 
-a cloud-optimized binary format for storing and retrieving 3d city models based on the cityjson standard.
+*Bringing the semantic richness of CityJSON with the performance of FlatBuffers*
 
-## overview
+[🚀 Getting Started](#getting-started) • [📊 Benchmarks](#performance--benchmarks) • [📖 Documentation](#documentation) • [🤝 Contributing](#contributing)
 
-flatcitybuf combines the semantic richness of cityjson with the performance benefits of flatbuffers binary serialization and spatial indexing techniques. it addresses several limitations of existing cityjson formats:
+</div>
 
-- **performance**: enables zero-copy access to specific city objects without parsing the entire file
-- **cloud optimization**: supports http range requests for partial data retrieval
-- **spatial indexing**: implements a packed r-tree for efficient spatial queries
-- **attribute indexing**: uses binary search trees for fast attribute-based filtering
-- **size efficiency**: reduces file sizes by 50-70% compared to text-based formats
+---
 
-benchmarks show flatcitybuf is 10-20× faster in data retrieval compared to cityjsonseq.
+## ✨ Overview
 
-## getting started
+FlatCityBuf revolutionizes 3D city model storage and retrieval by combining the semantic richness of [CityJSON](https://github.com/cityjson/cityjson-spec) with the performance benefits of [FlatBuffers](https://github.com/google/flatbuffers) binary serialization and advanced spatial indexing techniques.
 
-### prerequisites
+### 🎯 Why FlatCityBuf?
 
-- rust toolchain (cargo, rustc)
-- for wasm builds: wasm-pack
+Traditional CityJSON formats face significant challenges in large-scale urban applications:
 
-### build
+- **Slow parsing**: Entire files must be loaded and parsed
+- **Memory intensive**: High memory consumption for large datasets
+- **No spatial queries**: Lack of efficient spatial indexing
+- **Limited cloud support**: Poor performance with remote data access
 
-build the core library and cli:
+### 🚀 Key Features
 
-```bash
-cargo build --workspace --all-features --exclude fcb_wasm
+| Feature | Benefit |
+|---------|---------|
+| **⚡ Zero-copy Access** | Access specific city objects without parsing entire files |
+| **☁️ Cloud Optimized** | HTTP range requests for partial data retrieval |
+| **🗺️ Spatial Indexing** | Packed R-tree for lightning-fast spatial queries |
+| **🔍 Attribute Indexing** | Static B+Tree for instant attribute-based filtering |
+| **🌐 Multi-platform** | Rust core with WASM bindings for web applications |
+
+---
+
+## 🚄 Performance & Benchmarks
+
+FlatCityBuf delivers **10-20× faster** data retrieval compared to CityJSONTextSequence formats:
+
+### Speed Comparison Results
+
+| Dataset | CityJSON (ms) | FlatCityBuf (ms) | **Speed Improvement** | Memory Reduction |
+|---------|---------------|------------------|---------------------|------------------|
+| 3DBAG | 54 | 6 | **9.0×** | 4.7× less memory |
+| 3DBV | 3,787 | 120 | **31.6×** | 6.0× less memory |
+| Helsinki | 3,485 | 127 | **27.4×** | 3.4× less memory |
+| NYC | 949 | 42 | **22.6×** | 3.4× less memory |
+| Vienna | 46 | 1 | **46.0×** | 3.3× less memory |
+| Zurich | 1,878 | 149 | **12.6×** | 5.3× less memory |
+
+> 📈 **Average Performance**: 20× faster queries with 4× less memory usage
+
+---
+
+## 🏗️ Project Structure
+
+```
+flatcitybuf/
+├── 📦 fcb_core/          # Core library for reading/writing FlatCityBuf
+├── 🛠️ fcb_cli/           # Command-line interface and tools
+├── 🌳 static-btree/      # Static B+Tree for attribute indexing
+├── 🗺️ packed_rtree/      # Packed R-tree for spatial indexing
+├── 🌐 fcb_wasm/         # WebAssembly bindings for browsers
+├── 📚 docs/             # Documentation and examples
+└── 🧪 examples/         # Usage examples and tutorials
 ```
 
-build the wasm module:
+### Technology Stack
+
+- **Core**: Rust with zero-copy deserialization
+- **Serialization**: FlatBuffers schema with custom optimizations
+- **Spatial Index**: Packed R-tree for efficient range queries
+- **Attribute Index**: Static B+Tree for attribute indexing
+- **Web Support**: WebAssembly bindings via wasm-pack
+- **CLI**: Comprehensive command-line tools
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- **Rust toolchain** (1.83.0 or later)
+- **wasm-pack** (for WebAssembly builds)
+
+### 📦 Installation
+
+#### Build from Source
 
 ```bash
-cargo build -p fcb_wasm --target wasm32-unknown-unknown
-# or
-cd wasm && wasm-pack build --target web --debug --out-dir ../../ts
+# Clone the repository
+git clone https://github.com/HideBa/flatcitybuf.git
+cd flatcitybuf
+
+# Build the core library and CLI
+cargo build --workspace --all-features --exclude fcb_wasm --release
+
+# Build WebAssembly module (optional)
+cd wasm && wasm-pack build --target web --release --out-dir ../../ts
 ```
 
-### usage examples
+### 🛠️ CLI Usage
 
-serialize cityjson to flatcitybuf:
+#### Convert CityJSONSeq to FlatCityBuf
+
+replace `cargo run -p fcb_cli` with `fcb_cli` in the following commands if you want to use the binary directly.
 
 ```bash
-cargo run -p fcb_cli ser -i path/to/input.city.jsonl -o path/to/output.fcb
+# Basic conversion
+cargo run -p fcb_cli ser -i input.city.jsonl -o output.fcb
+
+# With compression and indexing options
+cargo run -p fcb_cli ser -i data.city.jsonl -o data.fcb
+
+# With spatial index and attribute index
+cargo run -p fcb_cli ser -i data.city.jsonl -o data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
+
+# Show information about the file
+cargo run -p fcb_cli info -i data.fcb
 ```
 
-deserialize flatcitybuf to cityjson:
+### 🧪 Run Benchmarks
 
 ```bash
-cargo run -p fcb_cli deser -i path/to/input.fcb -o path/to/output.city.jsonl
+# Core reading benchmarks
+cargo bench -p fcb_core --bench read -- --release
 ```
 
-get information about a flatcitybuf file:
+---
 
-```bash
-cargo run -p fcb_cli info -i path/to/file.fcb
+## 📚 Documentation
+
+- **[API Documentation](https://docs.rs/fcb_core)** - Comprehensive API reference
+- **[Scientific Paper]()** - Scientific paper about FlatCityBuf
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions from the community! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
+
+- 🐛 Reporting bugs
+- 💡 Requesting features
+- 🔧 Submitting pull requests
+- 📝 Improving documentation
+
+---
+
+## 🙏 Acknowledgements & Special Thanks
+
+### Core Contributors
+
+This project builds upon the excellent work of the geospatial and 3D GIS community:
+
+### Technical Foundations
+
+- **[FlatGeobuf](https://github.com/flatgeobuf/flatgeobuf)** - FlatGeobuf team
+  *Licensed under BSD 2-Clause License. Provided the foundational spatial indexing algorithms and FlatBuffers integration patterns.*
+
+- **[CityBuf](https://github.com/3DBAG/CityBuf)** - 3DBAG organisation
+  *Original FlatBuffers schema for CityJSON features, authored by Ravi Peters (3DGI) and Balázs Dukai (3DGI).*
+
+### Standards & Specifications
+
+- **[CityJSON](https://www.cityjson.org/specs/2.0.1/)** - For the semantic foundation of 3D city models
+- **[FlatBuffers](https://github.com/google/flatbuffers)** - Google's cross-platform serialization library
+- **[OGC CityGML](https://www.ogc.org/standards/citygml)** - International standard for 3D city models
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 📖 Citation
+
+If you use FlatCityBuf in your research, please cite:
+
+```bibtex
+@article{flatcitybuf,
+  title={FlatCityBuf: A Cloud-Optimized Binary Format for 3D City Models},
+  author={[Hidemichi Baba,  Hugo Ledoux,  Ravi Peters]},
+  year={2025},
+  url={https://github.com/HideBa/flatcitybuf}
+}
 ```
 
-### run benchmarks
+---
 
-```bash
-cargo bench -p fcb_core --bench read
-```
+<div align="center">
 
-## project structure
+**[⭐ Star us on GitHub](https://github.com/HideBa/flatcitybuf)** • **[🐛 Report Issues](https://github.com/HideBa/flatcitybuf/issues)** • **[💬 Discussions](https://github.com/HideBa/flatcitybuf/discussions)**
 
-- **fcb_core**: core library for reading and writing flatcitybuf files
-- **fcb_cli**: command-line interface for converting between cityjson and flatcitybuf
-- **bst**: binary search tree implementation for attribute indexing
-- **packed_rtree**: packed r-tree implementation for spatial indexing
-- **fcb_wasm**: webassembly bindings for browser usage
-
-## acknowledgements
-
-this project incorporates code from [flatgeobuf](https://github.com/flatgeobuf/flatgeobuf/tree/master), copyright (c) 2018, björn harrtell, licensed under the bsd 2-clause license.
-
-the flatbuffers schema for citybuf feature format is originally authored by tu delft 3d geoinformation group, ravi peters (3dgi), balazs dukai (3dgi).
-
-## references
-
-- [cityjson specification](https://github.com/cityjson/cityjson-spec)
-- [flatbuffers](https://github.com/google/flatbuffers)
-- [citybuf](https://github.com/ylannl/citybuf)
-- [flatgeobuf](https://github.com/flatgeobuf/flatgeobuf)
+</div>
