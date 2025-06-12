@@ -22,8 +22,8 @@ fallible-streaming-iterator = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 log = { workspace = true }
-packed_rtree = { path = "../packed_rtree" }
-static-btree = { path = "../static-btree" }
+packed_rtree = { path = "../packed_rtree", version = "0.1.0" }
+static-btree = { path = "../static-btree", version = "0.1.0" }
 ordered-float = { workspace = true }
 serde = { workspace = true }
 chrono = { workspace = true }
