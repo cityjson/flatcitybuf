@@ -164,7 +164,7 @@
     <div id="attr-query-inputs" class="query-inputs active">
       <label for="query-input">enter query (as json array):</label>
       <textarea id="query-input" rows="3">
-        [["b3_extrusive", "Gt", 2.0], ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"]]
+        [["b3_h_dak_50p", "Gt", 2.0], ["identificatie", "Eq", "NL.IMBAG.Pand.0503100000012869"]]
       </textarea>
     </div>
 
@@ -250,11 +250,19 @@
     <p><small>note: run a query first to collect features, then test the conversion</small></p>
   </div>
 
+  <!-- CityJSONSeq to CityJSON test section -->
+  <div class="obj-test-section">
+    <h3>cjseqToCj function test</h3>
+    <p>converts cityjson + cityjsonfeatures into single merged cityjson object</p>
+    <button id="test-cjseq-to-cj-btn" disabled>test cjseqToCj function</button>
+    <p><small>note: run a query first to collect cityjson header + features, then test the merge</small></p>
+  </div>
+
   <h2>output:</h2>
   <pre id="output"></pre>
 
   <script type="module">
-    import init, { HttpFcbReader, WasmAttrQuery, WasmSpatialQuery, cjToObj } from './fcb_wasm.js';
+    import init, { HttpFcbReader, WasmAttrQuery, WasmSpatialQuery, cjToObj, cjseqToCj } from './fcb_wasm.js';
 
     // Initialize the WASM module once at the beginning
     let wasmInitialized = false;
@@ -305,30 +313,44 @@
     }
 
     /**
-     * Updates the state of the cjToObj test button
-     */
+ * Updates the state of the test buttons
+ */
     function updateObjTestButton() {
-      const button = document.getElementById('test-cj-to-obj-btn');
+      const objButton = document.getElementById('test-cj-to-obj-btn');
+      const cjseqButton = document.getElementById('test-cjseq-to-cj-btn');
 
       // Debug logging
       console.log('updateObjTestButton called:');
       console.log('  collectedCityJSON:', collectedCityJSON ? 'exists' : 'null');
       console.log('  collectedFeatures.length:', collectedFeatures.length);
 
-      // Enable button if we have CityJSON (even with 0 features for backward compatibility test)
+      // Enable buttons if we have CityJSON (even with 0 features for backward compatibility test)
       const hasData = collectedCityJSON !== null;
-      button.disabled = !hasData;
+      objButton.disabled = !hasData;
+      cjseqButton.disabled = !hasData;
 
       log(`button update: cityjson=${collectedCityJSON ? 'exists' : 'null'}, features=${collectedFeatures.length}, enabled=${hasData}`);
 
+      // Update cjToObj button text
       if (hasData) {
         if (collectedFeatures.length > 0) {
-          button.textContent = `test cjToObj (${collectedFeatures.length} features collected)`;
+          objButton.textContent = `test cjToObj (${collectedFeatures.length} features collected)`;
         } else {
-          button.textContent = `test cjToObj (cityjson only, 0 features)`;
+          objButton.textContent = `test cjToObj (cityjson only, 0 features)`;
         }
       } else {
-        button.textContent = 'test cjToObj function';
+        objButton.textContent = 'test cjToObj function';
+      }
+
+      // Update cjseqToCj button text
+      if (hasData) {
+        if (collectedFeatures.length > 0) {
+          cjseqButton.textContent = `test cjseqToCj (merge ${collectedFeatures.length} features)`;
+        } else {
+          cjseqButton.textContent = `test cjseqToCj (cityjson only, 0 features)`;
+        }
+      } else {
+        cjseqButton.textContent = 'test cjseqToCj function';
       }
     }
 
@@ -581,8 +603,8 @@
     }
 
     /**
-     * Tests the cjToObj function with collected features
-     */
+ * Tests the cjToObj function with collected features
+ */
     async function testCjToObj() {
       if (!collectedCityJSON) {
         log('error: no cityjson data available. run a query first.');
@@ -630,6 +652,55 @@
       } catch (err) {
         log(`error during cjToObj test: ${err}`);
         console.error('cjToObj test error:', err);
+      }
+    }
+
+    /**
+     * Tests the cjseqToCj function - merges CityJSON + CityJSONFeatures into single CityJSON
+     */
+    async function testCjseqToCj() {
+      if (!collectedCityJSON) {
+        log('error: no cityjson data available. run a query first.');
+        return;
+      }
+
+      try {
+        log('=== testing cjseqToCj function ===');
+        log('merging cityjson header + cityjsonfeatures into single cityjson object...');
+
+        log(`input cityjson: ${JSON.stringify(collectedCityJSON, null, 2)}`);
+        log(`input features count: ${collectedFeatures.length}`);
+
+        if (collectedFeatures.length > 0) {
+          log(`sample feature: ${JSON.stringify(collectedFeatures[0], null, 2)}`);
+        } else {
+          log('no features to merge - testing with empty features array');
+        }
+
+        // Call the cjseqToCj function
+        const mergedCityJSON = cjseqToCj(collectedCityJSON, collectedFeatures);
+        log('cjseqToCj merge successful!');
+
+        console.log('mergedCityJSON: ', mergedCityJSON);
+
+        // Show the merged result
+        log(`merged cityjson result: ${JSON.stringify(mergedCityJSON, null, 2)}`);
+
+        // Compare before/after
+        const originalCityObjectCount = Object.keys(collectedCityJSON.CityObjects || {}).length;
+        const mergedCityObjectCount = Object.keys(mergedCityJSON.CityObjects || {}).length;
+
+        log(`comparison:`);
+        log(`  original cityobjects: ${originalCityObjectCount}`);
+        log(`  features to merge: ${collectedFeatures.length}`);
+        log(`  merged cityobjects: ${mergedCityObjectCount}`);
+        log(`  net gain: ${mergedCityObjectCount - originalCityObjectCount}`);
+
+        log('=== cjseqToCj test completed ===');
+
+      } catch (err) {
+        log(`error during cjseqToCj test: ${err}`);
+        console.error('cjseqToCj test error:', err);
       }
     }
 
@@ -701,6 +772,7 @@
     document.getElementById('query-test-btn').addEventListener('click', runQueryTest);
     document.getElementById('clear-output-btn').addEventListener('click', clearOutput);
     document.getElementById('test-cj-to-obj-btn').addEventListener('click', testCjToObj);
+    document.getElementById('test-cjseq-to-cj-btn').addEventListener('click', testCjseqToCj);
 
     // Main mode selection
     document.getElementById('attr-mode-btn').addEventListener('click', () => switchQueryMode('attr'));
