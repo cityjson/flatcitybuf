@@ -47,6 +47,12 @@
       background-color: #f0f0f0;
     }
 
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+      color: #666;
+    }
+
     h1,
     h2 {
       font-family: monospace;
@@ -109,6 +115,27 @@
 
     .spatial-inputs.active {
       display: block;
+    }
+
+    .obj-test-section {
+      margin-top: 30px;
+      border: 2px solid #000;
+      padding: 15px;
+      background-color: #f9f9f9;
+    }
+
+    .obj-test-section h3 {
+      margin-top: 0;
+      color: #000;
+    }
+
+    .test-options {
+      margin-bottom: 15px;
+    }
+
+    .test-options label {
+      margin-right: 20px;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -205,11 +232,29 @@
   <button id="query-test-btn">run query test</button>
   <button id="clear-output-btn">clear output</button>
 
+  <!-- CityJSON to OBJ test section -->
+  <div class="obj-test-section">
+    <h3>cjToObj function test</h3>
+    <div class="test-options">
+      <label>
+        <input type="radio" name="obj-test-type" value="cityjson" checked>
+        test with single cityjson object (backward compatibility)
+      </label>
+      <br>
+      <label>
+        <input type="radio" name="obj-test-type" value="cityjsonseq">
+        test with cityjsonseq array (new functionality)
+      </label>
+    </div>
+    <button id="test-cj-to-obj-btn" disabled>test cjToObj function</button>
+    <p><small>note: run a query first to collect features, then test the conversion</small></p>
+  </div>
+
   <h2>output:</h2>
   <pre id="output"></pre>
 
   <script type="module">
-    import init, { HttpFcbReader, WasmAttrQuery, WasmSpatialQuery } from './fcb_wasm.js';
+    import init, { HttpFcbReader, WasmAttrQuery, WasmSpatialQuery, cjToObj } from './fcb_wasm.js';
 
     // Initialize the WASM module once at the beginning
     let wasmInitialized = false;
@@ -218,6 +263,10 @@
     let currentQuery = null;
     let currentQueryMode = 'attr'; // 'attr' or 'spatial'
     let currentSpatialType = 'bbox'; // 'bbox', 'point-intersect', or 'nearest'
+
+    // Store collected features for obj conversion testing
+    let collectedCityJSON = null;
+    let collectedFeatures = [];
 
     /**
      * Appends a message to the output area.
@@ -256,11 +305,43 @@
     }
 
     /**
-     * Iterates through an AsyncFeatureIter, logging up to 10 features.
+     * Updates the state of the cjToObj test button
+     */
+    function updateObjTestButton() {
+      const button = document.getElementById('test-cj-to-obj-btn');
+
+      // Debug logging
+      console.log('updateObjTestButton called:');
+      console.log('  collectedCityJSON:', collectedCityJSON ? 'exists' : 'null');
+      console.log('  collectedFeatures.length:', collectedFeatures.length);
+
+      // Enable button if we have CityJSON (even with 0 features for backward compatibility test)
+      const hasData = collectedCityJSON !== null;
+      button.disabled = !hasData;
+
+      log(`button update: cityjson=${collectedCityJSON ? 'exists' : 'null'}, features=${collectedFeatures.length}, enabled=${hasData}`);
+
+      if (hasData) {
+        if (collectedFeatures.length > 0) {
+          button.textContent = `test cjToObj (${collectedFeatures.length} features collected)`;
+        } else {
+          button.textContent = `test cjToObj (cityjson only, 0 features)`;
+        }
+      } else {
+        button.textContent = 'test cjToObj function';
+      }
+    }
+
+    /**
+     * Iterates through an AsyncFeatureIter, collecting features for obj conversion testing.
      * @param {AsyncFeatureIter} iter - The async feature iterator.
      */
     async function iterateFeatures(iter) {
       let count = 0;
+      collectedFeatures = []; // Reset collected features
+
+      log(`starting feature iteration, collectedFeatures reset to: ${collectedFeatures.length}`);
+
       try {
         while (true) {
           console.log('fetching feature: ', count + 1);
@@ -270,6 +351,11 @@
             log('no more features.');
             break;
           }
+
+          // Store the feature for obj conversion testing
+          collectedFeatures.push(feature);
+          console.log(`pushed feature ${count + 1}, collectedFeatures.length now: ${collectedFeatures.length}`);
+
           log(`feature ${count + 1}: ${JSON.stringify(feature, null, 2)}`);
           count++;
           // Limit iteration to avoid excessive logs
@@ -279,6 +365,12 @@
           }
         }
         log(`total features fetched: ${count}`);
+        log(`features stored for obj conversion testing: ${collectedFeatures.length}`);
+        console.log('final collectedFeatures array:', collectedFeatures);
+
+        // Update the obj test button state
+        log('calling updateObjTestButton from iterateFeatures...');
+        updateObjTestButton();
       } catch (err) {
         log(`error during iteration: ${err}`);
         console.error('iteration error:', err);
@@ -316,6 +408,9 @@
 
       safelyFreeResource(currentReader, 'reader');
       currentReader = null;
+
+      // Note: We intentionally keep collectedCityJSON and collectedFeatures
+      // so the user can test cjToObj even after the query resources are cleaned up
     }
 
     /**
@@ -409,7 +504,7 @@
       // Create the spatial query object
       log(`constructing spatial query: ${JSON.stringify(queryObject)}`);
       currentQuery = new WasmSpatialQuery(queryObject);
-      log('calling select_query()...');
+      log('calling select_spatial()...');
 
       const header = await currentReader.cityjson();
       console.log(`header: ${JSON.stringify(header, null, 2)}`);
@@ -417,10 +512,10 @@
       const meta = await currentReader.meta();
       console.log(`meta: ${JSON.stringify(meta, null, 2)}`);
 
-      // The select_query method consumes the reader in Rust
-      currentIter = await currentReader.select_query(currentQuery);
+      // The select_spatial method consumes the reader in Rust
+      currentIter = await currentReader.select_spatial(currentQuery);
 
-      currentReader = null; // Reader is consumed by select_query
+      currentReader = null; // Reader is consumed by select_spatial
 
       await iterateFeatures(currentIter);
     }
@@ -459,6 +554,13 @@
         const cj = await currentReader.cityjson();
         log(`cj: ${JSON.stringify(cj, null, 2)}`);
 
+        // Store the CityJSON header for obj conversion testing
+        collectedCityJSON = cj;
+
+        // Update button state immediately after getting CityJSON
+        log('calling updateObjTestButton from runQueryTest after getting CityJSON...');
+        updateObjTestButton();
+
         const meta = await currentReader.meta();
         log(`meta: ${JSON.stringify(meta, null, 2)}`);
 
@@ -475,6 +577,59 @@
         console.error('query test error:', err);
         // Clean up resources even if there was an error
         cleanupResources();
+      }
+    }
+
+    /**
+     * Tests the cjToObj function with collected features
+     */
+    async function testCjToObj() {
+      if (!collectedCityJSON) {
+        log('error: no cityjson data available. run a query first.');
+        return;
+      }
+
+      const selectedTestType = document.querySelector('input[name="obj-test-type"]:checked').value;
+
+      try {
+        log('=== testing cjToObj function ===');
+
+        if (selectedTestType === 'cityjson') {
+          // Test with single CityJSON object (backward compatibility)
+          log('testing with single cityjson object (backward compatibility)...');
+          log(`input: ${JSON.stringify(collectedCityJSON, null, 2)}`);
+
+          const objResult = cjToObj(collectedCityJSON);
+          log('cjToObj conversion successful!');
+          log(`obj output (first 500 chars): ${objResult.substring(0, 500)}${objResult.length > 500 ? '...' : ''}`);
+          log(`total obj length: ${objResult.length} characters`);
+
+        } else if (selectedTestType === 'cityjsonseq') {
+          // Test with CityJSONSeq array format (new functionality)
+          log('testing with cityjsonseq array format (new functionality)...');
+
+          // Create the array: [CityJSON, ...CityJSONFeatures]
+          const cityJsonSeqArray = [collectedCityJSON, ...collectedFeatures];
+          log(`input array length: ${cityJsonSeqArray.length} (1 cityjson + ${collectedFeatures.length} features)`);
+          log(`first element (cityjson): ${JSON.stringify(cityJsonSeqArray[0], null, 2)}`);
+
+          if (collectedFeatures.length > 0) {
+            log(`sample feature: ${JSON.stringify(cityJsonSeqArray[1], null, 2)}`);
+          } else {
+            log(`no features to merge, testing with cityjson header only`);
+          }
+
+          const objResult = cjToObj(cityJsonSeqArray);
+          log('cjToObj conversion successful!');
+          log(`obj output (first 500 chars): ${objResult.substring(0, 500)}${objResult.length > 500 ? '...' : ''}`);
+          log(`total obj length: ${objResult.length} characters`);
+        }
+
+        log('=== cjToObj test completed ===');
+
+      } catch (err) {
+        log(`error during cjToObj test: ${err}`);
+        console.error('cjToObj test error:', err);
       }
     }
 
@@ -545,6 +700,7 @@
     // Attach the event listeners
     document.getElementById('query-test-btn').addEventListener('click', runQueryTest);
     document.getElementById('clear-output-btn').addEventListener('click', clearOutput);
+    document.getElementById('test-cj-to-obj-btn').addEventListener('click', testCjToObj);
 
     // Main mode selection
     document.getElementById('attr-mode-btn').addEventListener('click', () => switchQueryMode('attr'));

@@ -1,12 +1,14 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Converts a CityJSON object to OBJ format.
+ * Converts a CityJSON object or CityJSONSeq list to OBJ format.
  *
  * # Arguments
  *
- * * `city_json_js` - JsValue containing a CityJSON object that will be deserialized
- *   using serde_wasm_bindgen into the CityJSON struct defined by cjseq
+ * * `city_json_js` - JsValue containing either:
+ *   - A CityJSON object (for backward compatibility), or
+ *   - An array where the first element is a CityJSON object and
+ *     the rest are CityJSONFeature objects (CityJSONSeq format)
  *
  * # Returns
  *
@@ -120,8 +122,8 @@ export interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-  readonly closure533_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure572_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure550_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure589_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

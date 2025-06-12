@@ -242,12 +242,14 @@ function _assertClass(instance, klass) {
     }
 }
 /**
- * Converts a CityJSON object to OBJ format.
+ * Converts a CityJSON object or CityJSONSeq list to OBJ format.
  *
  * # Arguments
  *
- * * `city_json_js` - JsValue containing a CityJSON object that will be deserialized
- *   using serde_wasm_bindgen into the CityJSON struct defined by cjseq
+ * * `city_json_js` - JsValue containing either:
+ *   - A CityJSON object (for backward compatibility), or
+ *   - An array where the first element is a CityJSON object and
+ *     the rest are CityJSONFeature objects (CityJSONSeq format)
  *
  * # Returns
  *
@@ -277,13 +279,13 @@ export function cjToObj(city_json_js) {
 function __wbg_adapter_52(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure533_externref_shim(arg0, arg1, arg2);
+    wasm.closure550_externref_shim(arg0, arg1, arg2);
 }
 
 function __wbg_adapter_187(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure572_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure589_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -1047,8 +1049,8 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper9005 = function() { return logError(function (arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 534, __wbg_adapter_52);
+    imports.wbg.__wbindgen_closure_wrapper9413 = function() { return logError(function (arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 551, __wbg_adapter_52);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {
