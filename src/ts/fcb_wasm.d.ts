@@ -1,5 +1,6 @@
 /* tslint:disable */
 /* eslint-disable */
+export function cjseqToCj(base_cj: any, features: any): any;
 /**
  * Converts a CityJSON object or CityJSONSeq list to OBJ format.
  *
@@ -113,6 +114,7 @@ export interface InitOutput {
   readonly __wbg_wasmattrquery_free: (a: number, b: number) => void;
   readonly wasmattrquery_new: (a: any) => [number, number, number];
   readonly wasmattrquery_inner: (a: number) => any;
+  readonly cjseqToCj: (a: any, b: any) => [number, number, number];
   readonly cjToObj: (a: any) => [number, number, number, number];
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
@@ -122,8 +124,8 @@ export interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-  readonly closure550_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure589_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure551_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure590_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

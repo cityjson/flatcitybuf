@@ -2,6 +2,7 @@ use cjseq::conv::obj;
 use cjseq::{CityJSON, CityJSONFeature};
 use log::{debug, error};
 use serde_wasm_bindgen::from_value;
+use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 
 /// Converts a list of CityJSONFeature objects into a single CityJSON object.
@@ -27,6 +28,42 @@ pub fn cjseq_to_cj(mut base_cj: CityJSON, features: Vec<CityJSONFeature>) -> Cit
 
     debug!("completed: cjseq_to_cj");
     base_cj
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = cjseqToCj)]
+pub fn cjseq_to_cj_wasm(base_cj: JsValue, features: JsValue) -> Result<JsValue, JsValue> {
+    let base_cj: CityJSON = match from_value(base_cj) {
+        Ok(cj) => cj,
+        Err(e) => {
+            error!("failed to deserialize base_cj: {}", e);
+            return Err(JsValue::from_str(&format!(
+                "failed to parse base_cj: {}",
+                e
+            )));
+        }
+    };
+
+    let features: Vec<CityJSONFeature> = match from_value(features) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("failed to deserialize features: {}", e);
+            return Err(JsValue::from_str(&format!(
+                "failed to parse features: {}",
+                e
+            )));
+        }
+    };
+
+    let cj = cjseq_to_cj(base_cj, features);
+
+    match to_value(&cj) {
+        Ok(js_val) => Ok(js_val),
+        Err(e) => {
+            error!("failed to serialize cj: {}", e);
+            return Err(JsValue::from_str(&format!("failed to serialize cj: {}", e)));
+        }
+    }
 }
 
 /// Converts a CityJSON object or CityJSONSeq list to OBJ format.

@@ -242,6 +242,19 @@ function _assertClass(instance, klass) {
     }
 }
 /**
+ * @param {any} base_cj
+ * @param {any} features
+ * @returns {any}
+ */
+export function cjseqToCj(base_cj, features) {
+    const ret = wasm.cjseqToCj(base_cj, features);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * Converts a CityJSON object or CityJSONSeq list to OBJ format.
  *
  * # Arguments
@@ -279,13 +292,13 @@ export function cjToObj(city_json_js) {
 function __wbg_adapter_52(arg0, arg1, arg2) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure550_externref_shim(arg0, arg1, arg2);
+    wasm.closure551_externref_shim(arg0, arg1, arg2);
 }
 
-function __wbg_adapter_187(arg0, arg1, arg2, arg3) {
+function __wbg_adapter_188(arg0, arg1, arg2, arg3) {
     _assertNum(arg0);
     _assertNum(arg1);
-    wasm.closure589_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure590_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -851,7 +864,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wbg_adapter_187(a, state0.b, arg0, arg1);
+                    return __wbg_adapter_188(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -1049,8 +1062,8 @@ function __wbg_get_imports() {
         _assertBoolean(ret);
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper9413 = function() { return logError(function (arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 551, __wbg_adapter_52);
+    imports.wbg.__wbindgen_closure_wrapper9440 = function() { return logError(function (arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 552, __wbg_adapter_52);
         return ret;
     }, arguments) };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {
