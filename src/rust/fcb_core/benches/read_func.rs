@@ -88,7 +88,7 @@ fn format_duration(d: Duration) -> String {
     if d.as_secs() > 0 {
         format!("{:.2}s", d.as_secs_f64())
     } else {
-        format!("{:.2}ms", d.as_millis() as f64)
+        format!("{:.2}ms", d.as_secs_f64() * 1000.0)
     }
 }
 
@@ -225,10 +225,11 @@ fn print_benchmark_results(results: &HashMap<String, HashMap<String, BenchResult
 
 // Subset of datasets for function benchmarking
 const DATASETS: &[(&str, &str)] = &[
-    ("3DBAG", "benchmark_data/3DBAG.city.fcb"),
-    ("Helsinki", "benchmark_data/Helsinki.city.fcb"),
-    ("Rotterdam", "benchmark_data/Rotterdam.fcb"),
-    ("Zurich", "benchmark_data/Zurich.city.fcb"),
+    // ("3DBAG", "benchmark_data/3DBAG.city.fcb"),
+    // ("Helsinki", "benchmark_data/Helsinki.city.fcb"),
+    // ("Rotterdam", "benchmark_data/Rotterdam.fcb"),
+    // ("Zurich", "benchmark_data/Zurich.city.fcb"),
+    ("Ingolstadt", "benchmark_data/Ingolstadt.city.fcb"),
 ];
 
 pub fn read_func_benchmark(c: &mut Criterion) {
