@@ -376,12 +376,30 @@ const DATASETS: &[(&str, (&str, &str, &str, &str))] = &[
         ),
     ),
     (
+        "Takeshiba (PLATEAU) Building",
+        (
+            "benchmark_data/plateau_takeshiba_bldg.city.fcb",
+            "benchmark_data/plateau_takeshiba_bldg.city.jsonl",
+            "benchmark_data/plateau_takeshiba_bldg.city.cbor",
+            "benchmark_data/plateau_takeshiba_bldg.city.bson",
+        ),
+    ),
+    (
         "Takeshiba (PLATEAU) Brid",
         (
             "benchmark_data/plateau_takeshiba_brid.city.fcb",
             "benchmark_data/plateau_takeshiba_brid.city.jsonl",
             "benchmark_data/plateau_takeshiba_brid.city.cbor",
             "benchmark_data/plateau_takeshiba_brid.city.bson",
+        ),
+    ),
+    (
+        "Takeshiba (PLATEAU) Railway",
+        (
+            "benchmark_data/plateau_takeshiba_rwy.city.fcb",
+            "benchmark_data/plateau_takeshiba_rwy.city.jsonl",
+            "benchmark_data/plateau_takeshiba_rwy.city.cbor",
+            "benchmark_data/plateau_takeshiba_rwy.city.bson",
         ),
     ),
     (
