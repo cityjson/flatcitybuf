@@ -2,6 +2,27 @@
   "name": "fcb_wasm",
   "type": "module",
   "version": "0.1.0",
+  "description": "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.",
+  "author": {
+    "name": "Hidemichi Baba",
+    "email": "baba.papa1120.ba@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HideBa/flatcitybuf"
+  },
+  "homepage": "https://github.com/HideBa/flatcitybuf",
+  "bugs": {
+    "url": "https://github.com/HideBa/flatcitybuf/issues"
+  },
+  "keywords": [
+    "cityjson",
+    "flatbuffers",
+    "wasm",
+    "geospatial",
+    "3d-city-models"
+  ],
   "files": [
     "fcb_wasm_bg.wasm",
     "fcb_wasm.js",
