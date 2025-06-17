@@ -14,7 +14,7 @@ mod wasm {
     use serde_wasm_bindgen::to_value;
     use wasm_bindgen::prelude::*;
 
-    use static_btree::{FixedStringKey, Float, HttpIndex, HttpMultiIndex, KeyType};
+    use fcb_core::static_btree::{FixedStringKey, Float, HttpIndex, HttpMultiIndex, KeyType};
 
     use byteorder::{ByteOrder, LittleEndian};
     use bytes::{BufMut, Bytes, BytesMut};
@@ -34,7 +34,7 @@ mod wasm {
 
     use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
 
-    use packed_rtree::{
+    use fcb_core::packed_rtree::{
         http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree, Query as SpatialQuery,
     };
     use std::collections::VecDeque;
@@ -357,10 +357,10 @@ mod wasm {
             let http_ranges: Vec<HttpRange> = result
                 .into_iter()
                 .map(|item| match item.range {
-                    static_btree::http::HttpRange::Range(range) => {
+                    fcb_core::static_btree::http::HttpRange::Range(range) => {
                         HttpRange::Range(range.start..range.end)
                     }
-                    static_btree::http::HttpRange::RangeFrom(range) => {
+                    fcb_core::static_btree::http::HttpRange::RangeFrom(range) => {
                         HttpRange::RangeFrom(range.start..)
                     }
                 })
@@ -848,21 +848,21 @@ mod wasm {
                     let max_x = get_number_property(&obj, "maxX")?;
                     let max_y = get_number_property(&obj, "maxY")?;
 
-                    packed_rtree::Query::BBox(min_x, min_y, max_x, max_y)
+                    fcb_core::packed_rtree::Query::BBox(min_x, min_y, max_x, max_y)
                 }
                 "pointIntersects" => {
                     // Extract point coordinates
                     let x = get_number_property(&obj, "x")?;
                     let y = get_number_property(&obj, "y")?;
 
-                    packed_rtree::Query::PointIntersects(x, y)
+                    fcb_core::packed_rtree::Query::PointIntersects(x, y)
                 }
                 "pointNearest" => {
                     // Extract point coordinates
                     let x = get_number_property(&obj, "x")?;
                     let y = get_number_property(&obj, "y")?;
 
-                    packed_rtree::Query::PointNearest(x, y)
+                    fcb_core::packed_rtree::Query::PointNearest(x, y)
                 }
                 _ => {
                     return Err(JsValue::from_str(&format!(

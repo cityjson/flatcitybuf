@@ -1,17 +1,17 @@
 pub mod city_buffer;
 pub mod deserializer;
+use crate::static_btree::Offset;
 use city_buffer::*;
 use cjseq::CityJSONFeature;
 use deserializer::to_cj_feature;
-use static_btree::Offset;
 
 use crate::error::Error;
 use crate::fb::{size_prefixed_root_as_city_feature, CityFeature};
+use crate::packed_rtree::{self, PackedRTree, Query};
 use crate::{
     check_magic_bytes, size_prefixed_root_as_header, Column, Header, HEADER_MAX_BUFFER_SIZE,
 };
 use fallible_streaming_iterator::FallibleStreamingIterator;
-use packed_rtree::{PackedRTree, Query};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 mod attr_query;
 pub mod geom_decoder;

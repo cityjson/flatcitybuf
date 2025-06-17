@@ -7,7 +7,9 @@ pub mod fb;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 mod http_reader;
 
+pub mod packed_rtree;
 mod reader;
+pub mod static_btree;
 mod writer;
 
 pub use cj_utils::*;
@@ -15,6 +17,7 @@ pub use const_vars::*;
 pub use error::*;
 pub use fb::*;
 pub use packed_rtree::Query as SpatialQuery;
+pub use packed_rtree::*;
 pub use reader::*;
 pub use static_btree::{
     Entry, FixedStringKey, Float, Key, KeyType, MemoryIndex, MemoryMultiIndex, MultiIndex,

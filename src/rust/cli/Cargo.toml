@@ -8,7 +8,7 @@ name = "fcb"
 path = "src/main.rs"
 
 [dependencies]
-fcb_core = { path = "../fcb_core", features = ["http"] }
+fcb_core = { workspace = true, features = ["http"] }
 cjseq = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }

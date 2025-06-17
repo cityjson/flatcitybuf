@@ -1,10 +1,10 @@
 use std::error::Error;
 
 use anyhow::Result;
+use fcb_core::packed_rtree::Query;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 use fcb_core::HttpFcbReader;
 use fcb_core::{deserializer::to_cj_metadata, FixedStringKey, KeyType, Operator};
-use packed_rtree::Query;
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;

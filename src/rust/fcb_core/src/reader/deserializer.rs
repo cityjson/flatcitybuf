@@ -1,9 +1,9 @@
 use std::{collections::HashMap, mem::size_of};
 
 use crate::{
+    error::Error,
     fb::*,
     geom_decoder::{decode, decode_materials, decode_semantics, decode_textures},
-    Error,
 };
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{

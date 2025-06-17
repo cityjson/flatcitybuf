@@ -24,8 +24,8 @@ use cjseq::{
 
 use cjseq::ExtensionFile as CjExtensionFile;
 
+use crate::packed_rtree::NodeItem;
 use flatbuffers::FlatBufferBuilder;
-use packed_rtree::NodeItem;
 use serde_json::Value;
 
 use super::geom_encoder::{GMBoundaries, GMSemantics, MaterialMapping as GMMaterialMapping};

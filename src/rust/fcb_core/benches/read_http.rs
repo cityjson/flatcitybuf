@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
+use fcb_core::packed_rtree::Query;
 use fcb_core::{FixedStringKey, HttpFcbReader, KeyType, Operator};
-use packed_rtree::Query;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

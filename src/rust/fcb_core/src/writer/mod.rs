@@ -1,10 +1,10 @@
+use crate::packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use crate::MAGIC_BYTES;
 use attr_index::build_attribute_index_for_attr;
 use attribute::AttributeSchema;
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use feature_writer::{AttributeFeatureOffset, FeatureWriter};
 use header_writer::{HeaderWriter, HeaderWriterOptions};
-use packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use serializer::AttributeIndexInfo;
 
 use crate::error::Result;
@@ -247,7 +247,7 @@ impl<'a> FcbWriter<'a> {
         let mut attr_index_info: Vec<AttributeIndexInfo> = Vec::new();
         if let Some(sorted_indices) = &attr_indices {
             for (name, bf_opt) in sorted_indices {
-                let bf = bf_opt.unwrap_or(static_btree::DEFAULT_BRANCHING_FACTOR);
+                let bf = bf_opt.unwrap_or(crate::static_btree::DEFAULT_BRANCHING_FACTOR);
                 if let Ok((buf, info)) = build_attribute_index_for_attr(
                     name,
                     &self.attr_schema,

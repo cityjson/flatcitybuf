@@ -4,7 +4,7 @@ use crate::serializer::*;
 
 use super::attribute::{cityfeature_to_index_entries, AttributeIndexEntry, AttributeSchema};
 
-use packed_rtree::NodeItem;
+use crate::packed_rtree::NodeItem;
 
 /// A writer that converts CityJSON features to FlatBuffers format
 ///

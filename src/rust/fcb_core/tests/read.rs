@@ -1,10 +1,10 @@
 use anyhow::Result;
+use fcb_core::packed_rtree::Query;
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
-use packed_rtree::Query;
 use std::{
     fs::File,
     io::{BufReader, Cursor, Seek},

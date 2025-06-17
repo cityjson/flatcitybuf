@@ -1,8 +1,8 @@
 use crate::error::Result;
+use crate::packed_rtree::PackedRTree;
 use crate::serializer::to_fcb_header;
 use cjseq::CityJSON;
 use flatbuffers::FlatBufferBuilder;
-use packed_rtree::PackedRTree;
 
 use super::{attribute::AttributeSchema, serializer::AttributeIndexInfo};
 

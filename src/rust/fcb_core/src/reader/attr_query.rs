@@ -1,4 +1,4 @@
-use static_btree::{
+use crate::static_btree::{
     FixedStringKey, Float, KeyType, MemoryIndex, MemoryMultiIndex, MultiIndex, Operator, Query,
     QueryCondition, StreamIndex, StreamMultiIndex,
 };

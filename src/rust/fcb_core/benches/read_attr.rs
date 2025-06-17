@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fcb_core::error::Result;
+use fcb_core::static_btree::Float;
 use fcb_core::{AttrQuery, FcbReader, KeyType, Operator};
-use static_btree::Float;
 use std::{fs::File, io::BufReader};
 
 // TODO: test these cases as well

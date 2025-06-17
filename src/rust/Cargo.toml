@@ -2,14 +2,16 @@
 name = "flatcitybuf"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [workspace]
-members = ["cli", "fcb_core", "packed_rtree", "wasm", "static-btree"]
+members = ["cli", "fcb_core", "wasm"]
 resolver = "2"
 
 [workspace.dependencies]
 bytemuck = "1.15.0"
 async-trait = "0.1.85"
+fcb_core = { version = "0.1.0", path = "fcb_core" }
 flatbuffers = "24.3.25"
 byteorder = "1.5.0"
 cjseq = { git = "https://github.com/HideBa/cjseq", branch = "develop" }

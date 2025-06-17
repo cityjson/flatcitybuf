@@ -7,10 +7,10 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     #[error("R-tree error: {0}")]
-    Rtree(#[from] packed_rtree::Error),
+    Rtree(#[from] crate::packed_rtree::Error),
 
     #[error("StaticBTree error: {0}")]
-    StaticBTree(#[from] static_btree::Error),
+    StaticBTree(#[from] crate::static_btree::Error),
 
     #[error("Invalid attribute name: {name}")]
     InvalidAttributeName { name: String },

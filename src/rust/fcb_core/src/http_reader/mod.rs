@@ -2,7 +2,9 @@ use crate::deserializer::to_cj_feature;
 use crate::{add_indices_to_multi_memory_index, build_query, fb::*, AttrQuery};
 
 use crate::error::{Error, Result};
+use crate::packed_rtree::Query;
 use crate::reader::city_buffer::FcbBuffer;
+use crate::static_btree::{FixedStringKey, Float, KeyType, Operator};
 use crate::{
     check_magic_bytes, size_prefixed_root_as_city_feature, HEADER_MAX_BUFFER_SIZE,
     HEADER_SIZE_SIZE, MAGIC_BYTES_SIZE,
@@ -14,15 +16,13 @@ use cjseq::CityJSONFeature;
 use http_range_client::BufferedHttpRangeClient;
 use http_range_client::{AsyncBufferedHttpRangeClient, AsyncHttpRangeClient};
 use log::debug;
-use packed_rtree::Query;
 use reqwest;
-use static_btree::{FixedStringKey, Float, KeyType, Operator};
 
-use packed_rtree::{http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree};
-use static_btree::{
+use crate::packed_rtree::{http::HttpRange, http::HttpSearchResultItem, NodeItem, PackedRTree};
+use crate::static_btree::{
     http::HttpRange as AttrHttpRange, http::HttpSearchResultItem as AttrHttpSearchResultItem,
 };
-use static_btree::{HttpIndex, HttpMultiIndex};
+use crate::static_btree::{HttpIndex, HttpMultiIndex};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Range;

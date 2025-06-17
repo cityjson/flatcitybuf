@@ -1,3 +1,4 @@
+use crate::packed_rtree::Error as PackedRtreeError;
 use cjseq::error::CjseqError;
 use flatbuffers::InvalidFlatbuffer;
 use serde_json;
@@ -40,7 +41,7 @@ pub enum Error {
     JsonError(#[from] serde_json::Error),
 
     #[error("R-tree error: {0}")]
-    RtreeError(#[from] packed_rtree::Error),
+    RtreeError(#[from] PackedRtreeError),
 
     // Validation errors
     #[error("Unsupported column type: {0}")]
@@ -77,7 +78,7 @@ pub enum Error {
     #[error("StaticBTree error: {source}")]
     StaticBTree {
         #[from]
-        source: static_btree::Error,
+        source: crate::static_btree::Error,
     },
 }
 

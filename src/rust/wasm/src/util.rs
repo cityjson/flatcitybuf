@@ -61,7 +61,7 @@ pub fn cjseq_to_cj_wasm(base_cj: JsValue, features: JsValue) -> Result<JsValue, 
         Ok(js_val) => Ok(js_val),
         Err(e) => {
             error!("failed to serialize cj: {}", e);
-            return Err(JsValue::from_str(&format!("failed to serialize cj: {}", e)));
+            Err(JsValue::from_str(&format!("failed to serialize cj: {}", e)))
         }
     }
 }
@@ -95,7 +95,7 @@ pub fn convert_cityjson_to_obj(city_json_js: &JsValue) -> Result<String, JsValue
 
         // First element should be CityJSON
         let first_element = array.get(0);
-        let mut cj: CityJSON = match from_value(first_element) {
+        let cj: CityJSON = match from_value(first_element) {
             Ok(json) => json,
             Err(e) => {
                 error!("failed to deserialize first element as CityJSON: {}", e);
