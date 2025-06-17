@@ -2,6 +2,10 @@
 name = "fcb_core"
 version = "0.1.0"
 edition = "2021"
+authors = ["Hidemichi Baba <baba.papa1120.ba@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/HideBa/flatcitybuf"
+description = "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers."
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
