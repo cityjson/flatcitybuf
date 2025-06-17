@@ -36,6 +36,6 @@ export const __wbindgen_export_4: WebAssembly.Table;
 export const __wbindgen_export_5: WebAssembly.Table;
 export const __externref_table_dealloc: (a: number) => void;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
-export const closure551_externref_shim: (a: number, b: number, c: any) => void;
-export const closure590_externref_shim: (a: number, b: number, c: any, d: any) => void;
+export const closure549_externref_shim: (a: number, b: number, c: any) => void;
+export const closure588_externref_shim: (a: number, b: number, c: any, d: any) => void;
 export const __wbindgen_start: () => void;
