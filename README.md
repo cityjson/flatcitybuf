@@ -13,7 +13,7 @@
 
 *Bringing the semantic richness of CityJSON with the performance of FlatBuffers*
 
-[🚀 Getting Started](#getting-started) • [📊 Benchmarks](#performance--benchmarks) • [📖 Documentation](#documentation) • [🤝 Contributing](#contributing)
+[🚀 Getting Started](#-getting-started) • [📊 Benchmarks](#-performance--benchmarks) • [📖 Documentation](#-documentation) • [🤝 Contributing](#-contributing)
 
 </div>
 
@@ -101,7 +101,7 @@ flatcitybuf/
 ```bash
 # Clone the repository
 git clone https://github.com/HideBa/flatcitybuf.git
-cd flatcitybuf
+cd flatcitybuf/src/rust
 
 # Build the core library and CLI
 cargo build --workspace --all-features --exclude fcb_wasm --release
