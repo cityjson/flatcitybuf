@@ -50,16 +50,15 @@ FlatCityBuf delivers **10-20× faster** data retrieval compared to CityJSONTextS
 
 ### Speed Comparison Results
 
-| Dataset | CityJSON (ms) | FlatCityBuf (ms) | **Speed Improvement** | Memory Reduction |
+| Dataset | CityJSON | FlatCityBuf | **Speed Improvement** | Memory Reduction |
 |---------|---------------|------------------|---------------------|------------------|
-| 3DBAG | 54 | 6 | **9.0×** | 4.7× less memory |
-| 3DBV | 3,787 | 120 | **31.6×** | 6.0× less memory |
-| Helsinki | 3,485 | 127 | **27.4×** | 3.4× less memory |
-| NYC | 949 | 42 | **22.6×** | 3.4× less memory |
-| Vienna | 46 | 1 | **46.0×** | 3.3× less memory |
-| Zurich | 1,878 | 149 | **12.6×** | 5.3× less memory |
+| 3DBAG | 56 ms | 6 ms | **8.6×** | 4.7× less memory |
+| 3DBV | 3.8 s | 122ms | **32.6×** | 4.5× less memory |
+| Helsinki | 4.0 s | 132ms | **30.6×** | 2.9× less memory |
+| NYC | 887 ms | 43 ms | **20.7×** | 4.1× less memory |
 
-> 📈 **Average Performance**: 20× faster queries with 4× less memory usage
+
+> 📈 **Performance**: 8.6-256× faster queries with 2.1-6.4× less memory usage
 
 ---
 
@@ -69,8 +68,6 @@ FlatCityBuf delivers **10-20× faster** data retrieval compared to CityJSONTextS
 flatcitybuf/
 ├── 📦 fcb_core/          # Core library for reading/writing FlatCityBuf
 ├── 🛠️ fcb_cli/           # Command-line interface and tools
-├── 🌳 static-btree/      # Static B+Tree for attribute indexing
-├── 🗺️ packed_rtree/      # Packed R-tree for spatial indexing
 ├── 🌐 fcb_wasm/         # WebAssembly bindings for browsers
 ├── 📚 docs/             # Documentation and examples
 └── 🧪 examples/         # Usage examples and tutorials
@@ -114,7 +111,7 @@ cd wasm && wasm-pack build --target web --release --out-dir ../../ts
 
 #### Convert CityJSONSeq to FlatCityBuf
 
-replace `cargo run -p fcb_cli` with `fcb_cli` in the following commands if you want to use the binary directly.
+replace `cargo run -p fcb_cli` with `fcb` in the following commands if you want to use the binary directly.
 
 ```bash
 # Basic conversion
