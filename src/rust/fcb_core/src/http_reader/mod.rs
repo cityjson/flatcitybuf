@@ -1,3 +1,9 @@
+//! HTTP reader for FlatCityBuf files
+//!
+//! This module contains HTTP range request patterns and streaming functionality
+//! derived from FlatGeobuf (https://github.com/flatgeobuf/flatgeobuf)
+//! Licensed under BSD 2-Clause License, Copyright (c) 2018-2024, Björn Harrtell and contributors
+
 use crate::deserializer::to_cj_feature;
 use crate::{add_indices_to_multi_memory_index, build_query, fb::*, AttrQuery};
 

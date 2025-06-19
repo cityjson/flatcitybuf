@@ -5,7 +5,14 @@ edition = "2021"
 authors = ["Hidemichi Baba <baba.papa1120.ba@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/HideBa/flatcitybuf"
-description = "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers."
+description = "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers. Contains code derived from FlatGeobuf (BSD-2-Clause) for spatial indexing."
+readme = "README.md"
+keywords = ["cityjson", "flatbuffers", "geospatial", "3d", "gis"]
+categories = ["encoding", "data-structures", "science::geo"]
+
+# Attribution notice for derived code
+# Portions of this software are derived from FlatGeobuf (https://github.com/flatgeobuf/flatgeobuf)
+# Licensed under BSD 2-Clause License, Copyright (c) 2018-2024, Björn Harrtell and contributors
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

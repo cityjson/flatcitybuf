@@ -174,6 +174,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Attribution
+
+Portions of this software are derived from [FlatGeobuf](https://github.com/flatgeobuf/flatgeobuf) (BSD 2-Clause License).
+See [ATTRIBUTION.md](ATTRIBUTION.md) for detailed attribution information.
+
 ## API Reference
 
 ### Core Types

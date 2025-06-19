@@ -1,3 +1,29 @@
+//! # FlatCityBuf Core Library
+//!
+//! A high-performance Rust library for encoding and decoding CityJSON data to the FlatCityBuf (FCB) binary format.
+//! FCB uses FlatBuffers for efficient serialization with support for spatial and attribute indexing.
+//!
+//! ## Attribution
+//!
+//! **Portions of this software are derived from FlatGeobuf**
+//! - Source: <https://github.com/flatgeobuf/flatgeobuf>
+//! - License: BSD 2-Clause License
+//! - Copyright (c) 2018-2024, Björn Harrtell and contributors
+//!
+//! Specifically, the following components contain code derived from FlatGeobuf:
+//! - Spatial indexing algorithms (packed R-tree implementation)
+//! - HTTP range request handling (for Rust native part)
+//! - Binary format design patterns
+//!
+//! We extend our gratitude to the FlatGeobuf team for their excellent work on efficient
+//! geospatial binary formats, which provided the foundation for FlatCityBuf's spatial
+//! indexing and serialization architecture.
+//!
+//! ## License
+//!
+//! This project is licensed under the MIT License.
+//! FlatGeobuf portions remain under their original BSD 2-Clause License.
+
 mod cj_utils;
 mod cjerror;
 mod const_vars;
