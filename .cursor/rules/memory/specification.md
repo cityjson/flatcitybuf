@@ -4,16 +4,6 @@
 
 flatcitybuf is a cloud-optimized binary format for storing and retrieving 3d city models based on the cityjson standard. it combines the semantic richness of cityjson with the performance benefits of flatbuffers binary serialization and spatial indexing techniques.
 
-the format is designed to address several limitations of existing cityjson formats:
-
-- **performance**: traditional json-based formats require full parsing before data access, while flatcitybuf enables zero-copy access to specific city objects.
-- **cloud optimization**: supports http range requests for partial data retrieval, reducing bandwidth usage and improving load times.
-- **spatial indexing**: implements a packed r-tree for efficient spatial queries.
-- **attribute indexing**: uses binary search trees for fast attribute-based filtering.
-- **size efficiency**: binary encoding reduces file sizes by 50-70% compared to text-based formats.
-
-the format maintains backward compatibility with cityjson 2.0 while significantly improving query performance (10-20× faster) and storage efficiency.
-
 ## flatbuffers schema explanation
 
 flatcitybuf uses two primary schema files to define its structure:
@@ -103,7 +93,7 @@ struct DoubleVertex {
 ```
 
 - `templates`: An array of standard `Geometry` tables (defined in `geometry.fbs`), each representing a reusable geometry shape. The encoding of boundaries, semantics, etc., within these template geometries follows the standard `Geometry` encoding rules.
-- `templates_verteces`: A single flat array containing all vertices for *all* templates. Vertices are stored as `DoubleVertex` (using `f64`) to maintain precision, as templates are often defined in a local coordinate system. The indices used within a template's `boundaries` refer to its specific block of vertices within this global array.
+- `templates_verteces`: A single flat array containing all vertices for _all_ templates. Vertices are stored as `DoubleVertex` (using `f64`) to maintain precision, as templates are often defined in a local coordinate system. The indices used within a template's `boundaries` refer to its specific block of vertices within this global array.
 
 **Instance Definition (in `feature.fbs` via `geometry.fbs`)**
 
@@ -135,7 +125,7 @@ struct TransformationMatrix {
 - `geometry_instances`: An array within a `CityObject` holding references to templates.
 - `GeometryInstance`:
   - `template`: The index of the template geometry in the `Header.templates` array.
-  - `boundaries`: Contains **exactly one** `uint` index. This index refers to a vertex within the *containing `CityFeature`'s* `vertices` array (which uses `int` coordinates). This vertex serves as the reference point for the instance.
+  - `boundaries`: Contains **exactly one** `uint` index. This index refers to a vertex within the _containing `CityFeature`'s_ `vertices` array (which uses `int` coordinates). This vertex serves as the reference point for the instance.
   - `transformation`: A `TransformationMatrix` struct defining the 4x4 matrix (rotation, translation, scaling) applied to the template geometry relative to the reference point. The 16 `f64` values are stored row-major.
 
 This separation allows defining complex shapes once in the header and instantiating them multiple times within features using only an index, a reference point index, and a transformation matrix.
@@ -148,7 +138,6 @@ the schema design follows several key principles:
 2. **hierarchical structure**: maintains cityjson's hierarchical object model
 3. **shared vertices**: uses indexed vertices to reduce redundancy
 4. **semantic preservation**: maintains rich semantic information from cityjson
-5. **extensibility**: allows for future extensions while maintaining backward compatibility
 
 ## file storage overview
 
@@ -171,7 +160,7 @@ graph TD
     G --> G1[FlatBuffers Features]
 ```
 
-1. **magic bytes**: 4 bytes identifier for the file format ('fcb\\0')
+1. **magic bytes**: 8 bytes identifier for the file format ('fcb\\0\\1\\0\\0\\0\\0\\0')
 2. **header size**: 4 bytes uint32 indicating the size of the header in bytes
 3. **header**: flatbuffers-encoded header containing metadata, schema, and index information
 4. **r-tree index**: packed r-tree for spatial indexing
@@ -273,6 +262,7 @@ this approach maintains efficient tree traversal for unique keys while properly 
 two major optimizations improve remote access efficiency for the payload section:
 
 1. **payload prefetching**:
+
    - a configurable portion of the payload section is prefetched into a cache during the initial query
    - the optimal prefetch size is calculated based on:
      - total tree size (number of entries)
@@ -318,15 +308,7 @@ the `queryexecutor` coordinates between multiple b-tree indices and handles sele
 the b-tree structure offers significant advantages for http range requests:
 
 1. **reduced request count**: fewer http requests due to logarithmic tree height
-2. **block-level caching**: client-side caching of frequently accessed nodes improves performance
-3. **efficient range queries**: linked leaf nodes enable efficient range scans without traversing the tree repeatedly
-4. **progressive loading**: loads only the nodes needed for a query
-
-future optimizations include:
-
-1. **batch processing**: grouping feature requests based on spatial proximity
-2. **prefetching**: predicting which nodes might be needed and fetching them proactively
-3. **advanced caching**: implementing ttl and size-based cache management
+2. **progressive loading**: loads only the nodes needed for a query
 
 ## boundaries, semantics, and appearances encoding
 
@@ -465,18 +447,20 @@ flatcitybuf is designed for efficient access over http using range requests, all
 ### range request workflow
 
 1. **header retrieval**:
-   - client first fetches the magic bytes (4 bytes)
+
+   - client first fetches the magic bytes (8 bytes)
    - then fetches the header size (4 bytes)
    - finally fetches the header (variable size)
-   - the client also prefetches a small portion of the r-tree index to optimize subsequent requests
 
 2. **spatial query**:
+
    - client traverses the r-tree index using range requests
    - for leaf nodes, the client determines feature locations from their offsets
    - feature sizes are determined implicitly by the difference between consecutive offsets
    - for the last feature, the range extends to the end of the file
 
 3. **attribute query**:
+
    - client traverses the attribute index using range requests
    - retrieves feature offsets for matching attribute values
    - batches feature requests to minimize http overhead
@@ -491,31 +475,38 @@ flatcitybuf is designed for efficient access over http using range requests, all
 flatcitybuf implements several optimizations for http access:
 
 1. **request batching**:
+
    - nearby features are grouped into batches to reduce the number of http requests
    - a configurable threshold determines when to combine requests vs. making separate requests
    - this balances between minimizing requests and avoiding excessive data transfer
 
 2. **buffered client**:
+
    - uses a buffered http client that caches previously fetched data
    - avoids redundant requests for overlapping ranges
    - implements speculative prefetching for anticipated data
 
 3. **minimal header size**:
+
    - the header is kept small to minimize initial loading time
    - only essential metadata is included in the header
 
 4. **progressive loading**:
+
    - features are loaded on demand as they're needed
    - supports streaming iteration through features
    - allows applications to start processing data before the entire file is downloaded
 
 5. **payload optimizations**:
+
    - **payload prefetching**: proactively caches parts of the payload section during initial query execution
+
      - uses adaptive sizing based on tree characteristics (16kb-1mb typical range)
      - maintains prefetched data in a query-scoped cache
      - eliminates individual http requests for cached payload entries
 
    - **batch payload resolution**: combines multiple payload lookups into minimal http requests
+
      - collects payload references during tree traversal instead of resolving immediately
      - deduplicates and groups nearby payload references before http requests
      - makes consolidated http requests for adjacent payload entries
