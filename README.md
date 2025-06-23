@@ -24,9 +24,9 @@
 FlatCityBuf revolutionizes 3D city model storage and retrieval by combining the semantic richness of [CityJSON](https://github.com/cityjson/cityjson-spec) with the performance benefits of [FlatBuffers](https://github.com/google/flatbuffers) binary serialization and advanced spatial indexing techniques.
 
 ## Demo
+Web prototype can be available from **[here!](https://fcb-web-prototype.netlify.app/)**
 
-[![Watch demo video](./docs/logo.png)](https://storage.googleapis.com/flatcitybuf/flatgeobuf_demo.mp4)
-
+https://github.com/user-attachments/assets/ab49f026-1907-4a25-a5fb-8bc69e9a102b
 
 
 ### 🎯 Why FlatCityBuf?
