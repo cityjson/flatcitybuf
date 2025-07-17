@@ -145,7 +145,7 @@ cargo bench -p fcb_core --bench read -- --release
 ## 📚 Documentation
 
 - **[API Documentation](https://docs.rs/fcb_core)** - Comprehensive API reference
-- **[Scientific Paper]()** - Scientific paper about FlatCityBuf
+- **[MSc thesis at TU Delft](https://resolver.tudelft.nl/uuid:6727c979-5e46-4fe0-9349-a7803e825d02)** - FlatCityBuf was developed by @hideba for his MSc thesis in Geomatics, read all the details!
 
 ---
 
