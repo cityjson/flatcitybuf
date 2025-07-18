@@ -7,12 +7,8 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
-# [build]
-# target = "wasm32-unknown-unknown"
-
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-static-btree = { path = "../static-btree" }
 bytes = { workspace = true }
 fcb_core = { path = "../fcb_core", features = ["http"] }
 getrandom = { workspace = true, features = ["wasm_js"] }
@@ -37,7 +33,6 @@ cjseq = { workspace = true }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-static-btree = { path = "../static-btree" }
 bytes = { workspace = true }
 fcb_core = { workspace = true, features = ["http"] }
 getrandom = { workspace = true, features = ["wasm_js"] }

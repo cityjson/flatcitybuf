@@ -72,19 +72,6 @@ name = "read_benches"
 path = "benches/read_profile.rs"
 
 
-[[bin]]
-name = "read_cj"
-path = "src/bin/read_cj.rs"
-
-[[bin]]
-name = "read_attr_stream"
-path = "src/bin/read_attr_stream.rs"
-
-[[bin]]
-name = "read_attr"
-path = "src/bin/read_attr.rs"
-
-
 [[bench]]
 name = "read"
 harness = false
