@@ -1,8 +1,4 @@
-[package]
-name = "flatcitybuf"
-version = "0.1.0"
-edition = "2021"
-publish = false
+
 
 [workspace]
 members = ["cli", "fcb_core", "wasm"]
@@ -57,7 +53,6 @@ console_log = "0.2"
 bson = "2.13.0"
 serde_cbor = "0.10"
 
-[dependencies]
 
 [profile.release]
 debug = 1
