@@ -97,7 +97,6 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         let assumed_header_size = 2024;
         let min_req_size = assumed_header_size + prefetch_index_bytes;
         client.set_min_req_size(min_req_size);
-        debug!("fetching header. min_req_size: {min_req_size} (assumed_header_size: {assumed_header_size}, prefetched_index_bytes: {prefetch_index_bytes})");
         let mut read_bytes = 0;
         let bytes = client.get_range(read_bytes, MAGIC_BYTES_SIZE).await?; // to get magic bytes
         if !check_magic_bytes(bytes) {
@@ -600,14 +599,9 @@ impl FeatureBatch {
 
             let wasted_bytes = search_result_item.range.start() - prev_end;
             if wasted_bytes < combine_request_threshold {
-                if wasted_bytes == 0 {
-                    trace!("adjacent feature");
-                } else {
-                    trace!("wasting {wasted_bytes} to avoid an extra request");
-                }
                 latest_batch.push_back(search_result_item.range)
             } else {
-                trace!("creating a new request for batch rather than wasting {wasted_bytes} bytes");
+                debug!("creating a new request for batch rather than wasting {wasted_bytes} bytes");
                 let mut new_batch = VecDeque::new();
                 new_batch.push_back(search_result_item.range);
                 batched_ranges.push(new_batch);

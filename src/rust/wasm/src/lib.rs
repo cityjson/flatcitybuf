@@ -112,7 +112,6 @@ mod wasm {
             let assumed_header_size = 4096;
             let min_req_size = assumed_header_size + prefetch_index_bytes;
             client.set_min_req_size(min_req_size);
-            debug!("fetching header. min_req_size: {min_req_size} (assumed_header_size: {assumed_header_size}, prefetched_index_bytes: {prefetch_index_bytes})");
             let mut read_bytes = 0;
             let bytes = client
                 .get_range(read_bytes, MAGIC_BYTES_SIZE)
@@ -151,7 +150,6 @@ mod wasm {
             // verify flatbuffer
             let header = size_prefixed_root_as_header(&header_buf)
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            debug!("completed: opening http reader");
             Ok(HttpFcbReader {
                 client,
                 fbs: FcbBuffer {
@@ -164,14 +162,8 @@ mod wasm {
         #[wasm_bindgen]
         pub fn cityjson(&self) -> Result<JsValue, JsValue> {
             let header = self.fbs.header();
-            info!("header in the function: {:?}", to_cj_metadata(&header));
-            info!(
-                "attribute index in the function: {:?}",
-                header.attribute_index()
-            );
             let cj = to_cj_metadata(&header).map_err(|e| JsValue::from_str(&e.to_string()))?;
             let jsval = to_value(&cj).map_err(|e| JsValue::from_str(&e.to_string()))?;
-            info!("jsval: {:?}", jsval);
             Ok(jsval)
         }
 
@@ -340,18 +332,14 @@ mod wasm {
                     combine_request_threshold,
                 )
                 .map_err(|e| JsValue::from_str(&format!("failed to add index: {:?}", e)))?;
-                info!("before current index begin: {}", current_index_begin);
                 current_index_begin += attr_info.length() as usize;
-                info!("after current index begin: {}", current_index_begin);
             }
-            info!("current index begin: {}", current_index_begin);
             // self.client.set_min_req_size(combine_request_threshold);
             let result = http_multi_index
                 .query(&mut self.client, &query.conditions)
                 .await
                 .map_err(|e| JsValue::from_str(&format!("failed to query index: {:?}", e)))?;
 
-            info!("result: {:?}", result);
             let count = result.len();
 
             let http_ranges: Vec<HttpRange> = result
@@ -392,11 +380,7 @@ mod wasm {
             if let Some(col) = columns.iter().find(|col| col.index() == attr_info.index()) {
                 // TODO: now it assuming to add all indices to the multi_index. However, we should only add the indices that are used in the query. To do that, we need to change the implementation of StreamMultiIndex. Current StreamMultiIndex's `add_index` method assumes that all indices are added to the multi_index. We'll change it to take Range<usize> as an argument.
                 let index_begin = index_begin;
-                info!(
-                    "tring to add index for column: {:?}, {:?}",
-                    col.name(),
-                    col.type_()
-                );
+
                 match col.type_() {
                     ColumnType::Int => {
                         let index = HttpIndex::<i32>::new(
@@ -527,7 +511,6 @@ mod wasm {
                         )))
                     }
                 }
-                info!("Added index for column: {:?}", col.name());
             }
             Ok(())
         }
