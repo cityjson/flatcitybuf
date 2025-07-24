@@ -10,7 +10,7 @@ mod wasm {
     use fcb_core::{size_prefixed_root_as_header, Header, Operator};
     use js_sys::Array;
     use log::Level;
-    use log::{debug, info, trace};
+    use log::trace;
     use serde_wasm_bindgen::to_value;
     use wasm_bindgen::prelude::*;
 
