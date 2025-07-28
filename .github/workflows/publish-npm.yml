@@ -1,0 +1,66 @@
+name: Publish NPM Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "actions[bot]@github.com"
+
+      - name: Bump version
+        run: |
+          cd src/ts
+          npm version ${{ github.event.inputs.version_bump }} --no-git-tag-version
+
+      - name: Build WASM
+        run: |
+          cd src/rust/wasm
+          wasm-pack build --target web --out-dir ../../ts
+
+      - name: Commit version bump
+        run: |
+          git add .
+          git commit -m "chore: bump npm version (${{ github.event.inputs.version_bump }})"
+          git push
+
+      - name: Publish to NPM
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd src/ts
+          npm publish --access public

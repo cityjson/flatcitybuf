@@ -1,0 +1,54 @@
+name: Publish Crate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install cargo-workspaces
+        run: cargo install cargo-workspaces
+
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "actions[bot]@github.com"
+
+      - name: Bump version
+        run: |
+          cd src/rust
+          cargo workspaces version ${{ github.event.inputs.version_bump }} --no-git-commit --yes
+
+      - name: Commit version bump
+        run: |
+          git add .
+          git commit -m "chore: bump crate version (${{ github.event.inputs.version_bump }})"
+          git push
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cd src/rust
+          cargo workspaces publish --from-git --yes
