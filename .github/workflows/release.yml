@@ -1,0 +1,79 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from Cargo.toml
+        id: extract_version
+        run: |
+          VERSION=$(grep "^version" src/rust/fcb_core/Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git ls-remote --tags origin | grep -q "refs/tags/v${{ steps.extract_version.outputs.VERSION }}"; then
+            echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
+          else
+            echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate release notes
+        if: steps.check_tag.outputs.TAG_EXISTS == 'false'
+        id: release_notes
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          # Generate changelog
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "## What's Changed" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "Initial release" >> $GITHUB_OUTPUT
+          else
+            # Get commit messages since last tag
+            git log $LATEST_TAG..HEAD --pretty=format:"- %s" >> $GITHUB_OUTPUT
+          fi
+
+          echo "" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### Crate Version: ${{ steps.extract_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+
+          # Check npm version
+          NPM_VERSION=$(grep "\"version\"" src/ts/package.json | cut -d'"' -f4)
+          echo "### NPM Version: $NPM_VERSION" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ steps.extract_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        if: steps.check_tag.outputs.TAG_EXISTS == 'false'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.extract_version.outputs.VERSION }}" -m "Release v${{ steps.extract_version.outputs.VERSION }}"
+          git push origin "v${{ steps.extract_version.outputs.VERSION }}"
+
+      - name: Create GitHub Release
+        if: steps.check_tag.outputs.TAG_EXISTS == 'false'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.extract_version.outputs.VERSION }}
+          release_name: v${{ steps.extract_version.outputs.VERSION }}
+          body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
+          draft: false
+          prerelease: false
