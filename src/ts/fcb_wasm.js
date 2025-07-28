@@ -258,11 +258,11 @@ export function cjToObj(city_json_js) {
 }
 
 function __wbg_adapter_52(arg0, arg1, arg2) {
-    wasm.closure327_externref_shim(arg0, arg1, arg2);
+    wasm.closure326_externref_shim(arg0, arg1, arg2);
 }
 
 function __wbg_adapter_188(arg0, arg1, arg2, arg3) {
-    wasm.closure358_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure357_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const AsyncFeatureIterFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -960,8 +960,8 @@ function __wbg_get_imports() {
         const ret = false;
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper1228 = function(arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 328, __wbg_adapter_52);
+    imports.wbg.__wbindgen_closure_wrapper1223 = function(arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 327, __wbg_adapter_52);
         return ret;
     };
     imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {
