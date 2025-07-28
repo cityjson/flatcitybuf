@@ -46,7 +46,8 @@ jobs:
       - name: Build WASM
         run: |
           cd src/rust/wasm
-          wasm-pack build --target web --out-dir ../../ts
+          wasm-pack build --target web --no-pack
+          cp -r ./pkg/* ../../ts/
 
       - name: Update package.json with custom name and bump version
         run: |
