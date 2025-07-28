@@ -56,7 +56,7 @@ jobs:
           const fs = require('fs');
           const genPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const customPkg = {
-              \"name\": \"@cityjson/flatcitybuf\",
+              \"name\": \"@cityjson\/flatcitybuf\",
               \"type\": \"module\",
               \"version\": genPkg.version,
               \"description\": \"FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.\",
