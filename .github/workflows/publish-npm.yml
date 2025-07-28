@@ -58,7 +58,7 @@ jobs:
           const customPkg = {
               \"name\": \"@cityjson\/flatcitybuf\",
               \"type\": \"module\",
-              \"version\": genPkg.version,
+              \"version\": \"0.1.2\",
               \"description\": \"FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.\",
               \"author\": {
                 \"name\": \"Hidemichi Baba\",
@@ -80,8 +80,10 @@ jobs:
                 \"geospatial\",
                 \"3d-city-models\"
               ],
-              \"files\": [
-                genPkg.files
+              \"files\": genPkg.files || [
+                \"fcb_wasm_bg.wasm\",
+                \"fcb_wasm.js\",
+                \"fcb_wasm.d.ts\"
               ],
               \"main\": genPkg.main,
               \"types\": genPkg.types,
