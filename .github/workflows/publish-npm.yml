@@ -81,13 +81,11 @@ jobs:
                 \"3d-city-models\"
               ],
               \"files\": [
-                \"fcb_wasm_bg.wasm\",
-                \"fcb_wasm.js\",
-                \"fcb_wasm.d.ts\"
+                genPkg.files
               ],
-              \"main\": \"fcb_wasm.js\",
-              \"types\": \"fcb_wasm.d.ts\",
-              \"sideEffects\": [
+              \"main\": genPkg.main,
+              \"types\": genPkg.types,
+              \"sideEffects\": genPkg.sideEffects || [
                 \"./snippets/*\"
               ]
             };
