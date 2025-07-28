@@ -53,6 +53,52 @@ jobs:
           cd src/rust/wasm
           wasm-pack build --target web --out-dir ../../ts
 
+      - name: Update package.json with custom name
+        run: |
+          cd src/ts
+          # Update the package name and merge with existing package.json
+          node -e "
+          const fs = require('fs');
+          const genPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const customPkg = {
+              "name": "@cityjson/flatcitybuf",
+              "type": "module",
+              "version": "0.1.2",
+              "description": "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.",
+              "author": {
+                "name": "Hidemichi Baba",
+                "email": "baba.papa1120.ba@gmail.com"
+              },
+              "license": "MIT",
+              "repository": {
+                "type": "git",
+                "url": "https://github.com/HideBa/flatcitybuf"
+              },
+              "homepage": "https://github.com/HideBa/flatcitybuf",
+              "bugs": {
+                "url": "https://github.com/HideBa/flatcitybuf/issues"
+              },
+              "keywords": [
+                "cityjson",
+                "flatbuffers",
+                "wasm",
+                "geospatial",
+                "3d-city-models"
+              ],
+              "files": [
+                "fcb_wasm_bg.wasm",
+                "fcb_wasm.js",
+                "fcb_wasm.d.ts"
+              ],
+              "main": "fcb_wasm.js",
+              "types": "fcb_wasm.d.ts",
+              "sideEffects": [
+                "./snippets/*"
+              ]
+            };
+          fs.writeFileSync('package.json', JSON.stringify(customPkg, null, 2));
+          "
+
       - name: Commit version bump
         run: |
           git add .
