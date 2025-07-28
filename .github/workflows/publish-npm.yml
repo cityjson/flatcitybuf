@@ -61,39 +61,39 @@ jobs:
           const fs = require('fs');
           const genPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const customPkg = {
-              "name": "@cityjson/flatcitybuf",
-              "type": "module",
-              "version": "0.1.2",
-              "description": "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.",
-              "author": {
-                "name": "Hidemichi Baba",
-                "email": "baba.papa1120.ba@gmail.com"
+              \"name\": \"@cityjson/flatcitybuf\",
+              \"type\": \"module\",
+              \"version\": \"0.1.2\",
+              \"description\": \"FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.\",
+              \"author\": {
+                \"name\": \"Hidemichi Baba\",
+                \"email\": \"baba.papa1120.ba@gmail.com\"
               },
-              "license": "MIT",
-              "repository": {
-                "type": "git",
-                "url": "https://github.com/HideBa/flatcitybuf"
+              \"license\": \"MIT\",
+              \"repository\": {
+                \"type\": \"git\",
+                \"url\": \"https://github.com/cityjson/flatcitybuf\"
               },
-              "homepage": "https://github.com/HideBa/flatcitybuf",
-              "bugs": {
-                "url": "https://github.com/HideBa/flatcitybuf/issues"
+              \"homepage\": \"https://github.com/cityjson/flatcitybuf\",
+              \"bugs\": {
+                \"url\": \"https://github.com/cityjson/flatcitybuf/issues\"
               },
-              "keywords": [
-                "cityjson",
-                "flatbuffers",
-                "wasm",
-                "geospatial",
-                "3d-city-models"
+              \"keywords\": [
+                \"cityjson\",
+                \"flatbuffers\",
+                \"wasm\",
+                \"geospatial\",
+                \"3d-city-models\"
               ],
-              "files": [
-                "fcb_wasm_bg.wasm",
-                "fcb_wasm.js",
-                "fcb_wasm.d.ts"
+              \"files\": [
+                \"fcb_wasm_bg.wasm\",
+                \"fcb_wasm.js\",
+                \"fcb_wasm.d.ts\"
               ],
-              "main": "fcb_wasm.js",
-              "types": "fcb_wasm.d.ts",
-              "sideEffects": [
-                "./snippets/*"
+              \"main\": \"fcb_wasm.js\",
+              \"types\": \"fcb_wasm.d.ts\",
+              \"sideEffects\": [
+                \"./snippets/*\"
               ]
             };
           fs.writeFileSync('package.json', JSON.stringify(customPkg, null, 2));
