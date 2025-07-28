@@ -43,27 +43,22 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "actions[bot]@github.com"
 
-      - name: Bump version
-        run: |
-          cd src/ts
-          npm version ${{ github.event.inputs.version_bump }} --no-git-tag-version
-
       - name: Build WASM
         run: |
           cd src/rust/wasm
           wasm-pack build --target web --out-dir ../../ts
 
-      - name: Update package.json with custom name
+      - name: Update package.json with custom name and bump version
         run: |
           cd src/ts
-          # Update the package name and merge with existing package.json
+          # First, update package.json with custom metadata
           node -e "
           const fs = require('fs');
           const genPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const customPkg = {
               \"name\": \"@cityjson/flatcitybuf\",
               \"type\": \"module\",
-              \"version\": \"0.1.2\",
+              \"version\": genPkg.version,
               \"description\": \"FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.\",
               \"author\": {
                 \"name\": \"Hidemichi Baba\",
@@ -98,6 +93,8 @@ jobs:
             };
           fs.writeFileSync('package.json', JSON.stringify(customPkg, null, 2));
           "
+          # Then bump the version
+          npm version ${{ github.event.inputs.version_bump }} --no-git-tag-version
 
       - name: Commit version bump
         run: |
