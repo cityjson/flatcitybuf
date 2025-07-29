@@ -5,9 +5,8 @@ use cjseq::{
     TextureValues as CjTextureValues,
 };
 
-use crate::{
-    fb::{GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType, TextureMapping},
-    Column,
+use crate::fb::{
+    Column, GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType, TextureMapping,
 };
 use std::collections::HashMap;
 

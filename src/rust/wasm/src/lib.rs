@@ -3,14 +3,14 @@ mod gloo_client;
 #[cfg(target_arch = "wasm32")]
 mod util;
 
+#[cfg(target_arch = "wasm32")]
 mod wasm {
-    #[cfg(target_arch = "wasm32")]
     use crate::gloo_client::WasmHttpClient;
 
     use fcb_core::{size_prefixed_root_as_header, Header, Operator};
     use js_sys::Array;
+
     use log::Level;
-    use log::{debug, info, trace};
     use serde_wasm_bindgen::to_value;
     use wasm_bindgen::prelude::*;
 
@@ -18,7 +18,7 @@ mod wasm {
 
     use byteorder::{ByteOrder, LittleEndian};
     use bytes::{BufMut, Bytes, BytesMut};
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    use chrono::{DateTime, Utc};
     use fcb_core::city_buffer::FcbBuffer;
     use fcb_core::{
         build_query, check_magic_bytes,
@@ -74,13 +74,12 @@ mod wasm {
         pub async fn new(url: String) -> Result<HttpFcbReader, JsValue> {
             // Only initialize the logger once
             if !LOGGER_INITIALIZED.load(Ordering::SeqCst)
-                && console_log::init_with_level(Level::Trace).is_ok()
+                && console_log::init_with_level(Level::Info).is_ok()
             {
                 LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
                 log::info!("Logger initialized successfully.");
             }
 
-            trace!("starting: opening http reader, reading header");
             let client = WasmHttpClient::new(&url);
 
             Self::_open(client).await
@@ -240,7 +239,6 @@ mod wasm {
             mut self,
             query: &WasmSpatialQuery,
         ) -> Result<AsyncFeatureIter, JsValue> {
-            trace!("starting: select_spatial, traversing index");
             // Read R-Tree index and build filter for features within bbox
             let header = self.fbs.header();
             if header.index_node_size() == 0 || header.features_count() == 0 {
@@ -278,7 +276,6 @@ mod wasm {
                 .await
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
             let selection = FeatureSelection::SelectSpatial(SelectSpatial { feature_batches });
-            trace!("completed: select_spatial");
             Ok(AsyncFeatureIter {
                 client: self.client,
                 fbs: self.fbs,
@@ -292,7 +289,6 @@ mod wasm {
             mut self,
             query: &WasmAttrQuery,
         ) -> Result<AsyncFeatureIter, JsValue> {
-            trace!("starting: select_attr_query via http reader");
             let header = self.fbs.header();
             let header_len = self.header_len();
             // Assume the header provides rtree and attribute index sizes.
@@ -354,10 +350,6 @@ mod wasm {
                 })
                 .collect();
 
-            trace!(
-                "completed: select_attr_query via http reader, matched features: {}",
-                count
-            );
             Ok(AsyncFeatureIter {
                 client: self.client,
                 fbs: self.fbs,
@@ -693,16 +685,8 @@ mod wasm {
 
                 let wasted_bytes = search_result_item.range.start() - prev_end;
                 if wasted_bytes < combine_request_threshold {
-                    if wasted_bytes == 0 {
-                        trace!("adjacent feature");
-                    } else {
-                        trace!("wasting {wasted_bytes} to avoid an extra request");
-                    }
                     latest_batch.push_back(search_result_item.range)
                 } else {
-                    trace!(
-                        "creating a new request for batch rather than wasting {wasted_bytes} bytes"
-                    );
                     let mut new_batch = VecDeque::new();
                     new_batch.push_back(search_result_item.range);
                     batched_ranges.push(new_batch);
@@ -1070,8 +1054,8 @@ mod wasm {
                     let millis = date.get_time();
                     let secs = (millis / 1000.0) as i64;
                     let nanos = ((millis % 1000.0) * 1_000_000.0) as u32;
-                    let ndt = NaiveDateTime::from_timestamp(secs, nanos);
-                    let dt = DateTime::<Utc>::from_utc(ndt, Utc);
+                    let dt = DateTime::<Utc>::from_timestamp(secs, nanos)
+                        .expect("invalid datetime value");
                     KeyType::DateTime(dt)
                 } else if let Some(n) = value_js.as_f64() {
                     // All JS numbers are f64.

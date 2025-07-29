@@ -17,8 +17,6 @@ impl HttpFcbReader<MockHttpRangeClient> {
         HttpFcbReader<MockHttpRangeClient>,
         Arc<RwLock<RequestStats>>,
     )> {
-        trace!("starting: opening http reader, reading header");
-
         let stats = Arc::new(RwLock::new(RequestStats::new()));
         let http_client = MockHttpRangeClient::new(path, stats.clone());
         let client = http_range_client::AsyncBufferedHttpRangeClient::with(http_client, path);

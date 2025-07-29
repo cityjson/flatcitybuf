@@ -100,6 +100,7 @@ async fn read_http_node_items<K: Key, T: AsyncHttpRangeClient>(
 }
 
 #[cfg(feature = "http")]
+#[allow(dead_code)]
 async fn read_http_payload_data<T: AsyncHttpRangeClient>(
     client: &mut AsyncBufferedHttpRangeClient<T>,
     offset: usize,
@@ -197,6 +198,7 @@ pub async fn prefetch_payload<T: AsyncHttpRangeClient>(
 
 /// Read a payload entry from the payload cache if available, otherwise fetch it from HTTP
 #[cfg(feature = "http")]
+#[allow(dead_code)]
 async fn read_payload_entry<T: AsyncHttpRangeClient>(
     client: &mut AsyncBufferedHttpRangeClient<T>,
     offset: usize,
@@ -1414,7 +1416,6 @@ impl<K: Key> Stree<K> {
                 }
 
                 Err(index) => {
-                    let old_node_index = node_index;
                     // No exact match, determine appropriate child based on comparison
                     if index == 0 {
                         // Key is smaller than all keys in this node
@@ -1584,11 +1585,7 @@ impl<K: Key> Stree<K> {
         let payload_cache = prefetch_payload(client, payload_data_start, prefetch_size).await?;
 
         debug!("http_stream_find_range - index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, lower: {lower:?}, upper: {upper:?}");
-
-        let Range {
-            start: leaf_nodes_offset,
-            end: num_nodes,
-        } = level_bounds
+        let _ = level_bounds
             .first()
             .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
 
@@ -1731,7 +1728,6 @@ mod tests {
     use super::*;
     use crate::static_btree::error::Result;
     use crate::static_btree::key::FixedStringKey;
-    use crate::static_btree::key::Key;
 
     #[test]
     fn test_compute_payload_prefetch_size() -> Result<()> {
@@ -2414,7 +2410,7 @@ mod tests {
             NodeItem::new(7, 120),
         ];
         let tree = Stree::build(&nodes, 3)?;
-        let payload_size = tree.payload_data.len();
+        let _payload_size = tree.payload_data.len();
         let mut buf = Vec::new();
         tree.stream_write(&mut buf)?;
         let mut cursor = std::io::Cursor::new(&buf);

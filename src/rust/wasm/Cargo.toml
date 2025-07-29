@@ -1,6 +1,6 @@
 [package]
 name = "fcb_wasm"
-version = "0.1.0"
+version = "0.1.3"
 edition = "2021"
 
 
@@ -24,7 +24,7 @@ serde = { workspace = true, features = ["derive"] }
 clap = { workspace = true }
 tracing = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
-async-trait = { workspace = true, default-features = false }
+async-trait = { workspace = true }
 console_error_panic_hook = { workspace = true }
 console_log = { workspace = true }
 log = { workspace = true }
@@ -48,7 +48,7 @@ serde = { workspace = true, features = ["derive"] }
 clap = { workspace = true }
 tracing = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
-async-trait = { workspace = true, default-features = false }
+async-trait = { workspace = true }
 console_error_panic_hook = { workspace = true }
 console_log = { workspace = true }
 log = { workspace = true }

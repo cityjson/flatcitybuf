@@ -10,8 +10,9 @@ use crate::error::{Error, Result};
 
 use chrono::{DateTime, Utc};
 
+use crate::fb::Column;
 use crate::fb::ColumnType;
-use crate::{AttributeIndex, Column, FeatureOffset};
+use crate::{AttributeIndex, FeatureOffset};
 
 use super::{
     reader_trait::{NotSeekable, Seekable},
@@ -142,7 +143,6 @@ pub fn add_indices_to_multi_memory_index<R: Read>(
 pub fn add_indices_to_multi_stream_index<R: Read + Seek>(
     multi_index: &mut StreamMultiIndex,
     columns: &[Column],
-    query: &AttrQuery, // TODO: remove this
     attr_info: &AttributeIndex,
     index_begin: usize,
 ) -> Result<()> {
@@ -370,7 +370,6 @@ impl<R: Read + Seek> FcbReader<R> {
             add_indices_to_multi_stream_index::<R>(
                 &mut multi_index,
                 &columns,
-                &query,
                 attr_info,
                 index_range.start,
             )?;

@@ -1,6 +1,6 @@
 [package]
 name = "fcb_core"
-version = "0.1.1"
+version = "0.1.3"
 edition = "2021"
 authors = ["Hidemichi Baba <baba.papa1120.ba@gmail.com>"]
 license = "MIT"
@@ -63,15 +63,6 @@ path = "src/bin/read.rs"
 name = "stats"
 path = "src/bin/stats.rs"
 
-[[bin]]
-name = "read_profile"
-path = "benches/read_profile.rs"
-
-[[bin]]
-name = "read_benches"
-path = "benches/read_profile.rs"
-
-
 [[bench]]
 name = "read"
 harness = false
@@ -100,8 +91,3 @@ env_logger = { workspace = true }
 
 # --performance comparison
 sysinfo = "0.35.0"
-
-
-[profile.release]
-debug = 1
-strip = "debuginfo"

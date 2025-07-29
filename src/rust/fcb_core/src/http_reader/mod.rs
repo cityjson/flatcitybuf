@@ -62,7 +62,6 @@ pub struct AsyncFeatureIter<T: AsyncHttpRangeClient + Send + Sync> {
 
 impl HttpFcbReader<reqwest::Client> {
     pub async fn open(url: &str) -> Result<HttpFcbReader<reqwest::Client>> {
-        trace!("starting: opening http reader, reading header");
         let client = BufferedHttpRangeClient::new(url);
         Self::_open(client).await
     }
@@ -121,7 +120,6 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         // verify flatbuffer
         let _header = size_prefixed_root_as_header(&header_buf)?;
 
-        trace!("completed: opening http reader");
         Ok(HttpFcbReader {
             client,
             fbs: FcbBuffer {
@@ -191,7 +189,6 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
     }
     /// Select features within a bounding box.
     pub async fn select_query(mut self, query: Query) -> Result<AsyncFeatureIter<T>> {
-        trace!("starting: select_bbox, traversing index");
         // Read R-Tree index and build filter for features within bbox
         let header = self.fbs.header();
         if header.index_node_size() == 0 || header.features_count() == 0 {
@@ -222,7 +219,6 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
         let count = list.len();
         let feature_batches = FeatureBatch::make_batches(list, combine_request_threshold).await?;
         let selection = FeatureSelection::SelectBbox(SelectBbox { feature_batches });
-        trace!("completed: select_bbox");
         Ok(AsyncFeatureIter {
             client: self.client,
             fbs: self.fbs,
@@ -234,7 +230,6 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
     /// This method uses the attribute index section to find matching feature offsets.
     /// It then groups (batches) the remote feature ranges in order to reduce IO overhead.
     pub async fn select_attr_query(mut self, query: &AttrQuery) -> Result<AsyncFeatureIter<T>> {
-        trace!("starting: select_attr_query via http reader");
         let header = self.fbs.header();
         let header_len = self.header_len();
         // Assume the header provides rtree and attribute index sizes.
@@ -290,11 +285,6 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                 AttrHttpRange::RangeFrom(range) => HttpRange::RangeFrom(range.start..),
             })
             .collect();
-
-        trace!(
-            "completed: select_attr_query via http reader, matched features: {}",
-            count
-        );
 
         println!("http_ranges: {:?}", http_ranges);
         Ok(AsyncFeatureIter {

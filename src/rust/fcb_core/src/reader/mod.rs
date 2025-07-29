@@ -8,9 +8,7 @@ use deserializer::to_cj_feature;
 use crate::error::Error;
 use crate::fb::{size_prefixed_root_as_city_feature, CityFeature};
 use crate::packed_rtree::{self, PackedRTree, Query};
-use crate::{
-    check_magic_bytes, size_prefixed_root_as_header, Column, Header, HEADER_MAX_BUFFER_SIZE,
-};
+use crate::{check_magic_bytes, size_prefixed_root_as_header, Header, HEADER_MAX_BUFFER_SIZE};
 use fallible_streaming_iterator::FallibleStreamingIterator;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 mod attr_query;
@@ -18,7 +16,7 @@ pub mod geom_decoder;
 pub use attr_query::*;
 use std::marker::PhantomData;
 mod meta;
-pub use meta::*;
+pub use meta::{Column as MetaColumn, ColumnType as MetaColumnType, Meta};
 pub struct FcbReader<R> {
     reader: R,
     verify: bool,
@@ -249,7 +247,7 @@ impl<R: Read> FcbReader<R> {
 
     pub fn root_attr_schema(
         &self,
-    ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<Column>>> {
+    ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<crate::fb::Column>>> {
         self.buffer.header().columns()
     }
 
@@ -497,7 +495,7 @@ impl<R: Read, S> FeatureIter<R, S> {
 
     pub fn root_attr_schema(
         &self,
-    ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<Column>>> {
+    ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<crate::fb::Column>>> {
         self.buffer.header().columns()
     }
 
