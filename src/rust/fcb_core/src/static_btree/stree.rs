@@ -100,6 +100,7 @@ async fn read_http_node_items<K: Key, T: AsyncHttpRangeClient>(
 }
 
 #[cfg(feature = "http")]
+#[allow(dead_code)]
 async fn read_http_payload_data<T: AsyncHttpRangeClient>(
     client: &mut AsyncBufferedHttpRangeClient<T>,
     offset: usize,
@@ -197,6 +198,7 @@ pub async fn prefetch_payload<T: AsyncHttpRangeClient>(
 
 /// Read a payload entry from the payload cache if available, otherwise fetch it from HTTP
 #[cfg(feature = "http")]
+#[allow(dead_code)]
 async fn read_payload_entry<T: AsyncHttpRangeClient>(
     client: &mut AsyncBufferedHttpRangeClient<T>,
     offset: usize,
@@ -1726,7 +1728,6 @@ mod tests {
     use super::*;
     use crate::static_btree::error::Result;
     use crate::static_btree::key::FixedStringKey;
-    use crate::static_btree::key::Key;
 
     #[test]
     fn test_compute_payload_prefetch_size() -> Result<()> {
@@ -2409,7 +2410,7 @@ mod tests {
             NodeItem::new(7, 120),
         ];
         let tree = Stree::build(&nodes, 3)?;
-        let payload_size = tree.payload_data.len();
+        let _payload_size = tree.payload_data.len();
         let mut buf = Vec::new();
         tree.stream_write(&mut buf)?;
         let mut cursor = std::io::Cursor::new(&buf);

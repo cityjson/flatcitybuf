@@ -1450,7 +1450,7 @@ mod tests {
         let dist_to_node2: f64 = (node2_centroid.0 - 4.0) * (node2_centroid.0 - 4.0)
             + (node2_centroid.1 - 4.0) * (node2_centroid.1 - 4.0);
 
-        let expected_closest_distance = dist_to_node1.min(dist_to_node2);
+        let _expected_closest_distance = dist_to_node1.min(dist_to_node2);
 
         // Get the result
         let results = tree.search(Query::PointNearest(4.0, 4.0))?;

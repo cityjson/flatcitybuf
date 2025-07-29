@@ -114,15 +114,19 @@ fn get_writer(output: &str) -> Result<Box<dyn Write>, Error> {
     }
 }
 
-fn serialize(
-    input: &str,
-    output: &str,
+struct SerializeOptions {
     attr_index: Option<String>,
     index_all_attributes: Option<bool>,
     spatial_index: Option<bool>,
     attr_branching_factor: Option<u16>,
     bbox: Option<String>,
     ge: Option<bool>,
+}
+
+fn serialize(
+    input: &str,
+    output: &str,
+    options: SerializeOptions,
 ) -> Result<(), Error> {
     let reader = get_reader(input)?;
     let writer = get_writer(output)?;
@@ -131,7 +135,7 @@ fn serialize(
     let writer = BufWriter::new(writer);
 
     // Parse the bbox if provided
-    let bbox_parsed = if let Some(bbox_str) = bbox {
+    let bbox_parsed = if let Some(bbox_str) = options.bbox {
         Some(parse_bbox(&bbox_str).map_err(|e| {
             Error::IoError(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -210,7 +214,7 @@ fn serialize(
         }
     };
     let attr_index_vec: Option<Vec<(String, Option<u16>)>> =
-        if index_all_attributes.unwrap_or(false) && attr_schema.is_some() {
+        if options.index_all_attributes.unwrap_or(false) && attr_schema.is_some() {
             // create a vec with all attribute names and branching factor given
             Some(
                 attr_schema
@@ -220,23 +224,23 @@ fn serialize(
                     .map(|attr| {
                         (
                             attr.0.to_string(),
-                            Some(attr_branching_factor.unwrap_or(256)),
+                            Some(options.attr_branching_factor.unwrap_or(256)),
                         )
                     })
                     .collect::<Vec<(String, Option<u16>)>>(),
             )
         } else {
-            attr_index.map(|s| {
+            options.attr_index.map(|s| {
                 s.split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
-                    .map(|s| (s, attr_branching_factor))
+                    .map(|s| (s, options.attr_branching_factor))
                     .collect::<Vec<(String, Option<u16>)>>()
             })
         };
 
     // Calculate geospatial extent if requested
-    let geo_extent = if ge.unwrap_or(true) {
+    let geo_extent = if options.ge.unwrap_or(true) {
         Some(calculate_geospatial_extent(
             &filtered_features,
             &cj.transform,
@@ -246,9 +250,9 @@ fn serialize(
     };
 
     let header_options = HeaderWriterOptions {
-        write_index: spatial_index.unwrap_or(true),
+        write_index: options.spatial_index.unwrap_or(true),
         feature_count: filtered_features.len() as u64,
-        index_node_size: attr_branching_factor.unwrap_or(16),
+        index_node_size: options.attr_branching_factor.unwrap_or(16),
         attribute_indices: attr_index_vec,
         geographical_extent: geo_extent,
     };
@@ -523,12 +527,14 @@ fn main() -> Result<(), Error> {
         } => serialize(
             &input,
             &output,
-            attr_index,
-            index_all_attributes,
-            spatial_index,
-            attr_branching_factor,
-            bbox,
-            ge,
+            SerializeOptions {
+                attr_index,
+                index_all_attributes,
+                spatial_index,
+                attr_branching_factor,
+                bbox,
+                ge,
+            },
         ),
         Commands::Deser { input, output } => deserialize(&input, &output),
         Commands::Cbor { input, output } => encode_cbor(&input, &output),
