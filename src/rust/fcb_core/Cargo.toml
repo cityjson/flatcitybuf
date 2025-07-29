@@ -63,15 +63,6 @@ path = "src/bin/read.rs"
 name = "stats"
 path = "src/bin/stats.rs"
 
-[[bin]]
-name = "read_profile"
-path = "benches/read_profile.rs"
-
-[[bin]]
-name = "read_benches"
-path = "benches/read_profile.rs"
-
-
 [[bench]]
 name = "read"
 harness = false

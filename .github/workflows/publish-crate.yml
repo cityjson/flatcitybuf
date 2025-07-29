@@ -47,9 +47,23 @@ jobs:
           git commit -m "chore: bump crate version (${{ github.event.inputs.version_bump }})"
           git push
 
+      - name: Configure cargo for publishing
+        run: |
+          mkdir -p ~/.cargo
+          echo "[net]" >> ~/.cargo/config.toml
+          echo "git-fetch-with-cli = true" >> ~/.cargo/config.toml
+
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           cd src/rust
-          cargo workspaces publish --from-git --yes
+          # Publish fcb_core first since fcb_cli depends on it
+          cd fcb_core
+          cargo publish --allow-dirty
+          cd ..
+          # Wait a bit for crates.io to index the new version
+          sleep 30
+          # Now publish fcb_cli
+          cd cli
+          cargo publish --allow-dirty
