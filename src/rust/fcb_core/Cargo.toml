@@ -93,6 +93,3 @@ env_logger = { workspace = true }
 sysinfo = "0.35.0"
 
 
-[profile.release]
-debug = 1
-strip = "debuginfo"

@@ -1414,7 +1414,6 @@ impl<K: Key> Stree<K> {
                 }
 
                 Err(index) => {
-                    let old_node_index = node_index;
                     // No exact match, determine appropriate child based on comparison
                     if index == 0 {
                         // Key is smaller than all keys in this node
@@ -1584,11 +1583,7 @@ impl<K: Key> Stree<K> {
         let payload_cache = prefetch_payload(client, payload_data_start, prefetch_size).await?;
 
         debug!("http_stream_find_range - index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, lower: {lower:?}, upper: {upper:?}");
-
-        let Range {
-            start: leaf_nodes_offset,
-            end: num_nodes,
-        } = level_bounds
+        let _ = level_bounds
             .first()
             .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
 

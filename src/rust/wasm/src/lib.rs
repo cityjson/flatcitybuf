@@ -18,7 +18,7 @@ mod wasm {
 
     use byteorder::{ByteOrder, LittleEndian};
     use bytes::{BufMut, Bytes, BytesMut};
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    use chrono::{DateTime, Utc};
     use fcb_core::city_buffer::FcbBuffer;
     use fcb_core::{
         build_query, check_magic_bytes,
@@ -1054,8 +1054,8 @@ mod wasm {
                     let millis = date.get_time();
                     let secs = (millis / 1000.0) as i64;
                     let nanos = ((millis % 1000.0) * 1_000_000.0) as u32;
-                    let ndt = NaiveDateTime::from_timestamp(secs, nanos);
-                    let dt = DateTime::<Utc>::from_utc(ndt, Utc);
+                    let dt = DateTime::<Utc>::from_timestamp(secs, nanos)
+                        .expect("invalid datetime value");
                     KeyType::DateTime(dt)
                 } else if let Some(n) = value_js.as_f64() {
                     // All JS numbers are f64.

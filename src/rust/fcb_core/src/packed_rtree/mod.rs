@@ -39,12 +39,6 @@ pub struct NodeItem {
 }
 
 impl NodeItem {
-    #[deprecated(
-        note = "Use NodeItem::bounds instead if you're only using the node item for bounds checking"
-    )]
-    pub fn new(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> NodeItem {
-        Self::bounds(min_x, min_y, max_x, max_y)
-    }
     pub fn bounds(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> NodeItem {
         NodeItem {
             min_x,
@@ -549,7 +543,6 @@ impl PackedRTree {
             Query::PointIntersects(x, y) => {
                 // Point intersection query - find all bboxes that contain the point
                 // Create a point as a degenerate bbox
-                let point_bounds = NodeItem::bounds(x, y, x, y);
                 let mut results = Vec::new();
                 let mut queue = VecDeque::new();
                 queue.push_back((0, self.level_bounds.len() - 1));

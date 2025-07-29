@@ -131,7 +131,7 @@ impl<'a> FcbWriter<'a> {
         let scale_y = transform.scale[1];
         let translate_x = transform.translate[0];
         let translate_y = transform.translate[1];
-        NodeItem::new(
+        NodeItem::bounds(
             bbox.min_x * scale_x + translate_x,
             bbox.min_y * scale_y + translate_y,
             bbox.max_x * scale_x + translate_x,

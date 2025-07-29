@@ -5,14 +5,15 @@ use crate::fb::{
     SemanticObjectArgs, SemanticSurfaceType, Texture, TextureArgs, TextureType, Vec2, Vertex,
     WrapMode,
 };
+use crate::fb::{Column, ColumnArgs};
 use crate::fb::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
 use crate::geom_encoder::encode;
 use crate::{
-    AttributeIndex, Column, ColumnArgs, DoubleVertex, Extension, ExtensionArgs, GeometryInstance,
-    GeometryInstanceArgs, MaterialMapping, MaterialMappingArgs, TextureFormat, TextureMapping,
-    TextureMappingArgs, TransformationMatrix,
+    AttributeIndex, DoubleVertex, Extension, ExtensionArgs, GeometryInstance, GeometryInstanceArgs,
+    MaterialMapping, MaterialMappingArgs, TextureFormat, TextureMapping, TextureMappingArgs,
+    TransformationMatrix,
 };
 use cjseq::{
     Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON, CityJSONFeature,
@@ -468,7 +469,7 @@ pub(super) fn to_fcb_city_feature<'a>(
         .max()
         .unwrap_or(0) as f64;
 
-    let bbox = NodeItem::new(min_x, min_y, max_x, max_y);
+    let bbox = NodeItem::bounds(min_x, min_y, max_x, max_y);
     (
         CityFeature::create(
             fbb,

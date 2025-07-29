@@ -375,7 +375,7 @@ impl Key for bool {
 
     #[inline]
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
-        writer.write_all(&[*self as u8]).map_err(Error::from);
+        writer.write_all(&[*self as u8]).map_err(Error::from)?;
         Ok(Self::SERIALIZED_SIZE)
     }
 
@@ -409,9 +409,7 @@ impl Key for DateTime<Utc> {
     fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
         let secs = reader.read_i64::<LittleEndian>()?;
         let nanos = reader.read_u32::<LittleEndian>()?;
-        let ndt =
-            chrono::NaiveDateTime::from_timestamp_opt(secs, nanos).expect("invalid datetime value");
-        let dt = DateTime::<Utc>::from_utc(ndt, Utc);
+        let dt = DateTime::<Utc>::from_timestamp(secs, nanos).expect("invalid datetime value");
         Ok(dt)
     }
 
@@ -421,9 +419,7 @@ impl Key for DateTime<Utc> {
         array.copy_from_slice(&bytes[0..Self::SERIALIZED_SIZE]);
         let secs = i64::from_le_bytes(array[0..8].try_into().unwrap());
         let nanos = u32::from_le_bytes(array[8..12].try_into().unwrap());
-        let ndt =
-            chrono::NaiveDateTime::from_timestamp_opt(secs, nanos).expect("invalid datetime value");
-        let dt = DateTime::<Utc>::from_utc(ndt, Utc);
+        let dt = DateTime::<Utc>::from_timestamp(secs, nanos).expect("invalid datetime value");
         Ok(dt)
     }
 }
@@ -448,7 +444,7 @@ impl<const N: usize> Key for FixedStringKey<N> {
 
     #[inline]
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize> {
-        writer.write_all(&self.0).map_err(Error::from);
+        writer.write_all(&self.0).map_err(Error::from)?;
         Ok(Self::SERIALIZED_SIZE)
     }
 
