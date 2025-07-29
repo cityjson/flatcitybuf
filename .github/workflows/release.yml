@@ -9,6 +9,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GA_TOKEN }}
 
       - name: Extract version from Cargo.toml
         id: extract_version
