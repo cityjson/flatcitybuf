@@ -1,0 +1,22 @@
+[package]
+name = "fcb_api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fcb_core = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = "0.3"
+env_logger = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+futures = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
