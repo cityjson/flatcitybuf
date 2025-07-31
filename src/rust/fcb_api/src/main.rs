@@ -1,3 +1,5 @@
+mod openapi;
+
 use axum::{
     routing::get,
     Router,
