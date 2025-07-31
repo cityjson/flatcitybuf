@@ -18,5 +18,9 @@ anyhow = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 futures = { workspace = true }
 bytes = { workspace = true }
+http-range-client = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+openapi = { path = "src/openapi" }
+cjseq = { workspace = true }
 
 [dev-dependencies]
