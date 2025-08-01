@@ -28,6 +28,9 @@ jobs:
       contents: read
       packages: write
       id-token: write
+    defaults:
+      run:
+        working-directory: src/rust
 
     steps:
       - name: Checkout repository
@@ -58,7 +61,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./src/rust/fcb_api/Dockerfile
+          file: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

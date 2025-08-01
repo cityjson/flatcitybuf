@@ -1,0 +1,10 @@
+# FCB data files
+*.fcb
+
+# JSON files
+*.json
+*.jsonl
+
+# Binary data formats
+*.cbor
+*.bson
