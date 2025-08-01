@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.75-slim AS builder
+FROM rust:1.86-slim AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -12,13 +12,13 @@ WORKDIR /app
 RUN echo "=== Build context contents ===" && find . -type f -name "*.toml" -o -name "*.rs" | head -20
 
 # Copy workspace files from src/rust directory
-COPY Cargo.toml ./
-COPY . .
+COPY src/rust/Cargo.toml src/rust/Cargo.lock ./
+COPY src/rust ./
 
 # COPY . .
 RUN ls -la
 
-WORKDIR /app/src/rust
+
 
 # Build the fcb_api binary
 # RUN cargo build --release -p fcb_api
