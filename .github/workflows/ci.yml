@@ -37,5 +37,8 @@ jobs:
           workspaces: src/rust
           shared-key: "fcb-rust-ci"
 
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Check all
         run: make pre-commit
