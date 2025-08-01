@@ -69,7 +69,6 @@ fi
 # Post-processing: Setup proper module structure
 if [ -d "$OUTPUT_DIR" ]; then
     echo "Setting up module structure..."
-
     # Create a simple mod.rs to re-export models
     cat > "$OUTPUT_DIR/mod.rs" << 'MODEOF'
 // Re-export generated OpenAPI models
@@ -78,7 +77,6 @@ pub use self::models::*;
 // Include the generated modules
 pub mod models;
 MODEOF
-
     echo "Models generated successfully in $OUTPUT_DIR"
 else
     echo "Error: Output directory was not created"
