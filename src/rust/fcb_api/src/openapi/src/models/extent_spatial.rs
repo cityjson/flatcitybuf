@@ -43,4 +43,3 @@ impl Default for Crs {
         Self::HttpsColonSlashSlashWwwPeriodOpengisPeriodNetSlashDefSlashCrsSlashEpsgSlash0Slash7415
     }
 }
-

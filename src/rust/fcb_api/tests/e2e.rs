@@ -6,8 +6,7 @@ use axum::{
 };
 use serde_json::Value;
 use test_data::{
-    EXPECTED_COLLECTIONS, EXPECTED_COLLECTION_PAND, EXPECTED_CONFORMANCE, EXPECTED_ITEM_BY_ID,
-    EXPECTED_LANDING_PAGE,
+    EXPECTED_COLLECTIONS, EXPECTED_COLLECTION_PAND, EXPECTED_CONFORMANCE, EXPECTED_LANDING_PAGE,
 };
 use tower::util::ServiceExt;
 
@@ -171,7 +170,7 @@ async fn test_collection_items_with_bbox() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(&format!("/collections/pand/items?bbox={}&limit=5", bbox))
+                .uri(format!("/collections/pand/items?bbox={}&limit=5", bbox))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -235,7 +234,7 @@ async fn test_collection_item_by_id() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(&format!("/collections/pand/items/{}", test_id))
+                .uri(format!("/collections/pand/items/{}", test_id))
                 .body(Body::empty())
                 .unwrap(),
         )

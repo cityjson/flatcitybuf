@@ -21,10 +21,6 @@ pub struct Collections {
 
 impl Collections {
     pub fn new(links: Vec<models::Link>, collections: Vec<models::Collection>) -> Collections {
-        Collections {
-            links,
-            collections,
-        }
+        Collections { links, collections }
     }
 }
-

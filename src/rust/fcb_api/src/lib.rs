@@ -1,6 +1,6 @@
+pub mod constants;
 pub mod handlers;
 pub mod models;
-pub mod constants;
 
 use axum::{routing::get, Router};
 use std::env;
@@ -30,7 +30,7 @@ pub async fn create_app() -> Router {
     let state = Arc::new(AppState {
         fcb_url,
         max_return_features,
-        base_url: base_url,
+        base_url,
     });
 
     tracing::info!("FCB URL: {}", state.fcb_url);

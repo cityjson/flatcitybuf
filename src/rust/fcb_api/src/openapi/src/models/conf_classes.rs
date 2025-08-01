@@ -19,9 +19,6 @@ pub struct ConfClasses {
 
 impl ConfClasses {
     pub fn new(conforms_to: Vec<String>) -> ConfClasses {
-        ConfClasses {
-            conforms_to,
-        }
+        ConfClasses { conforms_to }
     }
 }
-

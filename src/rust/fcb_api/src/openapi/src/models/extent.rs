@@ -21,9 +21,6 @@ pub struct Extent {
 impl Extent {
     /// The extent of the features in the collection. In the Core only spatial and temporal extents are specified. Extensions may add additional members to represent other extents, for example, thermal or pressure ranges.  An array of extents is provided for each extent type (spatial, temporal). The first item in the array describes the overall extent of the data. All subsequent items describe more precise extents, e.g., to identify clusters of data. Clients only interested in the overall extent will only need to access the first extent in the array.
     pub fn new() -> Extent {
-        Extent {
-            spatial: None,
-        }
+        Extent { spatial: None }
     }
 }
-
