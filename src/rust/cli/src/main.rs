@@ -123,11 +123,7 @@ struct SerializeOptions {
     ge: Option<bool>,
 }
 
-fn serialize(
-    input: &str,
-    output: &str,
-    options: SerializeOptions,
-) -> Result<(), Error> {
+fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(), Error> {
     let reader = get_reader(input)?;
     let writer = get_writer(output)?;
 

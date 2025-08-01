@@ -37,16 +37,11 @@ jobs:
           workspaces: src/rust
           shared-key: "fcb-rust-ci"
 
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Check all
-        run: make check-common
-    # - name: Run tests
-    #   run: cargo test --all-features --verbose
-
-    # - name: Check formatting
-    #   run: cargo fmt --all -- --check
-
-    # - name: Run clippy
-    #   run: cargo clippy --all-targets --all-features -- -D warnings
-
-    # - name: Build
-    #   run: cargo build --verbose
+        run: make pre-commit

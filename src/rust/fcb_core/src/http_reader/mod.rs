@@ -286,7 +286,6 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             })
             .collect();
 
-        println!("http_ranges: {:?}", http_ranges);
         Ok(AsyncFeatureIter {
             client: self.client,
             fbs: self.fbs,
@@ -664,13 +663,11 @@ impl SelectAttr {
         &mut self,
         client: &mut AsyncBufferedHttpRangeClient<T>,
     ) -> Result<Option<Bytes>> {
-        println!("self.range_pos: {:?}", self.range_pos);
         let Some(range) = self.ranges.get(self.range_pos) else {
             return Ok(None);
         };
         let mut feature_buffer = BytesMut::from(client.get_range(range.start(), 4).await?);
         let feature_size = LittleEndian::read_u32(&feature_buffer) as usize;
-        println!("feature_size: {:?}", feature_size);
         feature_buffer.put(client.get_range(range.start() + 4, feature_size).await?);
         self.range_pos += 1;
         Ok(Some(feature_buffer.freeze()))
