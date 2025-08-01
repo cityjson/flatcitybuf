@@ -250,5 +250,6 @@ async fn test_collection_item_by_id() {
         assert_eq!(json["id"], test_id);
         assert!(json["feature"].is_object());
         assert!(json["links"].is_array());
+        println!("json: {:?}", json);
     }
 }
