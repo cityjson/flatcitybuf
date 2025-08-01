@@ -9,38 +9,34 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-RUN echo "=== Build context contents ===" && find . -type f -name "*.toml" -o -name "*.rs" | head -20
 
 # Copy workspace files from src/rust directory
 COPY src/rust/Cargo.toml src/rust/Cargo.lock ./
 COPY src/rust ./
 
-# COPY . .
-RUN ls -la
 
 
+Build the fcb_api binary
+RUN cargo build --release -p fcb_api
 
-# Build the fcb_api binary
-# RUN cargo build --release -p fcb_api
+# Runtime stage
+FROM debian:bookworm-slim
 
-# # Runtime stage
-# FROM debian:bookworm-slim
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 
-# # Install runtime dependencies
-# RUN apt-get update && apt-get install -y \
-#     ca-certificates \
-#     libssl3 \
-#     && rm -rf /var/lib/apt/lists/*
+# Copy the binary from builder
+COPY --from=builder /app/target/release/fcb_api /usr/local/bin/fcb_api
 
-# # Copy the binary from builder
-# COPY --from=builder /app/target/release/fcb_api /usr/local/bin/fcb_api
+# Set environment variables for Cloud Run
+ENV HOST=0.0.0.0
+ENV PORT=8080
 
-# # Set environment variables for Cloud Run
-# ENV HOST=0.0.0.0
-# ENV PORT=8080
+# Expose the port
+EXPOSE 8080
 
-# # Expose the port
-# EXPOSE 8080
-
-# # Run the binary
-# CMD ["fcb_api"]
+# Run the binary
+CMD ["fcb_api"]
