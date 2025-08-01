@@ -12,6 +12,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use crate::constants::*;
 use crate::models::*;
 use crate::AppState;
 
@@ -35,44 +36,42 @@ pub async fn landing_page(
     info!("Serving landing page");
 
     let landing_page = LandingPage {
-        title: Some("3DBAG API".to_string()),
-        description: Some(
-            "3DBAG is an extended version of the 3DBAG data set. It contains additional information that is either derived from the 3DBAG, or integrated from other data sources.".to_string(),
-        ),
+        title: Some(API_TITLE.to_string()),
+        description: Some(API_DESCRIPTION.to_string()),
         links: vec![
             Link {
                 href: format!("{}/", state.base_url),
-                rel: "self".to_string(),
-                r#type: Some("application/json".to_string()),
-                title: Some("this document".to_string()),
+                rel: REL_SELF.to_string(),
+                r#type: Some(CONTENT_TYPE_JSON.to_string()),
+                title: Some(TITLE_THIS_DOCUMENT.to_string()),
                 ..Default::default()
             },
             Link {
                 href: format!("{}/api", state.base_url),
-                rel: "service-desc".to_string(),
-                r#type: Some("application/vnd.oai.openapi+json;version=3.0".to_string()),
-                title: Some("the API definition".to_string()),
+                rel: REL_SERVICE_DESC.to_string(),
+                r#type: Some(CONTENT_TYPE_OPENAPI.to_string()),
+                title: Some(TITLE_API_DEFINITION.to_string()),
                 ..Default::default()
             },
             Link {
                 href: format!("{}/api.html", state.base_url),
-                rel: "service-doc".to_string(),
-                r#type: Some("text/html".to_string()),
-                title: Some("the API documentation".to_string()),
+                rel: REL_SERVICE_DOC.to_string(),
+                r#type: Some(CONTENT_TYPE_HTML.to_string()),
+                title: Some(TITLE_API_DOCUMENTATION.to_string()),
                 ..Default::default()
             },
             Link {
                 href: format!("{}/conformance", state.base_url),
-                rel: "conformance".to_string(),
-                r#type: Some("application/json".to_string()),
-                title: Some("Conformance classes implemented by this server".to_string()),
+                rel: REL_CONFORMANCE.to_string(),
+                r#type: Some(CONTENT_TYPE_JSON.to_string()),
+                title: Some(TITLE_CONFORMANCE.to_string()),
                 ..Default::default()
             },
             Link {
                 href: format!("{}/collections", state.base_url),
-                rel: "data".to_string(),
-                r#type: Some("application/json".to_string()),
-                title: Some("Information about the feature collections".to_string()),
+                rel: REL_DATA.to_string(),
+                r#type: Some(CONTENT_TYPE_JSON.to_string()),
+                title: Some(TITLE_COLLECTIONS.to_string()),
                 ..Default::default()
             },
         ],
@@ -85,7 +84,7 @@ pub async fn conformance() -> Result<Json<ConfClasses>, StatusCode> {
     info!("Serving conformance declaration");
 
     let conformance = ConfClasses {
-        conforms_to: vec!["https://cityjson.org/specs/1.1.1/".to_string()],
+        conforms_to: vec![CITYJSON_SPEC.to_string()],
     };
 
     Ok(Json(conformance))
@@ -100,62 +99,62 @@ pub async fn collections(
         "collections": [
             {
                 "crs": [
-                    "http://www.opengis.net/def/crs/EPSG/0/7415"
+                    STORAGE_CRS
                 ],
-                "description": "3D building models based on the 'pand' layer of the BAG dataset.",
+                "description": PAND_COLLECTION_DESCRIPTION,
                 "extent": {
                     "spatial": {
                         "bbox": [
-                            [10000, 306250, 287760, 623690]
+                            DEFAULT_BBOX
                         ],
-                        "crs": "http://www.opengis.net/def/crs/EPSG/0/7415"
+                        "crs": STORAGE_CRS
                     }
                 },
-                "id": "pand",
-                "itemType": "feature",
+                "id": PAND_COLLECTION_ID,
+                "itemType": ITEM_TYPE_FEATURE,
                 "links": [
                     {
-                        "href": format!("{}/collections/pand", state.base_url),
-                        "rel": "self",
-                        "title": "this document",
-                        "type": "application/json"
+                        "href": format!("{}/collections/{}", state.base_url, PAND_COLLECTION_ID),
+                        "rel": REL_SELF,
+                        "title": TITLE_THIS_DOCUMENT,
+                        "type": CONTENT_TYPE_JSON
                     },
                     {
-                        "href": format!("{}/collections/pand/items", state.base_url),
-                        "rel": "items",
-                        "title": "Pand items",
-                        "type": "application/geo+json"
+                        "href": format!("{}/collections/{}/items", state.base_url, PAND_COLLECTION_ID),
+                        "rel": REL_ITEMS,
+                        "title": TITLE_PAND_ITEMS,
+                        "type": CONTENT_TYPE_GEOJSON
                     },
                     {
-                        "href": "https://creativecommons.org/licenses/by/4.0/",
-                        "rel": "license",
-                        "title": "CC BY 4.0",
-                        "type": "text/html"
+                        "href": LICENSE_URL,
+                        "rel": REL_LICENSE,
+                        "title": LICENSE_TITLE,
+                        "type": CONTENT_TYPE_HTML
                     },
                     {
-                        "href": "https://creativecommons.org/licenses/by/4.0/rdf",
-                        "rel": "license",
-                        "title": "CC BY 4.0",
-                        "type": "application/rdf+xml"
+                        "href": LICENSE_RDF_URL,
+                        "rel": REL_LICENSE,
+                        "title": LICENSE_TITLE,
+                        "type": CONTENT_TYPE_RDF_XML
                     }
                 ],
-                "storageCrs": "http://www.opengis.net/def/crs/EPSG/0/7415",
-                "title": "Pand",
+                "storageCrs": STORAGE_CRS,
+                "title": PAND_COLLECTION_TITLE,
                 "version": {
-                    "api": "0.1",
-                    "collection": "v2023.10.08"
+                    "api": API_VERSION,
+                    "collection": COLLECTION_VERSION
                 }
             }
         ],
         "crs": [
-            "http://www.opengis.net/def/crs/EPSG/0/7415"
+            STORAGE_CRS
         ],
         "links": [
             {
                 "href": format!("{}/collections", state.base_url),
-                "rel": "self",
-                "title": "this document",
-                "type": "application/json"
+                "rel": REL_SELF,
+                "title": TITLE_THIS_DOCUMENT,
+                "type": CONTENT_TYPE_JSON
             }
         ]
     });
@@ -169,52 +168,45 @@ pub async fn collection_by_id(
 ) -> Result<Json<Collection>, StatusCode> {
     info!("Serving collection: {}", collection_id);
 
-    if collection_id != "pand" {
+    if collection_id != PAND_COLLECTION_ID {
         return Err(StatusCode::NOT_FOUND);
     }
 
     let collection = Collection {
-        id: "pand".to_string(),
-        title: Some("BAG building models".to_string()),
-        description: Some(concat!(
-            "LOD1.2, LOD1.3 and LOD2.2 3D building models of all buildings in the Netherlands. ",
-            "Generated by combining the building data from the BAG with the height data from the AHN. ",
-            "The 3D building models are available in multiple formats."
-        ).to_string()),
+        id: PAND_COLLECTION_ID.to_string(),
+        title: Some(PAND_COLLECTION_TITLE.to_string()),
+        description: Some(PAND_COLLECTION_DESCRIPTION.to_string()),
         links: vec![
             Link {
-                href: "/collections/pand".to_string(),
-                rel: "self".to_string(),
-                r#type: Some("application/json".to_string()),
-                title: Some("This collection".to_string()),
+                href: format!("/collections/{}", PAND_COLLECTION_ID),
+                rel: REL_SELF.to_string(),
+                r#type: Some(CONTENT_TYPE_JSON.to_string()),
+                title: Some(TITLE_THIS_DOCUMENT.to_string()),
                 ..Default::default()
             },
             Link {
-                href: "/collections/pand/items".to_string(),
-                rel: "items".to_string(),
-                r#type: Some("application/city+json".to_string()),
-                title: Some("Building models".to_string()),
+                href: format!("/collections/{}/items", PAND_COLLECTION_ID),
+                rel: REL_ITEMS.to_string(),
+                r#type: Some(CONTENT_TYPE_GEOJSON.to_string()),
+                title: Some(TITLE_PAND_ITEMS.to_string()),
                 ..Default::default()
             },
             Link {
-                href: "https://creativecommons.org/licenses/by/4.0/".to_string(),
-                rel: "license".to_string(),
-                r#type: Some("text/html".to_string()),
-                title: Some("CC BY 4.0".to_string()),
+                href: LICENSE_URL.to_string(),
+                rel: REL_LICENSE.to_string(),
+                r#type: Some(CONTENT_TYPE_HTML.to_string()),
+                title: Some(LICENSE_TITLE.to_string()),
                 ..Default::default()
             },
         ],
         extent: Some(Extent {
             spatial: Some(ExtentSpatial {
-                bbox: Some(vec![vec![3.37087, 50.7539, 7.21097, 53.4658]]), // TODO: get from FCB
+                bbox: Some(vec![DEFAULT_BBOX.to_vec()]),
                 crs: Some(Crs::default()),
             }),
         }),
-        item_type: Some("feature".to_string()),
-        crs: Some(vec![
-            "http://www.opengis.net/def/crs/OGC/1.3/CRS84".to_string(),
-            "http://www.opengis.net/def/crs/EPSG/0/28992".to_string(),
-        ]),
+        item_type: Some(ITEM_TYPE_FEATURE.to_string()),
+        crs: Some(vec![STORAGE_CRS.to_string()]),
     };
 
     Ok(Json(collection))
@@ -230,13 +222,13 @@ pub async fn collection_items(
         collection_id, query
     );
 
-    if collection_id != "pand" {
+    if collection_id != PAND_COLLECTION_ID {
         return Err(StatusCode::NOT_FOUND);
     }
 
     let limit = query
         .limit
-        .unwrap_or(state.max_return_features as i32)
+        .unwrap_or(DEFAULT_LIMIT)
         .min(state.max_return_features as i32);
 
     let bbox = query.bbox.as_ref().map(|bbox_str| {
@@ -343,7 +335,7 @@ pub async fn collection_item_by_id(
         item_id, collection_id
     );
 
-    if collection_id != "pand" {
+    if collection_id != PAND_COLLECTION_ID {
         return Err(StatusCode::NOT_FOUND);
     }
 

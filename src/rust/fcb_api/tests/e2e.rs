@@ -5,7 +5,9 @@ use axum::{
     http::{Request, StatusCode},
 };
 use serde_json::Value;
-use test_data::{EXPECTED_COLLECTIONS, EXPECTED_CONFORMANCE, EXPECTED_LANDING_PAGE};
+use test_data::{
+    EXPECTED_COLLECTIONS, EXPECTED_COLLECTION_PAND, EXPECTED_CONFORMANCE, EXPECTED_LANDING_PAGE,
+};
 use tower::util::ServiceExt;
 
 async fn app() -> axum::Router {
@@ -103,10 +105,8 @@ async fn test_collection_by_id() {
         .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(json["id"], "pand");
-    assert_eq!(json["title"], "BAG building models");
-    assert!(json["links"].is_array());
-    assert!(json["extent"]["spatial"]["bbox"].is_array());
+    let expected_json: Value = serde_json::from_str(EXPECTED_COLLECTION_PAND).unwrap();
+    assert_eq!(json, expected_json);
 }
 
 #[tokio::test]

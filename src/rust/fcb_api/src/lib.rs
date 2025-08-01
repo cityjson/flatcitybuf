@@ -1,5 +1,6 @@
 pub mod handlers;
 pub mod models;
+pub mod constants;
 
 use axum::{routing::get, Router};
 use std::env;

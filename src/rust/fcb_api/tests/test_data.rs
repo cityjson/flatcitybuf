@@ -116,7 +116,7 @@ pub const EXPECTED_COLLECTION_PAND: &str = r#"{
   "extent": {
     "spatial": {
       "bbox": [
-        [10000, 306250, 287760, 623690]
+        [10000.0, 306250.0, 287760.0, 623690.0]
       ],
       "crs": "http://www.opengis.net/def/crs/EPSG/0/7415"
     }
