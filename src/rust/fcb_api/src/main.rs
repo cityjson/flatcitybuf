@@ -7,7 +7,13 @@ async fn main() -> anyhow::Result<()> {
 
     let app = create_app().await;
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port: u16 = std::env::var("PORT")
+        .unwrap_or_else(|_| "3000".to_string())
+        .parse()
+        .expect("PORT must be a valid u16");
+
+    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
     tracing::info!("FCB API listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
