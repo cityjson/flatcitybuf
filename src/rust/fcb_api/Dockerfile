@@ -9,11 +9,15 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-RUN ls -la
+RUN echo "=== Build context contents ===" && find . -type f -name "*.toml" -o -name "*.rs" | head -20
 
 # Copy workspace files from src/rust directory
-COPY src/rust/Cargo.toml ./
-COPY src/rust ./
+# COPY src/rust/Cargo.toml ./
+# COPY src/rust ./
+COPY . .
+RUN ls -la src/rust
+
+WORKDIR /app/src/rust
 
 # Build the fcb_api binary
 RUN cargo build --release -p fcb_api
