@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.75-slim as builder
+FROM rust:1.75-slim AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -9,12 +9,11 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy workspace files
-COPY Cargo.toml Cargo.lock ./
-COPY src/rust ./src/rust
+# Copy workspace files from src/rust directory
+COPY src/rust/Cargo.toml src/rust/Cargo.lock ./
+COPY src/rust ./
 
 # Build the fcb_api binary
-WORKDIR /app/src/rust
 RUN cargo build --release -p fcb_api
 
 # Runtime stage
@@ -27,7 +26,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
-COPY --from=builder /app/src/rust/target/release/fcb_api /usr/local/bin/fcb_api
+COPY --from=builder /app/target/release/fcb_api /usr/local/bin/fcb_api
 
 # Set environment variables for Cloud Run
 ENV HOST=0.0.0.0
