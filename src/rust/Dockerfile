@@ -11,7 +11,7 @@ WORKDIR /app
 
 
 # Copy workspace files from src/rust directory
-COPY src/rust/Cargo.toml src/rust/Cargo.lock ./
+COPY src/rust/Cargo.toml ./
 COPY src/rust ./
 
 
