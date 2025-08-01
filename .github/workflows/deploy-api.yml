@@ -28,9 +28,9 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    defaults:
-      run:
-        working-directory: src/rust
+    # defaults:
+    #   run:
+    #     working-directory: src/rust
 
     steps:
       - name: Checkout repository
@@ -60,8 +60,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./src/rust
+          file: ./src/rust/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

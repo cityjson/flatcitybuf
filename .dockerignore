@@ -1,0 +1,59 @@
+# Build artifacts
+target/
+**/target/
+
+# Benchmark data and large test files
+src/rust/fcb_core/benchmark_data/
+src/rust/fcb_core/benchmark_results*
+src/rust/fcb_core/comparison_*
+src/rust/fcb_core/http_benchmark_results.csv
+src/rust/temp/
+
+# Large data files
+**/*.fcb
+**/*.bson
+**/*.cbor
+**/*.json
+**/*.jsonl
+
+# Keep only essential json files (exclude data files but keep config)
+!Cargo.toml
+!package.json
+!**/Cargo.toml
+!src/rust/fcb_api/schema/*.yaml
+!src/rust/fcb_core/tests/data/header.json
+
+# Documentation and examples
+docs/
+examples/
+README.md
+*.md
+!CLAUDE.md
+
+# Git and development files
+.git/
+.github/
+.gitignore
+*.log
+*.svg
+
+# Python and other language artifacts
+src/py/
+src/ts/node_modules/
+**/__pycache__/
+*.pyc
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+temp/
+**/temp/
+*.tmp
