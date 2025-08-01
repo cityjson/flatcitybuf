@@ -9,8 +9,10 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+RUN ls -la
+
 # Copy workspace files from src/rust directory
-COPY src/rust/Cargo.toml src/rust/Cargo.lock ./
+COPY src/rust/Cargo.toml ./
 COPY src/rust ./
 
 # Build the fcb_api binary
