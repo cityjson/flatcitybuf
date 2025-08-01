@@ -187,7 +187,6 @@ async fn test_collection_items_with_bbox() {
     assert_eq!(json["type"], "FeatureCollection");
 
     let features = json["features"].as_array().unwrap();
-    println!("features: {:?}", features);
     assert!(features.len() <= 5);
 }
 
