@@ -244,7 +244,6 @@ pub async fn collection_items(
             .split(',')
             .map(|s| s.trim().parse::<f64>())
             .collect();
-
         match parts {
             Ok(coords) => {
                 if coords.len() == 4 {
