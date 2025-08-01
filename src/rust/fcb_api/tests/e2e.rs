@@ -1,8 +1,11 @@
+mod test_data;
+
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
 use serde_json::Value;
+use test_data::{EXPECTED_COLLECTIONS, EXPECTED_CONFORMANCE, EXPECTED_LANDING_PAGE};
 use tower::util::ServiceExt;
 
 async fn app() -> axum::Router {
@@ -25,18 +28,8 @@ async fn test_landing_page() {
         .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(json["title"], "3DBAG API");
-    assert!(json["description"]
-        .as_str()
-        .unwrap()
-        .contains("3D building models"));
-    assert!(json["links"].is_array());
-
-    // Check required links
-    let links = json["links"].as_array().unwrap();
-    assert!(links.iter().any(|link| link["rel"] == "self"));
-    assert!(links.iter().any(|link| link["rel"] == "conformance"));
-    assert!(links.iter().any(|link| link["rel"] == "data"));
+    let expected_json: Value = serde_json::from_str(EXPECTED_LANDING_PAGE).unwrap();
+    assert_eq!(json, expected_json);
 }
 
 #[tokio::test]
@@ -60,10 +53,8 @@ async fn test_conformance() {
         .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
 
-    let conforms_to = json["conformsTo"].as_array().unwrap();
-    assert!(conforms_to.contains(&Value::String(
-        "https://cityjson.org/specs/1.1.1/".to_string()
-    )));
+    let expected_json: Value = serde_json::from_str(EXPECTED_CONFORMANCE).unwrap();
+    assert_eq!(json, expected_json);
 }
 
 #[tokio::test]
@@ -87,12 +78,8 @@ async fn test_collections() {
         .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
 
-    assert!(json["collections"].is_array());
-
-    let collections = json["collections"].as_array().unwrap();
-    assert_eq!(collections.len(), 1);
-    assert_eq!(collections[0]["id"], "pand");
-    assert_eq!(collections[0]["title"], "BAG building models");
+    let expected_json: Value = serde_json::from_str(EXPECTED_COLLECTIONS).unwrap();
+    assert_eq!(json, expected_json);
 }
 
 #[tokio::test]
@@ -199,6 +186,7 @@ async fn test_collection_items_with_bbox() {
     assert_eq!(json["type"], "FeatureCollection");
 
     let features = json["features"].as_array().unwrap();
+    println!("features: {:?}", features);
     assert!(features.len() <= 5);
 }
 
@@ -241,7 +229,7 @@ async fn test_collection_item_by_id() {
     let app = app().await;
 
     // Use a known test ID or skip if not available
-    let test_id = "NL.IMBAG.Pand.0503100000012869";
+    let test_id = "NL.IMBAG.Pand.0851100000000564";
 
     let response = app
         .oneshot(
@@ -262,5 +250,6 @@ async fn test_collection_item_by_id() {
         assert_eq!(json["id"], test_id);
         assert!(json["feature"].is_object());
         assert!(json["links"].is_array());
+        println!("json: {:?}", json);
     }
 }

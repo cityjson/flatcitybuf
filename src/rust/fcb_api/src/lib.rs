@@ -11,12 +11,15 @@ use tower_http::trace::TraceLayer;
 pub struct AppState {
     pub fcb_url: String,
     pub max_return_features: u32,
+    pub base_url: String,
 }
 
 pub async fn create_app() -> Router {
     let fcb_url = env::var("FCB_URL").unwrap_or_else(|_| {
         "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb".to_string()
     });
+
+    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "https://api.3dbag.nl".to_string());
 
     let max_return_features = env::var("MAX_RETURN_FEATURES")
         .unwrap_or_else(|_| "100".to_string())
@@ -26,6 +29,7 @@ pub async fn create_app() -> Router {
     let state = Arc::new(AppState {
         fcb_url,
         max_return_features,
+        base_url: base_url,
     });
 
     tracing::info!("FCB URL: {}", state.fcb_url);
