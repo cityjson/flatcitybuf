@@ -12,7 +12,7 @@ WORKDIR /app
 RUN echo "=== Build context contents ===" && find . -type f -name "*.toml" -o -name "*.rs" | head -20
 
 # Copy workspace files from src/rust directory
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 COPY . .
 
 # COPY . .
