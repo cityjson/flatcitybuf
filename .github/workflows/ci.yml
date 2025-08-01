@@ -40,5 +40,8 @@ jobs:
       - name: Add wasm target
         run: rustup target add wasm32-unknown-unknown
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Check all
         run: make pre-commit
