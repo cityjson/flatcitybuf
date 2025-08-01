@@ -105,7 +105,7 @@ pub async fn collections(
                 "extent": {
                     "spatial": {
                         "bbox": [
-                            DEFAULT_BBOX
+                            [DEFAULT_BBOX[0] as i64, DEFAULT_BBOX[1] as i64, DEFAULT_BBOX[2] as i64, DEFAULT_BBOX[3] as i64]
                         ],
                         "crs": STORAGE_CRS
                     }
@@ -164,50 +164,58 @@ pub async fn collections(
 
 pub async fn collection_by_id(
     Path(collection_id): Path<String>,
-    State(_state): State<Arc<AppState>>,
-) -> Result<Json<Collection>, StatusCode> {
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
     info!("Serving collection: {}", collection_id);
 
     if collection_id != PAND_COLLECTION_ID {
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let collection = Collection {
-        id: PAND_COLLECTION_ID.to_string(),
-        title: Some(PAND_COLLECTION_TITLE.to_string()),
-        description: Some(PAND_COLLECTION_DESCRIPTION.to_string()),
-        links: vec![
-            Link {
-                href: format!("/collections/{}", PAND_COLLECTION_ID),
-                rel: REL_SELF.to_string(),
-                r#type: Some(CONTENT_TYPE_JSON.to_string()),
-                title: Some(TITLE_THIS_DOCUMENT.to_string()),
-                ..Default::default()
+    let collection = serde_json::json!({
+        "crs": [STORAGE_CRS],
+        "description": PAND_COLLECTION_DESCRIPTION,
+        "extent": {
+            "spatial": {
+                "bbox": [DEFAULT_BBOX],
+                "crs": STORAGE_CRS
+            }
+        },
+        "id": PAND_COLLECTION_ID,
+        "itemType": ITEM_TYPE_FEATURE,
+        "links": [
+            {
+                "href": format!("{}/collections/{}", state.base_url, PAND_COLLECTION_ID),
+                "rel": REL_SELF,
+                "title": TITLE_THIS_DOCUMENT,
+                "type": CONTENT_TYPE_JSON
             },
-            Link {
-                href: format!("/collections/{}/items", PAND_COLLECTION_ID),
-                rel: REL_ITEMS.to_string(),
-                r#type: Some(CONTENT_TYPE_GEOJSON.to_string()),
-                title: Some(TITLE_PAND_ITEMS.to_string()),
-                ..Default::default()
+            {
+                "href": format!("{}/collections/{}/items", state.base_url, PAND_COLLECTION_ID),
+                "rel": REL_ITEMS,
+                "title": TITLE_PAND_ITEMS,
+                "type": CONTENT_TYPE_GEOJSON
             },
-            Link {
-                href: LICENSE_URL.to_string(),
-                rel: REL_LICENSE.to_string(),
-                r#type: Some(CONTENT_TYPE_HTML.to_string()),
-                title: Some(LICENSE_TITLE.to_string()),
-                ..Default::default()
+            {
+                "href": LICENSE_URL,
+                "rel": REL_LICENSE,
+                "title": LICENSE_TITLE,
+                "type": CONTENT_TYPE_HTML
             },
+            {
+                "href": LICENSE_RDF_URL,
+                "rel": REL_LICENSE,
+                "title": LICENSE_TITLE,
+                "type": CONTENT_TYPE_RDF_XML
+            }
         ],
-        extent: Some(Extent {
-            spatial: Some(ExtentSpatial {
-                bbox: Some(vec![DEFAULT_BBOX.to_vec()]),
-                crs: Some(Crs::default()),
-            }),
-        }),
-        item_type: Some(ITEM_TYPE_FEATURE.to_string()),
-        crs: Some(vec![STORAGE_CRS.to_string()]),
-    };
+        "storageCrs": STORAGE_CRS,
+        "title": PAND_COLLECTION_TITLE,
+        "version": {
+            "api": API_VERSION,
+            "collection": COLLECTION_VERSION
+        }
+    });
 
     Ok(Json(collection))
 }
@@ -269,13 +277,13 @@ pub async fn collection_items(
 
     // Apply bbox filtering if provided
 
-    let features = if let Some(bbox) = &bbox {
+    let res = if let Some(bbox) = &bbox {
         fetch_features_by_bbox(http_reader, bbox, limit).await
     } else {
         fetch_features_limited(http_reader, limit as u32).await
     };
 
-    let features = match features {
+    let (features, total_count) = match res {
         Ok(features) => features,
         Err(e) => {
             warn!("Failed to fetch features: {:?}", e);
@@ -283,7 +291,8 @@ pub async fn collection_items(
         }
     };
 
-    let features_count = features.len() as i64;
+    let number_matched = total_count as i32;
+    let number_returned = features.len() as i32;
 
     let feature_collection = FeatureCollection {
         r#type: Type::FeatureCollection,
@@ -311,8 +320,8 @@ pub async fn collection_items(
                 ..Default::default()
             })
             .collect(),
-        number_matched: Some(features_count as i32),
-        number_returned: Some(features_count as i32),
+        number_matched: Some(number_matched),
+        number_returned: Some(number_returned),
         time_stamp: Some(Utc::now().to_rfc3339()),
         links: Some(vec![Link {
             href: format!("/collections/{}/items", collection_id),
@@ -388,7 +397,7 @@ async fn fetch_features_by_bbox<T: AsyncHttpRangeClient + Send + Sync>(
     reader: HttpFcbReader<T>,
     bbox: &Vec<f64>,
     limit: i32,
-) -> Result<Vec<CityJSONFeature>, anyhow::Error> {
+) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     let (minx, miny, maxx, maxy) = (bbox[0], bbox[1], bbox[2], bbox[3]);
 
     let mut iter = reader
@@ -408,13 +417,15 @@ async fn fetch_features_by_bbox<T: AsyncHttpRangeClient + Send + Sync>(
         }
     }
 
-    Ok(features)
+    let features_count = iter.features_count().unwrap_or(count as usize);
+
+    Ok((features, features_count))
 }
 
 async fn fetch_features_limited<T: AsyncHttpRangeClient + Send + Sync>(
     reader: HttpFcbReader<T>,
     limit: u32,
-) -> Result<Vec<CityJSONFeature>, anyhow::Error> {
+) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     let mut iter = reader.select_all().await?;
 
     let mut features = Vec::new();
@@ -430,7 +441,9 @@ async fn fetch_features_limited<T: AsyncHttpRangeClient + Send + Sync>(
         }
     }
 
-    Ok(features)
+    let features_count = iter.features_count().unwrap_or(count as usize);
+
+    Ok((features, features_count))
 }
 
 async fn fetch_feature_by_id<T: AsyncHttpRangeClient + Send + Sync>(

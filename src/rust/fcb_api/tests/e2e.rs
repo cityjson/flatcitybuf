@@ -6,11 +6,13 @@ use axum::{
 };
 use serde_json::Value;
 use test_data::{
-    EXPECTED_COLLECTIONS, EXPECTED_COLLECTION_PAND, EXPECTED_CONFORMANCE, EXPECTED_LANDING_PAGE,
+    EXPECTED_COLLECTIONS, EXPECTED_COLLECTION_PAND, EXPECTED_CONFORMANCE, EXPECTED_ITEM_BY_ID,
+    EXPECTED_LANDING_PAGE,
 };
 use tower::util::ServiceExt;
 
 async fn app() -> axum::Router {
+    std::env::set_var("BASE_URL", "https://api.3dbag.nl");
     fcb_api::create_app().await
 }
 
@@ -228,7 +230,6 @@ async fn test_bbox_with_wrong_number_of_coords() {
 async fn test_collection_item_by_id() {
     let app = app().await;
 
-    // Use a known test ID or skip if not available
     let test_id = "NL.IMBAG.Pand.0851100000000564";
 
     let response = app
@@ -250,6 +251,5 @@ async fn test_collection_item_by_id() {
         assert_eq!(json["id"], test_id);
         assert!(json["feature"].is_object());
         assert!(json["links"].is_array());
-        println!("json: {:?}", json);
     }
 }
