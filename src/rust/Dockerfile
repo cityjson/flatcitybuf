@@ -14,9 +14,6 @@ WORKDIR /app
 COPY src/rust/Cargo.toml ./
 COPY src/rust ./
 
-
-
-Build the fcb_api binary
 RUN cargo build --release -p fcb_api
 
 # Runtime stage
