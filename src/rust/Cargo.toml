@@ -7,7 +7,7 @@ resolver = "2"
 [workspace.dependencies]
 bytemuck = "1.15.0"
 async-trait = { version = "0.1.85", default-features = true }
-fcb_core = { version = "0.1.0", path = "fcb_core" }
+fcb_core = { version = "0.2.0", path = "fcb_core" }
 flatbuffers = "24.3.25"
 byteorder = "1.5.0"
 cjseq = { package = "cjseq2", version = "0.1.0" }
