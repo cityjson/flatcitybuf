@@ -5,13 +5,13 @@ on:
     branches: [main]
     paths:
       - "src/rust/**"
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/**"
 
   pull_request:
     branches: [main]
     paths:
       - "src/rust/**"
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/**"
 
 env:
   CARGO_TERM_COLOR: always
