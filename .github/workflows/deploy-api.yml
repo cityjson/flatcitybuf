@@ -17,7 +17,7 @@ env:
   REGION: europe-west4
   SERVICE_NAME: flatcitybuf-api
   GAR_LOCATION: europe-west4
-  GAR_REPOSITORY: flatcitybuf-api
+  GAR_REPOSITORY: flatcitybuf
 
 jobs:
   build-and-push:
