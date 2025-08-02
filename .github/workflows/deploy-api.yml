@@ -1,17 +1,12 @@
 name: Deploy API to Cloud Run
 
 on:
-  # workflow_run:
-  #   workflows: ["Rust CI"]
-  #   types:
-  #     - completed
-  #   branches: [main]
+  workflow_run:
+    workflows: ["Rust CI"]
+    types:
+      - completed
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      branch:
-        description: "Branch to deploy"
-        required: true
-        default: "main"
 
 env:
   REGION: europe-west4
@@ -28,9 +23,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    # defaults:
-    #   run:
-    #     working-directory: src/rust
 
     steps:
       - name: Checkout repository
@@ -105,3 +97,4 @@ jobs:
             --cpu=1
             --memory=256Mi
             --timeout=300
+            --allow-unauthenticated
