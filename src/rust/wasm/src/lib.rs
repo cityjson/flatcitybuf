@@ -327,14 +327,14 @@ mod wasm {
                     feature_begin,
                     combine_request_threshold,
                 )
-                .map_err(|e| JsValue::from_str(&format!("failed to add index: {:?}", e)))?;
+                .map_err(|e| JsValue::from_str(&format!("failed to add index: {e:?}")))?;
                 current_index_begin += attr_info.length() as usize;
             }
             // self.client.set_min_req_size(combine_request_threshold);
             let result = http_multi_index
                 .query(&mut self.client, &query.conditions)
                 .await
-                .map_err(|e| JsValue::from_str(&format!("failed to query index: {:?}", e)))?;
+                .map_err(|e| JsValue::from_str(&format!("failed to query index: {e:?}")))?;
 
             let count = result.len();
 
@@ -833,8 +833,7 @@ mod wasm {
                 }
                 _ => {
                     return Err(JsValue::from_str(&format!(
-                        "Unsupported query type: {}",
-                        query_type
+                        "Unsupported query type: {query_type}"
                     )))
                 }
             };
@@ -983,11 +982,11 @@ mod wasm {
     // Helper function to extract number properties from JS objects
     fn get_number_property(obj: &js_sys::Object, property: &str) -> Result<f64, JsValue> {
         let property_value = js_sys::Reflect::get(obj, &JsValue::from_str(property))
-            .map_err(|_| JsValue::from_str(&format!("Missing '{}' field", property)))?;
+            .map_err(|_| JsValue::from_str(&format!("Missing '{property}' field")))?;
 
         property_value
             .as_f64()
-            .ok_or_else(|| JsValue::from_str(&format!("'{}' must be a number", property)))
+            .ok_or_else(|| JsValue::from_str(&format!("'{property}' must be a number")))
     }
 
     /// A wasm‑friendly wrapper over `AttrQuery`, which is defined as:

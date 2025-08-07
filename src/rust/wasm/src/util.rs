@@ -37,10 +37,7 @@ pub fn cjseq_to_cj_wasm(base_cj: JsValue, features: JsValue) -> Result<JsValue, 
         Ok(cj) => cj,
         Err(e) => {
             error!("failed to deserialize base_cj: {}", e);
-            return Err(JsValue::from_str(&format!(
-                "failed to parse base_cj: {}",
-                e
-            )));
+            return Err(JsValue::from_str(&format!("failed to parse base_cj: {e}")));
         }
     };
 
@@ -48,10 +45,7 @@ pub fn cjseq_to_cj_wasm(base_cj: JsValue, features: JsValue) -> Result<JsValue, 
         Ok(f) => f,
         Err(e) => {
             error!("failed to deserialize features: {}", e);
-            return Err(JsValue::from_str(&format!(
-                "failed to parse features: {}",
-                e
-            )));
+            return Err(JsValue::from_str(&format!("failed to parse features: {e}")));
         }
     };
 
@@ -61,7 +55,7 @@ pub fn cjseq_to_cj_wasm(base_cj: JsValue, features: JsValue) -> Result<JsValue, 
         Ok(js_val) => Ok(js_val),
         Err(e) => {
             error!("failed to serialize cj: {}", e);
-            Err(JsValue::from_str(&format!("failed to serialize cj: {}", e)))
+            Err(JsValue::from_str(&format!("failed to serialize cj: {e}")))
         }
     }
 }
@@ -100,8 +94,7 @@ pub fn convert_cityjson_to_obj(city_json_js: &JsValue) -> Result<String, JsValue
             Err(e) => {
                 error!("failed to deserialize first element as CityJSON: {}", e);
                 return Err(JsValue::from_str(&format!(
-                    "failed to parse first element as cityjson: {}",
-                    e
+                    "failed to parse first element as cityjson: {e}"
                 )));
             }
         };
@@ -118,8 +111,7 @@ pub fn convert_cityjson_to_obj(city_json_js: &JsValue) -> Result<String, JsValue
                         i, e
                     );
                     return Err(JsValue::from_str(&format!(
-                        "failed to parse element {} as cityjsonfeature: {}",
-                        i, e
+                        "failed to parse element {i} as cityjsonfeature: {e}"
                     )));
                 }
             };
@@ -136,10 +128,7 @@ pub fn convert_cityjson_to_obj(city_json_js: &JsValue) -> Result<String, JsValue
             Ok(json) => json,
             Err(e) => {
                 error!("failed to deserialize CityJSON: {}", e);
-                return Err(JsValue::from_str(&format!(
-                    "failed to parse cityjson: {}",
-                    e
-                )));
+                return Err(JsValue::from_str(&format!("failed to parse cityjson: {e}")));
             }
         }
     };

@@ -135,7 +135,7 @@ async fn http_read_fcb_bbox() -> Result<(Duration, u64)> {
         return Err(anyhow::anyhow!("no features found in bbox"));
     }
 
-    println!("  found {} features in bbox", features_found);
+    println!("  found {features_found} features in bbox");
     Ok((duration, total_bytes))
 }
 
@@ -146,7 +146,7 @@ async fn http_read_3dbag_pand(
 ) -> Result<(Duration, u64)> {
     let start = Instant::now();
 
-    let url = format!("{}/{}", THREEBAG_API_URL, feature_id);
+    let url = format!("{THREEBAG_API_URL}/{feature_id}");
 
     let response = client
         .get(&url)
@@ -193,10 +193,7 @@ async fn http_read_3dbag_bbox(client: &reqwest::Client) -> Result<(Duration, u64
     let start = Instant::now();
 
     let (minx, miny, maxx, maxy) = BBOX_COORDS;
-    let url = format!(
-        "{}?bbox={},{},{},{}&limit=10",
-        THREEBAG_API_URL, minx, miny, maxx, maxy
-    );
+    let url = format!("{THREEBAG_API_URL}?bbox={minx},{miny},{maxx},{maxy}&limit=10");
 
     let response = client
         .get(&url)
@@ -284,10 +281,10 @@ async fn run_benchmark(
     feature_id: &str,
     client: &reqwest::Client,
 ) -> Result<BenchmarkResult> {
-    println!("benchmarking {} for feature: {}", method, feature_id);
+    println!("benchmarking {method} for feature: {feature_id}");
 
     // Warm-up iterations
-    println!("  performing {} warm-up iterations...", WARMUP_ITERATIONS);
+    println!("  performing {WARMUP_ITERATIONS} warm-up iterations...");
     for i in 0..WARMUP_ITERATIONS {
         let result = match method {
             "FlatCityBuf" => http_read_fcb_pand(feature_id).await,
@@ -303,14 +300,14 @@ async fn run_benchmark(
     }
 
     // Measured iterations
-    println!("  starting {} measured iterations...", ITERATIONS);
+    println!("  starting {ITERATIONS} measured iterations...");
     let mut durations = Vec::with_capacity(ITERATIONS as usize);
     let mut total_bytes = 0u64;
     let mut successful_iterations = 0u32;
 
     for i in 0..ITERATIONS {
         if i % 20 == 0 && i > 0 {
-            println!("    completed {}/{} iterations", i, ITERATIONS);
+            println!("    completed {i}/{ITERATIONS} iterations");
         }
 
         let result = match method {
@@ -345,8 +342,7 @@ async fn run_benchmark(
     let success_rate = successful_iterations as f64 / ITERATIONS as f64 * 100.0;
 
     println!(
-        "  completed: mean={:.2}ms, median={:.2}ms, std_dev={:.2}ms, success_rate={:.1}%",
-        mean_ms, median_ms, std_dev_ms, success_rate
+        "  completed: mean={mean_ms:.2}ms, median={median_ms:.2}ms, std_dev={std_dev_ms:.2}ms, success_rate={success_rate:.1}%"
     );
 
     Ok(BenchmarkResult {
@@ -380,7 +376,7 @@ fn print_results(results: &[BenchmarkResult]) {
 
     // Print detailed results for each feature
     for (feature_id, feature_results) in &results_by_feature {
-        println!("\nFeature ID: {}", feature_id);
+        println!("\nFeature ID: {feature_id}");
         println!("{:-<120}", "");
         println!(
             "{:<15} {:>10} {:>12} {:>12} {:>12} {:>12} {:>12} {:>12} {:>15}",
@@ -486,7 +482,7 @@ fn print_results(results: &[BenchmarkResult]) {
 /// Format bytes in human-readable format
 fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
         format!("{:.2} KB", bytes as f64 / 1024.0)
     } else if bytes < 1024 * 1024 * 1024 {
@@ -523,16 +519,16 @@ fn export_results_to_csv(results: &[BenchmarkResult]) -> Result<()> {
         )?;
     }
 
-    println!("results exported to: {}", filename);
+    println!("results exported to: {filename}");
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("starting HTTP benchmark: FlatCityBuf vs 3DBAG API");
-    println!("iterations: {}, warm-up: {}", ITERATIONS, WARMUP_ITERATIONS);
-    println!("test features: {:?}", TEST_FEATURE_IDS);
-    println!("bbox coordinates: {:?}", BBOX_COORDS);
+    println!("iterations: {ITERATIONS}, warm-up: {WARMUP_ITERATIONS}");
+    println!("test features: {TEST_FEATURE_IDS:?}");
+    println!("bbox coordinates: {BBOX_COORDS:?}");
     println!();
 
     // Create HTTP client for 3DBAG API
@@ -545,18 +541,18 @@ async fn main() -> Result<()> {
 
     // Run benchmarks for each feature ID
     for feature_id in TEST_FEATURE_IDS {
-        println!("testing feature: {}", feature_id);
+        println!("testing feature: {feature_id}");
 
         // Benchmark FlatCityBuf
         match run_benchmark("FlatCityBuf", feature_id, &client).await {
             Ok(result) => all_results.push(result),
-            Err(e) => eprintln!("FlatCityBuf benchmark failed for {}: {:?}", feature_id, e),
+            Err(e) => eprintln!("FlatCityBuf benchmark failed for {feature_id}: {e:?}"),
         }
 
         // Benchmark 3DBAG API
         match run_benchmark("3DBAG_API", feature_id, &client).await {
             Ok(result) => all_results.push(result),
-            Err(e) => eprintln!("3DBAG API benchmark failed for {}: {:?}", feature_id, e),
+            Err(e) => eprintln!("3DBAG API benchmark failed for {feature_id}: {e:?}"),
         }
 
         println!();
@@ -568,13 +564,13 @@ async fn main() -> Result<()> {
     // Benchmark FlatCityBuf BBox
     match run_benchmark("FlatCityBuf_BBox", "bbox_query", &client).await {
         Ok(result) => all_results.push(result),
-        Err(e) => eprintln!("FlatCityBuf bbox benchmark failed: {:?}", e),
+        Err(e) => eprintln!("FlatCityBuf bbox benchmark failed: {e:?}"),
     }
 
     // Benchmark 3DBAG API BBox
     match run_benchmark("3DBAG_API_BBox", "bbox_query", &client).await {
         Ok(result) => all_results.push(result),
-        Err(e) => eprintln!("3DBAG API bbox benchmark failed: {:?}", e),
+        Err(e) => eprintln!("3DBAG API bbox benchmark failed: {e:?}"),
     }
 
     // Print and export results

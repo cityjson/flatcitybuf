@@ -85,7 +85,7 @@ fn read_fcb_with_attr_index_seekable(path: &str) -> Result<()> {
                 if let Some(b3_h_dak_50p) = attributes.get("b3_h_dak_50p") {
                     if b3_h_dak_50p.as_f64().unwrap() > 2.0 && b3_h_dak_50p.as_f64().unwrap() < 50.0
                     {
-                        println!("b3_h_dak_50p: {:?}", b3_h_dak_50p);
+                        println!("b3_h_dak_50p: {b3_h_dak_50p:?}");
                         target_feat_num += 1;
                         continue;
                     }
@@ -144,7 +144,7 @@ fn read_fcb_with_attr_index_non_seekable(path: &str) -> Result<()> {
                 if let Some(b3_h_dak_50p) = attributes.get("b3_h_dak_50p") {
                     if b3_h_dak_50p.as_f64().unwrap() > 2.0 && b3_h_dak_50p.as_f64().unwrap() < 50.0
                     {
-                        println!("b3_h_dak_50p: {:?}", b3_h_dak_50p);
+                        println!("b3_h_dak_50p: {b3_h_dak_50p:?}");
                         target_feat_num += 1;
                         continue;
                     }
@@ -195,7 +195,7 @@ pub fn read_benchmark(c: &mut Criterion) {
 
         // Benchmark the file with attribute index using seekable reader.
         group.bench_with_input(
-            BenchmarkId::new(format!("{} with seekable (streamable)", dataset), file_with),
+            BenchmarkId::new(format!("{dataset} with seekable (streamable)"), file_with),
             &file_with,
             |b, &path| {
                 b.iter(|| {
@@ -207,7 +207,7 @@ pub fn read_benchmark(c: &mut Criterion) {
         // Benchmark the file with attribute index using non-seekable reader.
         group.bench_with_input(
             BenchmarkId::new(
-                format!("{} with non-seekable (sequential)", dataset),
+                format!("{dataset} with non-seekable (sequential)"),
                 file_with,
             ),
             &file_with,

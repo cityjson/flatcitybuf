@@ -453,7 +453,7 @@ fn format_duration(d: Duration) -> String {
 
 fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
         format!("{:.2} KB", bytes as f64 / 1024.0)
     } else if bytes < 1024 * 1024 * 1024 {
@@ -510,13 +510,12 @@ fn coordinator() -> Result<()> {
     const WARMUP_ITERATIONS: u32 = 5;
 
     println!(
-        "running benchmarks with {} iterations and {} warmup iterations...\n",
-        ITERATIONS, WARMUP_ITERATIONS
+        "running benchmarks with {ITERATIONS} iterations and {WARMUP_ITERATIONS} warmup iterations...\n"
     );
     println!("this may take several minutes depending on dataset sizes...\n");
 
     for (dataset_name, formats) in DATASETS {
-        println!("processing dataset: {}", dataset_name);
+        println!("processing dataset: {dataset_name}");
         let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
 
         for (i, path) in [formats.0, formats.1, formats.2, formats.3]
@@ -525,8 +524,7 @@ fn coordinator() -> Result<()> {
         {
             let format_name = format_names[i];
             print!(
-                "  running {} benchmark ({} iterations + {} warmup)... ",
-                format_name, ITERATIONS, WARMUP_ITERATIONS
+                "  running {format_name} benchmark ({ITERATIONS} iterations + {WARMUP_ITERATIONS} warmup)... "
             );
 
             let start = Instant::now();
@@ -555,7 +553,7 @@ fn coordinator() -> Result<()> {
                 Ok(metrics) => metrics,
                 Err(e) => {
                     println!("failed to parse results!");
-                    eprintln!("failed to parse child JSON: {}", e);
+                    eprintln!("failed to parse child JSON: {e}");
                     continue;
                 }
             };
@@ -576,7 +574,7 @@ fn coordinator() -> Result<()> {
                 std_dev_duration,
             };
 
-            all_results.insert(format!("{}_{}", dataset_name, format_name), result);
+            all_results.insert(format!("{dataset_name}_{format_name}"), result);
             println!(
                 "completed in {} (mean: {}, median: {}, std dev: {})",
                 format_duration(duration),
@@ -619,7 +617,7 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
         let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
 
         for format_name in &format_names {
-            let key = format!("{}_{}", dataset_name, format_name);
+            let key = format!("{dataset_name}_{format_name}");
             if let Some(result) = results.get(&key) {
                 summary_table.add_row(Row::new(vec![
                     Cell::new(dataset_name),
@@ -639,30 +637,30 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
     let formats_to_compare = ["CityJSONTextSequence", "CBOR", "BSON"];
 
     for format in formats_to_compare {
-        println!("\n{} vs FlatCityBuf Comparison (Mean Times):", format);
+        println!("\n{format} vs FlatCityBuf Comparison (Mean Times):");
         let mut comparison_table = Table::new();
 
         // Header row
         comparison_table.add_row(Row::new(vec![
             Cell::new("Dataset"),
-            Cell::new(&format!("{} Mean", format)),
+            Cell::new(&format!("{format} Mean")),
             Cell::new("FCB Mean"),
             Cell::new("Time Ratio"),
-            Cell::new(&format!("{} Std Dev", format)),
+            Cell::new(&format!("{format} Std Dev")),
             Cell::new("FCB Std Dev"),
-            Cell::new(&format!("{} Memory", format)),
+            Cell::new(&format!("{format} Memory")),
             Cell::new("FCB Memory"),
             Cell::new("Memory Ratio"),
         ]));
 
         for (dataset_name, _) in DATASETS {
-            let fcb_key = format!("{}_FlatCityBuf", dataset_name);
-            let format_key = format!("{}_{}", dataset_name, format);
+            let fcb_key = format!("{dataset_name}_FlatCityBuf");
+            let format_key = format!("{dataset_name}_{format}");
 
             if let (Some(fcb_result), Some(format_result)) =
                 (results.get(&fcb_key), results.get(&format_key))
             {
-                println!("fcb_result: {:?}", fcb_result);
+                println!("fcb_result: {fcb_result:?}");
                 // Calculate ratios using mean times
                 let time_ratio = format_result.mean_duration.as_secs_f64()
                     / fcb_result.mean_duration.as_secs_f64();
@@ -673,12 +671,12 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
                     Cell::new(dataset_name),
                     Cell::new(&format_duration(format_result.mean_duration)),
                     Cell::new(&format_duration(fcb_result.mean_duration)),
-                    Cell::new(&format!("{:.2}x", time_ratio)),
+                    Cell::new(&format!("{time_ratio:.2}x")),
                     Cell::new(&format_duration(format_result.std_dev_duration)),
                     Cell::new(&format_duration(fcb_result.std_dev_duration)),
                     Cell::new(&format_bytes(format_result.peak_memory)),
                     Cell::new(&format_bytes(fcb_result.peak_memory)),
-                    Cell::new(&format!("{:.2}x", memory_ratio)),
+                    Cell::new(&format!("{memory_ratio:.2}x")),
                 ]));
             }
         }
@@ -705,7 +703,7 @@ fn print_benchmark_results(results: &HashMap<String, BenchResult>) {
         let mut lowest_cpu = ("None", f64::MAX);
 
         for format_name in &format_names {
-            let key = format!("{}_{}", dataset_name, format_name);
+            let key = format!("{dataset_name}_{format_name}");
             if let Some(result) = results.get(&key) {
                 if result.mean_duration < fastest.1 {
                     fastest = (&result.format, result.mean_duration);
@@ -752,14 +750,14 @@ fn export_results_to_csv(results: &HashMap<String, BenchResult>) {
                 file,
                 "Dataset,Format,Iterations,MeanTimeMs,MedianTimeMs,StdDevTimeMs,MemoryBytes,CpuPercent"
             ) {
-                eprintln!("error writing CSV header: {:?}", e);
+                eprintln!("error writing CSV header: {e:?}");
                 return;
             }
 
             for (dataset_name, _) in DATASETS {
                 let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
                 for format_name in &format_names {
-                    let key = format!("{}_{}", dataset_name, format_name);
+                    let key = format!("{dataset_name}_{format_name}");
                     if let Some(result) = results.get(&key) {
                         let mean_time_ms = result.mean_duration.as_secs_f64() * 1000.0;
                         let median_time_ms = result.median_duration.as_secs_f64() * 1000.0;
@@ -776,16 +774,16 @@ fn export_results_to_csv(results: &HashMap<String, BenchResult>) {
                             result.peak_memory,
                             result.cpu_usage
                         ) {
-                            eprintln!("error writing CSV row: {:?}", e);
+                            eprintln!("error writing CSV row: {e:?}");
                             return;
                         }
                     }
                 }
             }
-            println!("benchmark raw data with statistics saved to: {}", filename);
+            println!("benchmark raw data with statistics saved to: {filename}");
         }
         Err(e) => {
-            eprintln!("error creating CSV file: {:?}", e);
+            eprintln!("error creating CSV file: {e:?}");
         }
     }
 
@@ -803,12 +801,12 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
     let iterations = results.values().next().map(|r| r.iterations).unwrap_or(0);
 
     // Export comprehensive text report
-    let text_filename = format!("benchmark_results_{}.txt", timestamp);
+    let text_filename = format!("benchmark_results_{timestamp}.txt");
     match File::create(&text_filename) {
         Ok(mut file) => {
             writeln!(file, "FLATCITYBUF BENCHMARK RESULTS WITH STATISTICS").unwrap();
             writeln!(file, "Generated: {}", now.format("%Y-%m-%d %H:%M:%S")).unwrap();
-            writeln!(file, "Iterations per test: {}", iterations).unwrap();
+            writeln!(file, "Iterations per test: {iterations}").unwrap();
             writeln!(file, "{:=<120}", "").unwrap();
 
             // Main results table
@@ -825,7 +823,7 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
             for (dataset_name, _) in DATASETS {
                 let format_names = ["FlatCityBuf", "CityJSONTextSequence", "CBOR", "BSON"];
                 for format_name in &format_names {
-                    let key = format!("{}_{}", dataset_name, format_name);
+                    let key = format!("{dataset_name}_{format_name}");
                     if let Some(result) = results.get(&key) {
                         writeln!(
                             file,
@@ -846,7 +844,7 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
             // Detailed comparison tables
             let formats_to_compare = ["CityJSONTextSequence", "CBOR", "BSON"];
             for format in formats_to_compare {
-                writeln!(file, "\n{} vs FlatCityBuf Comparison (Mean Times):", format).unwrap();
+                writeln!(file, "\n{format} vs FlatCityBuf Comparison (Mean Times):").unwrap();
                 writeln!(file, "{:-<140}", "").unwrap();
                 writeln!(
                     file,
@@ -865,8 +863,8 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
                 writeln!(file, "{:-<140}", "").unwrap();
 
                 for (dataset_name, _) in DATASETS {
-                    let fcb_key = format!("{}_FlatCityBuf", dataset_name);
-                    let format_key = format!("{}_{}", dataset_name, format);
+                    let fcb_key = format!("{dataset_name}_FlatCityBuf");
+                    let format_key = format!("{dataset_name}_{format}");
 
                     if let (Some(fcb_result), Some(format_result)) =
                         (results.get(&fcb_key), results.get(&format_key))
@@ -894,10 +892,10 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
                 }
             }
 
-            println!("comprehensive benchmark report saved to: {}", text_filename);
+            println!("comprehensive benchmark report saved to: {text_filename}");
         }
         Err(e) => {
-            eprintln!("error creating text report: {:?}", e);
+            eprintln!("error creating text report: {e:?}");
         }
     }
 
@@ -908,12 +906,11 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
         match File::create(&csv_filename) {
             Ok(mut file) => {
                 // Write detailed comparison CSV header with statistics
-                writeln!(file, "Dataset,{}_Mean_Ms,FCB_Mean_Ms,Time_Ratio,{}_Median_Ms,FCB_Median_Ms,{}_StdDev_Ms,FCB_StdDev_Ms,{}_Memory_Bytes,FCB_Memory_Bytes,Memory_Ratio,{}_CPU_Percent,FCB_CPU_Percent",
-                    format, format, format, format, format).unwrap();
+                writeln!(file, "Dataset,{format}_Mean_Ms,FCB_Mean_Ms,Time_Ratio,{format}_Median_Ms,FCB_Median_Ms,{format}_StdDev_Ms,FCB_StdDev_Ms,{format}_Memory_Bytes,FCB_Memory_Bytes,Memory_Ratio,{format}_CPU_Percent,FCB_CPU_Percent").unwrap();
 
                 for (dataset_name, _) in DATASETS {
-                    let fcb_key = format!("{}_FlatCityBuf", dataset_name);
-                    let format_key = format!("{}_{}", dataset_name, format);
+                    let fcb_key = format!("{dataset_name}_FlatCityBuf");
+                    let format_key = format!("{dataset_name}_{format}");
 
                     if let (Some(fcb_result), Some(format_result)) =
                         (results.get(&fcb_key), results.get(&format_key))
@@ -943,16 +940,16 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
                         .unwrap();
                     }
                 }
-                println!("comparison CSV with statistics saved to: {}", csv_filename);
+                println!("comparison CSV with statistics saved to: {csv_filename}");
             }
             Err(e) => {
-                eprintln!("error creating comparison CSV {}: {:?}", csv_filename, e);
+                eprintln!("error creating comparison CSV {csv_filename}: {e:?}");
             }
         }
     }
 
     // Export summary CSV with statistics
-    let summary_filename = format!("benchmark_summary_{}.csv", timestamp);
+    let summary_filename = format!("benchmark_summary_{timestamp}.csv");
     match File::create(&summary_filename) {
         Ok(mut file) => {
             writeln!(file, "Dataset,Fastest_Format,Fastest_Mean_Ms,Most_Consistent_Format,Lowest_StdDev_Ms,Lowest_Memory_Format,Lowest_Memory_Bytes,Lowest_CPU_Format,Lowest_CPU_Percent").unwrap();
@@ -965,7 +962,7 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
                 let mut lowest_cpu = ("None", f64::MAX);
 
                 for format_name in &format_names {
-                    let key = format!("{}_{}", dataset_name, format_name);
+                    let key = format!("{dataset_name}_{format_name}");
                     if let Some(result) = results.get(&key) {
                         if result.mean_duration < fastest.1 {
                             fastest = (&result.format, result.mean_duration);
@@ -997,13 +994,10 @@ fn export_comparison_tables(results: &HashMap<String, BenchResult>) {
                 )
                 .unwrap();
             }
-            println!(
-                "benchmark summary with statistics saved to: {}",
-                summary_filename
-            );
+            println!("benchmark summary with statistics saved to: {summary_filename}");
         }
         Err(e) => {
-            eprintln!("error creating summary CSV: {:?}", e);
+            eprintln!("error creating summary CSV: {e:?}");
         }
     }
 }
@@ -1016,12 +1010,12 @@ fn run_child(dataset: &Path, format: &str, iterations: u32, warmup: u32) -> Resu
     // Warm-up iterations (not measured)
     for i in 0..warmup {
         if i == 0 {
-            eprintln!("performing {} warm-up iterations...", warmup);
+            eprintln!("performing {warmup} warm-up iterations...");
         }
         read_dataset_internal(path_str, format)?;
     }
 
-    eprintln!("starting {} measured iterations...", iterations);
+    eprintln!("starting {iterations} measured iterations...");
 
     let mut durations = Vec::with_capacity(iterations as usize);
     let mut peak_rss_values = Vec::with_capacity(iterations as usize);
@@ -1033,7 +1027,7 @@ fn run_child(dataset: &Path, format: &str, iterations: u32, warmup: u32) -> Resu
     // Measured iterations
     for i in 0..iterations {
         if i % 10 == 0 && i > 0 {
-            eprintln!("completed {}/{} iterations", i, iterations);
+            eprintln!("completed {i}/{iterations} iterations");
         }
 
         let usage_before = rusage();
@@ -1084,7 +1078,7 @@ fn run_child(dataset: &Path, format: &str, iterations: u32, warmup: u32) -> Resu
     let mean_peak_rss = peak_rss_values.iter().sum::<u64>() / peak_rss_values.len() as u64;
     let mean_cpu_usage = cpu_usage_values.iter().sum::<f64>() / cpu_usage_values.len() as f64;
 
-    eprintln!("benchmark completed: {} iterations", iterations);
+    eprintln!("benchmark completed: {iterations} iterations");
     eprintln!(
         "mean duration: {:.2}ms, median: {:.2}ms, std dev: {:.2}ms",
         mean_duration.as_secs_f64() * 1000.0,

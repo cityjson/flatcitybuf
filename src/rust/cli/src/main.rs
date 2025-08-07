@@ -135,7 +135,7 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         Some(parse_bbox(&bbox_str).map_err(|e| {
             Error::IoError(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                format!("failed to parse bbox: {}", e),
+                format!("failed to parse bbox: {e}"),
             ))
         })?)
     } else {
@@ -148,8 +148,7 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
     let CityJSONSeq { cj, features } = match cj_seq {
         CJType::Seq(cj_seq) => cj_seq,
         _ => {
-            return Err(Error::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Error::IoError(std::io::Error::other(
                 "failed to read CityJSON Feature",
             )))
         }
@@ -253,7 +252,7 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         geographical_extent: geo_extent,
     };
 
-    println!("header_options in cli: {:?}", header_options);
+    println!("header_options in cli: {header_options:?}");
 
     let mut fcb = FcbWriter::new(cj, Some(header_options), attr_schema, semantic_attr_schema)?;
 
@@ -274,8 +273,7 @@ fn parse_bbox(bbox_str: &str) -> Result<[f64; 4], String> {
     let parts: Vec<&str> = bbox_str.split(',').collect();
     if parts.len() != 4 {
         return Err(format!(
-            "Invalid bounding box format. Expected 'minx,miny,maxx,maxy', got '{}'",
-            bbox_str
+            "Invalid bounding box format. Expected 'minx,miny,maxx,maxy', got '{bbox_str}'"
         ));
     }
 
@@ -284,7 +282,7 @@ fn parse_bbox(bbox_str: &str) -> Result<[f64; 4], String> {
         bbox[i] = part
             .trim()
             .parse::<f64>()
-            .map_err(|e| format!("Failed to parse bbox component: {}", e))?;
+            .map_err(|e| format!("Failed to parse bbox component: {e}"))?;
     }
 
     // Validate that min <= max
@@ -413,10 +411,9 @@ fn encode_cbor(input: &str, output: &str) -> Result<(), Error> {
 
     let value: serde_json::Value = serde_json::from_reader(reader)?;
     serde_cbor::to_writer(writer, &value).map_err(|e| {
-        Error::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("failed to encode to cbor: {}", e),
-        ))
+        Error::IoError(std::io::Error::other(format!(
+            "failed to encode to cbor: {e}"
+        )))
     })?;
 
     if output != "-" {
@@ -435,19 +432,17 @@ fn encode_bson(input: &str, output: &str) -> Result<(), Error> {
 
     let cityjson: CityJSON = serde_json::from_str(&json_str)?;
     let bson = bson::to_bson(&cityjson).map_err(|e| {
-        Error::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("failed to encode to bson: {}", e),
-        ))
+        Error::IoError(std::io::Error::other(format!(
+            "failed to encode to bson: {e}"
+        )))
     })?;
     let doc = bson.as_document().unwrap();
 
     let mut writer = get_writer(output)?;
     doc.to_writer(&mut writer).map_err(|e| {
-        Error::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("failed to encode to bson: {}", e),
-        ))
+        Error::IoError(std::io::Error::other(format!(
+            "failed to encode to bson: {e}"
+        )))
     })?;
 
     if output != "-" {
@@ -478,14 +473,14 @@ fn show_info(input: PathBuf) -> Result<(), Error> {
     });
     let header = fcb_reader.header();
     println!("FCB File Info:");
-    println!("    File size: {} MB", metadata);
+    println!("    File size: {metadata} MB");
     println!("  Version: {}", header.version());
     println!("  Features count: {}", header.features_count());
     println!("  bbox: {:?}", header.geographical_extent());
     println!("  attr_index: {:?}", attr_index.unwrap_or_default());
 
     if let Some(title) = header.title() {
-        println!("  Title: {}", title);
+        println!("  Title: {title}");
     }
 
     if let Some(extent) = header.geographical_extent() {

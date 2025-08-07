@@ -39,7 +39,7 @@ fn read_fcb_with_attr_index_non_seekable(path: PathBuf) -> Result<()> {
         }
     }
     println!("process finished");
-    println!("feat_total: {}", feat_total);
+    println!("feat_total: {feat_total}");
 
     Ok(())
 }

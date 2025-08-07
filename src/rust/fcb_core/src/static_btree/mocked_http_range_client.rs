@@ -173,10 +173,7 @@ mod tests {
             let expected = test_data.slice(start..end);
 
             let length = end - start;
-            println!(
-                "test_mock_client_range_fetching: start={}, end={}, length={}",
-                start, end, length
-            );
+
             // Fetch the range
             let result = client.get_range(start, length).await.unwrap();
 
@@ -193,8 +190,7 @@ mod tests {
 
             assert_eq!(
                 result, expected,
-                "Range {}-{}: returned data doesn't match expected data",
-                start, end
+                "Range {start}-{end}: returned data doesn't match expected data"
             );
 
             // Verify each byte individually for clarity in case of failure

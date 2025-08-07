@@ -272,11 +272,11 @@ pub(super) fn to_reference_system<'a>(
     let authority = Some(fbb.create_string(&ref_system.authority));
 
     let version = ref_system.version.parse::<i32>().unwrap_or_else(|e| {
-        println!("failed to parse version: {}", e);
+        println!("failed to parse version: {e}");
         0
     });
     let code = ref_system.code.parse::<i32>().unwrap_or_else(|e| {
-        println!("failed to parse code: {}", e);
+        println!("failed to parse code: {e}");
         0
     });
 
