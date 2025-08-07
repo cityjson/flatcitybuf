@@ -47,7 +47,7 @@ impl AsyncHttpRangeClient for WasmHttpClient {
         let response = GlooRequest::new(url)
             .send()
             .await
-            .map_err(|e| HttpError::HttpError(format!("failed to send request: {}", e)))?;
+            .map_err(|e| HttpError::HttpError(format!("failed to send request: {e}")))?;
         if let Some(val) = response.headers().get(header) {
             Ok(Some(val.to_string()))
         } else {

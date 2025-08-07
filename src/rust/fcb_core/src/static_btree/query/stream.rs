@@ -410,9 +410,9 @@ impl StreamMultiIndex {
             let index_start = start_position + index_range.start as u64;
             // set cursor to the start of the index
             reader.seek(SeekFrom::Start(index_start))?;
-            println!("index_start: {}", index_start);
-            println!("start_position: {}", start_position);
-            println!("query condition: {:?}", cond);
+            println!("index_start: {index_start}");
+            println!("start_position: {start_position}");
+            println!("query condition: {cond:?}");
             let condition_results = indexer.execute_query_condition(reader, cond)?;
             result_set.retain(|offset| condition_results.contains(offset));
             if result_set.is_empty() {

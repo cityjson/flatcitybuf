@@ -396,7 +396,7 @@ mod tests {
                             if let Some(val) = attrs.get("tijdstipregistratie") {
                                 let val_tijdstip =
                                     chrono::DateTime::parse_from_rfc3339(val.as_str().unwrap())
-                                        .map_err(|e| eprintln!("Failed to parse datetime: {}", e))
+                                        .map_err(|e| eprintln!("Failed to parse datetime: {e}"))
                                         .map(|dt| dt.naive_utc())
                                         .unwrap_or_else(|_| {
                                             chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
@@ -425,8 +425,7 @@ mod tests {
             for feature in features {
                 assert!(
                     (test_case.validator)(&feature),
-                    "Validator failed for feature: {:?}",
-                    feature
+                    "Validator failed for feature: {feature:?}"
                 );
             }
         }

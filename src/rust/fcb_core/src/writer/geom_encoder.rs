@@ -737,7 +737,6 @@ mod tests {
           }
         }  );
         let composite_solid_geom: CjGeometry = serde_json::from_value(composite_solid_gem_json)?;
-        println!("composite_solid_geom: {:?}", composite_solid_geom);
         let CjGeometry { semantics, .. } = composite_solid_geom;
 
         let encoded_semantics = encode_semantics(&semantics.unwrap());

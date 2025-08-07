@@ -1641,11 +1641,8 @@ impl<K: Key> Stree<K> {
                 if item.key >= lower && item.key <= upper {
                     let off = item.offset;
 
-                    println!("off: {:?}", off);
-
                     if (off & PAYLOAD_TAG) != 0 {
                         let rel = (off & PAYLOAD_MASK) as usize;
-                        println!("rel: {:?}", rel);
                         // Add as indirect reference to be resolved in batch
                         payload_refs.push(PayloadRef::Indirect(rel));
                     } else {
@@ -2328,9 +2325,6 @@ mod tests {
         // payload_data should be appended
         let payload = &tree.payload_data;
         assert!(!payload.is_empty());
-        println!("written: {}", written);
-        println!("idx_bytes: {}", idx_bytes);
-        println!("payload.len(): {}", payload.len());
         assert_eq!(buf.len(), idx_bytes + payload.len());
         assert_eq!(&buf[idx_bytes..], payload);
         Ok(())
@@ -2503,14 +2497,10 @@ mod tests {
 
             let mut offs: Vec<usize> = res.iter().map(|item| item.range.start()).collect();
             offs.sort_unstable();
-            println!(
-                "query: {:?}, expected_result: {:?}, offs: {:?}",
-                query, expected_result, offs
-            );
+            println!("query: {query:?}, expected_result: {expected_result:?}, offs: {offs:?}");
             assert_eq!(
                 offs, expected_result,
-                "expected_result: {:?}, offs: {:?}",
-                expected_result, offs
+                "expected_result: {expected_result:?}, offs: {offs:?}"
             );
         }
         Ok(())
@@ -2585,19 +2575,10 @@ mod tests {
         let all_test_cases = [test_cases, more_test_cases].concat();
 
         for (query, branching_factor, expected_position) in all_test_cases {
-            println!(
-                "\nTesting query: {}, branching_factor: {}",
-                query, branching_factor
-            );
-
             let tree = Stree::<i64>::build(&nodes, branching_factor)?;
-
-            println!("Tree built with num_leaf_nodes: {}", tree.num_leaf_nodes);
-            println!("Tree level_bounds: {:?}", tree.level_bounds);
 
             // Verify expected_position using the in-memory find_partition
             let in_memory_position = tree.find_partition(query)?;
-            println!("In-memory find_partition result: {}", in_memory_position);
 
             // Ensure the expected position is what we expect from in-memory operation
             assert_eq!(
@@ -2622,13 +2603,10 @@ mod tests {
             )
             .await?;
 
-            println!("HTTP stream find_partition result: {}", position);
-
             // Verify HTTP implementation gives same result as in-memory
             assert_eq!(
                 position, expected_position,
-                "HTTP version gives {} but expected {}",
-                position, expected_position
+                "HTTP version gives {position} but expected {expected_position}"
             );
         }
         Ok(())
@@ -2688,11 +2666,6 @@ mod tests {
         ];
 
         for (lower, upper, branching_factor) in test_cases {
-            println!(
-                "\nTesting range: [{}, {}], branching_factor: {}",
-                lower, upper, branching_factor
-            );
-
             // Build the tree
             let tree = Stree::<i64>::build(&nodes, branching_factor)?;
 

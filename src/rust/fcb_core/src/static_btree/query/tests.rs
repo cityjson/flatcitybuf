@@ -56,7 +56,6 @@ fn test_memory_index_with_complex_data() -> Result<()> {
     // Test range queries with edge cases
     // Range that includes duplicates
     let results = index.find_range(Some(1_i64), Some(3_i64))?;
-    println!("results: {:?}", results);
     assert_eq!(results.len(), 3); // 1(x2), 2, 3
 
     // Range that includes the minimum value

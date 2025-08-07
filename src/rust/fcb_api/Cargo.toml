@@ -1,0 +1,37 @@
+[package]
+name = "fcb_api"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+name = "fcb_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fcb_api"
+path = "src/main.rs"
+
+[dependencies]
+fcb_core = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tower-http = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+env_logger = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+futures = { workspace = true }
+bytes = { workspace = true }
+http-range-client = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+ordered-float = { workspace = true }
+openapi = { path = "src/openapi" }
+cjseq = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+urlencoding = { workspace = true }
