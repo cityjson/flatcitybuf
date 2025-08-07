@@ -2,9 +2,10 @@ use std::error::Error;
 
 use anyhow::Result;
 use fcb_core::packed_rtree::Query;
+use fcb_core::Float;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 use fcb_core::HttpFcbReader;
-use fcb_core::{deserializer::to_cj_metadata, FixedStringKey, KeyType, Operator};
+use fcb_core::{deserializer::to_cj_metadata, KeyType, Operator};
 
 async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
@@ -42,30 +43,26 @@ async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
 async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
     let http_reader = HttpFcbReader::open(path).await?;
     let query: Vec<(String, Operator, KeyType)> = vec![
-        // (
-        //     "b3_extrusive".to_string(),
-        //     Operator::Gt,
-        //     KeyType::Float64(Float(100.0)),
-        // ),
         (
-            "identificatie".to_string(),
-            Operator::Eq,
-            KeyType::StringKey50(FixedStringKey::from_str("NL.IMBAG.Pand.0503100000012869")),
+            "b3_h_dak_50p".to_string(),
+            Operator::Gt,
+            KeyType::Float64(Float(300.0)),
         ),
+        // (
+        //     "identificatie".to_string(),
+        //     Operator::Eq,
+        //     KeyType::StringKey50(FixedStringKey::from_str("NL.IMBAG.Pand.0503100000012869")),
+        // ),
     ];
-
-    println!("query===: {:?}", query);
 
     let (cj, features_count) = {
         let header = http_reader.header();
+        println!("header: {header:?}");
+
         (to_cj_metadata(&header)?, header.features_count())
     };
 
-    println!("header: {:?}", cj);
-
     let mut iter = http_reader.select_attr_query(&query).await?;
-
-    println!("features_count: {:?}", features_count);
 
     let mut features = Vec::new();
     let mut feat_num = 0;
@@ -77,29 +74,30 @@ async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
     }
 
     let feature = features.first().unwrap();
-    let contains_b3_h_dak_50p = false;
-    let mut contains_identificatie = false;
+    let mut contains_b3_h_dak_50p = false;
+    let contains_identificatie = false;
     for co in feature.city_objects.values() {
         if co.attributes.is_some() {
             let attrs = co.attributes.as_ref().unwrap();
-            // if let Some(b3_h_dak_50p) = attrs.get("b3_h_dak_50p") {
-            //     if b3_h_dak_50p.as_f64().unwrap() > 100.0 {
-            //         contains_b3_h_dak_50p = true;
-            //     }
-            //     if b3_h_dak_50p.as_f64().unwrap() < 100.0 {
-            //         contains_b3_h_dak_50p = false;
-            //     }
-            // }
-            if let Some(identificatie) = attrs.get("identificatie") {
-                if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
-                    contains_identificatie = true;
+            if let Some(b3_h_dak_50p) = attrs.get("b3_h_dak_50p") {
+                if b3_h_dak_50p.as_f64().unwrap() > 300.0 {
+                    contains_b3_h_dak_50p = true;
+                }
+                if b3_h_dak_50p.as_f64().unwrap() < 300.0 {
+                    contains_b3_h_dak_50p = false;
                 }
             }
+            // if let Some(identificatie) = attrs.get("identificatie") {
+            //     if identificatie.as_str().unwrap() == "NL.IMBAG.Pand.0503100000012869" {
+            //         contains_identificatie = true;
+            //     }
+            // }
         }
     }
 
     assert!(feat_num > 0 && feat_num < features_count);
-    assert!(contains_identificatie);
+    // assert!(contains_identificatie);
+    assert!(contains_b3_h_dak_50p);
     Ok(())
 }
 

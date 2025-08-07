@@ -37,8 +37,6 @@ fn read_cj(input: &str) -> Result<()> {
             });
         }
     }
-    println!("document_nummers: {:?}", document_nummers);
-    println!("identifications: {:?}", identifications);
     Ok(())
 }
 

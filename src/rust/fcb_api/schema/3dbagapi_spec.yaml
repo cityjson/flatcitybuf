@@ -113,6 +113,7 @@ paths:
         - $ref: '#/components/parameters/bbox'
         - $ref: '#/components/parameters/crs'
         - $ref: '#/components/parameters/bbox-crs'
+        - $ref: '#/components/parameters/filter'
       responses:
         '200':
           $ref: '#/components/responses/Features'
@@ -233,6 +234,36 @@ components:
         type: integer
         minimum: 1
         default: 1
+      style: form
+      explode: false
+    filter:
+      name: filter
+      in: query
+      description: |-
+        Filter features by their attributes using CQL-like expressions.
+        
+        Supported operators:
+        - `=`: Equal to
+        - `!=` or `<>`: Not equal to
+        - `>`: Greater than
+        - `<`: Less than
+        - `>=`: Greater than or equal to
+        - `<=`: Less than or equal to
+        - `BETWEEN ... AND ...`: Range query (inclusive)
+        
+        Multiple conditions can be combined using `AND`.
+        String values should be enclosed in single or double quotes.
+        
+        Examples:
+        - `building_height > 30`
+        - `cityname = 'Amsterdam'`
+        - `building_height > 30 AND cityname = 'Amsterdam'`
+        - `building_height BETWEEN 10 AND 50`
+        - `b3_is_glas_dak = true`
+      required: false
+      schema:
+        type: string
+        example: "building_height > 30 AND cityname = 'Amsterdam'"
       style: form
       explode: false
   schemas: 

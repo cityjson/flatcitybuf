@@ -54,10 +54,9 @@ fn parse_cityjson<T: CityJSONReader>(mut source: T, cj_type: CJTypeKind) -> Resu
 
         CJTypeKind::Seq => {
             // Read first line as CityJSON metadata
-            let first_line = lines.next().ok_or(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Empty input",
-            )))?;
+            let first_line = lines
+                .next()
+                .ok_or(Error::Io(std::io::Error::other("Empty input")))?;
             let cj: CityJSON = serde_json::from_str(&first_line?)?;
 
             // Read remaining lines as CityJSONFeatures

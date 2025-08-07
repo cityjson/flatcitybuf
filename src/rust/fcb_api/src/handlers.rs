@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::constants::*;
+use crate::filter_parser::{parse_filter, ParseError};
 use crate::models::*;
 use crate::AppState;
 
@@ -28,6 +29,7 @@ pub struct BboxQuery {
     bbox: Option<String>,
     crs: Option<String>,
     bbox_crs: Option<String>,
+    filter: Option<String>,
 }
 
 pub async fn landing_page(
@@ -266,6 +268,28 @@ pub async fn collection_items(
         }
         None => None,
     };
+
+    // Parse filter if provided
+    let filter_conditions = if let Some(filter_str) = &query.filter {
+        match parse_filter(filter_str, &state.fcb_metadata) {
+            Ok(conditions) => Some(conditions),
+            Err(ParseError::InvalidSyntax(msg)) => {
+                warn!("Invalid filter syntax: {}", msg);
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            Err(ParseError::UnsupportedOperator(op)) => {
+                warn!("Unsupported operator in filter: {}", op);
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            Err(ParseError::InvalidValue(val)) => {
+                warn!("Invalid value in filter: {}", val);
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
+    } else {
+        None
+    };
+
     let http_reader = match HttpFcbReader::open(&state.fcb_url).await {
         Ok(reader) => reader,
         Err(e) => {
@@ -274,18 +298,24 @@ pub async fn collection_items(
         }
     };
 
-    // Apply bbox filtering if provided
-
-    let res = if let Some(bbox) = &bbox {
-        fetch_features_by_bbox(http_reader, bbox, limit).await
-    } else {
-        fetch_features_limited(http_reader, limit as u32).await
-    };
+    // Apply filtering (bbox and/or attribute filters)
+    let res =
+        fetch_features_with_filter(http_reader, bbox.as_ref(), filter_conditions, limit).await;
 
     let (features, total_count) = match res {
         Ok(features) => features,
         Err(e) => {
             warn!("Failed to fetch features: {:?}", e);
+            // Check if this is an attribute-related error that should return 400
+            let error_msg = e.to_string();
+            println!("error_msg-------: {error_msg}");
+            if error_msg.contains("AttributeIndexNotFound")
+                || error_msg.contains("NoColumnsInHeader")
+                || error_msg.contains("QueryExecutionError")
+                || error_msg.contains("Failed to execute streaming query")
+            {
+                return Err(StatusCode::BAD_REQUEST);
+            }
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -309,7 +339,7 @@ pub async fn collection_items(
                         ..Default::default()
                     },
                     Link {
-                        href: format!("/collections/{}", collection_id),
+                        href: format!("/collections/{collection_id}"),
                         rel: "collection".to_string(),
                         r#type: Some("application/json".to_string()),
                         title: Some("Collection".to_string()),
@@ -323,7 +353,7 @@ pub async fn collection_items(
         number_returned: Some(number_returned),
         time_stamp: Some(Utc::now().to_rfc3339()),
         links: Some(vec![Link {
-            href: format!("/collections/{}/items", collection_id),
+            href: format!("/collections/{collection_id}/items"),
             rel: "self".to_string(),
             r#type: Some("application/json".to_string()),
             title: Some("this document".to_string()),
@@ -362,20 +392,20 @@ pub async fn collection_item_by_id(
         id: Some(item_id.clone()),
         links: Some(vec![
             Link {
-                href: format!("/collections/{}/items/{}", collection_id, item_id),
+                href: format!("/collections/{collection_id}/items/{item_id}"),
                 rel: "self".to_string(),
                 r#type: Some("application/json".to_string()),
                 title: Some("this document".to_string()),
                 ..Default::default()
             },
             Link {
-                href: format!("/collections/{}", collection_id),
+                href: format!("/collections/{collection_id}"),
                 rel: "collection".to_string(),
                 r#type: Some("application/json".to_string()),
                 ..Default::default()
             },
             Link {
-                href: format!("/collections/{}/items", collection_id),
+                href: format!("/collections/{collection_id}/items"),
                 rel: "parent".to_string(),
                 r#type: Some("application/city+json".to_string()),
                 ..Default::default()
@@ -462,4 +492,51 @@ async fn fetch_feature_by_id<T: AsyncHttpRangeClient + Send + Sync>(
     }
 
     Ok(None)
+}
+
+async fn fetch_features_with_filter<T: AsyncHttpRangeClient + Send + Sync>(
+    reader: HttpFcbReader<T>,
+    bbox: Option<&Vec<f64>>,
+    filter_conditions: Option<Vec<(String, Operator, KeyType)>>,
+    limit: i32,
+) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
+    match (bbox, filter_conditions) {
+        // Both bbox and filter
+        (Some(bbox), Some(_)) => {
+            // For now, we'll prioritize bbox over attribute filtering
+            // In a full implementation, we'd need to apply both filters
+            fetch_features_by_bbox(reader, bbox, limit).await
+        }
+        // Only filter
+        (None, Some(conditions)) => {
+            println!("Fetching features with filter: {conditions:?}");
+            let mut iter = match reader.select_attr_query(&conditions).await {
+                Ok(iter) => iter,
+                Err(e) => {
+                    warn!("Failed to execute attribute query: {:?}", e);
+                    return Err(e.into());
+                }
+            };
+
+            let mut features = Vec::new();
+            let mut count = 0;
+
+            while count < limit {
+                match iter.next().await? {
+                    Some(feature_result) => {
+                        features.push(feature_result.cj_feature()?);
+                        count += 1;
+                    }
+                    None => break,
+                }
+            }
+
+            let features_count = iter.features_count().unwrap_or(count as usize);
+            Ok((features, features_count))
+        }
+        // Only bbox
+        (Some(bbox), None) => fetch_features_by_bbox(reader, bbox, limit).await,
+        // Neither bbox nor filter
+        (None, None) => fetch_features_limited(reader, limit as u32).await,
+    }
 }

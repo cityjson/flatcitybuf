@@ -379,8 +379,7 @@ impl<R: Read + Seek> FcbReader<R> {
             Ok(res) => res,
             Err(e) => {
                 return Err(Error::QueryExecutionError(format!(
-                    "Failed to execute streaming query: {}",
-                    e
+                    "Failed to execute streaming query: {e}"
                 )));
             }
         };

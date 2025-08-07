@@ -209,7 +209,7 @@ fn print_benchmark_results(results: &HashMap<String, HashMap<String, BenchResult
         for function_name in &all_functions {
             if let Some(result) = results.get(*dataset).and_then(|dr| dr.get(function_name)) {
                 let relative = result.duration.as_secs_f64() / baseline_duration.as_secs_f64();
-                row_cells.push(Cell::new(&format!("{:.2}x", relative)));
+                row_cells.push(Cell::new(&format!("{relative:.2}x")));
             } else {
                 row_cells.push(Cell::new("N/A"));
             }
@@ -266,7 +266,7 @@ pub fn read_func_benchmark(c: &mut Criterion) {
         dataset_table.add_row(Row::new(vec![Cell::new("Function"), Cell::new("Duration")]));
 
         // Benchmark cur_feature
-        println!("benchmarking cur_feature for dataset: {}", dataset_name);
+        println!("benchmarking cur_feature for dataset: {dataset_name}");
         let result = benchmark_read_fn(
             iterations,
             "cur_feature",
@@ -274,7 +274,7 @@ pub fn read_func_benchmark(c: &mut Criterion) {
             read_fcb_with_cur_feature,
         )
         .unwrap_or_else(|e| {
-            println!("error in cur_feature benchmark: {:?}", e);
+            println!("error in cur_feature benchmark: {e:?}");
             BenchResult {
                 function: "cur_feature".to_string(),
                 duration: Duration::new(0, 0),
@@ -296,7 +296,7 @@ pub fn read_func_benchmark(c: &mut Criterion) {
         dataset_results.insert("cur_feature".to_string(), result);
 
         // Benchmark cur_cj_feature
-        println!("benchmarking cur_cj_feature for dataset: {}", dataset_name);
+        println!("benchmarking cur_cj_feature for dataset: {dataset_name}");
         let result = benchmark_read_fn(
             iterations,
             "cur_cj_feature",
@@ -304,7 +304,7 @@ pub fn read_func_benchmark(c: &mut Criterion) {
             read_fcb_with_cur_cj_feature,
         )
         .unwrap_or_else(|e| {
-            println!("error in cur_cj_feature benchmark: {:?}", e);
+            println!("error in cur_cj_feature benchmark: {e:?}");
             BenchResult {
                 function: "cur_cj_feature".to_string(),
                 duration: Duration::new(0, 0),
@@ -326,7 +326,7 @@ pub fn read_func_benchmark(c: &mut Criterion) {
         dataset_results.insert("cur_cj_feature".to_string(), result);
 
         // Print the dataset results
-        println!("\nResults for dataset: {}", dataset_name);
+        println!("\nResults for dataset: {dataset_name}");
         dataset_table.printstd();
 
         // Store all results for this dataset

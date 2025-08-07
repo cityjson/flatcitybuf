@@ -62,7 +62,7 @@ struct FileStats {
 
 fn format_size(size_bytes: u64) -> String {
     if size_bytes < 1024 {
-        format!("{} B", size_bytes)
+        format!("{size_bytes} B")
     } else if size_bytes < 1024 * 1024 {
         format!("{:.2} KB", size_bytes as f64 / 1024.0)
     } else if size_bytes < 1024 * 1024 * 1024 {
@@ -242,20 +242,20 @@ fn find_dataset_pairs(
         let parent_dir = fcb_path.parent().unwrap_or(Path::new(""));
 
         // Look for a .city.jsonl file with the same base name
-        let jsonl_name = format!("{}.city.jsonl", city_name);
+        let jsonl_name = format!("{city_name}.city.jsonl");
         let jsonl_path = parent_dir.join(&jsonl_name);
 
         if jsonl_path.exists() {
             pairs.push((fcb_path, jsonl_path, city_name));
         } else {
             // Try alternative naming pattern (.jsonl without .city)
-            let alt_jsonl_name = format!("{}.jsonl", city_name);
+            let alt_jsonl_name = format!("{city_name}.jsonl");
             let alt_jsonl_path = parent_dir.join(&alt_jsonl_name);
 
             if alt_jsonl_path.exists() {
                 pairs.push((fcb_path, alt_jsonl_path, city_name));
             } else {
-                println!("warning: no matching jsonl file found for {}", city_name);
+                println!("warning: no matching jsonl file found for {city_name}");
             }
         }
     }
@@ -286,7 +286,7 @@ fn main() -> Result<()> {
     // Analyze each pair
     let mut stats = Vec::new();
     for (fcb_path, jsonl_path, city_name) in pairs {
-        println!("processing city: {}", city_name);
+        println!("processing city: {city_name}");
 
         // Analyze FCB file
         let (
@@ -482,6 +482,5 @@ fn output_json(stats: &[FileStats]) -> Result<()> {
             .collect::<Vec<_>>(),
     )?;
 
-    println!("{}", json);
     Ok(())
 }

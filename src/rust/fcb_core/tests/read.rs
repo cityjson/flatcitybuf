@@ -74,12 +74,6 @@ fn read_bbox() -> Result<()> {
         features.push(cj_feat);
     }
 
-    println!("bbox_cnt: {}", bbox_cnt);
-    println!(
-        "fcb.header().features_count(): {}",
-        fcb.header().features_count()
-    );
-
     assert!(bbox_cnt < fcb.header().features_count());
 
     let mut count_to_check = 0;
@@ -187,12 +181,6 @@ fn read_bbox_nonseekable() -> anyhow::Result<()> {
         let cj_feat = feature.cur_cj_feature()?;
         features.push(cj_feat);
     }
-
-    println!("bbox_cnt: {}", bbox_cnt);
-    println!(
-        "fcb.header().features_count(): {}",
-        fcb.header().features_count()
-    );
 
     assert!(bbox_cnt < fcb.header().features_count());
 

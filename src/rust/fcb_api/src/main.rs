@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .expect("PORT must be a valid u16");
 
-    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
+    let addr: SocketAddr = format!("{host}:{port}").parse()?;
     tracing::info!("FCB API listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

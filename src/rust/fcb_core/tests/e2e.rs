@@ -136,18 +136,6 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                     .attributes
                     .as_ref()
                     .unwrap();
-                if orig_attrs.is_object() && des_attrs.is_object() {
-                    for (key, value) in orig_attrs.as_object().unwrap() {
-                        let des_value = des_attrs.get(key);
-                        if des_value.is_none() {
-                            println!("  key not found: {:?}", key);
-                        } else if value != des_value.unwrap() {
-                            println!("  key: {:?}", key);
-                            println!("    original: {:?}", value);
-                            println!("    deserialized: {:?}", des_value.unwrap());
-                        }
-                    }
-                }
             }
             // ===============remove these lines later=================
             // FIXME: Later, just compare CityObject using "=="
@@ -233,12 +221,12 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                                 }
                                 (None, Some(des_sem)) => {
                                     println!("    semantics: original None, deserialized Some");
-                                    println!("      deserialized: {:?}", des_sem);
+                                    println!("      deserialized: {des_sem:?}");
                                 }
 
                                 (Some(orig_sem), None) => {
                                     println!("    semantics: original Some, deserialized None");
-                                    println!("      original: {:?}", orig_sem);
+                                    println!("      original: {orig_sem:?}");
                                 }
                                 (None, None) => {}
                             }
@@ -405,7 +393,7 @@ fn test_geometry_template_cycle() -> Result<()> {
             let des_co = des_feat
                 .city_objects
                 .get(id)
-                .unwrap_or_else(|| panic!("Deserialized CityObject missing for ID: {}", id));
+                .unwrap_or_else(|| panic!("Deserialized CityObject missing for ID: {id}"));
             assert_eq!(orig_co.thetype, des_co.thetype);
 
             // Find original GeometryInstance (if any)
@@ -428,8 +416,7 @@ fn test_geometry_template_cycle() -> Result<()> {
                     })
                     .unwrap_or_else(|| {
                         panic!(
-                            "Deserialized GeometryInstance missing or template mismatch for CO ID: {}",
-                            id
+                            "Deserialized GeometryInstance missing or template mismatch for CO ID: {id}"
                         )
                     });
 
@@ -455,7 +442,7 @@ fn test_geometry_template_cycle() -> Result<()> {
                     "Transformation matrix mismatch for instance in CO ID: {}",
                     id
                 );
-                println!("  GeometryInstance in CO ID: {} matches", id);
+                println!("  GeometryInstance in CO ID: {id} matches");
             }
         }
     }
@@ -531,7 +518,7 @@ fn test_extension_serialization_cycle() -> Result<()> {
         for (name, orig_ext_data) in orig_ext {
             let des_ext_data = des_ext
                 .get(name)
-                .unwrap_or_else(|| panic!("Extension {} not found in deserialized data", name));
+                .unwrap_or_else(|| panic!("Extension {name} not found in deserialized data"));
 
             assert_eq!(
                 orig_ext_data.url, des_ext_data.url,
@@ -570,7 +557,7 @@ fn test_extension_serialization_cycle() -> Result<()> {
         for (id, orig_co) in orig_feat.city_objects.iter() {
             if orig_co.thetype.starts_with("+") {
                 let des_co = des_feat.city_objects.get(id).unwrap_or_else(|| {
-                    panic!("Extended city object {} not found in deserialized data", id)
+                    panic!("Extended city object {id} not found in deserialized data")
                 });
 
                 println!(
@@ -589,12 +576,11 @@ fn test_extension_serialization_cycle() -> Result<()> {
                 {
                     for (key, value) in orig_attrs.as_object().unwrap() {
                         if key.starts_with("+") {
-                            println!("Found extended attribute: {}", key);
+                            println!("Found extended attribute: {key}");
                             let des_value = des_attrs.get(key);
                             assert!(
                                 des_value.is_some(),
-                                "Extended attribute {} not found in deserialized data",
-                                key
+                                "Extended attribute {key} not found in deserialized data"
                             );
                             assert_eq!(
                                 value,

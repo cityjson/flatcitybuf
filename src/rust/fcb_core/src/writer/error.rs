@@ -62,24 +62,23 @@ impl From<Error> for crate::error::Error {
             Error::Rtree(e) => Self::RtreeError(e),
             Error::StaticBTree(e) => Self::StaticBTree { source: e },
             Error::InvalidAttributeName { name } => Self::InvalidAttributeValue {
-                msg: format!("Invalid attribute name: {}", name),
+                msg: format!("Invalid attribute name: {name}"),
             },
             Error::AttributeSizeExceeded { name, size } => Self::InvalidAttributeValue {
-                msg: format!("Attribute '{}' exceeds maximum size ({} bytes)", name, size),
+                msg: format!("Attribute '{name}' exceeds maximum size ({size} bytes)"),
             },
             Error::NoGeometry => Self::InvalidAttributeValue {
                 msg: "Feature has no geometry".to_string(),
             },
             Error::InvalidGeometry { msg } => Self::InvalidAttributeValue {
-                msg: format!("Invalid geometry: {}", msg),
+                msg: format!("Invalid geometry: {msg}"),
             },
             Error::BufferOverflow {
                 attempted,
                 capacity,
             } => Self::InvalidAttributeValue {
                 msg: format!(
-                    "Buffer overflow: attempted to write {} bytes but capacity is {}",
-                    attempted, capacity
+                    "Buffer overflow: attempted to write {attempted} bytes but capacity is {capacity}"
                 ),
             },
         }

@@ -245,7 +245,7 @@ pub fn attribute_to_index_entries(
         let val: &Value = match map.get(attr) {
             Some(val) => val,
             None => {
-                println!("Attribute {} not found in schema", attr);
+                println!("Attribute {attr} not found in schema");
                 continue;
             }
         };
@@ -313,7 +313,7 @@ pub fn attribute_to_index_entries(
                     {
                         Ok(dt) => dt.to_utc(),
                         Err(e) => {
-                            eprintln!("Failed to parse DateTime: {}", e);
+                            eprintln!("Failed to parse DateTime: {e}");
                             // Choose whether to skip, default, or handle differently
                             // For example, default to 1970-01-01:
                             DateTime::<Utc>::from_timestamp(0, 0).unwrap()
@@ -326,7 +326,7 @@ pub fn attribute_to_index_entries(
                 }
                 _ => {
                     //Byte, Ubyte,
-                    println!("Attribute {} is not supported for indexing", attr);
+                    println!("Attribute {attr} is not supported for indexing");
                 }
             }
         }
@@ -490,7 +490,7 @@ mod tests {
         ];
 
         for (input, expected, schema, test_name) in test_cases {
-            println!("Testing case: {}", test_name);
+            println!("Testing case: {test_name}");
 
             let attrs = &input;
             let attr_schema = &schema["attributes"];
