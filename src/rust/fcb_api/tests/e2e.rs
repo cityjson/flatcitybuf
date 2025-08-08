@@ -165,6 +165,270 @@ async fn test_collection_items_with_limit() {
 }
 
 #[tokio::test]
+async fn test_collection_items_bbox_pagination_equivalence() {
+    let bbox = "68989.19384501831,444614.3991728433,70685.16687543111,446023.6031208569";
+
+    // Full page: offset=0, limit=3
+    let resp_all = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/collections/pand/items?bbox={bbox}&offset=0&limit=3"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp_all.status(), StatusCode::OK);
+    let body_all = axum::body::to_bytes(resp_all.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_all: Value = serde_json::from_slice(&body_all).unwrap();
+    let features_all = json_all["features"].as_array().cloned().unwrap_or_default();
+
+    // Part 1: offset=0, limit=1
+    let resp_part1 = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/collections/pand/items?bbox={bbox}&offset=0&limit=1"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp_part1.status(), StatusCode::OK);
+    let body_part1 = axum::body::to_bytes(resp_part1.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_part1: Value = serde_json::from_slice(&body_part1).unwrap();
+    let features_part1 = json_part1["features"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    // Part 2: offset=1, limit=2
+    let resp_part2 = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/collections/pand/items?bbox={bbox}&offset=1&limit=2"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp_part2.status(), StatusCode::OK);
+    let body_part2 = axum::body::to_bytes(resp_part2.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_part2: Value = serde_json::from_slice(&body_part2).unwrap();
+    let features_part2 = json_part2["features"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    // Compare ordered ids
+    let ids_all: Vec<String> = features_all
+        .iter()
+        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
+        .collect();
+    let mut ids_parts: Vec<String> = features_part1
+        .iter()
+        .chain(features_part2.iter())
+        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
+        .collect();
+    ids_parts.truncate(ids_all.len());
+
+    assert_eq!(
+        ids_all, ids_parts,
+        "Bbox pagination parts should match full page results"
+    );
+}
+
+#[tokio::test]
+async fn test_collection_items_filter_pagination_equivalence() {
+    // Use a filter expected to return multiple results
+    let filter = "b3_h_dak_50p > 100";
+    let filter_enc = urlencoding::encode(filter);
+
+    // Full page: offset=0, limit=3
+    let resp_all = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/collections/pand/items?filter={}&offset=0&limit=3",
+                    filter_enc
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp_all.status(), StatusCode::OK);
+    let body_all = axum::body::to_bytes(resp_all.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_all: Value = serde_json::from_slice(&body_all).unwrap();
+    let features_all = json_all["features"].as_array().cloned().unwrap_or_default();
+
+    // Part 1: offset=0, limit=1
+    let resp_part1 = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/collections/pand/items?filter={}&offset=0&limit=1",
+                    filter_enc
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp_part1.status(), StatusCode::OK);
+    let body_part1 = axum::body::to_bytes(resp_part1.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_part1: Value = serde_json::from_slice(&body_part1).unwrap();
+    let features_part1 = json_part1["features"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    // Part 2: offset=1, limit=2
+    let resp_part2 = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/collections/pand/items?filter={}&offset=1&limit=2",
+                    filter_enc
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp_part2.status(), StatusCode::OK);
+    let body_part2 = axum::body::to_bytes(resp_part2.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_part2: Value = serde_json::from_slice(&body_part2).unwrap();
+    let features_part2 = json_part2["features"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    // Compare ordered ids
+    let ids_all: Vec<String> = features_all
+        .iter()
+        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
+        .collect();
+    let mut ids_parts: Vec<String> = features_part1
+        .iter()
+        .chain(features_part2.iter())
+        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
+        .collect();
+    ids_parts.truncate(ids_all.len());
+
+    assert_eq!(
+        ids_all, ids_parts,
+        "Filter pagination parts should match full page results"
+    );
+}
+
+#[tokio::test]
+async fn test_collection_items_pagination_equivalence() {
+    // Fetch first page (offset=0, limit=3)
+    let resp_all = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri("/collections/pand/items?offset=0&limit=3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp_all.status(), StatusCode::OK);
+    let body_all = axum::body::to_bytes(resp_all.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_all: Value = serde_json::from_slice(&body_all).unwrap();
+    let features_all = json_all["features"].as_array().cloned().unwrap_or_default();
+
+    // Fetch parts: offset=0, limit=1
+    let resp_part1 = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri("/collections/pand/items?offset=0&limit=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp_part1.status(), StatusCode::OK);
+    let body_part1 = axum::body::to_bytes(resp_part1.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_part1: Value = serde_json::from_slice(&body_part1).unwrap();
+    let features_part1 = json_part1["features"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    // Fetch parts: offset=1, limit=2
+    let resp_part2 = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri("/collections/pand/items?offset=1&limit=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp_part2.status(), StatusCode::OK);
+    let body_part2 = axum::body::to_bytes(resp_part2.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_part2: Value = serde_json::from_slice(&body_part2).unwrap();
+    let features_part2 = json_part2["features"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    // Compare by concatenating ids
+    let ids_all: Vec<String> = features_all
+        .iter()
+        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
+        .collect();
+    let mut ids_parts: Vec<String> = features_part1
+        .iter()
+        .chain(features_part2.iter())
+        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    // Truncate concatenated parts to the length of the first page (in case the dataset has < 3 items)
+    ids_parts.truncate(ids_all.len());
+
+    assert_eq!(
+        ids_all, ids_parts,
+        "Pagination parts should match full page results"
+    );
+}
+
+#[tokio::test]
 async fn test_collection_items_with_bbox() {
     let app = app().await;
 
@@ -323,7 +587,7 @@ async fn test_filter_numeric_comparison() {
             for co in feature.city_objects.values() {
                 if let Some(attrs) = co.attributes.as_ref() {
                     if let Some(b3_h_dak_50p) = attrs.get("b3_h_dak_50p") {
-                        if b3_h_dak_50p.as_f64().unwrap() > 10.0 {
+                        if b3_h_dak_50p.as_f64().unwrap() > 100.0 {
                             found = true;
                         }
                     }

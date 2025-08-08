@@ -236,8 +236,21 @@ mod wasm {
         /// Select features within a bounding box.
         #[wasm_bindgen]
         pub async fn select_spatial(
+            self,
+            query: &WasmSpatialQuery,
+        ) -> Result<AsyncFeatureIter, JsValue> {
+            self.select_spatial_paged(query, None, None).await
+        }
+
+        /// Select features within a bounding box with optional pagination.
+        /// If `limit`/`offset` are provided, only a page of features is returned while
+        /// `features_count()` on the returned iterator still reflects the total number of matches.
+        #[wasm_bindgen]
+        pub async fn select_spatial_paged(
             mut self,
             query: &WasmSpatialQuery,
+            limit: Option<u32>,
+            offset: Option<u32>,
         ) -> Result<AsyncFeatureIter, JsValue> {
             // Read R-Tree index and build filter for features within bbox
             let header = self.fbs.header();
@@ -271,8 +284,22 @@ mod wasm {
                 "Since the tree is traversed breadth first, list should be sorted by construction."
             );
 
-            let count = list.len();
-            let feature_batches = FeatureBatch::make_batches(list, combine_request_threshold)
+            let total_count = list.len();
+
+            // Apply pagination
+            let start = offset.unwrap_or(0) as usize;
+            let start = start.min(total_count);
+            let end = match limit {
+                Some(l) => start.saturating_add(l as usize).min(total_count),
+                None => total_count,
+            };
+            let page_list: Vec<_> = if start < end {
+                list.into_iter().skip(start).take(end - start).collect()
+            } else {
+                Vec::new()
+            };
+
+            let feature_batches = FeatureBatch::make_batches(page_list, combine_request_threshold)
                 .await
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
             let selection = FeatureSelection::SelectSpatial(SelectSpatial { feature_batches });
@@ -280,14 +307,25 @@ mod wasm {
                 client: self.client,
                 fbs: self.fbs,
                 selection,
-                count,
+                count: total_count,
             })
         }
 
         #[wasm_bindgen]
         pub async fn select_attr_query(
+            self,
+            query: &WasmAttrQuery,
+        ) -> Result<AsyncFeatureIter, JsValue> {
+            self.select_attr_query_paged(query, None, None).await
+        }
+
+        /// Attribute query with optional pagination.
+        #[wasm_bindgen]
+        pub async fn select_attr_query_paged(
             mut self,
             query: &WasmAttrQuery,
+            limit: Option<u32>,
+            offset: Option<u32>,
         ) -> Result<AsyncFeatureIter, JsValue> {
             let header = self.fbs.header();
             let header_len = self.header_len();
@@ -336,9 +374,22 @@ mod wasm {
                 .await
                 .map_err(|e| JsValue::from_str(&format!("failed to query index: {e:?}")))?;
 
-            let count = result.len();
+            let total_count = result.len();
 
-            let http_ranges: Vec<HttpRange> = result
+            // Apply pagination
+            let start = offset.unwrap_or(0) as usize;
+            let start = start.min(total_count);
+            let end = match limit {
+                Some(l) => start.saturating_add(l as usize).min(total_count),
+                None => total_count,
+            };
+            let paged_iter: Vec<_> = if start < end {
+                result.into_iter().skip(start).take(end - start).collect()
+            } else {
+                Vec::new()
+            };
+
+            let http_ranges: Vec<HttpRange> = paged_iter
                 .into_iter()
                 .map(|item| match item.range {
                     fcb_core::static_btree::http::HttpRange::Range(range) => {
@@ -357,7 +408,7 @@ mod wasm {
                     ranges: http_ranges,
                     range_pos: 0,
                 }),
-                count,
+                count: total_count,
             })
         }
 

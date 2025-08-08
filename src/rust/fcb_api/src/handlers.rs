@@ -240,6 +240,7 @@ pub async fn collection_items(
         .limit
         .unwrap_or(DEFAULT_LIMIT)
         .min(state.max_return_features as i32);
+    let offset = query.offset.unwrap_or(0).max(0);
 
     let bbox = query.bbox.as_ref().map(|bbox_str| {
         let parts: Result<Vec<f64>, _> = bbox_str
@@ -300,7 +301,8 @@ pub async fn collection_items(
 
     // Apply filtering (bbox and/or attribute filters)
     let res =
-        fetch_features_with_filter(http_reader, bbox.as_ref(), filter_conditions, limit).await;
+        fetch_features_with_filter(http_reader, bbox.as_ref(), filter_conditions, limit, offset)
+            .await;
 
     let (features, total_count) = match res {
         Ok(features) => features,
@@ -426,11 +428,16 @@ async fn fetch_features_by_bbox<T: AsyncHttpRangeClient + Send + Sync>(
     reader: HttpFcbReader<T>,
     bbox: &Vec<f64>,
     limit: i32,
+    offset: i32,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     let (minx, miny, maxx, maxy) = (bbox[0], bbox[1], bbox[2], bbox[3]);
 
     let mut iter = reader
-        .select_query(Query::BBox(minx, miny, maxx, maxy))
+        .select_query_paged(
+            Query::BBox(minx, miny, maxx, maxy),
+            Some(limit as usize),
+            Some(offset as usize),
+        )
         .await?;
 
     let mut features = Vec::new();
@@ -454,8 +461,19 @@ async fn fetch_features_by_bbox<T: AsyncHttpRangeClient + Send + Sync>(
 async fn fetch_features_limited<T: AsyncHttpRangeClient + Send + Sync>(
     reader: HttpFcbReader<T>,
     limit: u32,
+    offset: u32,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
+    // For full scan, emulate pagination by skipping `offset` features client-side.
     let mut iter = reader.select_all().await?;
+
+    // Skip offset
+    let mut skipped: u32 = 0;
+    while skipped < offset {
+        match iter.next().await? {
+            Some(_) => skipped += 1,
+            None => break,
+        }
+    }
 
     let mut features = Vec::new();
     let mut count = 0;
@@ -485,7 +503,9 @@ async fn fetch_feature_by_id<T: AsyncHttpRangeClient + Send + Sync>(
         KeyType::StringKey50(FixedStringKey::from_str(feature_id)),
     )];
 
-    let mut iter = reader.select_attr_query(&query).await?;
+    let mut iter = reader
+        .select_attr_query_paged(&query, Some(1), Some(0))
+        .await?;
 
     if let Some(feature_result) = iter.next().await? {
         return Ok(Some(feature_result.cj_feature()?));
@@ -499,18 +519,22 @@ async fn fetch_features_with_filter<T: AsyncHttpRangeClient + Send + Sync>(
     bbox: Option<&Vec<f64>>,
     filter_conditions: Option<Vec<(String, Operator, KeyType)>>,
     limit: i32,
+    offset: i32,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     match (bbox, filter_conditions) {
         // Both bbox and filter
         (Some(bbox), Some(_)) => {
             // For now, we'll prioritize bbox over attribute filtering
             // In a full implementation, we'd need to apply both filters
-            fetch_features_by_bbox(reader, bbox, limit).await
+            fetch_features_by_bbox(reader, bbox, limit, offset).await
         }
         // Only filter
         (None, Some(conditions)) => {
             println!("Fetching features with filter: {conditions:?}");
-            let mut iter = match reader.select_attr_query(&conditions).await {
+            let mut iter = match reader
+                .select_attr_query_paged(&conditions, Some(limit as usize), Some(offset as usize))
+                .await
+            {
                 Ok(iter) => iter,
                 Err(e) => {
                     warn!("Failed to execute attribute query: {:?}", e);
@@ -535,8 +559,8 @@ async fn fetch_features_with_filter<T: AsyncHttpRangeClient + Send + Sync>(
             Ok((features, features_count))
         }
         // Only bbox
-        (Some(bbox), None) => fetch_features_by_bbox(reader, bbox, limit).await,
+        (Some(bbox), None) => fetch_features_by_bbox(reader, bbox, limit, offset).await,
         // Neither bbox nor filter
-        (None, None) => fetch_features_limited(reader, limit as u32).await,
+        (None, None) => fetch_features_limited(reader, limit as u32, offset as u32).await,
     }
 }
