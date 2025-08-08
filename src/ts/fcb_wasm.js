@@ -261,7 +261,7 @@ function __wbg_adapter_52(arg0, arg1, arg2) {
     wasm.closure326_externref_shim(arg0, arg1, arg2);
 }
 
-function __wbg_adapter_188(arg0, arg1, arg2, arg3) {
+function __wbg_adapter_190(arg0, arg1, arg2, arg3) {
     wasm.closure357_externref_shim(arg0, arg1, arg2, arg3);
 }
 
@@ -405,6 +405,21 @@ export class HttpFcbReader {
         return ret;
     }
     /**
+     * Select features within a bounding box with optional pagination.
+     * If `limit`/`offset` are provided, only a page of features is returned while
+     * `features_count()` on the returned iterator still reflects the total number of matches.
+     * @param {WasmSpatialQuery} query
+     * @param {number | null} [limit]
+     * @param {number | null} [offset]
+     * @returns {Promise<AsyncFeatureIter>}
+     */
+    select_spatial_paged(query, limit, offset) {
+        const ptr = this.__destroy_into_raw();
+        _assertClass(query, WasmSpatialQuery);
+        const ret = wasm.httpfcbreader_select_spatial_paged(ptr, query.__wbg_ptr, isLikeNone(limit) ? 0x100000001 : (limit) >>> 0, isLikeNone(offset) ? 0x100000001 : (offset) >>> 0);
+        return ret;
+    }
+    /**
      * @param {WasmAttrQuery} query
      * @returns {Promise<AsyncFeatureIter>}
      */
@@ -412,6 +427,19 @@ export class HttpFcbReader {
         const ptr = this.__destroy_into_raw();
         _assertClass(query, WasmAttrQuery);
         const ret = wasm.httpfcbreader_select_attr_query(ptr, query.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Attribute query with optional pagination.
+     * @param {WasmAttrQuery} query
+     * @param {number | null} [limit]
+     * @param {number | null} [offset]
+     * @returns {Promise<AsyncFeatureIter>}
+     */
+    select_attr_query_paged(query, limit, offset) {
+        const ptr = this.__destroy_into_raw();
+        _assertClass(query, WasmAttrQuery);
+        const ret = wasm.httpfcbreader_select_attr_query_paged(ptr, query.__wbg_ptr, isLikeNone(limit) ? 0x100000001 : (limit) >>> 0, isLikeNone(offset) ? 0x100000001 : (offset) >>> 0);
         return ret;
     }
 }
@@ -771,7 +799,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wbg_adapter_188(a, state0.b, arg0, arg1);
+                    return __wbg_adapter_190(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -960,7 +988,7 @@ function __wbg_get_imports() {
         const ret = false;
         return ret;
     };
-    imports.wbg.__wbindgen_closure_wrapper1223 = function(arg0, arg1, arg2) {
+    imports.wbg.__wbindgen_closure_wrapper1244 = function(arg0, arg1, arg2) {
         const ret = makeMutClosure(arg0, arg1, 327, __wbg_adapter_52);
         return ret;
     };

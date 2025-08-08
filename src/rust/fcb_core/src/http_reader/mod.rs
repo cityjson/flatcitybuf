@@ -189,6 +189,18 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
     }
     /// Select features within a bounding box.
     pub async fn select_query(mut self, query: Query) -> Result<AsyncFeatureIter<T>> {
+        self.select_query_paged(query, None, None).await
+    }
+
+    /// Select features within a bounding box with optional pagination.
+    /// If `limit`/`offset` are provided, only a page of features is returned while
+    /// `features_count()` on the returned iterator still reflects the total number of matches.
+    pub async fn select_query_paged(
+        mut self,
+        query: Query,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<AsyncFeatureIter<T>> {
         // Read R-Tree index and build filter for features within bbox
         let header = self.fbs.header();
         if header.index_node_size() == 0 || header.features_count() == 0 {
@@ -216,20 +228,45 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             "Since the tree is traversed breadth first, list should be sorted by construction."
         );
 
-        let count = list.len();
-        let feature_batches = FeatureBatch::make_batches(list, combine_request_threshold).await?;
+        let total_count = list.len();
+
+        // Apply pagination
+        let start = offset.unwrap_or(0).min(total_count);
+        let end = match limit {
+            Some(l) => start.saturating_add(l).min(total_count),
+            None => total_count,
+        };
+        let page_list: Vec<_> = if start < end {
+            list.into_iter().skip(start).take(end - start).collect()
+        } else {
+            Vec::new()
+        };
+
+        let feature_batches =
+            FeatureBatch::make_batches(page_list, combine_request_threshold).await?;
         let selection = FeatureSelection::SelectBbox(SelectBbox { feature_batches });
         Ok(AsyncFeatureIter {
             client: self.client,
             fbs: self.fbs,
             selection,
-            count,
+            count: total_count,
         })
     }
 
     /// This method uses the attribute index section to find matching feature offsets.
     /// It then groups (batches) the remote feature ranges in order to reduce IO overhead.
     pub async fn select_attr_query(mut self, query: &AttrQuery) -> Result<AsyncFeatureIter<T>> {
+        self.select_attr_query_paged(query, None, None).await
+    }
+
+    /// Attribute query with optional pagination where the iterator returns only the requested page,
+    /// while `features_count()` reflects the total number of matches.
+    pub async fn select_attr_query_paged(
+        mut self,
+        query: &AttrQuery,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<AsyncFeatureIter<T>> {
         let header = self.fbs.header();
         let header_len = self.header_len();
         // Assume the header provides rtree and attribute index sizes.
@@ -274,11 +311,21 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             .query(&mut self.client, &query.conditions)
             .await?;
 
-        let count = result.len();
+        let total_count = result.len();
 
-        // println!("result: {:?}", result);
+        // Apply pagination to attribute query results
+        let start = offset.unwrap_or(0).min(total_count);
+        let end = match limit {
+            Some(l) => start.saturating_add(l).min(total_count),
+            None => total_count,
+        };
+        let paged_iter: Vec<_> = if start < end {
+            result.into_iter().skip(start).take(end - start).collect()
+        } else {
+            Vec::new()
+        };
 
-        let http_ranges: Vec<HttpRange> = result
+        let http_ranges: Vec<HttpRange> = paged_iter
             .into_iter()
             .map(|item| match item.range {
                 AttrHttpRange::Range(range) => HttpRange::Range(range.start..range.end),
@@ -293,7 +340,7 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                 ranges: http_ranges,
                 range_pos: 0,
             }),
-            count,
+            count: total_count,
         })
     }
 
