@@ -46,7 +46,17 @@ export class HttpFcbReader {
    * Select features within a bounding box.
    */
   select_spatial(query: WasmSpatialQuery): Promise<AsyncFeatureIter>;
+  /**
+   * Select features within a bounding box with optional pagination.
+   * If `limit`/`offset` are provided, only a page of features is returned while
+   * `features_count()` on the returned iterator still reflects the total number of matches.
+   */
+  select_spatial_paged(query: WasmSpatialQuery, limit?: number | null, offset?: number | null): Promise<AsyncFeatureIter>;
   select_attr_query(query: WasmAttrQuery): Promise<AsyncFeatureIter>;
+  /**
+   * Attribute query with optional pagination.
+   */
+  select_attr_query_paged(query: WasmAttrQuery, limit?: number | null, offset?: number | null): Promise<AsyncFeatureIter>;
 }
 /**
  * A wasm‑friendly wrapper over `AttrQuery`, which is defined as:
@@ -96,7 +106,9 @@ export interface InitOutput {
   readonly httpfcbreader_meta: (a: number) => [number, number, number];
   readonly httpfcbreader_select_all: (a: number) => any;
   readonly httpfcbreader_select_spatial: (a: number, b: number) => any;
+  readonly httpfcbreader_select_spatial_paged: (a: number, b: number, c: number, d: number) => any;
   readonly httpfcbreader_select_attr_query: (a: number, b: number) => any;
+  readonly httpfcbreader_select_attr_query_paged: (a: number, b: number, c: number, d: number) => any;
   readonly asyncfeatureiter_header: (a: number) => [number, number, number];
   readonly asyncfeatureiter_features_count: (a: number) => number;
   readonly asyncfeatureiter_next: (a: number) => any;
