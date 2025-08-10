@@ -31,7 +31,7 @@ pub mod error;
 pub mod fb;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
-mod http_reader;
+pub mod http_reader;
 
 pub mod packed_rtree;
 mod reader;

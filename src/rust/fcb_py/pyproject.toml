@@ -3,16 +3,21 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "fcb"
+name = "flatcitybuf"
 version = "0.1.0"
 description = "Python bindings for FlatCityBuf - a cloud-optimized binary format for 3D city models"
 authors = [{name = "HideBa", email = "baba.papa1120.ba@gmail.com"}]
 license = {text = "MIT"}
 readme = "README.md"
+homepage = "https://github.com/cityjson/flatcitybuf"
+repository = "https://github.com/cityjson/flatcitybuf"
+documentation = "https://github.com/cityjson/flatcitybuf/blob/main/README.md"
 requires-python = ">=3.8"
+keywords = ["gis", "3d", "cityjson", "citymodel", "flatbuffers"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -22,6 +27,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Operating System :: OS Independent",
 ]
 dependencies = []
 
@@ -63,7 +70,7 @@ exclude = '''
 
 
 [tool.mypy]
-files = ["py/**/*.py"]
+files = ["python/**/*.py", "tests/**/*.py"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 ignore_missing_imports = true
@@ -82,4 +89,10 @@ warn_untyped_fields = true
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["py", "py.*"]
+include = ["python", "python.*"]
+
+# Additional metadata for PyPI publishing
+[project.urls]
+"Bug Tracker" = "https://github.com/cityjson/flatcitybuf/issues"
+"Source Code" = "https://github.com/cityjson/flatcitybuf"
+"Documentation" = "https://github.com/cityjson/flatcitybuf/blob/main/README.md"

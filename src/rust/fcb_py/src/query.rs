@@ -64,12 +64,12 @@ impl From<BBox> for fcb_core::packed_rtree::Query {
 #[pyclass]
 #[derive(Clone, Debug)]
 pub enum Operator {
-    Eq,    // ==
-    Ne,    // !=
-    Gt,    // >
-    Ge,    // >=
-    Lt,    // <
-    Le,    // <=
+    Eq, // ==
+    Ne, // !=
+    Gt, // >
+    Ge, // >=
+    Lt, // <
+    Le, // <=
 }
 
 #[pymethods]
@@ -123,10 +123,7 @@ impl AttrFilter {
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "AttrFilter('{}', {:?}, value)",
-            self.field, self.operator
-        )
+        format!("AttrFilter('{}', {:?}, value)", self.field, self.operator)
     }
 
     /// Create an equality filter
@@ -163,6 +160,12 @@ impl AttrFilter {
     #[classmethod]
     fn le(_cls: &PyType, field: String, value: PyObject) -> Self {
         Self::new(field, Operator::Le, value)
+    }
+}
+
+impl From<AttrFilter> for fcb_core::AttrQuery {
+    fn from(filter: AttrFilter) -> Self {
+        vec![(filter.field, filter.operator.into(), filter.value.into())] //TODO: Implement proper KeyType conversion. First it needs to infer proper type from the value. After that, we can cast type into compatible type by considering the key type of the index. For example, we want to convert integer into float when the index is a float. Type casting can be done in `query_attr` function in fcb_py/src/reader.rs
     }
 }
 

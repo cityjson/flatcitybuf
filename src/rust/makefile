@@ -6,12 +6,12 @@ pre-commit:
 .PHONY: check-common
 check-common:
 	cargo fmt
-	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm
+	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm --exclude fcb_py
 	cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
 	# cargo machete --exclude wasm
-	cargo nextest run --all-features --workspace --exclude fcb_wasm
-	cargo check --all-features --workspace --exclude fcb_wasm
-	cargo build --workspace --all-features --exclude fcb_wasm
+	cargo nextest run --all-features --workspace --exclude fcb_wasm --exclude fcb_py
+	cargo check --all-features --workspace --exclude fcb_wasm --exclude fcb_py
+	cargo build --workspace --all-features --exclude fcb_wasm --exclude fcb_py
 
 .PHONY: check-wasm
 check-wasm:
@@ -39,3 +39,24 @@ build-fcb_core:
 wasm-build:
 	cd wasm && wasm-pack build --target web --debug --no-pack
 # cargo build --target web --release
+
+.PHONY: py-build
+py-build:
+	cd fcb_py && maturin build --release
+
+.PHONY: py-develop
+py-develop:
+	cd fcb_py && maturin develop
+
+.PHONY: py-test
+py-test:
+	cd fcb_py && python -m pytest tests/
+
+.PHONY: py-clean
+py-clean:
+	cd fcb_py && cargo clean
+	cd fcb_py && rm -rf target/
+	cd fcb_py && rm -rf *.so
+	cd fcb_py && rm -rf build/
+	cd fcb_py && rm -rf dist/
+	cd fcb_py && rm -rf *.egg-info

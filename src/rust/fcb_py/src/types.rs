@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use serde_json::Value;
@@ -100,13 +101,11 @@ impl Feature {
         geometry: Vec<Geometry>,
         attributes: Option<PyObject>,
     ) -> Self {
-        Python::with_gil(|py| {
-            Self {
-                id,
-                feature_type,
-                geometry,
-                attributes: attributes.unwrap_or_else(|| py.None()),
-            }
+        Python::with_gil(|py| Self {
+            id,
+            feature_type,
+            geometry,
+            attributes: attributes.unwrap_or_else(|| py.None()),
         })
     }
 
@@ -153,10 +152,11 @@ impl FileInfo {
 
     fn __repr__(&self) -> String {
         format!(
-            "FileInfo(features={}, columns={}, crs='{}')",
+            "FileInfo(features={}, columns={}, crs='{}', bbox={:?})",
             self.feature_count,
-            "...",  // We'll implement proper column display later
-            self.crs.as_ref().unwrap_or(&"None".to_string())
+            "...", // We'll implement proper column display later
+            self.crs.as_ref().unwrap_or(&"None".to_string()),
+            self.bbox,
         )
     }
 }
@@ -202,15 +202,20 @@ pub fn python_to_value(obj: &PyAny) -> PyResult<Value> {
         Ok(Value::Number(serde_json::Number::from(i)))
     } else if let Ok(f) = obj.extract::<f64>() {
         Ok(Value::Number(
-            serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0))
+            serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0)),
         ))
     } else if let Ok(s) = obj.extract::<String>() {
         Ok(Value::String(s))
+    } else if let Ok(datetime) = obj.extract::<DateTime<Utc>>() {
+        Ok(Value::String(datetime.to_string()))
     } else {
         // For complex types, convert to JSON string and parse
         let json_str = obj.str()?.to_str()?;
         serde_json::from_str(json_str).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Cannot convert to JSON: {}", e))
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Cannot convert to JSON: {}",
+                e
+            ))
         })
     }
 }

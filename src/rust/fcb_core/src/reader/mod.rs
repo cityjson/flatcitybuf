@@ -17,6 +17,7 @@ pub use attr_query::*;
 use std::marker::PhantomData;
 mod meta;
 pub use meta::{Column as MetaColumn, ColumnType as MetaColumnType, Meta};
+
 pub struct FcbReader<R> {
     reader: R,
     verify: bool,
@@ -202,7 +203,12 @@ impl<R: Read + Seek> FcbReader<R> {
         ))
     }
 
-    pub fn select_query(mut self, query: Query) -> Result<FeatureIter<R, Seekable>, Error> {
+    pub fn select_query(
+        mut self,
+        query: Query,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<FeatureIter<R, Seekable>, Error> {
         // Read R-Tree index and build filter for features within bbox
         let header = self.buffer.header();
         if header.index_node_size() == 0 || header.features_count() == 0 {
@@ -214,6 +220,11 @@ impl<R: Read + Seek> FcbReader<R> {
             PackedRTree::DEFAULT_NODE_SIZE,
             query,
         )?;
+        let list: Vec<_> = list
+            .into_iter()
+            .skip(offset.unwrap_or(0))
+            .take(limit.unwrap_or(usize::MAX))
+            .collect();
         debug_assert!(
             list.windows(2).all(|w| w[0].offset < w[1].offset),
             "Since the tree is traversed breadth first, list should be sorted by construction."

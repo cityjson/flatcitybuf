@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["cli", "fcb_core", "wasm", "fcb_api"]
+members = ["cli", "fcb_core", "wasm", "fcb_api", "fcb_py"]
 resolver = "2"
 
 [workspace.dependencies]
