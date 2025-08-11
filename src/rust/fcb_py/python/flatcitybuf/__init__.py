@@ -54,10 +54,10 @@ if _ASYNC_AVAILABLE:
 
 def open_file(path: str):
     """Convenience function to open and read all features from a file"""
-    with Reader(path) as reader:
-        return list(reader)
+    reader = Reader(path)
+    return list(reader)
 
 def query_bbox(path: str, min_x: float, min_y: float, max_x: float, max_y: float):
     """Convenience function for spatial bbox queries"""
-    with Reader(path) as reader:
-        return list(reader.query_bbox(min_x, min_y, max_x, max_y))
+    reader = Reader(path)
+    return list(reader.query_bbox(min_x, min_y, max_x, max_y))

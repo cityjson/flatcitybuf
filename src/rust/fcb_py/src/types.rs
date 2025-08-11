@@ -91,6 +91,15 @@ pub struct Feature {
     pub attributes: PyObject,
 }
 
+#[pyclass]
+#[derive(Clone)]
+pub struct CityObject {
+    #[pyo3(get)]
+    pub id: Option<String>,
+    #[pyo3(get)]
+    pub type_: String,
+}
+
 #[pymethods]
 impl Feature {
     #[new]
