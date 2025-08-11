@@ -62,8 +62,11 @@ fn read_bbox() -> Result<()> {
     let maxx = 85323.23;
     let maxy = 446334.69;
 
-    let mut fcb =
-        FcbReader::open(&mut memory_buffer)?.select_query(Query::BBox(minx, miny, maxx, maxy))?;
+    let mut fcb = FcbReader::open(&mut memory_buffer)?.select_query(
+        Query::BBox(minx, miny, maxx, maxy),
+        None,
+        None,
+    )?;
 
     assert_ne!(fcb.features_count(), None);
     let mut features = Vec::new();

@@ -6,8 +6,8 @@ build-backend = "maturin"
 name = "flatcitybuf"
 version = "0.1.0"
 description = "Python bindings for FlatCityBuf - a cloud-optimized binary format for 3D city models"
-authors = [{name = "HideBa", email = "baba.papa1120.ba@gmail.com"}]
-license = {text = "MIT"}
+authors = [{ name = "HideBa", email = "baba.papa1120.ba@gmail.com" }]
+license = { text = "MIT" }
 readme = "README.md"
 homepage = "https://github.com/cityjson/flatcitybuf"
 repository = "https://github.com/cityjson/flatcitybuf"
@@ -33,21 +33,13 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-test = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21.0",
-]
-dev = [
-    "black>=23.0",
-    "mypy>=1.0",
-    "flake8>=6.0",
-    "isort>=5.0",
-    "maturin>=1.0",
-]
+test = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
+dev = ["black>=23.0", "mypy>=1.0", "flake8>=6.0", "isort>=5.0", "maturin>=1.0"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
+module-name = "fcb/flatcitybuf"
 
 
 [tool.black]
