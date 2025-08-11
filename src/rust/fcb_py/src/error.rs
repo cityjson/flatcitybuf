@@ -8,7 +8,7 @@ pub struct FcbError;
 #[pymethods]
 impl FcbError {
     #[new]
-    pub fn new(message: String) -> Self {
+    pub fn new(_message: String) -> Self {
         FcbError
     }
 }

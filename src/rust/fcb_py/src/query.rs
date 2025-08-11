@@ -163,11 +163,8 @@ impl AttrFilter {
     }
 }
 
-impl From<AttrFilter> for fcb_core::AttrQuery {
-    fn from(filter: AttrFilter) -> Self {
-        vec![(filter.field, filter.operator.into(), filter.value.into())] //TODO: Implement proper KeyType conversion. First it needs to infer proper type from the value. After that, we can cast type into compatible type by considering the key type of the index. For example, we want to convert integer into float when the index is a float. Type casting can be done in `query_attr` function in fcb_py/src/reader.rs
-    }
-}
+// Note: We removed the From<AttrFilter> implementation since we now handle 
+// conversion manually in the reader methods using proper type conversion
 
 // Helper function to convert Python value to a string for now
 // TODO: Implement proper KeyType conversion when static_btree API is available

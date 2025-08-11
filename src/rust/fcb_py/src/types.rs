@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
+// use chrono::{DateTime, Utc}; // Unused for now to avoid dependency issues
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use serde_json::Value;
-use std::collections::HashMap;
+// use std::collections::HashMap; // Unused for now
 
 /// Python representation of a 3D vertex
 #[pyclass]
@@ -206,8 +206,7 @@ pub fn python_to_value(obj: &PyAny) -> PyResult<Value> {
         ))
     } else if let Ok(s) = obj.extract::<String>() {
         Ok(Value::String(s))
-    } else if let Ok(datetime) = obj.extract::<DateTime<Utc>>() {
-        Ok(Value::String(datetime.to_string()))
+    // Removed DateTime handling for now to avoid dependency issues
     } else {
         // For complex types, convert to JSON string and parse
         let json_str = obj.str()?.to_str()?;

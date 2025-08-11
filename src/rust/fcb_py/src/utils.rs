@@ -3,11 +3,11 @@ use crate::types::*;
 use fcb_core::fb::{CityFeature, CityObject, Vertex as FbVertex};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use serde_json::Value;
+// use serde_json::Value; // Unused for now
 
 /// Convert a FlatCityBuf CityFeature to Python Feature
 pub fn cityfeature_to_python(py: Python, feature: CityFeature) -> PyResult<Feature> {
-    let id = feature.id().map(|s| s.to_string());
+    let id = Some(feature.id().to_string());
     
     // Extract vertices
     let vertices = if let Some(vertex_vec) = feature.vertices() {
