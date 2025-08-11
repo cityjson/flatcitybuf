@@ -15,6 +15,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 ordered-float = { workspace = true }
 chrono = { workspace = true }
+fallible-streaming-iterator = { workspace = true }
 pyo3-asyncio = { version = "0.20", features = [
   "tokio-runtime",
 ], optional = true }

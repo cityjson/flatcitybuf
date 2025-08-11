@@ -12,7 +12,7 @@ mod utils;
 use async_reader::{AsyncReader, AsyncReaderOpened};
 use error::FcbError;
 use query::{AttrFilter, BBox, Operator};
-use reader::{Reader, ReaderIterator};
+use reader::{AllFeaturesIterator, AttributeIterator, Reader, ReaderIterator, SpatialIterator};
 use types::{Feature, FileInfo, Geometry, Vertex};
 
 /// Python bindings for FlatCityBuf
@@ -20,7 +20,12 @@ use types::{Feature, FileInfo, Geometry, Vertex};
 fn _fcb(_py: Python, m: &PyModule) -> PyResult<()> {
     // Core classes
     m.add_class::<Reader>()?;
-    m.add_class::<ReaderIterator>()?;
+    
+    // Iterator classes
+    m.add_class::<AllFeaturesIterator>()?;
+    m.add_class::<SpatialIterator>()?;
+    m.add_class::<AttributeIterator>()?;
+    m.add_class::<ReaderIterator>()?; // Alias for backward compatibility
     
     #[cfg(feature = "http")]
     {

@@ -3,13 +3,12 @@ use crate::query::{AttrFilter, BBox};
 use crate::type_conversion::python_value_to_keytype;
 use crate::types::{Feature, FileInfo};
 use crate::utils::{cityfeature_to_python, is_url};
+use fallible_streaming_iterator::FallibleStreamingIterator;
 use fcb_core::{packed_rtree::Query as SpatialQuery, AttrQuery, FcbReader};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::fs::File;
 use std::io::BufReader;
-
-// We need to use the actual marker types from fcb_core, not local ones
 
 /// Synchronous reader for local FlatCityBuf files
 #[pyclass]
@@ -79,7 +78,7 @@ impl Reader {
         Ok(FileInfo::new(feature_count, columns, crs, bbox))
     }
 
-    /// Query features by bounding box
+    /// Query features by bounding box (returns an iterator)
     pub fn query_bbox(
         &self,
         min_x: f64,
@@ -88,41 +87,41 @@ impl Reader {
         max_y: f64,
         limit: Option<usize>,
         offset: Option<usize>,
-    ) -> PyResult<Vec<Feature>> {
+    ) -> PyResult<FeatureIterator> {
         let bbox = BBox::new(min_x, min_y, max_x, max_y);
         self.query_spatial(bbox, limit, offset)
     }
 
-    /// Query features by spatial bounding box
+    /// Query features by spatial bounding box (returns an iterator)
     pub fn query_spatial(
         &self,
         bbox: BBox,
         limit: Option<usize>,
         offset: Option<usize>,
-    ) -> PyResult<Vec<Feature>> {
+    ) -> PyResult<FeatureIterator> {
         let query: SpatialQuery = bbox.into();
 
         let file = File::open(&self.path).map_err(io_error_to_py_err)?;
         let buf_reader = BufReader::new(file);
         let reader = FcbReader::open(buf_reader).map_err(fcb_error_to_py_err)?;
 
-        let mut feature_iter = reader
+        let feature_iter = reader
             .select_query(query, limit, offset)
             .map_err(fcb_error_to_py_err)?;
 
-        Python::with_gil(|py| {
-            let mut features = Vec::new();
-            while let Ok(Some(iter)) = feature_iter.next() {
-                let fcb_feature = iter.cur_feature();
-                let py_feature = cityfeature_to_python(py, fcb_feature)?;
-                features.push(py_feature);
-            }
-            Ok(features)
+        let total_count = feature_iter
+            .size_hint()
+            .1
+            .unwrap_or(feature_iter.size_hint().0) as u64;
+
+        Ok(FeatureIterator {
+            inner: Box::new(feature_iter),
+            total_count,
         })
     }
 
-    /// Query features by attribute filter
-    pub fn query_attr(&self, filters: Vec<AttrFilter>) -> PyResult<Vec<Feature>> {
+    /// Query features by attribute filter (returns an iterator)
+    pub fn query_attr(&self, filters: Vec<AttrFilter>) -> PyResult<FeatureIterator> {
         let file = File::open(&self.path).map_err(io_error_to_py_err)?;
         let buf_reader = BufReader::new(file);
         let reader = FcbReader::open(buf_reader).map_err(fcb_error_to_py_err)?;
@@ -144,31 +143,32 @@ impl Reader {
         }
 
         let attr_query: AttrQuery = query_conditions;
-        let mut feature_iter = reader
+        let feature_iter = reader
             .select_attr_query(attr_query)
             .map_err(fcb_error_to_py_err)?;
 
-        Python::with_gil(|py| {
-            let mut features = Vec::new();
-            while let Ok(Some(iter)) = feature_iter.next() {
-                let fcb_feature = iter.cur_feature();
-                let py_feature = cityfeature_to_python(py, fcb_feature)?;
-                features.push(py_feature);
-            }
-            Ok(features)
+        let total_count = feature_iter
+            .size_hint()
+            .1
+            .unwrap_or(feature_iter.size_hint().0) as u64;
+
+        Ok(FeatureIterator {
+            inner: Box::new(feature_iter),
+            total_count,
         })
     }
 
     /// Get all features as an iterator
-    pub fn __iter__(&self) -> PyResult<ReaderIterator> {
+    pub fn __iter__(&self) -> PyResult<FeatureIterator> {
         let file = File::open(&self.path).map_err(io_error_to_py_err)?;
         let buf_reader = BufReader::new(file);
         let reader = FcbReader::open(buf_reader).map_err(fcb_error_to_py_err)?;
         let total_count = reader.header().features_count();
 
-        Ok(ReaderIterator {
-            path: self.path.clone(),
-            current_index: 0,
+        let feature_iter = reader.select_all().map_err(fcb_error_to_py_err)?;
+
+        Ok(FeatureIterator {
+            inner: Box::new(feature_iter),
             total_count,
         })
     }
@@ -178,51 +178,72 @@ impl Reader {
     }
 }
 
-/// Iterator for features from synchronous reader
+/// Iterator that wraps FeatureIter from fcb_core
 #[pyclass]
-pub struct ReaderIterator {
-    // Store path to re-open file for each operation (simple but not efficient)
-    path: String,
-    current_index: usize,
+pub struct FeatureIterator {
+    // Use a boxed trait object to handle different FeatureIter types
+    inner: Box<
+        dyn FallibleStreamingIterator<
+                Item = fcb_core::city_buffer::FcbBuffer,
+                Error = fcb_core::error::Error,
+            > + Send,
+    >,
     total_count: u64,
 }
 
 #[pymethods]
-impl ReaderIterator {
+impl FeatureIterator {
+    /// Total number of features that will be returned
+    pub fn total_count(&self) -> u64 {
+        self.total_count
+    }
+
+    /// Get size hint (remaining features, exact count if known)
+    pub fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    /// Number of features remaining
+    pub fn count(&self) -> usize {
+        self.inner.size_hint().1.unwrap_or(self.inner.size_hint().0)
+    }
+
     fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
         slf
     }
 
     fn __next__(&mut self) -> PyResult<Option<Feature>> {
-        if self.current_index >= self.total_count as usize {
-            return Ok(None);
-        }
-
-        // Open file and create iterator each time (inefficient but simple)
-        let file = File::open(&self.path).map_err(io_error_to_py_err)?;
-        let buf_reader = BufReader::new(file);
-        let reader = FcbReader::open(buf_reader).map_err(fcb_error_to_py_err)?;
-        let mut feature_iter = reader.select_all().map_err(fcb_error_to_py_err)?;
-
-        // Skip to current position
-        for _ in 0..self.current_index {
-            if feature_iter.next().is_err() {
-                return Ok(None);
+        // Use the FallibleStreamingIterator's advance method
+        match self.inner.advance() {
+            Ok(()) => {
+                if let Some(buffer) = self.inner.get() {
+                    Python::with_gil(|py| {
+                        let fcb_feature = buffer.feature();
+                        let py_feature = cityfeature_to_python(py, fcb_feature)?;
+                        Ok(Some(py_feature))
+                    })
+                } else {
+                    Ok(None)
+                }
             }
-        }
-
-        // Get the current feature
-        match feature_iter.next() {
-            Ok(Some(feature_data)) => {
-                self.current_index += 1;
-                Python::with_gil(|py| {
-                    let fcb_feature = feature_data.cur_feature();
-                    let py_feature = cityfeature_to_python(py, fcb_feature)?;
-                    Ok(Some(py_feature))
-                })
-            }
-            Ok(None) => Ok(None),
             Err(e) => Err(fcb_error_to_py_err(e)),
         }
+    }
+
+    fn __len__(&self) -> usize {
+        self.count()
+    }
+
+    /// Collect all remaining features into a list
+    pub fn collect(&mut self) -> PyResult<Vec<Feature>> {
+        let mut features = Vec::new();
+        while let Some(feature) = self.__next__()? {
+            features.push(feature);
+        }
+        Ok(features)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("FeatureIterator(count={})", self.count())
     }
 }
