@@ -190,7 +190,7 @@ If you use FlatCityBuf in your research, please cite:
 
 ```bibtex
 @article{flatcitybuf,
-  title={FlatCityBuf: A Cloud-Optimized Binary Format for 3D City Models},
+  title={FlatCityBuf: a new cloud-optimised CityJSON format},
   author={[Hidemichi Baba,  Hugo Ledoux,  Ravi Peters]},
   year={2025},
   url={https://repository.tudelft.nl/record/uuid:6727c979-5e46-4fe0-9349-a7803e825d02}
