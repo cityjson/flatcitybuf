@@ -17,7 +17,7 @@ use types::{Feature, FileInfo, Geometry, Vertex};
 
 /// Python bindings for FlatCityBuf
 #[pymodule]
-fn _fcb(_py: Python, m: &PyModule) -> PyResult<()> {
+fn flatcitybuf(_py: Python, m: &PyModule) -> PyResult<()> {
     // Core classes
     m.add_class::<Reader>()?;
 

@@ -71,3 +71,4 @@ src/rust/fcb_core/tests/data/*.json
 flamegraph*
 .roo
 .serena/
+*.so

@@ -12,7 +12,7 @@ readme = "README.md"
 homepage = "https://github.com/cityjson/flatcitybuf"
 repository = "https://github.com/cityjson/flatcitybuf"
 documentation = "https://github.com/cityjson/flatcitybuf/blob/main/README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.8.1"
 keywords = ["gis", "3d", "cityjson", "citymodel", "flatbuffers"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -30,7 +30,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Operating System :: OS Independent",
 ]
-dependencies = []
+dependencies = ["pytest>=8.3.5", "pytest-asyncio>=0.24.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
@@ -39,7 +39,7 @@ dev = ["black>=23.0", "mypy>=1.0", "flake8>=6.0", "isort>=5.0", "maturin>=1.0"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "fcb/flatcitybuf"
+module-name = "flatcitybuf"
 
 
 [tool.black]
