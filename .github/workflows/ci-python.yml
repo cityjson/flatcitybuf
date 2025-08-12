@@ -53,7 +53,7 @@ jobs:
       - name: Check compilation
         run: |
           cd fcb_py
-          cargo check --release
+          cargo check --release --features pyo3/extension-module
 
       - name: Build with verbose output (if check fails)
         if: failure()
