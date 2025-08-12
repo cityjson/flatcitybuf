@@ -19,6 +19,12 @@ check-wasm:
 	cargo check -p fcb_wasm --target wasm32-unknown-unknown
 	cargo build -p fcb_wasm --target wasm32-unknown-unknown
 
+.PHONY: check-py
+check-py:
+	cd fcb_py && uv run ruff check --fix .
+	cd fcb_py && uv run ruff format .
+	cd fcb_py && uv run pytest tests/
+
 .PHONY: fcb_info
 fcb_info:
 	cargo run -p fcb_cli info -i fcb_core/tests/data/delft_bbox.fcb
@@ -50,7 +56,7 @@ py-develop:
 
 .PHONY: py-test
 py-test:
-	cd fcb_py && python -m pytest tests/
+	cd fcb_py && uv run pytest tests/
 
 .PHONY: py-clean
 py-clean:

@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "flatcitybuf"
 version = "0.1.0"
 description = "Python bindings for FlatCityBuf - a cloud-optimized binary format for 3D city models"
-authors = [{ name = "HideBa", email = "baba.papa1120.ba@gmail.com" }]
+authors = [{ name = "HideBa" }]
 license = { text = "MIT" }
 readme = "README.md"
 homepage = "https://github.com/cityjson/flatcitybuf"
@@ -34,32 +34,41 @@ dependencies = ["pytest>=8.3.5", "pytest-asyncio>=0.24.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
-dev = ["black>=23.0", "mypy>=1.0", "flake8>=6.0", "isort>=5.0", "maturin>=1.0"]
+dev = ["ruff>=0.1.0", "mypy>=1.0", "maturin>=1.0"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "flatcitybuf"
 
+[tool.ruff]
+line-length = 79
+target-version = "py38"
 
-[tool.black]
-line-length = 78
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)/
-'''
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501", # line too long, handled by formatter
+]
 
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py files
+
+[tool.ruff.lint.isort]
+known-first-party = ["flatcitybuf"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
 
 [tool.mypy]
 files = ["python/**/*.py", "tests/**/*.py"]
@@ -82,6 +91,9 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["python", "python.*"]
+
+[dependency-groups]
+dev = ["ruff>=0.12.8"]
 
 # Additional metadata for PyPI publishing
 [project.urls]

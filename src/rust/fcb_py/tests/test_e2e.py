@@ -1,20 +1,15 @@
 """End-to-end integration tests for FlatCityBuf Python bindings"""
 
+# For HTTP testing
+import shutil
 import subprocess
 import tempfile
-import shutil
-import pytest
-import asyncio
-import threading
-import time
 from pathlib import Path
-from flatcitybuf import Reader, AsyncReader, AttrFilter, FcbError, Operator
-import flatcitybuf as fcb
 
-# For HTTP testing
-import http.server
-import socketserver
-from urllib.parse import urlparse
+import pytest
+
+import flatcitybuf as fcb
+from flatcitybuf import AsyncReader, AttrFilter, FcbError, Operator, Reader
 
 
 def setup_test_data():
@@ -201,21 +196,21 @@ class TestE2EIntegration:
 class TestAsyncReaderE2E:
     """End-to-end tests for AsyncReader (HTTP functionality)"""
 
-    def fcb_url(self, http_server_url):
+    def fcb_url(self):
         """URL to test FCB file"""
         return "https://storage.googleapis.com/flatcitybuf/delft.city.fcb"
 
     @pytest.mark.asyncio
-    async def test_async_reader_creation(self, http_server_url):
+    async def test_async_reader_creation(self):
         """Test creating AsyncReader with HTTP URL"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         assert reader is not None
 
     @pytest.mark.asyncio
-    async def test_async_reader_open(self, http_server_url):
+    async def test_async_reader_open(self):
         """Test opening AsyncReader and getting info"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         opened_reader = await reader.open()
 
@@ -227,9 +222,9 @@ class TestAsyncReaderE2E:
         assert hasattr(info, "bbox")
 
     @pytest.mark.asyncio
-    async def test_async_reader_cityjson_header(self, http_server_url):
+    async def test_async_reader_cityjson_header(self):
         """Test getting CityJSON header information"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         opened_reader = await reader.open()
 
@@ -242,9 +237,9 @@ class TestAsyncReaderE2E:
         assert cityjson.feature_count > 0
 
     @pytest.mark.asyncio
-    async def test_async_select_all_iterator(self, http_server_url):
+    async def test_async_select_all_iterator(self):
         """Test select_all async iterator"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         opened_reader = await reader.open()
 
@@ -268,9 +263,9 @@ class TestAsyncReaderE2E:
         assert second_feature.id != first_feature.id
 
     @pytest.mark.asyncio
-    async def test_async_collect_all_features(self, http_server_url):
+    async def test_async_collect_all_features(self):
         """Test collecting all features at once"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         opened_reader = await reader.open()
 
@@ -289,9 +284,9 @@ class TestAsyncReaderE2E:
         assert len(first_feature.city_objects) > 0
 
     @pytest.mark.asyncio
-    async def test_async_spatial_query_bbox(self, http_server_url):
+    async def test_async_spatial_query_bbox(self):
         """Test async spatial query using bounding box"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         opened_reader = await reader.open()
 
@@ -309,9 +304,9 @@ class TestAsyncReaderE2E:
         assert len(features) > 0
 
     @pytest.mark.asyncio
-    async def test_async_spatial_query_iterator(self, http_server_url):
+    async def test_async_spatial_query_iterator(self):
         """Test async spatial query with iterator"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         opened_reader = await reader.open()
 
@@ -337,9 +332,9 @@ class TestAsyncReaderE2E:
         assert count > 0
 
     @pytest.mark.asyncio
-    async def test_async_attribute_query(self, http_server_url):
+    async def test_async_attribute_query(self):
         """Test async querying features by attributes"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         opened_reader = await reader.open()
 
@@ -360,9 +355,9 @@ class TestAsyncReaderE2E:
             print(f"Attribute query failed as expected: {e}")
 
     @pytest.mark.asyncio
-    async def test_async_iterator_state_persistence(self, http_server_url):
+    async def test_async_iterator_state_persistence(self):
         """Test that async iterator maintains state across calls"""
-        url = self.fcb_url(http_server_url)
+        url = self.fcb_url()
         reader = AsyncReader(url)
         opened_reader = await reader.open()
 
@@ -371,7 +366,7 @@ class TestAsyncReaderE2E:
 
         # Get first few features
         features = []
-        for i in range(3):
+        for _ in range(3):
             feature = await async_iter.next()
             if feature is None:
                 break
@@ -394,7 +389,9 @@ class TestAsyncReaderE2E:
 
         # Test valid URL format but non-existent server
         reader = AsyncReader("http://localhost:99999/test.fcb")
-        with pytest.raises(Exception):  # Should raise connection error
+        with pytest.raises(
+            (FcbError, ConnectionError, OSError)
+        ):  # Should raise connection error
             await reader.open()
 
 
