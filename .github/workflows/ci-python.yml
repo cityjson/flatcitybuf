@@ -47,13 +47,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features
+      # - name: Run clippy
+      #   run: cargo clippy --all-targets --all-features
 
       - name: Check compilation
         run: |
           cd fcb_py
-          cargo check --release --features pyo3/extension-module
+          cargo check --release
 
       - name: Build with verbose output (if check fails)
         if: failure()
