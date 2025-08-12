@@ -170,7 +170,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          args: --release --out dist --find-interpreter --compatibility manylinux2014
+          args: --release --out dist --find-interpreter
           sccache: "true"
           manylinux: auto
           working-directory: src/rust/fcb_py
