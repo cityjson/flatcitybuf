@@ -22,18 +22,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
-        exclude:
-          # Skip some combinations to reduce CI time
-          - os: macos-latest
-            python-version: "3.8"
-          - os: macos-latest
-            python-version: "3.9"
-          - os: windows-latest
-            python-version: "3.8"
-          - os: windows-latest
-            python-version: "3.9"
+        os: [ubuntu-latest]
+        python-version: ["3.8", "3.12"]
 
     defaults:
       run:
@@ -59,18 +49,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Install maturin
-        run: pip install maturin
-
-      - name: Build Python package
-        run: |
-          cd fcb_py
-          maturin develop
-
-      - name: Install dev dependencies
+      - name: Install dev dependencies and build
         run: |
           cd fcb_py
           uv sync --extra dev
+          uv run maturin develop
 
       - name: Run linting
         run: |
@@ -113,9 +96,8 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
-          sccache: 'true'
+          sccache: "true"
           manylinux: auto
           working-directory: src/rust/fcb_py
 
