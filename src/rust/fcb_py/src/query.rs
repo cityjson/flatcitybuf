@@ -163,7 +163,7 @@ impl AttrFilter {
     }
 }
 
-// Note: We removed the From<AttrFilter> implementation since we now handle 
+// Note: We removed the From<AttrFilter> implementation since we now handle
 // conversion manually in the reader methods using proper type conversion
 
 // Helper function to convert Python value to a string for now

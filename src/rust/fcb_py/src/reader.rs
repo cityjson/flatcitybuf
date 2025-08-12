@@ -83,10 +83,8 @@ impl Reader {
         let file = File::open(&self.path).map_err(io_error_to_py_err)?;
         let buf_reader = BufReader::new(file);
         let reader = FcbReader::open(buf_reader).map_err(fcb_error_to_py_err)?;
-        
-        Python::with_gil(|py| {
-            header_to_cityjson(py, &reader.header())
-        })
+
+        Python::with_gil(|py| header_to_cityjson(py, &reader.header()))
     }
 
     /// Query features by bounding box (returns an iterator)
