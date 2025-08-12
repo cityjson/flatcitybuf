@@ -16,16 +16,59 @@ on:
 env:
   CARGO_TERM_COLOR: always
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
+  RUST_BACKTRACE: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # First, check if Rust code compiles
+  check-rust:
+    name: Check Rust Compilation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/rust
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/rust
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Check compilation
+        run: |
+          cd fcb_py
+          cargo check --release --features pyo3/extension-module
+
+      - name: Build with verbose output (if check fails)
+        if: failure()
+        run: |
+          cd fcb_py
+          cargo build --release --features pyo3/extension-module --verbose 2>&1 | tee build.log
+          echo "=== Last 100 lines of errors ==="
+          tail -100 build.log
+
   test:
     name: Test Python Package
+    needs: check-rust # Only run if Rust compilation succeeds
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false # Continue testing other combinations if one fails
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
@@ -70,7 +113,7 @@ jobs:
         run: |
           cd fcb_py
           uv sync --extra dev
-          uv run maturin develop
+          uv run maturin develop --release
 
       - name: Run linting
         run: |
@@ -81,12 +124,14 @@ jobs:
       - name: Run tests
         run: |
           cd fcb_py
-          uv run pytest tests/ -v
+          uv run pytest tests/ -v --tb=short
 
   build-wheels:
     name: Build wheels
+    needs: check-rust # Only build wheels if Rust compilation succeeds
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
@@ -108,19 +153,29 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          args: --release --out dist --find-interpreter
+          args: --release --out dist --find-interpreter --compatibility manylinux2014
           sccache: "true"
           manylinux: auto
           working-directory: src/rust/fcb_py
+          before-script-linux: |
+            # Install any system dependencies if needed
+            echo "Building for Linux"
+
+      - name: Check wheel contents
+        run: |
+          pip install wheel
+          wheel unpack dist/*.whl || true
+          ls -la dist/
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.os }}-${{ github.run_number }}
           path: src/rust/fcb_py/dist
 
   build-sdist:
     name: Build source distribution
+    needs: check-rust
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -147,5 +202,31 @@ jobs:
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
-          name: sdist
+          name: sdist-${{ github.run_number }}
           path: src/rust/fcb_py/dist
+
+  # Optional: Test the built wheels
+  test-wheels:
+    name: Test built wheels
+    needs: [build-wheels]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
+      - name: Test wheel installation
+        run: |
+          pip install dist/*cp311*linux*.whl
+          python -c "import flatcitybuf; print(flatcitybuf.__version__)"
