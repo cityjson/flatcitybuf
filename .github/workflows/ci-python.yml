@@ -75,8 +75,8 @@ jobs:
     strategy:
       fail-fast: false # Continue testing other combinations if one fails
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        os: [macos-latest, windows-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
         exclude:
           # Skip some combinations to reduce CI time
           - os: macos-latest
@@ -89,6 +89,10 @@ jobs:
             python-version: "3.9"
           - os: windows-latest
             python-version: "3.10"
+          - os: macos-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.11"
 
     defaults:
       run:
@@ -101,12 +105,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install system dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -156,7 +154,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -168,37 +166,6 @@ jobs:
           sccache: "true"
           manylinux: auto
           working-directory: src/rust/fcb_py
-          before-script-linux: |
-            # Install OpenSSL development packages inside maturin container
-            echo "=== Container Information ==="
-            cat /etc/os-release || echo "No /etc/os-release found"
-            echo "Available package managers:"
-            command -v yum && echo "  yum: $(yum --version | head -1)" || echo "  yum: not found"
-            command -v apt-get && echo "  apt-get: $(apt-get --version | head -1)" || echo "  apt-get: not found"
-            command -v apk && echo "  apk: $(apk --version | head -1)" || echo "  apk: not found"
-            
-            echo "=== Installing OpenSSL development packages ==="
-            if command -v yum >/dev/null 2>&1; then
-              echo "Using yum (CentOS/RHEL based)"
-              yum update -y || echo "yum update failed, continuing..."
-              yum install -y openssl-devel pkgconfig || (echo "yum install failed" && exit 1)
-            elif command -v apt-get >/dev/null 2>&1; then
-              echo "Using apt-get (Debian/Ubuntu based)"
-              apt-get update || echo "apt-get update failed, continuing..."
-              apt-get install -y libssl-dev pkg-config || (echo "apt-get install failed" && exit 1)
-            elif command -v apk >/dev/null 2>&1; then
-              echo "Using apk (Alpine based)"
-              apk update || echo "apk update failed, continuing..."
-              apk add openssl-dev pkgconfig || (echo "apk add failed" && exit 1)
-            else
-              echo "ERROR: No supported package manager found"
-              exit 1
-            fi
-            
-            echo "=== Verifying OpenSSL installation ==="
-            pkg-config --exists openssl && echo "✓ OpenSSL found via pkg-config" || echo "✗ OpenSSL not found via pkg-config"
-            pkg-config --modversion openssl || echo "Could not get OpenSSL version"
-            ls -la /usr/lib*/pkgconfig/*ssl* || echo "No OpenSSL pkgconfig files found"
 
       - name: Check wheel contents
         shell: bash
@@ -227,7 +194,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install system dependencies
         run: |
@@ -262,7 +229,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Download wheels
         uses: actions/download-artifact@v4
