@@ -12,6 +12,10 @@ on:
           - minor
           - major
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   bump-version:
     runs-on: ubuntu-latest
@@ -47,14 +51,14 @@ jobs:
           python -c "
           import toml
           import sys
-          
+
           # Read current pyproject.toml
           with open('pyproject.toml', 'r') as f:
               data = toml.load(f)
-          
+
           current_version = data['project']['version']
           major, minor, patch = map(int, current_version.split('.'))
-          
+
           bump_type = '${{ github.event.inputs.version_bump }}'
           if bump_type == 'major':
               major += 1
@@ -68,14 +72,14 @@ jobs:
           else:
               print(f'Invalid bump type: {bump_type}')
               sys.exit(1)
-          
+
           new_version = f'{major}.{minor}.{patch}'
           data['project']['version'] = new_version
-          
+
           # Write back to file
           with open('pyproject.toml', 'w') as f:
               toml.dump(data, f)
-          
+
           print(f'Bumped version from {current_version} to {new_version}')
           print(f'::set-output name=version::{new_version}')
           "
@@ -98,7 +102,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main  # Get the updated version
+          ref: main # Get the updated version
 
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
@@ -109,4 +113,4 @@ jobs:
           args: --non-interactive --skip-existing
           working-directory: src/rust/fcb_py
           manylinux: auto
-          sccache: 'true'
+          sccache: "true"
