@@ -1,8 +1,8 @@
 use crate::error::{fcb_error_to_py_err, io_error_to_py_err, FcbError};
 use crate::query::{AttrFilter, BBox};
 use crate::type_conversion::python_value_to_keytype;
-use crate::types::{Feature, FileInfo};
-use crate::utils::{cityfeature_to_python, is_url};
+use crate::types::{CityJSON, Feature, FileInfo};
+use crate::utils::{cityfeature_to_python, header_to_cityjson, is_url};
 use fallible_streaming_iterator::FallibleStreamingIterator;
 use fcb_core::{packed_rtree::Query as SpatialQuery, AttrQuery, FcbReader};
 use pyo3::prelude::*;
@@ -76,6 +76,17 @@ impl Reader {
             .map(|crs| format!("EPSG:{}", crs.code_string().unwrap_or_default()));
 
         Ok(FileInfo::new(feature_count, columns, crs, bbox))
+    }
+
+    /// Get CityJSON header information with metadata and transform
+    pub fn cityjson_header(&self) -> PyResult<CityJSON> {
+        let file = File::open(&self.path).map_err(io_error_to_py_err)?;
+        let buf_reader = BufReader::new(file);
+        let reader = FcbReader::open(buf_reader).map_err(fcb_error_to_py_err)?;
+        
+        Python::with_gil(|py| {
+            header_to_cityjson(py, &reader.header())
+        })
     }
 
     /// Query features by bounding box (returns an iterator)
@@ -218,8 +229,7 @@ impl FeatureIterator {
             Ok(()) => {
                 if let Some(buffer) = self.inner.get() {
                     Python::with_gil(|py| {
-                        let fcb_feature = buffer.feature();
-                        let py_feature = cityfeature_to_python(py, fcb_feature)?;
+                        let py_feature = cityfeature_to_python(py, buffer)?;
                         Ok(Some(py_feature))
                     })
                 } else {

@@ -6,7 +6,7 @@ use serde_json::Value;
 
 /// Python representation of a 3D vertex
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Vertex {
     #[pyo3(get)]
     pub x: f64,
@@ -38,14 +38,14 @@ impl Vertex {
 
 /// Python representation of geometry data
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Geometry {
     #[pyo3(get)]
     pub geometry_type: String,
     #[pyo3(get)]
     pub vertices: Vec<Vertex>,
     #[pyo3(get)]
-    pub boundaries: Vec<Vec<u32>>,
+    pub boundaries: PyObject,
     #[pyo3(get)]
     pub semantics: Option<PyObject>,
 }
@@ -56,7 +56,7 @@ impl Geometry {
     pub fn new(
         geometry_type: String,
         vertices: Vec<Vertex>,
-        boundaries: Vec<Vec<u32>>,
+        boundaries: PyObject,
         semantics: Option<PyObject>,
     ) -> Self {
         Self {
@@ -72,65 +72,109 @@ impl Geometry {
             "Geometry(type='{}', vertices={}, boundaries={})",
             self.geometry_type,
             self.vertices.len(),
-            self.boundaries.len()
+            self.boundaries
         )
+    }
+
+    fn __str__(&self) -> String {
+        self.__repr__()
     }
 }
 
-/// Python representation of a FlatCityBuf feature
+/// Python representation of a CityJSON Feature
+/// Matches the structure of CityJSONFeature with CityObjects
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Feature {
     #[pyo3(get)]
-    pub id: Option<String>,
+    pub id: String,
     #[pyo3(get)]
-    pub feature_type: String,
+    pub r#type: String,
+    #[pyo3(get)]
+    pub city_objects: PyObject, // Dict[str, CityObject]
+    #[pyo3(get)]
+    pub vertices: Vec<Vertex>,
+}
+
+/// Python representation of a CityJSON CityObject
+#[pyclass]
+#[derive(Clone, Debug)]
+pub struct CityObject {
+    #[pyo3(get)]
+    pub r#type: String,
     #[pyo3(get)]
     pub geometry: Vec<Geometry>,
     #[pyo3(get)]
     pub attributes: PyObject,
-}
-
-#[pyclass]
-#[derive(Clone)]
-pub struct CityObject {
     #[pyo3(get)]
-    pub id: Option<String>,
+    pub children: Option<Vec<String>>,
     #[pyo3(get)]
-    pub type_: String,
+    pub parents: Option<Vec<String>>,
 }
 
 #[pymethods]
 impl Feature {
     #[new]
-    #[pyo3(signature = (feature_type, id=None, geometry=Vec::new(), attributes=None))]
-    pub fn new(
-        feature_type: String,
-        id: Option<String>,
-        geometry: Vec<Geometry>,
-        attributes: Option<PyObject>,
-    ) -> Self {
-        Python::with_gil(|py| Self {
+    pub fn new(id: String, r#type: String, city_objects: PyObject, vertices: Vec<Vertex>) -> Self {
+        Self {
             id,
-            feature_type,
-            geometry,
-            attributes: attributes.unwrap_or_else(|| py.None()),
+            r#type,
+            city_objects,
+            vertices,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        Python::with_gil(|py| {
+            let n_objects = if let Ok(dict) = self.city_objects.downcast::<PyDict>(py) {
+                dict.len()
+            } else {
+                0
+            };
+            format!(
+                "Feature(id='{}', type='{}', city_objects={}, vertices={})",
+                self.id,
+                self.r#type,
+                n_objects,
+                self.vertices.len()
+            )
         })
+    }
+}
+
+#[pymethods]
+impl CityObject {
+    #[new]
+    pub fn new(
+        r#type: String,
+        geometry: Vec<Geometry>,
+        attributes: PyObject,
+        children: Option<Vec<String>>,
+        parents: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            r#type,
+            geometry,
+            attributes,
+            children,
+            parents,
+        }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "Feature(id='{}', type='{}', geometries={})",
-            self.id.as_ref().unwrap_or(&"None".to_string()),
-            self.feature_type,
-            self.geometry.len()
+            "CityObject(type='{}', geometries={}, children={:?}, parents={:?})",
+            self.r#type,
+            self.geometry.len(),
+            self.children,
+            self.parents
         )
     }
 }
 
 /// File metadata and schema information
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FileInfo {
     #[pyo3(get)]
     pub feature_count: u64,
@@ -202,28 +246,118 @@ pub fn value_to_python(py: Python, value: &Value) -> PyResult<PyObject> {
     }
 }
 
-pub fn python_to_value(obj: &PyAny) -> PyResult<Value> {
-    if obj.is_none() {
-        Ok(Value::Null)
-    } else if let Ok(b) = obj.extract::<bool>() {
-        Ok(Value::Bool(b))
-    } else if let Ok(i) = obj.extract::<i64>() {
-        Ok(Value::Number(serde_json::Number::from(i)))
-    } else if let Ok(f) = obj.extract::<f64>() {
-        Ok(Value::Number(
-            serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0)),
-        ))
-    } else if let Ok(s) = obj.extract::<String>() {
-        Ok(Value::String(s))
-    // Removed DateTime handling for now to avoid dependency issues
-    } else {
-        // For complex types, convert to JSON string and parse
-        let json_str = obj.str()?.to_str()?;
-        serde_json::from_str(json_str).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Cannot convert to JSON: {}",
-                e
-            ))
-        })
+/// Python representation of CityJSON Transform
+#[pyclass]
+#[derive(Clone)]
+pub struct Transform {
+    #[pyo3(get)]
+    pub scale: Vec<f64>,
+    #[pyo3(get)]
+    pub translate: Vec<f64>,
+}
+
+#[pymethods]
+impl Transform {
+    #[new]
+    pub fn new(scale: Vec<f64>, translate: Vec<f64>) -> Self {
+        Self { scale, translate }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Transform(scale={:?}, translate={:?})",
+            self.scale, self.translate
+        )
+    }
+}
+
+/// Python representation of CityJSON Metadata
+#[pyclass]
+#[derive(Clone)]
+pub struct Metadata {
+    #[pyo3(get)]
+    pub geographical_extent: Option<Vec<f64>>,
+    #[pyo3(get)]
+    pub identifier: Option<String>,
+    #[pyo3(get)]
+    pub reference_date: Option<String>,
+    #[pyo3(get)]
+    pub reference_system: Option<String>,
+    #[pyo3(get)]
+    pub title: Option<String>,
+}
+
+#[pymethods]
+impl Metadata {
+    #[new]
+    #[pyo3(signature = (geographical_extent=None, identifier=None, reference_date=None, reference_system=None, title=None))]
+    pub fn new(
+        geographical_extent: Option<Vec<f64>>,
+        identifier: Option<String>,
+        reference_date: Option<String>,
+        reference_system: Option<String>,
+        title: Option<String>,
+    ) -> Self {
+        Self {
+            geographical_extent,
+            identifier,
+            reference_date,
+            reference_system,
+            title,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Metadata(identifier={:?}, title={:?}, reference_system={:?})",
+            self.identifier, self.title, self.reference_system
+        )
+    }
+}
+
+/// Python representation of CityJSON (header/metadata)
+#[pyclass]
+#[derive(Clone)]
+pub struct CityJSON {
+    #[pyo3(get)]
+    pub r#type: String,
+    #[pyo3(get)]
+    pub version: String,
+    #[pyo3(get)]
+    pub transform: Transform,
+    #[pyo3(get)]
+    pub metadata: Option<Metadata>,
+    #[pyo3(get)]
+    pub feature_count: u64,
+}
+
+#[pymethods]
+impl CityJSON {
+    #[new]
+    #[pyo3(signature = (r#type, version, transform, feature_count, metadata=None))]
+    pub fn new(
+        r#type: String,
+        version: String,
+        transform: Transform,
+        feature_count: u64,
+        metadata: Option<Metadata>,
+    ) -> Self {
+        Self {
+            r#type,
+            version,
+            transform,
+            metadata,
+            feature_count,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CityJSON(type='{}', version='{}', features={}, metadata={:?})",
+            self.r#type,
+            self.version,
+            self.feature_count,
+            self.metadata.is_some()
+        )
     }
 }

@@ -77,19 +77,19 @@ def test_data_dir():
 class TestE2EIntegration:
     """End-to-end integration tests using real FCB files"""
 
-    def test_fcb_path(self, test_data_dir):
+    def fcb_path(self, test_data_dir):
         """Path to small test FCB file"""
         return test_data_dir / "delft.fcb"
 
     def test_file_exists(self, test_data_dir):
         """Ensure test files exist"""
-        fcb_path = self.test_fcb_path(test_data_dir)
+        fcb_path = self.fcb_path(test_data_dir)
 
         assert fcb_path.exists(), f"Test file not found: {fcb_path}"
 
     def test_read_file_info(self, test_data_dir):
         """Test reading file information"""
-        fcb_path = self.test_fcb_path(test_data_dir)
+        fcb_path = self.fcb_path(test_data_dir)
         reader = Reader(str(fcb_path))
         info = reader.info()
 
@@ -100,22 +100,44 @@ class TestE2EIntegration:
 
     def test_iterate_features(self, test_data_dir):
         """Test iterating through all features"""
-        fcb_path = self.test_fcb_path(test_data_dir)
+        fcb_path = self.fcb_path(test_data_dir)
         reader = Reader(str(fcb_path))
         features = list(reader)
 
         assert len(features) > 0
 
-        # Check first feature has expected attributes
+        # Check first feature has expected CityJSON attributes
         first_feature = features[0]
-        print("first_feature===========", first_feature)
         assert hasattr(first_feature, "id")
-        assert hasattr(first_feature, "geometry")
-        assert hasattr(first_feature, "attributes")
+        assert hasattr(first_feature, "type")
+        assert hasattr(first_feature, "city_objects")
+        assert hasattr(first_feature, "vertices")
+
+        # Get the first city object from the dictionary
+        city_objects_values = list(first_feature.city_objects.values())
+        first_city_object = (
+            city_objects_values[1]
+            if len(city_objects_values) > 1
+            else city_objects_values[0]
+        )
+        assert hasattr(first_city_object, "geometry")
+        assert hasattr(first_city_object, "attributes")
+        assert hasattr(first_city_object, "children")
+        assert hasattr(first_city_object, "parents")
+        assert len(first_city_object.geometry) > 0
+        assert len(first_city_object.geometry[0].boundaries) > 0
+
+        # Check that city_objects is a dictionary
+        assert isinstance(first_feature.city_objects, dict)
+        assert len(first_feature.city_objects) > 0
+
+        # Check vertices list
+        assert isinstance(first_feature.vertices, list)
+        assert len(first_feature.vertices) > 0
 
     def test_spatial_query_bbox(self, test_data_dir):
         """Test spatial query using bounding box"""
-        fcb_path = self.test_fcb_path(test_data_dir)
+        fcb_path = self.fcb_path(test_data_dir)
         reader = Reader(str(fcb_path))
 
         minx = 84227.77
@@ -125,12 +147,13 @@ class TestE2EIntegration:
         features = list(reader.query_bbox(minx, miny, maxx, maxy))
 
         assert isinstance(features, list)
+
         # Should find some features in this area
         assert len(features) > 0
 
     def test_attribute_query(self, test_data_dir):
         """Test querying features by attributes"""
-        fcb_path = self.test_fcb_path(test_data_dir)
+        fcb_path = self.fcb_path(test_data_dir)
         reader = Reader(str(fcb_path))
 
         # Try to query by attributes that should exist in cube_attr test data
@@ -151,7 +174,7 @@ class TestE2EIntegration:
 
     def test_convenience_functions(self, test_data_dir):
         """Test module-level convenience functions"""
-        fcb_path = self.test_fcb_path(test_data_dir)
+        fcb_path = self.fcb_path(test_data_dir)
 
         # Test open_file convenience function
         features = fcb.open_file(str(fcb_path))
@@ -163,43 +186,7 @@ class TestE2EIntegration:
             str(fcb_path), 84227.77, 445377.33, 85323.23, 446334.69
         )
         assert isinstance(bbox_features, list)
-
-    def test_feature_geometry_access(self, test_data_dir):
-        """Test accessing feature geometry data"""
-        fcb_path = self.test_fcb_path(test_data_dir)
-        reader = Reader(str(fcb_path))
-        features = list(reader)
-
-        if len(features) > 0:
-            feature = features[0]
-
-            print(feature)
-
-    def test_feature_attributes_access(self, test_data_dir):
-        """Test accessing feature attributes"""
-        fcb_path = self.test_fcb_path(test_data_dir)
-        reader = Reader(str(fcb_path))
-        features = list(reader)
-
-        if len(features) > 0:
-            feature = features[0]
-
-            # Check attributes access
-            if hasattr(feature, "attributes") and feature.attributes:
-                attributes = feature.attributes
-                assert attributes is not None
-                assert isinstance(attributes, dict)
-
-    def test_reader_basic_usage(self, test_data_dir):
-        """Test basic Reader usage"""
-        fcb_path = self.test_fcb_path(test_data_dir)
-
-        reader = Reader(str(fcb_path))
-        info = reader.info()
-        assert info.feature_count > 0
-
-        features = list(reader)
-        assert len(features) > 0
+        assert len(bbox_features) > 0
 
 
 class TestAsyncReaderE2E:

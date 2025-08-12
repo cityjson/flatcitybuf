@@ -1,81 +1,197 @@
-use crate::types::*;
-// use cjseq::CityJSONFeature; // TODO: Fix cjseq dependency
-use fcb_core::fb::{CityFeature, CityObject, Vertex as FbVertex};
+use crate::types::{
+    value_to_python, CityJSON, CityObject, Feature, Geometry, Metadata, Transform, Vertex,
+};
+use cjseq::CityJSONFeature;
+use fcb_core::fb::Vertex as FbVertex;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
-// use serde_json::Value; // Unused for now
+use pyo3::types::{PyDict, PyList};
 
-/// Convert a FlatCityBuf CityFeature to Python Feature
-pub fn cityfeature_to_python(py: Python, feature: CityFeature) -> PyResult<Feature> {
-    let id = Some(feature.id().to_string());
-    
-    // Extract vertices
-    let vertices = if let Some(vertex_vec) = feature.vertices() {
-        vertex_vec
-            .iter()
-            .map(|v| Vertex::new(v.x() as f64, v.y() as f64, v.z() as f64))
-            .collect()
-    } else {
-        Vec::new()
-    };
+/// Convert a CityJSONFeature from cjseq to Python Feature
+pub fn cityjson_feature_to_python(py: Python, cj_feature: &CityJSONFeature) -> PyResult<Feature> {
+    let id = cj_feature.id.clone();
+    let feature_type = cj_feature.thetype.clone();
 
-    // Extract geometries
-    let geometries = if let Some(objects) = feature.objects() {
-        let mut geoms = Vec::new();
-        for obj in objects.iter() {
-            if let Some(geometry) = extract_geometry_from_object(py, &obj, &vertices)? {
-                geoms.push(geometry);
+    // Convert vertices from Vec<Vec<i64>> to Vec<Vertex>
+    let vertices: Vec<Vertex> = cj_feature
+        .vertices
+        .iter()
+        .map(|v| {
+            let x = v.get(0).unwrap_or(&0) as &i64;
+            let y = v.get(1).unwrap_or(&0) as &i64;
+            let z = v.get(2).unwrap_or(&0) as &i64;
+            Vertex::new(*x as f64, *y as f64, *z as f64)
+        })
+        .collect();
+
+    // Convert CityObjects to Python dictionary
+    let city_objects_dict = PyDict::new(py);
+    for (obj_id, city_obj) in &cj_feature.city_objects {
+        let py_city_obj = cityjson_cityobject_to_python(py, city_obj)?;
+        city_objects_dict.set_item(obj_id, Py::new(py, py_city_obj)?)?;
+    }
+
+    Ok(Feature::new(
+        id,
+        feature_type,
+        city_objects_dict.to_object(py),
+        vertices,
+    ))
+}
+
+/// Convert FlatCityBuf CityFeature to CityJSONFeature, then to Python
+/// This is a bridge function that uses the fcb_core deserialization
+pub fn cityfeature_to_python(
+    py: Python,
+    buffer: &fcb_core::city_buffer::FcbBuffer,
+) -> PyResult<Feature> {
+    // Use fcb_core to deserialize to CityJSONFeature
+    let cj_feature = buffer.cj_feature().map_err(|e| {
+        PyErr::new::<crate::error::FcbError, _>(format!("Failed to deserialize CityJSON: {}", e))
+    })?;
+
+    // Convert the CityJSONFeature to Python
+    cityjson_feature_to_python(py, &cj_feature)
+}
+
+/// Convert a CityJSON CityObject to Python CityObject
+fn cityjson_cityobject_to_python(py: Python, city_obj: &cjseq::CityObject) -> PyResult<CityObject> {
+    let obj_type = city_obj.thetype.clone();
+
+    // Convert geometries
+    let mut geometries = Vec::new();
+    if let Some(geom_vec) = &city_obj.geometry {
+        for geom in geom_vec {
+            geometries.push(cityjson_geometry_to_python(py, geom)?);
+        }
+    }
+
+    // Convert attributes
+    let attributes_dict = PyDict::new(py);
+    if let Some(attrs) = &city_obj.attributes {
+        for (key, value) in attrs.as_object().unwrap_or(&serde_json::Map::new()) {
+            attributes_dict.set_item(key, value_to_python(py, value)?)?;
+        }
+    }
+
+    // Convert children and parents
+    let children = city_obj.children.clone();
+    let parents = city_obj.parents.clone();
+
+    Ok(CityObject::new(
+        obj_type,
+        geometries,
+        attributes_dict.to_object(py),
+        children,
+        parents,
+    ))
+}
+
+/// Convert a CityJSON Geometry to Python Geometry
+fn cityjson_geometry_to_python(py: Python, geom: &cjseq::Geometry) -> PyResult<Geometry> {
+    let geom_type = format!("{:?}", geom.thetype);
+
+    // Convert boundaries based on geometry type
+    let boundaries = convert_boundaries_to_python(py, &geom.boundaries)?;
+
+    // Convert semantics if available
+    let semantics = if let Some(sem) = &geom.semantics {
+        let sem_dict = PyDict::new(py);
+        // Convert semantics structure to Python dict
+        if let Ok(sem_value) = serde_json::to_value(sem) {
+            for (key, value) in sem_value.as_object().unwrap_or(&serde_json::Map::new()) {
+                sem_dict.set_item(key, value_to_python(py, value)?)?;
             }
         }
-        geoms
+        Some(sem_dict.to_object(py))
     } else {
-        Vec::new()
+        None
     };
 
-    // For now, use the first object's type if available
-    let feature_type = if let Some(objects) = feature.objects() {
-        if objects.len() > 0 {
-            let first_obj = objects.get(0);
-            format!("{:?}", first_obj.type_())  // This will need proper conversion
+    Ok(Geometry::new(
+        geom_type,
+        Vec::new(), // Vertices are at feature level in CityJSON
+        boundaries,
+        semantics,
+    ))
+}
+
+/// Convert FCB header to CityJSON Python object
+/// This creates a proper CityJSON object with transform and metadata
+pub fn header_to_cityjson(_py: Python, header: &fcb_core::Header) -> PyResult<CityJSON> {
+    // Extract transform information
+    let transform = if let Some(fcb_transform) = header.transform() {
+        Transform::new(
+            vec![
+                fcb_transform.scale().x(),
+                fcb_transform.scale().y(),
+                fcb_transform.scale().z(),
+            ],
+            vec![
+                fcb_transform.translate().x(),
+                fcb_transform.translate().y(),
+                fcb_transform.translate().z(),
+            ],
+        )
+    } else {
+        // Default CityJSON transform
+        Transform::new(vec![1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0])
+    };
+
+    // Extract metadata information
+    let metadata = {
+        let mut has_metadata = false;
+        let geographical_extent = header.geographical_extent().map(|extent| {
+            has_metadata = true;
+            vec![
+                extent.min().x(),
+                extent.min().y(),
+                extent.min().z(),
+                extent.max().x(),
+                extent.max().y(),
+                extent.max().z(),
+            ]
+        });
+
+        let identifier = header.identifier().map(|id| {
+            has_metadata = true;
+            id.to_string()
+        });
+
+        let title = header.title().map(|t| {
+            has_metadata = true;
+            t.to_string()
+        });
+
+        let reference_system = header.reference_system().map(|crs| {
+            has_metadata = true;
+            if let Some(auth) = crs.authority() {
+                format!("{}:{}", auth, crs.code())
+            } else {
+                format!("EPSG:{}", crs.code())
+            }
+        });
+
+        if has_metadata {
+            Some(Metadata::new(
+                geographical_extent,
+                identifier,
+                None, // reference_date not available in FCB header
+                reference_system,
+                title,
+            ))
         } else {
-            "Unknown".to_string()
+            None
         }
-    } else {
-        "Unknown".to_string()
     };
 
-    // Extract attributes (simplified for now)
-    let attributes = PyDict::new(py).to_object(py);
-
-    Ok(Feature::new(feature_type, id, geometries, Some(attributes)))
-}
-
-/// Convert a CityJSONFeature to Python Feature (placeholder)
-pub fn cityjson_to_python(py: Python, _feature: serde_json::Value) -> PyResult<Feature> {
-    // TODO: Implement proper CityJSON conversion
-    let id = Some("placeholder".to_string());
-    let feature_type = "Unknown".to_string();
-    let geometries = Vec::new();
-    
-    // Placeholder attributes
-    let attributes = py.None();
-    
-    Ok(Feature::new(feature_type, id, geometries, Some(attributes)))
-}
-
-fn extract_geometry_from_object(
-    _py: Python,
-    _obj: &CityObject,
-    _vertices: &[Vertex],
-) -> PyResult<Option<Geometry>> {
-    // TODO: Implement proper geometry extraction from FlatBuffers CityObject
-    // This is a placeholder that would need to handle the FlatBuffers geometry structure
-    Ok(Some(Geometry::new(
-        "Unknown".to_string(),
-        Vec::new(),
-        Vec::new(),
-        None,
-    )))
+    // Create CityJSON object
+    Ok(CityJSON::new(
+        "CityJSON".to_string(),
+        header.version().to_string(),
+        transform,
+        header.features_count(),
+        metadata,
+    ))
 }
 
 /// Check if a string is a URL
@@ -83,11 +199,22 @@ pub fn is_url(path: &str) -> bool {
     path.starts_with("http://") || path.starts_with("https://")
 }
 
-/// Convert FlatBuffers vertex to Python vertex with scale and translation
-pub fn fb_vertex_to_python(vertex: &FbVertex, scale: (f64, f64, f64), translate: (f64, f64, f64)) -> Vertex {
-    Vertex::new(
-        vertex.x() as f64 * scale.0 + translate.0,
-        vertex.y() as f64 * scale.1 + translate.1,
-        vertex.z() as f64 * scale.2 + translate.2,
-    )
+/// Helper function to convert nested boundaries to Python arrays
+fn convert_boundaries_to_python(py: Python, boundaries: &cjseq::Boundaries) -> PyResult<PyObject> {
+    match boundaries {
+        cjseq::Boundaries::Indices(indices) => {
+            // Convert Vec<u32> to Python list
+            let py_list = PyList::new(py, indices);
+            Ok(py_list.to_object(py))
+        }
+        cjseq::Boundaries::Nested(nested_boundaries) => {
+            // Convert Vec<Boundaries> to nested Python list
+            let py_list = PyList::empty(py);
+            for nested in nested_boundaries {
+                let nested_py = convert_boundaries_to_python(py, nested)?;
+                py_list.append(nested_py)?;
+            }
+            Ok(py_list.to_object(py))
+        }
+    }
 }

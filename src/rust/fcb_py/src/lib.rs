@@ -13,7 +13,7 @@ use async_reader::{AsyncFeatureIterator, AsyncReader, AsyncReaderOpened};
 use error::FcbError;
 use query::{AttrFilter, BBox, Operator};
 use reader::{FeatureIterator, Reader};
-use types::{Feature, FileInfo, Geometry, Vertex};
+use types::{CityJSON, CityObject, Feature, FileInfo, Geometry, Metadata, Transform, Vertex};
 
 /// Python bindings for FlatCityBuf
 #[pymodule]
@@ -32,9 +32,13 @@ fn flatcitybuf(_py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     m.add_class::<Feature>()?;
+    m.add_class::<CityObject>()?;
     m.add_class::<Geometry>()?;
     m.add_class::<Vertex>()?;
     m.add_class::<FileInfo>()?;
+    m.add_class::<CityJSON>()?;
+    m.add_class::<Transform>()?;
+    m.add_class::<Metadata>()?;
 
     // Query types
     m.add_class::<BBox>()?;

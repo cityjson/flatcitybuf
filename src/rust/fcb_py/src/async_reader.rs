@@ -1,8 +1,8 @@
 use crate::error::{fcb_error_to_py_err, FcbError};
 use crate::query::{AttrFilter, BBox};
 use crate::type_conversion::python_value_to_keytype;
-use crate::types::FileInfo;
-use crate::utils::is_url;
+use crate::types::{CityJSON, FileInfo};
+use crate::utils::{header_to_cityjson, is_url};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use pyo3_asyncio::tokio::future_into_py;
@@ -104,6 +104,13 @@ impl AsyncReaderOpened {
             .map(|crs| format!("EPSG:{}", crs.code_string().unwrap_or_default()));
 
         Ok(FileInfo::new(feature_count, columns, crs, bbox))
+    }
+
+    /// Get CityJSON header information with metadata and transform
+    pub fn cityjson_header(&self) -> PyResult<CityJSON> {
+        Python::with_gil(|py| {
+            header_to_cityjson(py, &self.reader.header())
+        })
     }
 
     /// Query features by bounding box (async)
