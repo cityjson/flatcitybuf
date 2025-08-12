@@ -1,17 +1,9 @@
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 
-/// Python exception type for FlatCityBuf errors
-#[pyclass(extends=PyException)]
-pub struct FcbError;
-
-#[pymethods]
-impl FcbError {
-    #[new]
-    pub fn new(_message: String) -> Self {
-        FcbError
-    }
-}
+// Python exception type for FlatCityBuf errors
+// Using create_exception! macro for PyO3 0.21 compatibility
+pyo3::create_exception!(flatcitybuf, FcbError, PyException);
 
 // Helper functions to convert errors to PyErr
 pub fn fcb_error_to_py_err(err: fcb_core::error::Error) -> PyErr {

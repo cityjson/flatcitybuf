@@ -45,8 +45,8 @@ fn flatcitybuf(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<AttrFilter>()?;
     m.add_class::<Operator>()?;
 
-    // Exceptions
-    m.add("FcbError", _py.get_type::<FcbError>())?;
+    // Exceptions - use the exception created by create_exception! macro
+    m.add("FcbError", _py.get_type_bound::<FcbError>())?;
 
     Ok(())
 }
