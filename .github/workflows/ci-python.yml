@@ -181,7 +181,7 @@ jobs:
             if command -v yum >/dev/null 2>&1; then
               echo "Using yum (CentOS/RHEL based)"
               yum update -y || echo "yum update failed, continuing..."
-              yum install -y openssl-devel pkg-config || (echo "yum install failed" && exit 1)
+              yum install -y openssl-devel pkgconfig || (echo "yum install failed" && exit 1)
             elif command -v apt-get >/dev/null 2>&1; then
               echo "Using apt-get (Debian/Ubuntu based)"
               apt-get update || echo "apt-get update failed, continuing..."
