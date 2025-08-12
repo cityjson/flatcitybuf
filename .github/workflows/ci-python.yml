@@ -1,0 +1,157 @@
+name: Python CI
+
+on:
+  push:
+    branches: [main, feat/py]
+    paths:
+      - "src/rust/fcb_py/**"
+      - ".github/workflows/**"
+
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/rust/fcb_py/**"
+      - ".github/workflows/**"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test Python Package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        exclude:
+          # Skip some combinations to reduce CI time
+          - os: macos-latest
+            python-version: "3.8"
+          - os: macos-latest
+            python-version: "3.9"
+          - os: windows-latest
+            python-version: "3.8"
+          - os: windows-latest
+            python-version: "3.9"
+
+    defaults:
+      run:
+        working-directory: src/rust
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/rust
+          shared-key: "fcb-python-ci-${{ matrix.os }}-${{ matrix.python-version }}"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build Python package
+        run: |
+          cd fcb_py
+          maturin develop
+
+      - name: Install dev dependencies
+        run: |
+          cd fcb_py
+          uv sync --extra dev
+
+      - name: Run linting
+        run: |
+          cd fcb_py
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Run type checking
+        run: |
+          cd fcb_py
+          uv run mypy python/
+
+      - name: Run tests
+        run: |
+          cd fcb_py
+          uv run pytest tests/ -v
+
+  build-wheels:
+    name: Build wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    defaults:
+      run:
+        working-directory: src/rust/fcb_py
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter
+          sccache: 'true'
+          manylinux: auto
+          working-directory: src/rust/fcb_py
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: src/rust/fcb_py/dist
+
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/rust/fcb_py
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          working-directory: src/rust/fcb_py
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: src/rust/fcb_py/dist

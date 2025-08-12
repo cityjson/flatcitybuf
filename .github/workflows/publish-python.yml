@@ -1,0 +1,112 @@
+name: Publish Python Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/rust/fcb_py
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GA_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install toml
+
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "actions[bot]@github.com"
+
+      - name: Bump version in pyproject.toml
+        id: version
+        run: |
+          python -c "
+          import toml
+          import sys
+          
+          # Read current pyproject.toml
+          with open('pyproject.toml', 'r') as f:
+              data = toml.load(f)
+          
+          current_version = data['project']['version']
+          major, minor, patch = map(int, current_version.split('.'))
+          
+          bump_type = '${{ github.event.inputs.version_bump }}'
+          if bump_type == 'major':
+              major += 1
+              minor = 0
+              patch = 0
+          elif bump_type == 'minor':
+              minor += 1
+              patch = 0
+          elif bump_type == 'patch':
+              patch += 1
+          else:
+              print(f'Invalid bump type: {bump_type}')
+              sys.exit(1)
+          
+          new_version = f'{major}.{minor}.{patch}'
+          data['project']['version'] = new_version
+          
+          # Write back to file
+          with open('pyproject.toml', 'w') as f:
+              toml.dump(data, f)
+          
+          print(f'Bumped version from {current_version} to {new_version}')
+          print(f'::set-output name=version::{new_version}')
+          "
+
+      - name: Commit version bump
+        run: |
+          cd ../../..
+          git add .
+          git commit -m "chore: bump python version (${{ github.event.inputs.version_bump }})"
+          git push
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ${{ matrix.os }}
+    needs: bump-version
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main  # Get the updated version
+
+      - name: Publish to PyPI
+        uses: PyO3/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        with:
+          command: publish
+          args: --non-interactive --skip-existing
+          working-directory: src/rust/fcb_py
+          manylinux: auto
+          sccache: 'true'

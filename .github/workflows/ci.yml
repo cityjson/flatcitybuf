@@ -1,4 +1,4 @@
-name: Rust CI
+name: CI
 
 on:
   push:
@@ -44,5 +44,38 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Check all
-        run: make pre-commit
+      - name: Check Rust crates
+        run: make check-common
+
+      - name: Check WASM
+        run: make check-wasm
+
+  check-python:
+    name: Check Python
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/rust
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/rust
+          shared-key: "fcb-python-ci"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Check Python package
+        run: make check-py

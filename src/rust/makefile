@@ -2,6 +2,7 @@
 pre-commit:
 	make check-common
 	make check-wasm
+	make check-py
 
 .PHONY: check-common
 check-common:
@@ -21,6 +22,7 @@ check-wasm:
 
 .PHONY: check-py
 check-py:
+	cd fcb_py && maturin develop
 	cd fcb_py && uv run ruff check --fix .
 	cd fcb_py && uv run ruff format .
 	cd fcb_py && uv run pytest tests/
