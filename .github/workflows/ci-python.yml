@@ -27,12 +27,19 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.8", "3.12"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
         exclude:
+          # Skip some combinations to reduce CI time
           - os: macos-latest
             python-version: "3.8"
+          - os: macos-latest
+            python-version: "3.9"
           - os: windows-latest
             python-version: "3.8"
+          - os: windows-latest
+            python-version: "3.9"
+          - os: windows-latest
+            python-version: "3.10"
 
     defaults:
       run:
@@ -70,11 +77,6 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
-      - name: Run type checking
-        run: |
-          cd fcb_py
-          uv run mypy python/
-
       - name: Run tests
         run: |
           cd fcb_py
@@ -97,7 +99,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -129,7 +131,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

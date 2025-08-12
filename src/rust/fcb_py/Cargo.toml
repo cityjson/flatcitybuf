@@ -8,7 +8,7 @@ name = "_fcb"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.20", features = ["extension-module"] }
+pyo3 = { version = "0.22", features = ["extension-module"] }
 fcb_core = { workspace = true }
 cjseq = { workspace = true }
 serde_json = { workspace = true }
@@ -16,7 +16,7 @@ thiserror = { workspace = true }
 ordered-float = { workspace = true }
 chrono = { workspace = true }
 fallible-streaming-iterator = { workspace = true }
-pyo3-asyncio = { version = "0.20", features = [
+pyo3-asyncio = { version = "0.22", features = [
   "tokio-runtime",
 ], optional = true }
 tokio = { workspace = true, optional = true }
@@ -28,4 +28,4 @@ default = ["http"]
 http = ["fcb_core/http", "tokio", "reqwest", "pyo3-asyncio"]
 
 [build-dependencies]
-pyo3-build-config = "0.20"
+pyo3-build-config = "0.22"
