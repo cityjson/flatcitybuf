@@ -24,10 +24,10 @@
 FlatCityBuf revolutionizes 3D city model storage and retrieval by combining the semantic richness of [CityJSON](https://github.com/cityjson/cityjson-spec) with the performance benefits of [FlatBuffers](https://github.com/google/flatbuffers) binary serialization and advanced spatial indexing techniques.
 
 ## Demo
+
 Web prototype can be available from **[here!](https://fcb-web-prototype.netlify.app/)**
 
-https://github.com/user-attachments/assets/ab49f026-1907-4a25-a5fb-8bc69e9a102b
-
+<https://github.com/user-attachments/assets/ab49f026-1907-4a25-a5fb-8bc69e9a102b>
 
 ### 🎯 Why FlatCityBuf?
 
@@ -63,7 +63,6 @@ FlatCityBuf delivers **10-20× faster** data retrieval compared to CityJSONTextS
 | Helsinki | 4.0 s | 132ms | **30.6×** | 2.9× less memory |
 | NYC | 887 ms | 43 ms | **20.7×** | 4.1× less memory |
 
-
 > 📈 **Performance**: 8.6-256× faster queries with 2.1-6.4× less memory usage
 
 ---
@@ -98,6 +97,20 @@ flatcitybuf/
 - **wasm-pack** (for WebAssembly builds)
 
 ### 📦 Installation
+
+#### Package Manager Installation
+
+**Python**: Install from PyPI
+
+```bash
+pip install flatcitybuf
+```
+
+**JavaScript/TypeScript**: Install from npm
+
+```bash
+npm install @cityjson/flatcitybuf
+```
 
 #### Build from Source
 
