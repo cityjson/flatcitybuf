@@ -2,7 +2,6 @@ use crate::types::{
     value_to_python, CityJSON, CityObject, Feature, Geometry, Metadata, Transform, Vertex,
 };
 use cjseq::CityJSONFeature;
-use fcb_core::fb::Vertex as FbVertex;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
