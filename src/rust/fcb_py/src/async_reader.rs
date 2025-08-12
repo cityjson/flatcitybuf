@@ -5,7 +5,7 @@ use crate::types::{CityJSON, FileInfo};
 use crate::utils::{cityfeature_to_python, header_to_cityjson, is_url};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use pyo3_asyncio::tokio::future_into_py;
+use pyo3_async_runtimes::tokio::future_into_py;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -38,7 +38,7 @@ impl AsyncReader {
     }
 
     /// Open and initialize the reader (async)
-    pub fn open<'p>(&self, py: Python<'p>) -> PyResult<&'p PyAny> {
+    pub fn open<'p>(&self, py: Python<'p>) -> PyResult<Bound<'p, PyAny>> {
         let url = self.url.clone();
         future_into_py(py, async move {
             let reader = HttpFcbReader::open(&url)
@@ -110,12 +110,11 @@ impl AsyncReaderOpened {
 
     /// Get CityJSON header information with metadata and transform
     pub fn cityjson_header(&self) -> PyResult<CityJSON> {
-        Python::with_gil(|py| {
-            header_to_cityjson(py, &self.reader.header())
-        })
+        Python::with_gil(|py| header_to_cityjson(py, &self.reader.header()))
     }
 
     /// Query features by bounding box (returns an async iterator)
+    #[pyo3(signature = (min_x, min_y, max_x, max_y, limit=None, offset=None))]
     pub fn query_bbox(
         &self,
         min_x: f64,
@@ -130,6 +129,7 @@ impl AsyncReaderOpened {
     }
 
     /// Query features by spatial bounding box (returns an async iterator)
+    #[pyo3(signature = (bbox, limit=None, offset=None))]
     pub fn query_spatial(
         &self,
         bbox: BBox,
@@ -141,7 +141,11 @@ impl AsyncReaderOpened {
 
         Ok(AsyncFeatureIterator::new(
             url,
-            AsyncIteratorType::Spatial { query, limit, offset }
+            AsyncIteratorType::Spatial {
+                query,
+                limit,
+                offset,
+            },
         ))
     }
 
@@ -168,7 +172,7 @@ impl AsyncReaderOpened {
 
         Ok(AsyncFeatureIterator::new(
             url,
-            AsyncIteratorType::Attribute { attr_query }
+            AsyncIteratorType::Attribute { attr_query },
         ))
     }
 
@@ -176,10 +180,7 @@ impl AsyncReaderOpened {
     pub fn select_all(&self) -> PyResult<AsyncFeatureIterator> {
         let url = self.url.clone();
 
-        Ok(AsyncFeatureIterator::new(
-            url,
-            AsyncIteratorType::All
-        ))
+        Ok(AsyncFeatureIterator::new(url, AsyncIteratorType::All))
     }
 
     /// Python iterator protocol - returns self
@@ -197,8 +198,14 @@ impl AsyncReaderOpened {
 #[derive(Clone)]
 pub enum AsyncIteratorType {
     All,
-    Spatial { query: SpatialQuery, limit: Option<usize>, offset: Option<usize> },
-    Attribute { attr_query: AttrQuery },
+    Spatial {
+        query: SpatialQuery,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    },
+    Attribute {
+        attr_query: AttrQuery,
+    },
 }
 
 /// State holder for the async feature iterator
@@ -231,14 +238,14 @@ impl AsyncFeatureIterator {
 #[pymethods]
 impl AsyncFeatureIterator {
     /// Get next feature (async)
-    pub fn next<'p>(&mut self, py: Python<'p>) -> PyResult<&'p PyAny> {
+    pub fn next<'p>(&mut self, py: Python<'p>) -> PyResult<Bound<'p, PyAny>> {
         let url = self.url.clone();
         let iterator_type = self.iterator_type.clone();
         let state = Arc::clone(&self.state);
 
         future_into_py(py, async move {
             let mut state_guard = state.lock().await;
-            
+
             // Initialize the iterator if not already done
             if state_guard.iter.is_none() {
                 let reader = HttpFcbReader::open(&url)
@@ -249,32 +256,30 @@ impl AsyncFeatureIterator {
                     AsyncIteratorType::All => {
                         reader.select_all().await.map_err(fcb_error_to_py_err)?
                     }
-                    AsyncIteratorType::Spatial { query, limit, offset } => {
-                        reader
-                            .select_query_paged(query, limit, offset)
-                            .await
-                            .map_err(fcb_error_to_py_err)?
-                    }
-                    AsyncIteratorType::Attribute { attr_query } => {
-                        reader
-                            .select_attr_query(&attr_query)
-                            .await
-                            .map_err(fcb_error_to_py_err)?
-                    }
+                    AsyncIteratorType::Spatial {
+                        query,
+                        limit,
+                        offset,
+                    } => reader
+                        .select_query_paged(query, limit, offset)
+                        .await
+                        .map_err(fcb_error_to_py_err)?,
+                    AsyncIteratorType::Attribute { attr_query } => reader
+                        .select_attr_query(&attr_query)
+                        .await
+                        .map_err(fcb_error_to_py_err)?,
                 };
-                
+
                 state_guard.iter = Some(async_iter);
             }
 
             // Get the next feature from the existing iterator
             if let Some(ref mut iter) = state_guard.iter {
                 match iter.next().await {
-                    Ok(Some(buffer)) => {
-                        Python::with_gil(|py| {
-                            let feature = cityfeature_to_python(py, buffer)?;
-                            Ok(Some(feature))
-                        })
-                    }
+                    Ok(Some(buffer)) => Python::with_gil(|py| {
+                        let feature = cityfeature_to_python(py, buffer)?;
+                        Ok(Some(feature))
+                    }),
                     Ok(None) => Ok(None),
                     Err(e) => Err(fcb_error_to_py_err(e)),
                 }
@@ -285,14 +290,14 @@ impl AsyncFeatureIterator {
     }
 
     /// Collect all remaining features into a list (async)
-    pub fn collect<'p>(&mut self, py: Python<'p>) -> PyResult<&'p PyAny> {
+    pub fn collect<'p>(&mut self, py: Python<'p>) -> PyResult<Bound<'p, PyAny>> {
         let url = self.url.clone();
         let iterator_type = self.iterator_type.clone();
         let state = Arc::clone(&self.state);
 
         future_into_py(py, async move {
             let mut state_guard = state.lock().await;
-            
+
             // Initialize the iterator if not already done
             if state_guard.iter.is_none() {
                 let reader = HttpFcbReader::open(&url)
@@ -303,20 +308,20 @@ impl AsyncFeatureIterator {
                     AsyncIteratorType::All => {
                         reader.select_all().await.map_err(fcb_error_to_py_err)?
                     }
-                    AsyncIteratorType::Spatial { query, limit, offset } => {
-                        reader
-                            .select_query_paged(query, limit, offset)
-                            .await
-                            .map_err(fcb_error_to_py_err)?
-                    }
-                    AsyncIteratorType::Attribute { attr_query } => {
-                        reader
-                            .select_attr_query(&attr_query)
-                            .await
-                            .map_err(fcb_error_to_py_err)?
-                    }
+                    AsyncIteratorType::Spatial {
+                        query,
+                        limit,
+                        offset,
+                    } => reader
+                        .select_query_paged(query, limit, offset)
+                        .await
+                        .map_err(fcb_error_to_py_err)?,
+                    AsyncIteratorType::Attribute { attr_query } => reader
+                        .select_attr_query(&attr_query)
+                        .await
+                        .map_err(fcb_error_to_py_err)?,
                 };
-                
+
                 state_guard.iter = Some(async_iter);
             }
 
@@ -335,9 +340,9 @@ impl AsyncFeatureIterator {
     }
 
     /// Get estimated feature count (may not be exact)
-    pub fn features_count<'p>(&self, py: Python<'p>) -> PyResult<&'p PyAny> {
+    pub fn features_count<'p>(&self, py: Python<'p>) -> PyResult<Bound<'p, PyAny>> {
         let state = Arc::clone(&self.state);
-        
+
         future_into_py(py, async move {
             let state_guard = state.lock().await;
             if let Some(ref iter) = state_guard.iter {
@@ -354,7 +359,7 @@ impl AsyncFeatureIterator {
     }
 
     /// Python async iterator next
-    pub fn __anext__<'p>(&mut self, py: Python<'p>) -> PyResult<Option<&'p PyAny>> {
+    pub fn __anext__<'p>(&mut self, py: Python<'p>) -> PyResult<Option<Bound<'p, PyAny>>> {
         // Return the awaitable for the next feature
         Ok(Some(self.next(py)?))
     }
