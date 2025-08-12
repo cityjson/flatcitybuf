@@ -1,0 +1,29 @@
+[package]
+name = "fcb_py"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "_fcb"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { workspace = true }
+fcb_core = { workspace = true }
+cjseq = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ordered-float = { workspace = true }
+chrono = { workspace = true }
+fallible-streaming-iterator = { workspace = true }
+pyo3-async-runtimes = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+
+
+[features]
+default = ["http"]
+http = ["fcb_core/http", "tokio", "reqwest", "pyo3-async-runtimes"]
+
+[build-dependencies]
+pyo3-build-config = "0.21"

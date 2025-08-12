@@ -2,36 +2,31 @@
 pre-commit:
 	make check-common
 	make check-wasm
+	make check-py
 
 .PHONY: check-common
 check-common:
 	cargo fmt
-	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm
+	cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm --exclude fcb_py
 	cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
 	# cargo machete --exclude wasm
-	cargo nextest run --all-features --workspace --exclude fcb_wasm
-	cargo check --all-features --workspace --exclude fcb_wasm
-	cargo build --workspace --all-features --exclude fcb_wasm
+	cargo nextest run --all-features --workspace --exclude fcb_wasm --exclude fcb_py
+	cargo check --all-features --workspace --exclude fcb_wasm --exclude fcb_py
+	cargo build --workspace --all-features --exclude fcb_wasm --exclude fcb_py
 
 .PHONY: check-wasm
 check-wasm:
 	cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
-# cargo nextest run -p wasm --target wasm32-unknown-unknown
 	cargo check -p fcb_wasm --target wasm32-unknown-unknown
 	cargo build -p fcb_wasm --target wasm32-unknown-unknown
 
-.PHONY: ser
-ser:
-	cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl  -o fcb_core/tests/data/delft_attr.fcb --attr-index identificatie,tijdstipregistratie,b3_is_glas_dak,b3_h_dak_50p --attr-branching-factor 256
-# cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o temp/delft_bbox.fcb
-# cargo run --bin flatcitybuf_cli serialize -i tests/data/delft.city.jsonl -o temp/delft.fcb
-	# cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o fcb_core/benchmark_data/attribute/delft.fcb
-
-
-.PHONY: deser
-deser:
-	cargo run -p fcb_cli deser -i temp/delft_attr.fcb -o temp/delft_attr.city.jsonl
-# cargo run --bin flatcitybuf_cli deserialize -i temp/small.fcb -o temp/small.city.jsonl
+.PHONY: check-py
+check-py:
+	cd fcb_py && uv sync --extra dev
+	cd fcb_py && uv run maturin develop
+	cd fcb_py && uv run ruff check --fix .
+	cd fcb_py && uv run ruff format .
+	cd fcb_py && uv run pytest tests/
 
 .PHONY: fcb_info
 fcb_info:
@@ -53,3 +48,24 @@ build-fcb_core:
 wasm-build:
 	cd wasm && wasm-pack build --target web --debug --no-pack
 # cargo build --target web --release
+
+.PHONY: py-build
+py-build:
+	cd fcb_py && maturin build --release
+
+.PHONY: py-develop
+py-develop:
+	cd fcb_py && maturin develop
+
+.PHONY: py-test
+py-test:
+	cd fcb_py && uv run pytest tests/
+
+.PHONY: py-clean
+py-clean:
+	cd fcb_py && cargo clean
+	cd fcb_py && rm -rf target/
+	cd fcb_py && rm -rf *.so
+	cd fcb_py && rm -rf build/
+	cd fcb_py && rm -rf dist/
+	cd fcb_py && rm -rf *.egg-info

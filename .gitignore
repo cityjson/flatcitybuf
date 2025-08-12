@@ -27,8 +27,6 @@ target/
 **/*.rs.bk
 Cargo.lock
 *.pdb
-src/rust/tests/data/*
-!src/rust/tests/data/.gitkeep
 
 # C++
 *.o
@@ -71,3 +69,4 @@ src/rust/fcb_core/tests/data/*.json
 flamegraph*
 .roo
 .serena/
+*.so

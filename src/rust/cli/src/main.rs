@@ -1,5 +1,5 @@
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use fcb_core::error::Error;
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
@@ -41,12 +41,12 @@ enum Commands {
         attr_index: Option<String>,
 
         /// If index all attributes
-        #[arg(short = 'A', long)]
-        index_all_attributes: Option<bool>,
+        #[arg(short = 'A', long, action = ArgAction::SetTrue)]
+        index_all_attributes: bool,
 
-        /// If write spatial index. Default is true.
-        #[arg(short = 's', long)]
-        spatial_index: Option<bool>,
+        /// Disable spatial index (spatial index is enabled by default)
+        #[arg(short = 's', long, action = ArgAction::SetTrue)]
+        no_spatial_index: bool,
 
         /// Branching factor for attribute index
         #[arg(long)]
@@ -57,8 +57,8 @@ enum Commands {
         bbox: Option<String>,
 
         /// Automatically calculate and set geospatial extent in header
-        #[arg(short = 'g', long)]
-        ge: Option<bool>,
+        #[arg(short = 'g', long, action = ArgAction::SetTrue)]
+        ge: bool,
     },
 
     /// Convert FCB to CityJSON
@@ -116,11 +116,11 @@ fn get_writer(output: &str) -> Result<Box<dyn Write>, Error> {
 
 struct SerializeOptions {
     attr_index: Option<String>,
-    index_all_attributes: Option<bool>,
-    spatial_index: Option<bool>,
+    index_all_attributes: bool,
+    no_spatial_index: bool,
     attr_branching_factor: Option<u16>,
     bbox: Option<String>,
-    ge: Option<bool>,
+    ge: bool,
 }
 
 fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(), Error> {
@@ -209,7 +209,7 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         }
     };
     let attr_index_vec: Option<Vec<(String, Option<u16>)>> =
-        if options.index_all_attributes.unwrap_or(false) && attr_schema.is_some() {
+        if options.index_all_attributes && attr_schema.is_some() {
             // create a vec with all attribute names and branching factor given
             Some(
                 attr_schema
@@ -235,7 +235,7 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         };
 
     // Calculate geospatial extent if requested
-    let geo_extent = if options.ge.unwrap_or(true) {
+    let geo_extent = if options.ge {
         Some(calculate_geospatial_extent(
             &filtered_features,
             &cj.transform,
@@ -245,7 +245,7 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
     };
 
     let header_options = HeaderWriterOptions {
-        write_index: options.spatial_index.unwrap_or(true),
+        write_index: !options.no_spatial_index, // Spatial index enabled by default, disabled if flag is present
         feature_count: filtered_features.len() as u64,
         index_node_size: options.attr_branching_factor.unwrap_or(16),
         attribute_indices: attr_index_vec,
@@ -511,7 +511,7 @@ fn main() -> Result<(), Error> {
             output,
             attr_index,
             index_all_attributes,
-            spatial_index,
+            no_spatial_index,
             attr_branching_factor,
             bbox,
             ge,
@@ -521,7 +521,7 @@ fn main() -> Result<(), Error> {
             SerializeOptions {
                 attr_index,
                 index_all_attributes,
-                spatial_index,
+                no_spatial_index,
                 attr_branching_factor,
                 bbox,
                 ge,

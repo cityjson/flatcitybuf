@@ -264,8 +264,7 @@ async fn test_collection_items_filter_pagination_equivalence() {
         .oneshot(
             Request::builder()
                 .uri(format!(
-                    "/collections/pand/items?filter={}&offset=0&limit=3",
-                    filter_enc
+                    "/collections/pand/items?filter={filter_enc}&offset=0&limit=3"
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -285,8 +284,7 @@ async fn test_collection_items_filter_pagination_equivalence() {
         .oneshot(
             Request::builder()
                 .uri(format!(
-                    "/collections/pand/items?filter={}&offset=0&limit=1",
-                    filter_enc
+                    "/collections/pand/items?filter={filter_enc}&offset=0&limit=1"
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -309,8 +307,7 @@ async fn test_collection_items_filter_pagination_equivalence() {
         .oneshot(
             Request::builder()
                 .uri(format!(
-                    "/collections/pand/items?filter={}&offset=1&limit=2",
-                    filter_enc
+                    "/collections/pand/items?filter={filter_enc}&offset=1&limit=2"
                 ))
                 .body(Body::empty())
                 .unwrap(),
