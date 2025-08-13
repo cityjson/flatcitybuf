@@ -8,6 +8,26 @@ FlatCityBuf is a cloud-optimized binary format for storing and retrieving 3D cit
 
 ## Common Development Commands
 
+### Python Development
+
+```bash
+# Build and install Python bindings in development mode
+cd src/rust
+make py-develop
+
+# Build Python wheel for distribution
+cd src/rust
+make py-build
+
+# Run Python tests
+cd src/rust
+make py-test
+
+# Clean Python build artifacts
+cd src/rust
+make py-clean
+```
+
 ### Building and Testing
 
 ```bash
@@ -15,17 +35,21 @@ FlatCityBuf is a cloud-optimized binary format for storing and retrieving 3D cit
 cd src/rust
 cargo build --workspace --all-features --exclude fcb_wasm --release
 
-# Run pre-commit checks (formatting, linting, tests)
+# Run pre-commit checks (formatting, linting, tests) - runs check-common, check-wasm, check-py
 cd src/rust
 make pre-commit
 
 # Run tests with nextest (faster test runner)
 cd src/rust
-cargo nextest run --all-features --workspace --exclude fcb_wasm
+cargo nextest run --all-features --workspace --exclude fcb_wasm --exclude fcb_py
 
 # Run specific integration test
 cd src/rust
 cargo test -p fcb_core --test e2e
+
+# Run Python tests (uv required)
+cd src/rust
+make py-test
 
 # Run benchmarks
 cd src/rust
@@ -44,8 +68,12 @@ make gen-all  # Runs all generation scripts
 ### WebAssembly Build
 
 ```bash
-# Build WASM module
+# Build WASM module for release
 cd src/rust/wasm && wasm-pack build --target web --release --out-dir ../../ts
+
+# Build WASM module for debug (via makefile)
+cd src/rust
+make wasm-build
 ```
 
 ### Linting and Formatting
@@ -56,8 +84,11 @@ cd src/rust
 # Format code
 cargo fmt --all
 
-# Run clippy
-cargo clippy --workspace --all-features -- -D warnings
+# Run clippy with auto-fix
+cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm
+
+# Run clippy for WASM target
+cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
 
 # Check for security vulnerabilities
 cargo audit
@@ -75,8 +106,10 @@ cargo audit
 
 2. **Rust Workspace** (`/src/rust/`)
    - `fcb_core` - Core library for reading/writing FlatCityBuf format
-   - `fcb_cli` - Command-line interface for file conversion and analysis
+   - `cli` - Command-line interface for file conversion and analysis
    - `fcb_wasm` - WebAssembly bindings for browser usage
+   - `fcb_py` - Python bindings using PyO3 and maturin
+   - `fcb_api` - HTTP API server for FlatCityBuf operations
 
 3. **Indexing Structures**
    - **Packed R-tree**: 2D spatial indexing using Hilbert space-filling curves
@@ -159,6 +192,8 @@ cargo audit
 
 - The project uses a Rust workspace structure - always build from `/src/rust/`
 - WASM builds require `wasm-pack` and target `wasm32-unknown-unknown`
+- Python bindings require `uv` package manager and use maturin for building
 - FlatBuffers schemas must be regenerated after changes using `make gen-all`
 - HTTP optimization is critical - always consider range request efficiency
 - Geometry templates are supported for efficient repeated geometry encoding
+- Use `thiserror` for custom error types in library code, avoid `anyhow` except when explicitly approved
