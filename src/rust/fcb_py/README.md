@@ -40,7 +40,7 @@ pip install flatcitybuf
 import flatcitybuf as fcb
 
 # Read a local file
-reader = fcb.Reader("data.fcb")
+reader = fcb.Reader("https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb")
 
 # Get file information
 info = reader.info()
@@ -75,16 +75,16 @@ import flatcitybuf as fcb
 
 async def main():
     # Create async reader for HTTP URL
-    async_reader = fcb.AsyncReader("https://example.com/data.fcb")
+    async_reader = fcb.AsyncReader("https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb")
     opened_reader = await async_reader.open()
-    
+
     # Get file info
     info = opened_reader.info()
     print(f"Features: {info.feature_count}")
-    
+
     # Async iteration - efficient streaming
     async_iter = opened_reader.select_all()
-    
+
     # Process features one by one
     count = 0
     while count < 10:  # Get first 10 features
@@ -93,11 +93,11 @@ async def main():
             break
         print(f"Feature {count}: {feature.id}")
         count += 1
-    
+
     # Or collect all at once
     all_features = await opened_reader.select_all().collect()
     print(f"Total features: {len(all_features)}")
-    
+
     # Async spatial query
     bbox_iter = opened_reader.query_bbox(84227.77, 445377.33, 85323.23, 446334.69)
     spatial_features = await bbox_iter.collect()
@@ -117,6 +117,7 @@ reader = fcb.Reader(path: str)
 ```
 
 **Methods:**
+
 - `info() -> FileInfo` - Get file metadata and statistics
 - `cityjson_header() -> CityJSON` - Get CityJSON header with transform/metadata
 - `query_bbox(min_x, min_y, max_x, max_y) -> Iterator[Feature]` - Spatial query
@@ -133,6 +134,7 @@ opened_reader = await async_reader.open()
 ```
 
 **Methods:**
+
 - `info() -> FileInfo` - Get file metadata
 - `cityjson_header() -> CityJSON` - Get CityJSON header information
 - `select_all() -> AsyncFeatureIterator` - Get all features as async iterator
@@ -158,7 +160,7 @@ Represents a CityJSON feature with proper structure.
 ```python
 class Feature:
     id: str                           # Feature ID
-    type: str                         # Feature type  
+    type: str                         # Feature type
     vertices: List[List[float]]       # 3D vertices as [x, y, z] arrays
     city_objects: Dict[str, CityObject]  # Dictionary of city objects
 ```
@@ -223,7 +225,7 @@ filter_le = fcb.AttrFilter("floors", fcb.Operator.Le, 10)
 
 # Available operators
 fcb.Operator.Eq    # Equal
-fcb.Operator.Ne    # Not equal  
+fcb.Operator.Ne    # Not equal
 fcb.Operator.Gt    # Greater than
 fcb.Operator.Ge    # Greater than or equal
 fcb.Operator.Lt    # Less than
@@ -235,7 +237,7 @@ fcb.Operator.Le    # Less than or equal
 The Python bindings leverage Rust's zero-copy deserialization and efficient indexing:
 
 - **10-20× faster** than parsing equivalent JSON formats
-- **2-6× less memory** usage compared to text formats  
+- **2-6× less memory** usage compared to text formats
 - **Efficient spatial indexing** with packed R-tree queries
 - **HTTP range requests** for cloud-optimized partial access
 - **Async streaming** minimizes memory usage for large datasets
@@ -264,6 +266,7 @@ AsyncReader is optimized for HTTP access:
 ## Examples
 
 See the [examples/](examples/) directory for comprehensive usage examples including:
+
 - Basic local file reading
 - HTTP access with async iteration
 - CityJSON header processing
@@ -297,7 +300,7 @@ python -m pytest tests/test_e2e.py -v
 # Run only sync tests
 python -m pytest tests/test_e2e.py::TestE2EIntegration -v
 
-# Run only async tests  
+# Run only async tests
 python -m pytest tests/test_e2e.py::TestAsyncReaderE2E -v
 ```
 

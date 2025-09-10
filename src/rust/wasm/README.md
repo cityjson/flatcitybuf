@@ -14,7 +14,7 @@ This package provides WebAssembly bindings for the FlatCityBuf library, allowing
 
 ```javascript
 // Import the wasm module
-import * as fcb from 'fcb_wasm';
+import * as fcb from 'flatcitybuf';
 
 // Example CityJSON object
 const cityJsonObject = {
@@ -83,17 +83,17 @@ import * as fcb from 'fcb_wasm';
 
 async function loadFcb() {
   // Create an HTTP FlatCityBuf reader
-  const reader = await new fcb.HttpFcbReader("https://example.com/path/to/model.fcb");
-  
+  const reader = await new fcb.HttpFcbReader("https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb");
+
   // Get CityJSON metadata
   const metadata = await reader.cityjson();
   console.log("CityJSON metadata:", metadata);
-  
+
   // Select all features and iterate
   const iter = await reader.select_all();
   const count = iter.features_count();
   console.log(`Found ${count} features`);
-  
+
   // Process features
   let feature;
   while ((feature = await iter.next()) !== null) {

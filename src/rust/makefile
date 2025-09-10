@@ -69,3 +69,7 @@ py-clean:
 	cd fcb_py && rm -rf build/
 	cd fcb_py && rm -rf dist/
 	cd fcb_py && rm -rf *.egg-info
+
+.PHONY: ser
+ser:
+	cargo run -p fcb_cli ser -i fcb_core/tests/data/delft.city.jsonl -o fcb_core/tests/data/delft.fcb -A -g --attr-branching-factor 64

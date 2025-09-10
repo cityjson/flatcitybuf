@@ -29,6 +29,11 @@ Web prototype can be available from **[here!](https://fcb-web-prototype.netlify.
 
 <https://github.com/user-attachments/assets/ab49f026-1907-4a25-a5fb-8bc69e9a102b>
 
+## Example FlatCityBuf File
+
+- [3DBAG all (70GB)](https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb): serialised whole 3DBAG dataset with spatial and attribute indexing
+- [3DBAG small (3.4GB)](https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb)
+
 ### 🎯 Why FlatCityBuf?
 
 Traditional CityJSON formats face significant challenges in large-scale urban applications:
@@ -106,11 +111,15 @@ flatcitybuf/
 pip install flatcitybuf
 ```
 
+For more details, see [PyPI documentation](https://pypi.org/project/flatcitybuf/)
+
 **JavaScript/TypeScript**: Install from npm
 
 ```bash
 npm install @cityjson/flatcitybuf
 ```
+
+For more details, see [npm documentation](https://www.npmjs.com/package/@cityjson/flatcitybuf)
 
 #### Build from Source
 

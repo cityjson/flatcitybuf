@@ -63,6 +63,7 @@ src/rust/fcb_core/tests/data/*.json
 
 *.fcb
 
+!examples/**/*.fcb
 .cursor/mcp.json
 
 *.plist
