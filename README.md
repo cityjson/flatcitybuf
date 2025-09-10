@@ -33,7 +33,7 @@ Web prototype can be available from **[here!](https://fcb-web-prototype.netlify.
 
 - [3DBAG all (70GB)](https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb): serialised whole 3DBAG dataset with spatial and attribute indexing
 - [3DBAG small (3.4GB)](https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb)
-- [Delft (6MB)(examples/data)
+- [Delft (6MB)](examples/data/delft.fcb)
 
 ### 🎯 Why FlatCityBuf?
 
