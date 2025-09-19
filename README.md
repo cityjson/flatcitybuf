@@ -212,11 +212,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 If you use FlatCityBuf in your research, please cite:
 
 ```bibtex
-@article{flatcitybuf,
-  title={FlatCityBuf: a new cloud-optimised CityJSON format},
-  author={[Hidemichi Baba,  Hugo Ledoux,  Ravi Peters]},
-  year={2025},
-  url={https://repository.tudelft.nl/record/uuid:6727c979-5e46-4fe0-9349-a7803e825d02}
+@article{baba2025flatcitybuf,
+  author = {Baba, H. and Ledoux, H. and Peters, R.},
+  title = {{FlatCityBuf}: A new cloud-optimised {CityJSON} format},
+  journal = {The International Archives of the Photogrammetry, Remote Sensing and Spatial Information Sciences},
+  volume = {XLVIII-4/W15-2025},
+  pages = {17--24},
+  year = {2025},
+  doi = {10.5194/isprs-archives-xlviii-4-w15-2025-17-2025},
+  url = {https://doi.org/10.5194/isprs-archives-xlviii-4-w15-2025-17-2025}
 }
 ```
 
