@@ -209,6 +209,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📖 Citation
 
+The reserach paper has been published on 20th 3D GeoInfo conference in 2025. The paper is publicly availabe on [ISPRS achives](https://isprs-archives.copernicus.org/articles/XLVIII-4-W15-2025/17/2025/) and its DOI is `10.5194/isprs-archives-XLVIII-4-W15-2025-17-2025`
+
 If you use FlatCityBuf in your research, please cite:
 
 ```bibtex
