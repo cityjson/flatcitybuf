@@ -212,15 +212,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 If you use FlatCityBuf in your research, please cite:
 
 ```bibtex
-@article{baba2025flatcitybuf,
-  author = {Baba, H. and Ledoux, H. and Peters, R.},
-  title = {{FlatCityBuf}: A new cloud-optimised {CityJSON} format},
-  journal = {The International Archives of the Photogrammetry, Remote Sensing and Spatial Information Sciences},
-  volume = {XLVIII-4/W15-2025},
-  pages = {17--24},
-  year = {2025},
-  doi = {10.5194/isprs-archives-xlviii-4-w15-2025-17-2025},
-  url = {https://doi.org/10.5194/isprs-archives-xlviii-4-w15-2025-17-2025}
+@inproceedings{25_3dgeoinfo_fcb,
+ author = {Baba, Hidemichi and Ledoux, Hugo and Peters, Ravi},
+ title = {{FlatCityBuf}: {A} new cloud-optimised {CityJSON} format},
+ booktitle = {Proceedings 20th 3D GeoInfo Conference},
+ year = {2025},
+ volume = {XLVIII-4/W15-2025},
+ pages = {17--24},
+ address = {Tokyo, Japan},
+ publisher = {ISPRS},
+ doi = {10.5194/isprs-archives-XLVIII-4-W15-2025-17-2025}
 }
 ```
 
