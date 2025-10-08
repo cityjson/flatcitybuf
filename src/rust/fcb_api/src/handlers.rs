@@ -1,12 +1,14 @@
 use axum::{
     extract::{Path, Query as AxumQuery, State},
-    http::StatusCode,
-    response::Json,
+    http::{header, StatusCode},
+    response::{IntoResponse, Json, Response},
 };
 use chrono::Utc;
 use cjseq::CityJSONFeature;
 use fcb_core::packed_rtree::Query;
-use fcb_core::{FixedStringKey, HttpFcbReader, KeyType, Operator};
+use fcb_core::{
+    deserializer, size_prefixed_root_as_header, FixedStringKey, HttpFcbReader, KeyType, Operator,
+};
 use http_range_client::AsyncHttpRangeClient;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -30,6 +32,7 @@ pub struct BboxQuery {
     crs: Option<String>,
     bbox_crs: Option<String>,
     filter: Option<String>,
+    format: Option<String>,
 }
 
 pub async fn landing_page(
@@ -226,7 +229,7 @@ pub async fn collection_items(
     Path(collection_id): Path<String>,
     AxumQuery(query): AxumQuery<BboxQuery>,
     State(state): State<Arc<AppState>>,
-) -> Result<Json<FeatureCollection>, StatusCode> {
+) -> Result<Response, StatusCode> {
     info!(
         "Serving items for collection: {} with query: {:?}",
         collection_id, query
@@ -236,6 +239,7 @@ pub async fn collection_items(
         return Err(StatusCode::NOT_FOUND);
     }
 
+    let format = query.format.as_deref().unwrap_or("json");
     let limit = query
         .limit
         .unwrap_or(DEFAULT_LIMIT)
@@ -299,10 +303,27 @@ pub async fn collection_items(
         }
     };
 
+    // Store header buffer for later use
+    let header_buf = http_reader.header();
+
+    // TODO: think the best way not to open a new reader again
+    let feature_reader = match HttpFcbReader::open(&state.fcb_url).await {
+        Ok(reader) => reader,
+        Err(e) => {
+            warn!("Failed to open FCB reader: {:?}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
     // Apply filtering (bbox and/or attribute filters)
-    let res =
-        fetch_features_with_filter(http_reader, bbox.as_ref(), filter_conditions, limit, offset)
-            .await;
+    let res = fetch_features_with_filter(
+        feature_reader,
+        bbox.as_ref(),
+        filter_conditions,
+        limit,
+        offset,
+    )
+    .await;
 
     let (features, total_count) = match res {
         Ok(features) => features,
@@ -310,7 +331,6 @@ pub async fn collection_items(
             warn!("Failed to fetch features: {:?}", e);
             // Check if this is an attribute-related error that should return 400
             let error_msg = e.to_string();
-            println!("error_msg-------: {error_msg}");
             if error_msg.contains("AttributeIndexNotFound")
                 || error_msg.contains("NoColumnsInHeader")
                 || error_msg.contains("QueryExecutionError")
@@ -322,48 +342,126 @@ pub async fn collection_items(
         }
     };
 
-    let number_matched = total_count as i32;
-    let number_returned = features.len() as i32;
+    // Handle different output formats
+    match format {
+        "cjseq" => {
+            // Generate CityJSONSeq format
+            let metadata = match deserializer::to_cj_metadata(&header_buf) {
+                Ok(meta) => meta,
+                Err(e) => {
+                    warn!("Failed to generate CityJSON metadata: {:?}", e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+            };
 
-    let feature_collection = FeatureCollection {
-        r#type: Type::FeatureCollection,
-        features: features
-            .into_iter()
-            .map(|f| FeatureCityJson {
-                feature: Some(serde_json::to_value(f.clone()).unwrap_or_default()),
-                id: Some(f.id.clone()),
-                links: Some(vec![
-                    Link {
-                        href: format!("/collections/{}/items/{}", collection_id, f.id),
-                        rel: "self".to_string(),
-                        r#type: Some("application/city+json".to_string()),
-                        title: Some("this document".to_string()),
-                        ..Default::default()
-                    },
-                    Link {
-                        href: format!("/collections/{collection_id}"),
-                        rel: "collection".to_string(),
-                        r#type: Some("application/json".to_string()),
-                        title: Some("Collection".to_string()),
-                        ..Default::default()
-                    },
-                ]),
-                ..Default::default()
-            })
-            .collect(),
-        number_matched: Some(number_matched),
-        number_returned: Some(number_returned),
-        time_stamp: Some(Utc::now().to_rfc3339()),
-        links: Some(vec![Link {
-            href: format!("/collections/{collection_id}/items"),
-            rel: "self".to_string(),
-            r#type: Some("application/json".to_string()),
-            title: Some("this document".to_string()),
-            ..Default::default()
-        }]),
-    };
+            let mut output = String::new();
+            // First line: metadata
+            output.push_str(&serde_json::to_string(&metadata).unwrap_or_default());
+            output.push('\n');
 
-    Ok(Json(feature_collection))
+            // Following lines: individual features
+            for feature in features {
+                output.push_str(&serde_json::to_string(&feature).unwrap_or_default());
+                output.push('\n');
+            }
+
+            Ok((
+                [(header::CONTENT_TYPE, "application/city+json-seq")],
+                output,
+            )
+                .into_response())
+        }
+        "cityjson" => {
+            // Generate CityJSON format by combining all features
+            let mut cjj = match deserializer::to_cj_metadata(&header_buf) {
+                Ok(meta) => meta,
+                Err(e) => {
+                    warn!("Failed to generate CityJSON metadata: {:?}", e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+            };
+
+            // Add all features to the CityJSON object
+            for mut feature in features {
+                cjj.add_cjfeature(&mut feature);
+            }
+
+            // Remove duplicate vertices and update transform
+            cjj.remove_duplicate_vertices();
+            cjj.update_transform();
+
+            let json_str = serde_json::to_string(&cjj).unwrap_or_default();
+            Ok(([(header::CONTENT_TYPE, "application/city+json")], json_str).into_response())
+        }
+        "obj" => {
+            // Generate OBJ format
+            let mut cjj = match deserializer::to_cj_metadata(&header_buf) {
+                Ok(meta) => meta,
+                Err(e) => {
+                    warn!("Failed to generate CityJSON metadata: {:?}", e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+            };
+
+            // Add all features to the CityJSON object
+            for mut feature in features {
+                cjj.add_cjfeature(&mut feature);
+            }
+
+            // Remove duplicate vertices and update transform
+            cjj.remove_duplicate_vertices();
+            cjj.update_transform();
+
+            // Convert to OBJ
+            let obj_str = cjseq::conv::obj::to_obj_string(&cjj);
+            Ok(([(header::CONTENT_TYPE, "text/plain")], obj_str).into_response())
+        }
+        "json" | _ => {
+            // Default JSON format (FeatureCollection)
+            let number_matched = total_count as i32;
+            let number_returned = features.len() as i32;
+
+            let feature_collection = FeatureCollection {
+                r#type: Type::FeatureCollection,
+                features: features
+                    .into_iter()
+                    .map(|f| FeatureCityJson {
+                        feature: Some(serde_json::to_value(f.clone()).unwrap_or_default()),
+                        id: Some(f.id.clone()),
+                        links: Some(vec![
+                            Link {
+                                href: format!("/collections/{}/items/{}", collection_id, f.id),
+                                rel: "self".to_string(),
+                                r#type: Some("application/city+json".to_string()),
+                                title: Some("this document".to_string()),
+                                ..Default::default()
+                            },
+                            Link {
+                                href: format!("/collections/{collection_id}"),
+                                rel: "collection".to_string(),
+                                r#type: Some("application/json".to_string()),
+                                title: Some("Collection".to_string()),
+                                ..Default::default()
+                            },
+                        ]),
+                        ..Default::default()
+                    })
+                    .collect(),
+                number_matched: Some(number_matched),
+                number_returned: Some(number_returned),
+                time_stamp: Some(Utc::now().to_rfc3339()),
+                links: Some(vec![Link {
+                    href: format!("/collections/{collection_id}/items"),
+                    rel: "self".to_string(),
+                    r#type: Some("application/json".to_string()),
+                    title: Some("this document".to_string()),
+                    ..Default::default()
+                }]),
+            };
+
+            Ok(Json(feature_collection).into_response())
+        }
+    }
 }
 
 pub async fn collection_item_by_id(
