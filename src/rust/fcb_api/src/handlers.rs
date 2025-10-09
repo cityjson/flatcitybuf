@@ -1,20 +1,19 @@
 use axum::{
     extract::{Path, Query as AxumQuery, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
 };
 use chrono::Utc;
 use cjseq::CityJSONFeature;
 use fcb_core::packed_rtree::Query;
-use fcb_core::{
-    deserializer, size_prefixed_root_as_header, FixedStringKey, HttpFcbReader, KeyType, Operator,
-};
+use fcb_core::{deserializer, FixedStringKey, HttpFcbReader, KeyType, Operator};
 use http_range_client::AsyncHttpRangeClient;
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::constants::*;
+use crate::crs::{transform_bbox, DUTCH_CRS};
 use crate::filter_parser::{parse_filter, ParseError};
 use crate::models::*;
 use crate::AppState;
@@ -30,9 +29,39 @@ pub struct BboxQuery {
     offset: Option<i32>,
     bbox: Option<String>,
     crs: Option<String>,
+    #[serde(rename = "bbox-crs")]
     bbox_crs: Option<String>,
     filter: Option<String>,
-    format: Option<String>,
+    f: Option<String>,
+}
+
+/// Determine output format from query parameter or Accept header
+/// Priority: query parameter 'f' > Accept header > default 'json'
+fn determine_format<'a>(query_format: &'a Option<String>, headers: &HeaderMap) -> &'a str {
+    // First priority: query parameter
+    if let Some(f) = query_format {
+        return f.as_str();
+    }
+
+    // Second priority: Accept header
+    if let Some(accept) = headers.get(header::ACCEPT) {
+        if let Ok(accept_str) = accept.to_str() {
+            // Parse Accept header and match against supported formats
+            for media_type in accept_str.split(',') {
+                let media_type = media_type.split(';').next().unwrap_or("").trim();
+                match media_type {
+                    "application/city+json-seq" => return "cjseq",
+                    "application/city+json" => return "cityjson",
+                    "text/plain" | "model/obj" => return "obj",
+                    "application/json" => return "json",
+                    _ => continue,
+                }
+            }
+        }
+    }
+
+    // Default format
+    "json"
 }
 
 pub async fn landing_page(
@@ -227,6 +256,7 @@ pub async fn collection_by_id(
 
 pub async fn collection_items(
     Path(collection_id): Path<String>,
+    headers: HeaderMap,
     AxumQuery(query): AxumQuery<BboxQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, StatusCode> {
@@ -239,39 +269,71 @@ pub async fn collection_items(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let format = query.format.as_deref().unwrap_or("json");
+    // Determine format from query parameter or Accept header
+    let format = determine_format(&query.f, &headers);
     let limit = query
         .limit
         .unwrap_or(DEFAULT_LIMIT)
         .min(state.max_return_features as i32);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    let bbox = query.bbox.as_ref().map(|bbox_str| {
+    // Parse and transform bbox if provided
+    let bbox = if let Some(bbox_str) = &query.bbox {
         let parts: Result<Vec<f64>, _> = bbox_str
             .split(',')
             .map(|s| s.trim().parse::<f64>())
             .collect();
-        match parts {
+
+        let parsed_bbox = match parts {
             Ok(coords) => {
                 if coords.len() == 4 {
                     Ok(coords)
                 } else if coords.len() == 6 {
+                    // Extract 2D bbox from 3D bbox (ignore z coordinates)
                     Ok(vec![coords[0], coords[1], coords[3], coords[4]])
                 } else {
                     Err(StatusCode::BAD_REQUEST)
                 }
             }
-            Err(_) => Err(StatusCode::BAD_REQUEST),
-        }
-    });
+            Err(_) => {
+                warn!("Failed to parse bbox coordinates");
+                Err(StatusCode::BAD_REQUEST)
+            }
+        };
 
-    let bbox = match bbox {
-        Some(Ok(bbox)) => Some(bbox),
-        Some(Err(e)) => {
-            warn!("Failed to parse bbox: {:?}", e);
-            return Err(StatusCode::BAD_REQUEST);
+        // Apply coordinate transformation if bbox-crs is provided
+        match parsed_bbox {
+            Ok(coords) => {
+                if let Some(bbox_crs) = &query.bbox_crs {
+                    // Transform from bbox_crs to Dutch CRS
+                    match transform_bbox(&coords, bbox_crs, DUTCH_CRS) {
+                        Ok(transformed) => {
+                            info!(
+                                "Transformed bbox from {} to {}: {:?} -> {:?}",
+                                bbox_crs, DUTCH_CRS, coords, transformed
+                            );
+                            Some(transformed)
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Failed to transform bbox from {} to {}: {}",
+                                bbox_crs, DUTCH_CRS, e
+                            );
+                            return Err(StatusCode::BAD_REQUEST);
+                        }
+                    }
+                } else {
+                    // No transformation needed, bbox is already in Dutch CRS
+                    Some(coords)
+                }
+            }
+            Err(e) => {
+                warn!("Failed to parse bbox: {:?}", e);
+                return Err(StatusCode::BAD_REQUEST);
+            }
         }
-        None => None,
+    } else {
+        None
     };
 
     // Parse filter if provided

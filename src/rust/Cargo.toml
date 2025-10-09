@@ -47,6 +47,7 @@ pyo3 = { version = "0.21", features = ["extension-module"] }
 pyo3-async-runtimes = { version = "0.21", features = ["tokio-runtime"] }
 bson = "2.13.0"
 serde_cbor = "0.10"
+proj = "0.31"
 
 #---WASM dependencies---
 getrandom = { version = "0.3.3" }
