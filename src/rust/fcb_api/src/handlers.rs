@@ -248,6 +248,14 @@ pub async fn collection_by_id(
         "version": {
             "api": API_VERSION,
             "collection": COLLECTION_VERSION
+        },
+        "cityjson": {
+            "version": CITYJSON_VERSION,
+            "transform": {
+                "scale": CITYJSON_SCALE,
+                "translate": CITYJSON_TRANSLATE
+            },
+            "extensions": CITYJSON_EXTENSIONS
         }
     });
 
