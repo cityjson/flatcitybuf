@@ -69,3 +69,11 @@ pub const ITEM_TYPE_FEATURE: &str = "feature";
 
 // Feature collection type
 pub const FEATURE_COLLECTION_TYPE: &str = "FeatureCollection";
+
+// CityJSON Metadata
+pub const CITYJSON_VERSION: &str = "2.0";
+
+pub const CITYJSON_SCALE: [f64; 3] = [0.001, 0.001, 0.001];
+pub const CITYJSON_TRANSLATE: [f64; 3] = [171800.0, 472700.0, 0.0];
+
+pub const CITYJSON_EXTENSIONS: Vec<String> = vec![];

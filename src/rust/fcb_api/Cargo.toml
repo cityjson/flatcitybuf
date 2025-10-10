@@ -32,6 +32,7 @@ ordered-float = { workspace = true }
 openapi = { path = "src/openapi" }
 cjseq = { workspace = true }
 thiserror = { workspace = true }
+proj = { workspace = true }
 
 [dev-dependencies]
 urlencoding = { workspace = true }

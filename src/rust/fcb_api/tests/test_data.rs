@@ -154,6 +154,14 @@ pub const EXPECTED_COLLECTION_PAND: &str = r#"{
   "version": {
     "api": "0.1",
     "collection": "v2023.10.08"
+  },
+  "cityjson": {
+    "version": "2.0",
+    "transform": {
+      "scale": [0.001, 0.001, 0.001],
+      "translate": [171800.0, 472700.0, 0.0]
+    },
+    "extensions": []
   }
 }"#;
 
