@@ -152,20 +152,17 @@ async fn load_fcb_metadata(fcb_url: &str, is_local: bool) -> FcbMetadata {
                                     column_type: column.type_(),
                                     is_indexed: indexed_columns.contains(&column.index()),
                                 };
-                                metadata
-                                    .columns
-                                    .insert(column.name().to_string(), col_meta);
+                                metadata.columns.insert(column.name().to_string(), col_meta);
                             }
                         }
 
-                        tracing::info!("Successfully loaded FCB metadata from local file: {}", fcb_url);
+                        tracing::info!(
+                            "Successfully loaded FCB metadata from local file: {}",
+                            fcb_url
+                        );
                     }
                     Err(e) => {
-                        tracing::error!(
-                            "Failed to open local FCB reader from {}: {}",
-                            fcb_url,
-                            e
-                        );
+                        tracing::error!("Failed to open local FCB reader from {}: {}", fcb_url, e);
                     }
                 }
             }
@@ -202,7 +199,10 @@ async fn load_fcb_metadata(fcb_url: &str, is_local: bool) -> FcbMetadata {
                     }
                 }
 
-                tracing::info!("Successfully loaded FCB metadata from HTTP URL: {}", fcb_url);
+                tracing::info!(
+                    "Successfully loaded FCB metadata from HTTP URL: {}",
+                    fcb_url
+                );
             }
             Err(e) => {
                 tracing::error!("Failed to load FCB metadata from {}: {}", fcb_url, e);

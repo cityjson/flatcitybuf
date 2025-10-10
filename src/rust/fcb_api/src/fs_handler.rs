@@ -163,7 +163,13 @@ pub async fn collection_items(
     let header = reader.header();
 
     // Apply filtering (bbox and/or attribute filters)
-    let res = fetch_features_with_filter(query_reader, bbox.as_ref(), filter_conditions, limit, offset);
+    let res = fetch_features_with_filter(
+        query_reader,
+        bbox.as_ref(),
+        filter_conditions,
+        limit,
+        offset,
+    );
 
     let (features, total_count) = match res {
         Ok(features) => features,

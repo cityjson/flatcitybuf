@@ -658,65 +658,6 @@ async fn test_filter_and_condition() {
     }
 }
 
-// TODO: add test for BETWEEN condition
-// #[tokio::test]
-// async fn test_filter_between_condition() {
-//     let app = app().await;
-
-//     let filter = "b3_h_dak_50p BETWEEN 5.0 AND 20.0";
-//     let response = app
-//         .oneshot(
-//             Request::builder()
-//                 .uri(format!(
-//                     "/collections/pand/items?filter={}&limit=3",
-//                     urlencoding::encode(filter)
-//                 ))
-//                 .body(Body::empty())
-//                 .unwrap(),
-//         )
-//         .await
-//         .unwrap();
-
-//     // Handle case where attributes might not be indexed in test dataset
-//     assert!(
-//         response.status() == StatusCode::OK,
-//         "Expected 200, got: {}",
-//         response.status()
-//     );
-
-//     if response.status() == StatusCode::OK {
-//         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-//             .await
-//             .unwrap();
-//         let json: FeatureCollection = serde_json::from_slice(&body).unwrap();
-//         let features = json.features;
-
-//         // Verify that all returned features match BETWEEN condition:
-//         // b3_h_dak_50p BETWEEN 5 AND 20 (inclusive)
-//         for feature in features {
-//             let mut between_condition_met = false;
-
-//             let feature: CityJSONFeature =
-//                 serde_json::from_value(feature.feature.unwrap()).unwrap();
-//             for co in feature.city_objects.values() {
-//                 if let Some(attrs) = co.attributes.as_ref() {
-//                     // Check b3_h_dak_50p >= 5 AND b3_h_dak_50p <= 20
-//                     if let Some(height) = attrs.get("b3_h_dak_50p") {
-//                         let height_value = height.as_f64().unwrap();
-//                         if (5.0..=20.0).contains(&height_value) {
-//                             between_condition_met = true;
-//                         }
-//                     }
-//                 }
-//             }
-//             assert!(
-//                 between_condition_met,
-//                 "BETWEEN condition not met for feature"
-//             );
-//         }
-//     }
-// }
-
 #[tokio::test]
 async fn test_filter_boolean_value() {
     let app = app().await;
