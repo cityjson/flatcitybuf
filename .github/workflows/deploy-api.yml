@@ -2,7 +2,7 @@ name: Deploy API to Cloud Run
 
 on:
   workflow_run:
-    workflows: ["Rust CI"]
+    workflows: ["CI"]
     types:
       - completed
     branches: [main]
