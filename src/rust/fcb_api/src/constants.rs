@@ -77,3 +77,10 @@ pub const CITYJSON_SCALE: [f64; 3] = [0.001, 0.001, 0.001];
 pub const CITYJSON_TRANSLATE: [f64; 3] = [171800.0, 472700.0, 0.0];
 
 pub const CITYJSON_EXTENSIONS: Vec<String> = vec![];
+
+// CRS, these are not used as part of API responses, but are used in the code.
+
+/// Dutch RD New coordinate system (Rijksdriehoekscoördinaten)
+pub const DUTCH_CRS: &str = "EPSG:28992";
+/// WGS84 coordinate system (commonly used in GPS and web mapping)
+pub const WGS84_CRS: &str = "EPSG:4326";

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::constants::*;
-use crate::crs::{transform_bbox, DUTCH_CRS};
+use crate::crs::transform_bbox;
 use crate::filter_parser::{parse_filter, ParseError};
 use crate::handlers::{determine_format, BboxQuery};
 use crate::link::{build_link_header, build_link_json};
