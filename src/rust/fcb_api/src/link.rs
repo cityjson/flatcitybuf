@@ -38,22 +38,19 @@ pub fn build_link_header(
 
     // Self link
     links.push(format!(
-        "<{}/collections/{}/items?limit={}&offset={}{}>; rel=\"self\"",
-        base_url, collection_id, limit, offset, query_suffix
+        "<{base_url}/collections/{collection_id}/items?limit={limit}&offset={offset}{query_suffix}>; rel=\"self\""
     ));
 
     // First link
     links.push(format!(
-        "<{}/collections/{}/items?limit={}&offset=0{}>; rel=\"first\"",
-        base_url, collection_id, limit, query_suffix
+        "<{base_url}/collections/{collection_id}/items?limit={limit}&offset=0{query_suffix}>; rel=\"first\""
     ));
 
     // Prev link
     if offset > 0 {
         let prev_offset = (offset - limit).max(0);
         links.push(format!(
-            "<{}/collections/{}/items?limit={}&offset={}{}>; rel=\"prev\"",
-            base_url, collection_id, limit, prev_offset, query_suffix
+            "<{base_url}/collections/{collection_id}/items?limit={limit}&offset={prev_offset}{query_suffix}>; rel=\"prev\""
         ));
     }
 
@@ -61,8 +58,7 @@ pub fn build_link_header(
     if offset + number_returned < number_matched {
         let next_offset = offset + limit;
         links.push(format!(
-            "<{}/collections/{}/items?limit={}&offset={}{}>; rel=\"next\"",
-            base_url, collection_id, limit, next_offset, query_suffix
+            "<{base_url}/collections/{collection_id}/items?limit={limit}&offset={next_offset}{query_suffix}>; rel=\"next\""
         ));
     }
 
@@ -70,8 +66,7 @@ pub fn build_link_header(
     let last_offset = ((number_matched - 1) / limit) * limit;
     if last_offset > 0 {
         links.push(format!(
-            "<{}/collections/{}/items?limit={}&offset={}{}>; rel=\"last\"",
-            base_url, collection_id, limit, last_offset, query_suffix
+            "<{base_url}/collections/{collection_id}/items?limit={limit}&offset={last_offset}{query_suffix}>; rel=\"last\""
         ));
     }
 
@@ -116,8 +111,7 @@ pub fn build_link_json(
     // Self link
     links.push(Link {
         href: format!(
-            "{}/collections/{}/items?limit={}&offset={}{}",
-            base_url, collection_id, limit, offset, query_suffix
+            "{base_url}/collections/{collection_id}/items?limit={limit}&offset={offset}{query_suffix}"
         ),
         rel: "self".to_string(),
         r#type: Some("application/json".to_string()),
@@ -128,8 +122,7 @@ pub fn build_link_json(
     // First link
     links.push(Link {
         href: format!(
-            "{}/collections/{}/items?limit={}&offset=0{}",
-            base_url, collection_id, limit, query_suffix
+            "{base_url}/collections/{collection_id}/items?limit={limit}&offset=0{query_suffix}"
         ),
         rel: "first".to_string(),
         r#type: Some("application/json".to_string()),
@@ -142,8 +135,7 @@ pub fn build_link_json(
         let prev_offset = (offset - limit).max(0);
         links.push(Link {
             href: format!(
-                "{}/collections/{}/items?limit={}&offset={}{}",
-                base_url, collection_id, limit, prev_offset, query_suffix
+                "{base_url}/collections/{collection_id}/items?limit={limit}&offset={prev_offset}{query_suffix}"
             ),
             rel: "prev".to_string(),
             r#type: Some("application/json".to_string()),
@@ -157,8 +149,7 @@ pub fn build_link_json(
         let next_offset = offset + limit;
         links.push(Link {
             href: format!(
-                "{}/collections/{}/items?limit={}&offset={}{}",
-                base_url, collection_id, limit, next_offset, query_suffix
+                "{base_url}/collections/{collection_id}/items?limit={limit}&offset={next_offset}{query_suffix}"
             ),
             rel: "next".to_string(),
             r#type: Some("application/json".to_string()),
@@ -172,8 +163,7 @@ pub fn build_link_json(
     if last_offset > 0 {
         links.push(Link {
             href: format!(
-                "{}/collections/{}/items?limit={}&offset={}{}",
-                base_url, collection_id, limit, last_offset, query_suffix
+                "{base_url}/collections/{collection_id}/items?limit={limit}&offset={last_offset}{query_suffix}"
             ),
             rel: "last".to_string(),
             r#type: Some("application/json".to_string()),

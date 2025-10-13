@@ -257,13 +257,13 @@ Use the `format` query parameter to request different output formats:
 
 ```bash
 # CityJSON file
-GET /collections/pand/items?format=cityjson
+GET /collections/pand/items?f=cityjson
 
 # CityJSONSeq (newline-delimited)
-GET /collections/pand/items?format=cjseq
+GET /collections/pand/items?f=cjseq
 
 # Wavefront OBJ (3D mesh)
-GET /collections/pand/items?format=obj
+GET /collections/pand/items?f=obj
 ```
 
 ---
@@ -397,59 +397,6 @@ While attribute filtering is supported, performance varies by query type:
 
 ---
 
-## Production Deployment Considerations
-
-### Critical Decisions
-
-#### 1. Storage Location
-
-- **Option A: 3DBAG Server (gilfoyle)**
-  - ✅ Control, existing infrastructure, free
-  - ❌ Limited bandwidth, needs HTTP range request support
-
-- **Option B: Current GCS Bucket**
-  - ✅ Already working, minimal migration
-  - ❌ Personal account dependency, costs
-
-- **Option C: CDN with Origin Storage**
-  - ✅ Global distribution, caching, low latency
-  - ❌ Additional setup, costs
-
-#### 2. Deployment Method
-
-- **Option A: Docker on 3DBAG Server**
-  - ✅ Control, existing infrastructure, free
-  - ❌ Requires Docker setup
-
-- **Option B: Binary on 3DBAG Server**
-  - ✅ Simpler, no container overhead
-  - ❌ Manual binary deployment
-
-- **Option C: Cloud Run (Current)**
-  - ✅ Auto-scaling, pay-per-use, zero maintenance
-  - ❌ Cold start latency, vendor lock-in, costs
-
-#### 3. Maintenance Ownership
-
-- **Option A: 3DBAG Team**
-  - Requires: Training, documentation, handoff period
-
-- **Option B: FlatCityBuf Developer**
-  - Requires: Long-term commitment, access credentials
-
-- **Option C: Shared Responsibility**
-  - Requires: Clear SLA, communication protocol
-
-### Migration Milestones
-
-- [ ] Decision to proceed with migration
-- [ ] Deploy beta API for testing
-- [ ] Beta testing by 3DBAG team
-- [ ] Replace production API
-- [ ] Deprecate old API
-
----
-
 ## Example Queries
 
 ### Live API Examples
@@ -473,7 +420,7 @@ GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/i
 GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items?bbox=84000,445000,85000,446000&filter=b3_bouwlagen>2
 
 # Request CityJSON format
-GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items?bbox=84000,445000,85000,446000&format=cityjson
+GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items?bbox=84000,445000,85000,446000&f=cityjson
 ```
 
 ---

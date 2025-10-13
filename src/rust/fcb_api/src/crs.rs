@@ -55,65 +55,49 @@ pub fn transform_bbox(bbox: &[f64], from_epsg: &str, to_epsg: &str) -> Result<Ve
         return Ok(bbox.to_vec());
     }
 
-    // `from_epsg` and `to_epsg` are in the format "EPSG:4326" or "EPSG:28992". This must be converted to proj string.
-    let from_code = from_epsg
-        .split(':')
-        .next_back()
-        .ok_or_else(|| CrsError::ProjectionCreationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: proj4rs::errors::Error::InputStringError("Missing ':' in from_epsg"),
-        })?
-        .parse::<u16>()
-        .map_err(|_| CrsError::ProjectionCreationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: proj4rs::errors::Error::InputStringError("from_epsg is not a valid EPSG code"),
-        })?;
+    // Helper function to parse EPSG code from string like "EPSG:4326"
+    let parse_epsg_code = |epsg: &str| -> Result<u16, CrsError> {
+        epsg.split(':')
+            .next_back()
+            .ok_or_else(|| CrsError::ProjectionCreationFailed {
+                from: from_epsg.to_string(),
+                to: to_epsg.to_string(),
+                source: proj4rs::errors::Error::InputStringError("Missing ':' in EPSG code"),
+            })?
+            .parse::<u16>()
+            .map_err(|_| CrsError::ProjectionCreationFailed {
+                from: from_epsg.to_string(),
+                to: to_epsg.to_string(),
+                source: proj4rs::errors::Error::InputStringError("Invalid EPSG code format"),
+            })
+    };
 
-    let to_code = to_epsg
-        .split(':')
-        .next_back()
-        .ok_or_else(|| CrsError::ProjectionCreationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: proj4rs::errors::Error::InputStringError("Missing ':' in to_epsg"),
-        })?
-        .parse::<u16>()
-        .map_err(|_| CrsError::ProjectionCreationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: proj4rs::errors::Error::InputStringError("to_epsg is not a valid EPSG code"),
-        })?;
+    // Helper function to get proj4 string from EPSG code
+    let get_proj_string = |code: u16| -> Result<&'static str, CrsError> {
+        crs_definitions::from_code(code)
+            .ok_or_else(|| CrsError::ProjectionCreationFailed {
+                from: from_epsg.to_string(),
+                to: to_epsg.to_string(),
+                source: proj4rs::errors::Error::InputStringError("Unsupported EPSG code"),
+            })
+            .map(|def| def.proj4)
+    };
 
-    let from_proj_string = crs_definitions::from_code(from_code)
-        .ok_or_else(|| CrsError::ProjectionCreationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: proj4rs::errors::Error::InputStringError("from_epsg is not a valid EPSG code"),
-        })?
-        .proj4;
-    let to_proj_string = crs_definitions::from_code(to_code)
-        .ok_or_else(|| CrsError::ProjectionCreationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: proj4rs::errors::Error::InputStringError("to_epsg is not a valid EPSG code"),
-        })?
-        .proj4;
+    // Parse EPSG codes and get proj4 strings
+    let from_code = parse_epsg_code(from_epsg)?;
+    let to_code = parse_epsg_code(to_epsg)?;
+    let from_proj_string = get_proj_string(from_code)?;
+    let to_proj_string = get_proj_string(to_code)?;
 
-    let from_proj = Proj::from_proj_string(from_proj_string).map_err(|e| {
-        CrsError::ProjectionCreationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: e,
-        }
-    })?;
-    let to_proj =
-        Proj::from_proj_string(to_proj_string).map_err(|e| CrsError::ProjectionCreationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: e,
-        })?;
+    // Create projection objects
+    let create_proj_error = |e| CrsError::ProjectionCreationFailed {
+        from: from_epsg.to_string(),
+        to: to_epsg.to_string(),
+        source: e,
+    };
+
+    let from_proj = Proj::from_proj_string(from_proj_string).map_err(create_proj_error)?;
+    let to_proj = Proj::from_proj_string(to_proj_string).map_err(create_proj_error)?;
 
     let (minx, miny, maxx, maxy) = (bbox[0], bbox[1], bbox[2], bbox[3]);
 
@@ -135,23 +119,20 @@ pub fn transform_bbox(bbox: &[f64], from_epsg: &str, to_epsg: &str) -> Result<Ve
         (maxx, maxy)
     };
 
+    // Helper for transformation errors
+    let create_transform_error = |e| CrsError::TransformationFailed {
+        from: from_epsg.to_string(),
+        to: to_epsg.to_string(),
+        source: e,
+    };
+
     // Transform the lower-left corner (minx, miny)
-    proj4rs::transform::transform(&from_proj, &to_proj, &mut left_lower).map_err(|e| {
-        CrsError::TransformationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: e,
-        }
-    })?;
+    proj4rs::transform::transform(&from_proj, &to_proj, &mut left_lower)
+        .map_err(create_transform_error)?;
 
     // Transform the upper-right corner (maxx, maxy)
-    proj4rs::transform::transform(&from_proj, &to_proj, &mut right_upper).map_err(|e| {
-        CrsError::TransformationFailed {
-            from: from_epsg.to_string(),
-            to: to_epsg.to_string(),
-            source: e,
-        }
-    })?;
+    proj4rs::transform::transform(&from_proj, &to_proj, &mut right_upper)
+        .map_err(create_transform_error)?;
 
     // Check if destination CRS is geographic and convert back to degrees if needed
     // NOTE: maybe this is not the best way to check if the CRS is geographic.
