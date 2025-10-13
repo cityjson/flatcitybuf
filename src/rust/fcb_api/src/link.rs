@@ -34,23 +34,18 @@ pub fn build_link_header(
 
     let mut links = vec![];
 
+    let base_url = base_url.trim().trim_end_matches('/');
+
     // Self link
     links.push(format!(
         "<{}/collections/{}/items?limit={}&offset={}{}>; rel=\"self\"",
-        base_url.trim_end_matches('/'),
-        collection_id,
-        limit,
-        offset,
-        query_suffix
+        base_url, collection_id, limit, offset, query_suffix
     ));
 
     // First link
     links.push(format!(
         "<{}/collections/{}/items?limit={}&offset=0{}>; rel=\"first\"",
-        base_url.trim_end_matches('/'),
-        collection_id,
-        limit,
-        query_suffix
+        base_url, collection_id, limit, query_suffix
     ));
 
     // Prev link
@@ -58,11 +53,7 @@ pub fn build_link_header(
         let prev_offset = (offset - limit).max(0);
         links.push(format!(
             "<{}/collections/{}/items?limit={}&offset={}{}>; rel=\"prev\"",
-            base_url.trim_end_matches('/'),
-            collection_id,
-            limit,
-            prev_offset,
-            query_suffix
+            base_url, collection_id, limit, prev_offset, query_suffix
         ));
     }
 
@@ -71,11 +62,7 @@ pub fn build_link_header(
         let next_offset = offset + limit;
         links.push(format!(
             "<{}/collections/{}/items?limit={}&offset={}{}>; rel=\"next\"",
-            base_url.trim_end_matches('/'),
-            collection_id,
-            limit,
-            next_offset,
-            query_suffix
+            base_url, collection_id, limit, next_offset, query_suffix
         ));
     }
 
@@ -84,11 +71,7 @@ pub fn build_link_header(
     if last_offset > 0 {
         links.push(format!(
             "<{}/collections/{}/items?limit={}&offset={}{}>; rel=\"last\"",
-            base_url.trim_end_matches('/'),
-            collection_id,
-            limit,
-            last_offset,
-            query_suffix
+            base_url, collection_id, limit, last_offset, query_suffix
         ));
     }
 
@@ -128,15 +111,13 @@ pub fn build_link_json(
 
     let mut links = vec![];
 
+    let base_url = base_url.trim().trim_end_matches('/');
+
     // Self link
     links.push(Link {
         href: format!(
             "{}/collections/{}/items?limit={}&offset={}{}",
-            base_url.trim_end_matches('/'),
-            collection_id,
-            limit,
-            offset,
-            query_suffix
+            base_url, collection_id, limit, offset, query_suffix
         ),
         rel: "self".to_string(),
         r#type: Some("application/json".to_string()),
@@ -148,10 +129,7 @@ pub fn build_link_json(
     links.push(Link {
         href: format!(
             "{}/collections/{}/items?limit={}&offset=0{}",
-            base_url.trim_end_matches('/'),
-            collection_id,
-            limit,
-            query_suffix
+            base_url, collection_id, limit, query_suffix
         ),
         rel: "first".to_string(),
         r#type: Some("application/json".to_string()),
@@ -165,11 +143,7 @@ pub fn build_link_json(
         links.push(Link {
             href: format!(
                 "{}/collections/{}/items?limit={}&offset={}{}",
-                base_url.trim_end_matches('/'),
-                collection_id,
-                limit,
-                prev_offset,
-                query_suffix
+                base_url, collection_id, limit, prev_offset, query_suffix
             ),
             rel: "prev".to_string(),
             r#type: Some("application/json".to_string()),
@@ -184,11 +158,7 @@ pub fn build_link_json(
         links.push(Link {
             href: format!(
                 "{}/collections/{}/items?limit={}&offset={}{}",
-                base_url.trim_end_matches('/'),
-                collection_id,
-                limit,
-                next_offset,
-                query_suffix
+                base_url, collection_id, limit, next_offset, query_suffix
             ),
             rel: "next".to_string(),
             r#type: Some("application/json".to_string()),
@@ -203,11 +173,7 @@ pub fn build_link_json(
         links.push(Link {
             href: format!(
                 "{}/collections/{}/items?limit={}&offset={}{}",
-                base_url.trim_end_matches('/'),
-                collection_id,
-                limit,
-                last_offset,
-                query_suffix
+                base_url, collection_id, limit, last_offset, query_suffix
             ),
             rel: "last".to_string(),
             r#type: Some("application/json".to_string()),
@@ -544,5 +510,49 @@ mod tests {
 
         let last_link = links.iter().find(|l| l.rel == "last").unwrap();
         assert_eq!(last_link.title, Some("Last page".to_string()));
+    }
+
+    #[test]
+    fn test_build_link_header_whitespace_trimming() {
+        let query = create_test_query(None, None, None);
+
+        // Test with leading/trailing whitespace
+        let result = build_link_header(
+            "  http://localhost:8080  ",
+            "buildings",
+            &query,
+            10,
+            0,
+            100,
+            10,
+        );
+
+        // Should not have any whitespace in URLs
+        assert!(result.contains("http://localhost:8080/collections"));
+        assert!(!result.contains("  http://"));
+        assert!(!result.contains("8080  /"));
+    }
+
+    #[test]
+    fn test_build_link_json_whitespace_trimming() {
+        let query = create_test_query(None, None, None);
+
+        // Test with leading/trailing whitespace and trailing slash
+        let links = build_link_json(
+            "  http://localhost:8080/  ",
+            "buildings",
+            &query,
+            10,
+            0,
+            100,
+            10,
+        );
+
+        // All links should have clean URLs without whitespace
+        for link in &links {
+            assert!(link.href.starts_with("http://localhost:8080/"));
+            assert!(!link.href.contains("  "));
+            assert!(!link.href.contains("8080//"));
+        }
     }
 }

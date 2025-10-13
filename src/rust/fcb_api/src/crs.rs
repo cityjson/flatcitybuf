@@ -108,13 +108,12 @@ pub fn transform_bbox(bbox: &[f64], from_epsg: &str, to_epsg: &str) -> Result<Ve
             source: e,
         }
     })?;
-    let to_proj = Proj::from_proj_string(to_proj_string).map_err(|e| {
-        CrsError::ProjectionCreationFailed {
+    let to_proj =
+        Proj::from_proj_string(to_proj_string).map_err(|e| CrsError::ProjectionCreationFailed {
             from: from_epsg.to_string(),
             to: to_epsg.to_string(),
             source: e,
-        }
-    })?;
+        })?;
 
     let (minx, miny, maxx, maxy) = (bbox[0], bbox[1], bbox[2], bbox[3]);
 
