@@ -15,6 +15,7 @@ use crate::constants::*;
 use crate::crs::{transform_bbox, DUTCH_CRS};
 use crate::filter_parser::{parse_filter, ParseError};
 use crate::handlers::{determine_format, BboxQuery};
+use crate::link::{build_link_header, build_link_json};
 use crate::models::*;
 use crate::AppState;
 
@@ -169,6 +170,9 @@ pub async fn collection_items(
     };
 
     // Handle different output formats
+    let number_matched = total_count as i32;
+    let number_returned = features.len() as i32;
+
     match format {
         "cjseq" => {
             // Generate CityJSONSeq format
@@ -191,8 +195,26 @@ pub async fn collection_items(
                 output.push('\n');
             }
 
+            // Build Link header for pagination
+            let link_header = build_link_header(
+                &state.base_url,
+                &collection_id,
+                &query,
+                limit,
+                offset,
+                number_matched,
+                number_returned,
+            );
+
             Ok((
-                [(header::CONTENT_TYPE, "application/city+json-seq")],
+                [
+                    (header::CONTENT_TYPE, "application/city+json-seq"),
+                    (header::LINK, link_header.as_str()),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        "inline; filename=\"data.city.jsonl\"",
+                    ),
+                ],
                 output,
             )
                 .into_response())
@@ -217,7 +239,30 @@ pub async fn collection_items(
             cjj.update_transform();
 
             let json_str = serde_json::to_string(&cjj).unwrap_or_default();
-            Ok(([(header::CONTENT_TYPE, "application/city+json")], json_str).into_response())
+
+            // Build Link header for pagination
+            let link_header = build_link_header(
+                &state.base_url,
+                &collection_id,
+                &query,
+                limit,
+                offset,
+                number_matched,
+                number_returned,
+            );
+
+            Ok((
+                [
+                    (header::CONTENT_TYPE, "application/city+json"),
+                    (header::LINK, link_header.as_str()),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        "inline; filename=\"data.city.json\"",
+                    ),
+                ],
+                json_str,
+            )
+                .into_response())
         }
         "obj" => {
             // Generate OBJ format
@@ -240,12 +285,40 @@ pub async fn collection_items(
 
             // Convert to OBJ
             let obj_str = cjseq::conv::obj::to_obj_string(&cjj);
-            Ok(([(header::CONTENT_TYPE, "text/plain")], obj_str).into_response())
+
+            // Build Link header for pagination
+            let link_header = build_link_header(
+                &state.base_url,
+                &collection_id,
+                &query,
+                limit,
+                offset,
+                number_matched,
+                number_returned,
+            );
+
+            Ok((
+                [
+                    (header::CONTENT_TYPE, "text/plain"),
+                    (header::LINK, link_header.as_str()),
+                    (header::CONTENT_DISPOSITION, "inline; filename=\"data.obj\""),
+                ],
+                obj_str,
+            )
+                .into_response())
         }
         "json" | _ => {
             // Default JSON format (FeatureCollection)
-            let number_matched = total_count as i32;
-            let number_returned = features.len() as i32;
+            // Generate pagination links using the shared link module
+            let collection_links = build_link_json(
+                &state.base_url,
+                &collection_id,
+                &query,
+                limit,
+                offset,
+                number_matched,
+                number_returned,
+            );
 
             let feature_collection = FeatureCollection {
                 r#type: Type::FeatureCollection,
@@ -256,14 +329,23 @@ pub async fn collection_items(
                         id: Some(f.id.clone()),
                         links: Some(vec![
                             Link {
-                                href: format!("/collections/{}/items/{}", collection_id, f.id),
+                                href: format!(
+                                    "{}/collections/{}/items/{}",
+                                    state.base_url.trim_end_matches('/'),
+                                    collection_id,
+                                    f.id
+                                ),
                                 rel: "self".to_string(),
                                 r#type: Some("application/city+json".to_string()),
                                 title: Some("this document".to_string()),
                                 ..Default::default()
                             },
                             Link {
-                                href: format!("/collections/{collection_id}"),
+                                href: format!(
+                                    "{}/collections/{}",
+                                    state.base_url.trim_end_matches('/'),
+                                    collection_id
+                                ),
                                 rel: "collection".to_string(),
                                 r#type: Some("application/json".to_string()),
                                 title: Some("Collection".to_string()),
@@ -276,13 +358,7 @@ pub async fn collection_items(
                 number_matched: Some(number_matched),
                 number_returned: Some(number_returned),
                 time_stamp: Some(Utc::now().to_rfc3339()),
-                links: Some(vec![Link {
-                    href: format!("/collections/{collection_id}/items"),
-                    rel: "self".to_string(),
-                    r#type: Some("application/json".to_string()),
-                    title: Some("this document".to_string()),
-                    ..Default::default()
-                }]),
+                links: Some(collection_links),
             };
 
             Ok(Json(feature_collection).into_response())
