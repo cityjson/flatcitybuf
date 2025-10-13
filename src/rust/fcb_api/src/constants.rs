@@ -12,7 +12,7 @@ pub const DEFAULT_BBOX: [f64; 4] = [10000.0, 306250.0, 287760.0, 623690.0];
 // Pagination defaults
 pub const DEFAULT_OFFSET: i32 = 1;
 pub const DEFAULT_LIMIT: i32 = 10;
-pub const DEFAULT_MAX_LIMIT: i32 = 100;
+pub const DEFAULT_MAX_LIMIT: i32 = 10000;
 
 // API metadata
 pub const API_TITLE: &str = "3DBAG API";
