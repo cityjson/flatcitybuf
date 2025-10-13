@@ -1,11 +1,12 @@
 pub mod constants;
-pub mod crs;
-pub mod filter_parser;
-pub mod fs_handler;
-pub mod handlers;
-pub mod http_handler;
-pub mod metadata;
-pub mod models;
+mod crs;
+mod filter_parser;
+mod fs_handler;
+mod handlers;
+mod http_handler;
+mod link;
+mod metadata;
+mod models;
 
 use axum::{routing::get, Router};
 use metadata::FcbMetadata;
