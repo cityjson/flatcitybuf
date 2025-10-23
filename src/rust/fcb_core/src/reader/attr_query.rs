@@ -393,14 +393,15 @@ impl<R: Read + Seek> FcbReader<R> {
             magic_bytes: 8,
             header: header_size as u64,
             rtree_index: self.rtree_index_size(),
-            attributes: self.attr_index_size(),
+            attributes: self.attr_index_size() as u64,
         };
 
         let total_feat_count = result_vec.len() as u64;
 
         let attr_index_size = self.attr_index_size();
-        self.reader
-            .seek(SeekFrom::Start(attr_index_start_pos + attr_index_size))?;
+        self.reader.seek(SeekFrom::Start(
+            attr_index_start_pos + attr_index_size as u64,
+        ))?;
 
         Ok(FeatureIter::<R, Seekable>::new(
             self.reader,
@@ -474,7 +475,7 @@ impl<R: Read> FcbReader<R> {
             magic_bytes: 8,
             header: header_size as u64,
             rtree_index: self.rtree_index_size(),
-            attributes: self.attr_index_size(),
+            attributes: self.attr_index_size() as u64,
         };
 
         let total_feat_count = result.len() as u64;

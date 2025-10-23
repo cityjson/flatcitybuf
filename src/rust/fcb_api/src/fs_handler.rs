@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use axum::{
     extract::{Path, Query as AxumQuery, State},
     http::{header, HeaderMap, StatusCode},
@@ -7,10 +8,11 @@ use chrono::Utc;
 use cjseq::CityJSONFeature;
 use fcb_core::packed_rtree::Query;
 use fcb_core::{deserializer, FcbReader, FixedStringKey, KeyType, Operator};
+use std::error::Error as StdError;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::constants::*;
 use crate::crs::transform_bbox;
@@ -127,7 +129,14 @@ pub async fn collection_items(
     let file = match File::open(&state.fcb_url) {
         Ok(f) => f,
         Err(e) => {
-            warn!("Failed to open FCB file: {:?}", e);
+            error!(
+                "Failed to open FCB file '{}' for collection '{}': {:?}",
+                state.fcb_url, collection_id, e
+            );
+            error!(
+                "File open error context: path={}, errno={}",
+                state.fcb_url, e
+            );
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -136,7 +145,11 @@ pub async fn collection_items(
     let reader = match FcbReader::open(buf_reader) {
         Ok(reader) => reader,
         Err(e) => {
-            warn!("Failed to open FCB reader: {:?}", e);
+            error!(
+                "Failed to open FCB reader for collection '{}': {:?}",
+                collection_id, e
+            );
+            error!("FCB reader error details: {:#}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -146,7 +159,14 @@ pub async fn collection_items(
     let file2 = match File::open(&state.fcb_url) {
         Ok(f) => f,
         Err(e) => {
-            warn!("Failed to reopen FCB file: {:?}", e);
+            error!(
+                "Failed to reopen FCB file '{}' for querying: {:?}",
+                state.fcb_url, e
+            );
+            error!(
+                "File reopen error context: path={}, errno={}",
+                state.fcb_url, e
+            );
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -155,13 +175,20 @@ pub async fn collection_items(
     let query_reader = match FcbReader::open(buf_reader2) {
         Ok(reader) => reader,
         Err(e) => {
-            warn!("Failed to reopen FCB reader: {:?}", e);
+            error!(
+                "Failed to reopen FCB reader for querying collection '{}': {:?}",
+                collection_id, e
+            );
+            error!("FCB query reader error details: {:#}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
     // Store header for later use
     let header = reader.header();
+
+    // Clone filter_conditions for logging (since it will be moved)
+    let filter_conditions_log = filter_conditions.clone();
 
     // Apply filtering (bbox and/or attribute filters)
     let res = fetch_features_with_filter(
@@ -175,7 +202,17 @@ pub async fn collection_items(
     let (features, total_count) = match res {
         Ok(features) => features,
         Err(e) => {
-            warn!("Failed to fetch features: {:?}", e);
+            error!(
+                "Failed to fetch features for collection '{}' with bbox={:?}, filter={:?}, limit={}, offset={}: {:?}",
+                collection_id, bbox, filter_conditions_log, limit, offset, e
+            );
+            error!("Query execution error details: {:#}", e);
+
+            // Note: anyhow::Error doesn't support .chain(), so we log the source if available
+            if let Some(source) = e.source() {
+                error!("Error source: {:?}", source);
+            }
+
             // Check if this is an attribute-related error that should return 400
             let error_msg = e.to_string();
             if error_msg.contains("AttributeIndexNotFound")
@@ -183,8 +220,13 @@ pub async fn collection_items(
                 || error_msg.contains("QueryExecutionError")
                 || error_msg.contains("Failed to execute streaming query")
             {
+                warn!(
+                    "Returning BAD_REQUEST due to attribute error: {}",
+                    error_msg
+                );
                 return Err(StatusCode::BAD_REQUEST);
             }
+            error!("Returning INTERNAL_SERVER_ERROR due to unexpected error");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -199,7 +241,11 @@ pub async fn collection_items(
             let metadata = match deserializer::to_cj_metadata(&header) {
                 Ok(meta) => meta,
                 Err(e) => {
-                    warn!("Failed to generate CityJSON metadata: {:?}", e);
+                    error!(
+                        "Failed to generate CityJSON metadata for cjseq format (collection '{}'): {:?}",
+                        collection_id, e
+                    );
+                    error!("Metadata generation error details: {:#}", e);
                     return Err(StatusCode::INTERNAL_SERVER_ERROR);
                 }
             };
@@ -244,7 +290,11 @@ pub async fn collection_items(
             let mut cjj = match deserializer::to_cj_metadata(&header) {
                 Ok(meta) => meta,
                 Err(e) => {
-                    warn!("Failed to generate CityJSON metadata: {:?}", e);
+                    error!(
+                        "Failed to generate CityJSON metadata for cityjson format (collection '{}'): {:?}",
+                        collection_id, e
+                    );
+                    error!("Metadata generation error details: {:#}", e);
                     return Err(StatusCode::INTERNAL_SERVER_ERROR);
                 }
             };
@@ -289,7 +339,11 @@ pub async fn collection_items(
             let mut cjj = match deserializer::to_cj_metadata(&header) {
                 Ok(meta) => meta,
                 Err(e) => {
-                    warn!("Failed to generate CityJSON metadata: {:?}", e);
+                    error!(
+                        "Failed to generate CityJSON metadata for obj format (collection '{}'): {:?}",
+                        collection_id, e
+                    );
+                    error!("Metadata generation error details: {:#}", e);
                     return Err(StatusCode::INTERNAL_SERVER_ERROR);
                 }
             };
@@ -403,7 +457,14 @@ pub async fn collection_item_by_id(
     let file = match File::open(&state.fcb_url) {
         Ok(f) => f,
         Err(e) => {
-            warn!("Failed to open FCB file: {:?}", e);
+            error!(
+                "Failed to open FCB file '{}' for item '{}' in collection '{}': {:?}",
+                state.fcb_url, item_id, collection_id, e
+            );
+            error!(
+                "File open error context: path={}, errno={}",
+                state.fcb_url, e
+            );
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -412,7 +473,11 @@ pub async fn collection_item_by_id(
     let reader = match FcbReader::open(buf_reader) {
         Ok(reader) => reader,
         Err(e) => {
-            warn!("Failed to open FCB reader: {:?}", e);
+            error!(
+                "Failed to open FCB reader for item '{}' in collection '{}': {:?}",
+                item_id, collection_id, e
+            );
+            error!("FCB reader error details: {:#}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -448,7 +513,14 @@ pub async fn collection_item_by_id(
     match feature {
         Ok(feature) => Ok(Json(feature)),
         Err(e) => {
-            warn!("Failed to fetch feature by ID: {:?}", e);
+            error!(
+                "Failed to fetch feature by ID '{}' in collection '{}': {:?}",
+                item_id, collection_id, e
+            );
+            error!("Feature fetch error details: {:#}", e);
+            if let Some(source) = e.source() {
+                error!("Error source: {:?}", source);
+            }
             Err(StatusCode::NOT_FOUND)
         }
     }
@@ -462,11 +534,20 @@ fn fetch_features_by_bbox(
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     let (minx, miny, maxx, maxy) = (bbox[0], bbox[1], bbox[2], bbox[3]);
 
-    let mut iter = reader.select_query(
-        Query::BBox(minx, miny, maxx, maxy),
-        Some(limit as usize),
-        Some(offset as usize),
-    )?;
+    let mut iter = reader
+        .select_query(
+            Query::BBox(minx, miny, maxx, maxy),
+            Some(limit as usize),
+            Some(offset as usize),
+        )
+        .map_err(|e| {
+            error!("Failed to select query: {:?}", e);
+            error!("Query error details: {:#}", e);
+            if let Some(source) = e.source() {
+                error!("Error source: {:?}", source);
+            }
+            anyhow!("Failed to select query: {:?}", e)
+        })?;
 
     let mut features = Vec::new();
     let mut count = 0;
@@ -556,11 +637,20 @@ fn fetch_features_with_filter(
         }
         // Only filter
         (None, Some(conditions)) => {
-            println!("Fetching features with filter: {conditions:?}");
+            info!("Fetching features with filter: {conditions:?}");
+            // Clone conditions for error logging before moving
+            let conditions_log = conditions.clone();
             let mut iter = match reader.select_attr_query(conditions) {
                 Ok(iter) => iter,
                 Err(e) => {
-                    warn!("Failed to execute attribute query: {:?}", e);
+                    error!(
+                        "Failed to execute attribute query with conditions {:?}: {:?}",
+                        conditions_log, e
+                    );
+                    error!("Attribute query error details: {:#}", e);
+                    if let Some(source) = e.source() {
+                        error!("Error source: {:?}", source);
+                    }
                     return Err(e.into());
                 }
             };

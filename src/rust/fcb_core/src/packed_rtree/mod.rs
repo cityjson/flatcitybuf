@@ -7,10 +7,6 @@
 //! Create and read a [packed Hilbert R-Tree](https://en.wikipedia.org/wiki/Hilbert_R-tree#Packed_Hilbert_R-trees)
 //! to enable fast bounding box spatial filtering.
 
-// ... rest of the code ...
-//! Create and read a [packed Hilbert R-Tree](https://en.wikipedia.org/wiki/Hilbert_R-tree#Packed_Hilbert_R-trees)
-//! to enable fast bounding box spatial filtering.
-
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use core::f64;
 pub use error::Error;
@@ -23,8 +19,6 @@ use std::mem::size_of;
 use std::ops::Range;
 
 mod error;
-
-// This implementation was derived from FlatGeobuf's implemenation.
 
 #[derive(Clone, PartialEq, Debug)]
 #[repr(C)]
