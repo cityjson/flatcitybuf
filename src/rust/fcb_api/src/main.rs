@@ -1,9 +1,17 @@
 use fcb_api::create_app;
 use std::net::SocketAddr;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    // Initialize tracing with better formatting for production
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "fcb_api=info,fcb_core=info,tower_http=debug".into()),
+        )
+        .with(tracing_subscriber::fmt::layer().with_target(true))
+        .init();
 
     let app = create_app().await;
 
