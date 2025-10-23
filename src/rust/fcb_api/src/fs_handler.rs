@@ -553,11 +553,9 @@ fn fetch_features_by_bbox(
     let mut count = 0;
 
     while count < limit {
-        println!("fetch_features_by_bbox count: {}", count);
         match iter.next()? {
             Some(feature_iter) => {
                 features.push(feature_iter.cur_cj_feature()?);
-                println!("fetch_features_by_bbox feature added");
                 count += 1;
             }
             None => break,
