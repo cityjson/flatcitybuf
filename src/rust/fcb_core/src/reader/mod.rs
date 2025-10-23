@@ -477,10 +477,17 @@ impl<R: Read, S> FeatureIter<R, S> {
             total_feat_count,
         };
 
-        if iter.read_feature_size() {
-            iter.state = State::Finished;
+        // Only read the first feature size if we're reading sequentially (no filters).
+        // When we have filters (bbox or attribute), we'll seek to the specific feature first.
+        if iter.item_filter.is_none() && iter.item_attr_filter.is_none() {
+            if iter.read_feature_size() {
+                iter.state = State::Finished;
+            } else {
+                iter.state = State::ReadFirstFeatureSize
+            }
         } else {
-            iter.state = State::ReadFirstFeatureSize
+            // With filters, we'll read the feature size when we seek to each feature
+            iter.state = State::ReadFirstFeatureSize;
         }
 
         iter.count = match &iter.item_filter {
