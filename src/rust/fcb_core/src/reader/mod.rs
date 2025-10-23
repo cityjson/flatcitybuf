@@ -229,6 +229,9 @@ impl<R: Read + Seek> FcbReader<R> {
             list.windows(2).all(|w| w[0].offset < w[1].offset),
             "Since the tree is traversed breadth first, list should be sorted by construction."
         );
+        println!("size of attr_index in bytes===={:?}", self.attr_index_size());
+        println!("size of attr_index in bytes i64===={:?}", self.attr_index_size() as i64);
+
         // skip index
         self.reader
             .seek(SeekFrom::Current(self.attr_index_size() as i64))?;
@@ -239,6 +242,7 @@ impl<R: Read + Seek> FcbReader<R> {
             attributes: self.attr_index_size(),
         };
         let total_feat_count = list.len() as u64;
+        println!("total_feat_count===={:?}", total_feat_count);
         Ok(FeatureIter::new(
             self.reader,
             self.verify,
@@ -272,16 +276,17 @@ impl<R: Read> FcbReader<R> {
         }
     }
 
-    fn attr_index_size(&self) -> u64 {
+    fn attr_index_size(&self) -> usize {
         let header = self.buffer.header();
+        let len = 
         header
             .attribute_index()
             .map(|attr_index| {
                 attr_index
                     .iter()
-                    .try_fold(0u32, |acc, ai| {
+                    .try_fold(0, |acc, ai| {
                         let len = ai.length();
-                        if len > u32::MAX - acc {
+                        if len > usize::MAX - acc {
                             Err(Error::AttributeIndexSizeOverflow)
                         } else {
                             Ok(acc + len)
@@ -289,7 +294,9 @@ impl<R: Read> FcbReader<R> {
                     })
                     .unwrap_or(0)
             })
-            .unwrap_or(0) as u64
+            .unwrap_or(0);
+            println!("len===={:?}", len);
+            len
     }
 }
 
@@ -353,8 +360,11 @@ impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
         if self.advance_finished() {
             return Ok(());
         }
+        println!("advance====");
         if let Some(filter) = &self.item_filter {
+            println!("filter===={:?}", filter.len());
             let item = &filter[self.feat_no];
+            println!("item===={:?}", item.offset);
             if item.offset as u64 > self.cur_pos {
                 if self.state == State::ReadFirstFeatureSize {
                     self.state = State::Reading;
@@ -363,6 +373,7 @@ impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
                 let seek_bytes = item.offset as u64 - self.cur_pos;
                 self.reader.seek(SeekFrom::Current(seek_bytes as i64))?;
                 self.cur_pos += seek_bytes;
+                println!("cur_pos===={:?}", self.cur_pos);
             }
         }
 
@@ -427,6 +438,7 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
     }
     /// Return current feature
     pub fn cur_cj_feature(&self) -> Result<CityJSONFeature, Error> {
+        println!("cur_cj_feature====");
         let fcb_feature = self.buffer.feature();
         let root_attr_schema = self.buffer.header().columns();
         let semantic_attr_schema = self.buffer.header().semantic_columns();
@@ -477,17 +489,10 @@ impl<R: Read, S> FeatureIter<R, S> {
             total_feat_count,
         };
 
-        // Only read the first feature size if we're reading sequentially (no filters).
-        // When we have filters (bbox or attribute), we'll seek to the specific feature first.
-        if iter.item_filter.is_none() && iter.item_attr_filter.is_none() {
-            if iter.read_feature_size() {
-                iter.state = State::Finished;
-            } else {
-                iter.state = State::ReadFirstFeatureSize
-            }
+        if iter.read_feature_size() {
+            iter.state = State::Finished;
         } else {
-            // With filters, we'll read the feature size when we seek to each feature
-            iter.state = State::ReadFirstFeatureSize;
+            iter.state = State::ReadFirstFeatureSize
         }
 
         iter.count = match &iter.item_filter {
@@ -572,7 +577,9 @@ impl<R: Read, S> FeatureIter<R, S> {
             }
         }
         let sbuf = &self.buffer.features_buf;
+        println!("sbuf===={:?}", sbuf);
         let feature_size = u32::from_le_bytes([sbuf[0], sbuf[1], sbuf[2], sbuf[3]]) as usize;
+        println!("feature_size===={:?}", feature_size);
         self.buffer.features_buf.resize(feature_size + 4, 0);
         self.reader.read_exact(&mut self.buffer.features_buf[4..])?;
         if self.verify {
