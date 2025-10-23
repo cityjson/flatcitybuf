@@ -127,7 +127,7 @@ impl<R: Read> FcbReader<R> {
         let feature_offset = FeatureOffset {
             magic_bytes: 8,
             header: 4 + self.buffer.header_buf.len() as u64,
-            rtree_index: index_size,
+            rtree_index: self.rtree_index_size(),
             attributes: self.attr_index_size(),
         };
         let total_feat_count = self.buffer.header().features_count();
@@ -229,8 +229,14 @@ impl<R: Read + Seek> FcbReader<R> {
             list.windows(2).all(|w| w[0].offset < w[1].offset),
             "Since the tree is traversed breadth first, list should be sorted by construction."
         );
-        println!("size of attr_index in bytes===={:?}", self.attr_index_size());
-        println!("size of attr_index in bytes i64===={:?}", self.attr_index_size() as i64);
+        println!(
+            "size of attr_index in bytes===={:?}",
+            self.attr_index_size()
+        );
+        println!(
+            "size of attr_index in bytes i64===={:?}",
+            self.attr_index_size() as i64
+        );
 
         // skip index
         self.reader
@@ -276,17 +282,16 @@ impl<R: Read> FcbReader<R> {
         }
     }
 
-    fn attr_index_size(&self) -> usize {
+    fn attr_index_size(&self) -> u64 {
         let header = self.buffer.header();
-        let len = 
-        header
+        let len = header
             .attribute_index()
             .map(|attr_index| {
                 attr_index
                     .iter()
-                    .try_fold(0, |acc, ai| {
-                        let len = ai.length();
-                        if len > usize::MAX - acc {
+                    .try_fold(0u64, |acc, ai| {
+                        let len = ai.length() as u64;
+                        if len > u64::MAX - acc {
                             Err(Error::AttributeIndexSizeOverflow)
                         } else {
                             Ok(acc + len)
@@ -295,8 +300,8 @@ impl<R: Read> FcbReader<R> {
                     .unwrap_or(0)
             })
             .unwrap_or(0);
-            println!("len===={:?}", len);
-            len
+        println!("len===={:?}", len);
+        len
     }
 }
 
