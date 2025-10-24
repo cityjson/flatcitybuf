@@ -19,6 +19,7 @@ export function cjToObj(city_json_js: any): string;
 export class AsyncFeatureIter {
   private constructor();
   free(): void;
+  [Symbol.dispose](): void;
   header(): any;
   /**
    * Number of selected features (might be unknown)
@@ -35,6 +36,7 @@ export class AsyncFeatureIter {
  */
 export class HttpFcbReader {
   free(): void;
+  [Symbol.dispose](): void;
   constructor(url: string);
   cityjson(): any;
   meta(): any;
@@ -64,6 +66,7 @@ export class HttpFcbReader {
  */
 export class WasmAttrQuery {
   free(): void;
+  [Symbol.dispose](): void;
   /**
    * Creates a new WasmAttrQuery from a JS array of query tuples.
    *
@@ -84,6 +87,7 @@ export class WasmAttrQuery {
 }
 export class WasmSpatialQuery {
   free(): void;
+  [Symbol.dispose](): void;
   constructor(js_value: any);
   to_js(): any;
   readonly query_type: string;
@@ -136,8 +140,8 @@ export interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-  readonly closure326_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure357_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure329_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure344_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 
