@@ -50,6 +50,8 @@ serde_cbor = "0.10"
 proj = "0.31"
 proj4rs = "0.1.9"
 crs-definitions = "0.3.1"
+indicatif = "0.17"
+console = "0.15"
 
 #---WASM dependencies---
 getrandom = { version = "0.3.3" }

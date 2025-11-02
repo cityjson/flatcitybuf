@@ -21,3 +21,5 @@ serde_json = { workspace = true }
 bson = { workspace = true }
 serde_cbor = { workspace = true }
 thiserror = { workspace = true }
+indicatif = { workspace = true }
+console = { workspace = true }

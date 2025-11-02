@@ -1,5 +1,6 @@
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use clap::{ArgAction, Parser, Subcommand};
+use console::{style, Term};
 use fcb_core::error::Error;
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
@@ -7,6 +8,7 @@ use fcb_core::{
     header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbReader, FcbWriter,
 };
+use indicatif::{ProgressBar, ProgressStyle};
 use std::{
     fs::File,
     io::{self, BufReader, BufWriter, Read, Write},
@@ -124,6 +126,25 @@ struct SerializeOptions {
 }
 
 fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(), Error> {
+    let term = Term::stderr();
+    let is_stdout = output == "-";
+
+    // Print header
+    if !is_stdout {
+        term.write_line(&format!(
+            "\n{} {}",
+            style("━━━").bold().cyan(),
+            style("FlatCityBuf Serialization").bold().cyan()
+        ))
+        .ok();
+        term.write_line(&format!(
+            "{} {}",
+            style("━━━").bold().cyan(),
+            style("━━━━━━━━━━━━━━━━━━━━━━━━").bold().cyan()
+        ))
+        .ok();
+    }
+
     let reader = get_reader(input)?;
     let writer = get_writer(output)?;
 
@@ -131,8 +152,8 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
     let writer = BufWriter::new(writer);
 
     // Parse the bbox if provided
-    let bbox_parsed = if let Some(bbox_str) = options.bbox {
-        Some(parse_bbox(&bbox_str).map_err(|e| {
+    let bbox_parsed = if let Some(bbox_str) = &options.bbox {
+        Some(parse_bbox(bbox_str).map_err(|e| {
             Error::IoError(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("failed to parse bbox: {e}"),
@@ -142,7 +163,97 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         None
     };
 
+    // Print configuration
+    if !is_stdout {
+        term.write_line("").ok();
+        term.write_line(&format!("{} Configuration", style("▶").bold().green()))
+            .ok();
+        term.write_line(&format!(
+            "  {} {}",
+            style("Input:").dim(),
+            if input == "-" {
+                style("stdin").yellow()
+            } else {
+                style(input).yellow()
+            }
+        ))
+        .ok();
+        term.write_line(&format!(
+            "  {} {}",
+            style("Output:").dim(),
+            style(output).yellow()
+        ))
+        .ok();
+        term.write_line(&format!(
+            "  {} {}",
+            style("Spatial Index:").dim(),
+            if options.no_spatial_index {
+                style("disabled").red()
+            } else {
+                style("enabled").green()
+            }
+        ))
+        .ok();
+
+        if let Some(bbox) = &bbox_parsed {
+            term.write_line(&format!(
+                "  {} [{:.2}, {:.2}, {:.2}, {:.2}]",
+                style("Bounding Box:").dim(),
+                bbox[0],
+                bbox[1],
+                bbox[2],
+                bbox[3]
+            ))
+            .ok();
+        }
+
+        if options.index_all_attributes {
+            term.write_line(&format!(
+                "  {} {}",
+                style("Attribute Index:").dim(),
+                style("all attributes").green()
+            ))
+            .ok();
+        } else if let Some(attrs) = &options.attr_index {
+            term.write_line(&format!(
+                "  {} {}",
+                style("Attribute Index:").dim(),
+                style(attrs).green()
+            ))
+            .ok();
+        }
+
+        if let Some(bf) = options.attr_branching_factor {
+            term.write_line(&format!(
+                "  {} {}",
+                style("Branching Factor:").dim(),
+                style(bf).yellow()
+            ))
+            .ok();
+        }
+
+        term.write_line(&format!(
+            "  {} {}",
+            style("Geospatial Extent:").dim(),
+            if options.ge {
+                style("auto-calculate").green()
+            } else {
+                style("not set").dim()
+            }
+        ))
+        .ok();
+        term.write_line("").ok();
+    }
+
     // Create a CityJSONSeq reader
+    if !is_stdout {
+        term.write_line(&format!(
+            "{} Reading CityJSON...",
+            style("▶").bold().green()
+        ))
+        .ok();
+    }
+
     let cj_seq = read_cityjson_from_reader(reader, CJTypeKind::Seq)?;
 
     let CityJSONSeq { cj, features } = match cj_seq {
@@ -154,7 +265,24 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         }
     };
 
+    if !is_stdout {
+        term.write_line(&format!(
+            "  {} {} features",
+            style("✓").bold().green(),
+            style(features.len()).bold().yellow()
+        ))
+        .ok();
+    }
+
     // Filter features by bbox if provided
+    if !is_stdout && bbox_parsed.is_some() {
+        term.write_line(&format!(
+            "{} Filtering by bounding box...",
+            style("▶").bold().green()
+        ))
+        .ok();
+    }
+
     let filtered_features = if let Some(bbox) = &bbox_parsed {
         features
             .into_iter()
@@ -165,7 +293,29 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
     };
 
     if filtered_features.is_empty() {
-        eprintln!("warning: no features found within the specified bbox");
+        if !is_stdout {
+            term.write_line(&format!(
+                "  {} No features found within the specified bbox",
+                style("⚠").bold().yellow()
+            ))
+            .ok();
+        }
+    } else if !is_stdout && bbox_parsed.is_some() {
+        term.write_line(&format!(
+            "  {} {} features after filtering",
+            style("✓").bold().green(),
+            style(filtered_features.len()).bold().yellow()
+        ))
+        .ok();
+    }
+
+    // Build attribute schema
+    if !is_stdout {
+        term.write_line(&format!(
+            "{} Building attribute schema...",
+            style("▶").bold().green()
+        ))
+        .ok();
     }
 
     let attr_schema = {
@@ -184,6 +334,23 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
             Some(schema)
         }
     };
+
+    if !is_stdout {
+        if let Some(ref schema) = attr_schema {
+            term.write_line(&format!(
+                "  {} {} unique attributes found",
+                style("✓").bold().green(),
+                style(schema.len()).bold().yellow()
+            ))
+            .ok();
+        } else {
+            term.write_line(&format!(
+                "  {} No attributes found",
+                style("✓").bold().green()
+            ))
+            .ok();
+        }
+    }
 
     let semantic_attr_schema = {
         let mut schema = AttributeSchema::new();
@@ -208,6 +375,7 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
             Some(schema)
         }
     };
+
     let attr_index_vec: Option<Vec<(String, Option<u16>)>> =
         if options.index_all_attributes && attr_schema.is_some() {
             // create a vec with all attribute names and branching factor given
@@ -236,33 +404,143 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
 
     // Calculate geospatial extent if requested
     let geo_extent = if options.ge {
-        Some(calculate_geospatial_extent(
-            &filtered_features,
-            &cj.transform,
-        ))
+        if !is_stdout {
+            term.write_line(&format!(
+                "{} Calculating geospatial extent...",
+                style("▶").bold().green()
+            ))
+            .ok();
+        }
+        let extent = calculate_geospatial_extent(&filtered_features, &cj.transform);
+        if !is_stdout {
+            term.write_line(&format!(
+                "  {} Min: [{:.2}, {:.2}, {:.2}]",
+                style("✓").bold().green(),
+                extent[0],
+                extent[1],
+                extent[2]
+            ))
+            .ok();
+            term.write_line(&format!(
+                "    Max: [{:.2}, {:.2}, {:.2}]",
+                extent[3], extent[4], extent[5]
+            ))
+            .ok();
+        }
+        Some(extent)
     } else {
         None
     };
 
     let header_options = HeaderWriterOptions {
-        write_index: !options.no_spatial_index, // Spatial index enabled by default, disabled if flag is present
+        write_index: !options.no_spatial_index,
         feature_count: filtered_features.len() as u64,
         index_node_size: options.attr_branching_factor.unwrap_or(16),
-        attribute_indices: attr_index_vec,
+        attribute_indices: attr_index_vec.clone(),
         geographical_extent: geo_extent,
     };
 
-    println!("header_options in cli: {header_options:?}");
+    // Show index information
+    if !is_stdout {
+        term.write_line(&format!(
+            "{} Building indices...",
+            style("▶").bold().green()
+        ))
+        .ok();
+
+        if !options.no_spatial_index {
+            term.write_line(&format!(
+                "  {} Spatial R-tree index (node size: {})",
+                style("✓").bold().green(),
+                style(header_options.index_node_size).yellow()
+            ))
+            .ok();
+        }
+
+        if let Some(ref indices) = attr_index_vec {
+            term.write_line(&format!(
+                "  {} Attribute B+Tree indices for {} attributes:",
+                style("✓").bold().green(),
+                style(indices.len()).yellow()
+            ))
+            .ok();
+            for (attr_name, bf) in indices.iter().take(5) {
+                term.write_line(&format!(
+                    "    • {} (branching factor: {})",
+                    style(attr_name).cyan(),
+                    style(bf.unwrap_or(16)).dim()
+                ))
+                .ok();
+            }
+            if indices.len() > 5 {
+                term.write_line(&format!(
+                    "    {} {} more attributes...",
+                    style("...").dim(),
+                    style(indices.len() - 5).dim()
+                ))
+                .ok();
+            }
+        }
+        term.write_line("").ok();
+    }
+
+    // Write features
+    if !is_stdout {
+        term.write_line(&format!(
+            "{} Writing FCB file...",
+            style("▶").bold().green()
+        ))
+        .ok();
+    }
 
     let mut fcb = FcbWriter::new(cj, Some(header_options), attr_schema, semantic_attr_schema)?;
 
+    let pb = if !is_stdout {
+        let pb = ProgressBar::new(filtered_features.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  {bar:40.cyan/blue} {pos}/{len} features ({percent}%)")
+                .unwrap()
+                .progress_chars("━━╾─"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
+
     for feature in filtered_features.iter() {
         fcb.add_feature(feature)?;
+        if let Some(ref pb) = pb {
+            pb.inc(1);
+        }
     }
+
+    if let Some(ref pb) = pb {
+        pb.finish_and_clear();
+    }
+
     fcb.write(writer)?;
 
-    if output != "-" {
-        eprintln!("Successfully encoded to FCB");
+    if !is_stdout {
+        term.write_line(&format!(
+            "  {} File written successfully",
+            style("✓").bold().green()
+        ))
+        .ok();
+        term.write_line("").ok();
+        term.write_line(&format!(
+            "{} {}",
+            style("━━━").bold().cyan(),
+            style("Serialization Complete").bold().cyan()
+        ))
+        .ok();
+        term.write_line(&format!(
+            "{} {}",
+            style("━━━").bold().cyan(),
+            style("━━━━━━━━━━━━━━━━━━━━━━").bold().cyan()
+        ))
+        .ok();
+        term.write_line("").ok();
     }
 
     Ok(())
@@ -452,52 +730,226 @@ fn encode_bson(input: &str, output: &str) -> Result<(), Error> {
 }
 
 fn show_info(input: PathBuf) -> Result<(), Error> {
-    let reader = BufReader::new(File::open(input)?);
-    let metadata = reader.get_ref().metadata()?.len() / 1024 / 1024; // show in megabytes
+    let term = Term::stdout();
+
+    // Print header
+    term.write_line(&format!(
+        "\n{} {}",
+        style("━━━").bold().cyan(),
+        style("FlatCityBuf File Information").bold().cyan()
+    ))
+    .ok();
+    term.write_line(&format!(
+        "{} {}",
+        style("━━━").bold().cyan(),
+        style("━━━━━━━━━━━━━━━━━━━━━━━━━━━").bold().cyan()
+    ))
+    .ok();
+    term.write_line("").ok();
+
+    let reader = BufReader::new(File::open(&input)?);
+    let file_size = reader.get_ref().metadata()?.len();
     let fcb_reader = FcbReader::open(reader)?.select_all()?;
-    let raw_attr_index = fcb_reader.header().attribute_index();
-    let attr_index = raw_attr_index.map(|ai_vec| {
-        ai_vec
+    let header = fcb_reader.header();
+
+    // File information
+    term.write_line(&format!("{} File Details", style("▶").bold().green()))
+        .ok();
+    term.write_line(&format!(
+        "  {} {}",
+        style("Path:").dim(),
+        style(input.display()).yellow()
+    ))
+    .ok();
+
+    // Format file size nicely
+    let size_str = if file_size >= 1024 * 1024 * 1024 {
+        format!("{:.2} GB", file_size as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if file_size >= 1024 * 1024 {
+        format!("{:.2} MB", file_size as f64 / (1024.0 * 1024.0))
+    } else if file_size >= 1024 {
+        format!("{:.2} KB", file_size as f64 / 1024.0)
+    } else {
+        format!("{} bytes", file_size)
+    };
+
+    term.write_line(&format!(
+        "  {} {}",
+        style("Size:").dim(),
+        style(size_str).yellow()
+    ))
+    .ok();
+    term.write_line(&format!(
+        "  {} {}",
+        style("Version:").dim(),
+        style(header.version()).yellow()
+    ))
+    .ok();
+
+    if let Some(title) = header.title() {
+        term.write_line(&format!(
+            "  {} {}",
+            style("Title:").dim(),
+            style(title).yellow()
+        ))
+        .ok();
+    }
+
+    term.write_line("").ok();
+
+    // Dataset information
+    term.write_line(&format!("{} Dataset", style("▶").bold().green()))
+        .ok();
+    term.write_line(&format!(
+        "  {} {}",
+        style("Features:").dim(),
+        style(header.features_count()).bold().yellow()
+    ))
+    .ok();
+
+    if let Some(extent) = header.geographical_extent() {
+        term.write_line(&format!("  {} Yes", style("Geospatial Extent:").dim()))
+            .ok();
+        term.write_line(&format!(
+            "    {} [{:.2}, {:.2}, {:.2}]",
+            style("Min:").dim(),
+            extent.min().x(),
+            extent.min().y(),
+            extent.min().z()
+        ))
+        .ok();
+        term.write_line(&format!(
+            "    {} [{:.2}, {:.2}, {:.2}]",
+            style("Max:").dim(),
+            extent.max().x(),
+            extent.max().y(),
+            extent.max().z()
+        ))
+        .ok();
+
+        // Calculate dimensions
+        let width = extent.max().x() - extent.min().x();
+        let height = extent.max().y() - extent.min().y();
+        let depth = extent.max().z() - extent.min().z();
+        term.write_line(&format!(
+            "    {} {:.2} × {:.2} × {:.2}",
+            style("Dimensions:").dim(),
+            width,
+            height,
+            depth
+        ))
+        .ok();
+    } else {
+        term.write_line(&format!(
+            "  {} {}",
+            style("Geospatial Extent:").dim(),
+            style("Not set").dim()
+        ))
+        .ok();
+    }
+
+    term.write_line("").ok();
+
+    // Index information
+    term.write_line(&format!("{} Indices", style("▶").bold().green()))
+        .ok();
+
+    let has_spatial_index = header.index_node_size() > 0;
+    term.write_line(&format!(
+        "  {} {}",
+        style("Spatial R-tree:").dim(),
+        if has_spatial_index {
+            style("Yes").green()
+        } else {
+            style("No").red()
+        }
+    ))
+    .ok();
+
+    let raw_attr_index = header.attribute_index();
+    if let Some(ai_vec) = raw_attr_index {
+        let attr_names: Vec<String> = ai_vec
             .iter()
-            .map(|ai| {
-                fcb_reader
-                    .header()
+            .filter_map(|ai| {
+                header
                     .columns()
                     .iter()
                     .flat_map(|c| c.iter())
                     .find(|ci| ci.index() == ai.index())
-                    .map(|ci| ci.name())
-                    .unwrap()
+                    .map(|ci| ci.name().to_string())
             })
-            .collect::<Vec<_>>()
-    });
-    let header = fcb_reader.header();
-    println!("FCB File Info:");
-    println!("    File size: {metadata} MB");
-    println!("  Version: {}", header.version());
-    println!("  Features count: {}", header.features_count());
-    println!("  bbox: {:?}", header.geographical_extent());
-    println!("  attr_index: {:?}", attr_index.unwrap_or_default());
+            .collect();
 
-    if let Some(title) = header.title() {
-        println!("  Title: {title}");
+        term.write_line(&format!(
+            "  {} {} (B+Tree)",
+            style("Attribute Indices:").dim(),
+            style(attr_names.len()).yellow()
+        ))
+        .ok();
+
+        if !attr_names.is_empty() {
+            for (i, name) in attr_names.iter().enumerate().take(10) {
+                term.write_line(&format!(
+                    "    {}. {}",
+                    style(i + 1).dim(),
+                    style(name).cyan()
+                ))
+                .ok();
+            }
+            if attr_names.len() > 10 {
+                term.write_line(&format!(
+                    "    {} {} more attributes...",
+                    style("...").dim(),
+                    style(attr_names.len() - 10).dim()
+                ))
+                .ok();
+            }
+        }
+    } else {
+        term.write_line(&format!(
+            "  {} {}",
+            style("Attribute Indices:").dim(),
+            style("None").dim()
+        ))
+        .ok();
     }
 
-    if let Some(extent) = header.geographical_extent() {
-        println!("  Geographical extent:");
-        println!(
-            "    Min: [{}, {}, {}]",
-            extent.min().x(),
-            extent.min().y(),
-            extent.min().z()
-        );
-        println!(
-            "    Max: [{}, {}, {}]",
-            extent.max().x(),
-            extent.max().y(),
-            extent.max().z()
-        );
+    term.write_line("").ok();
+
+    // Transform information
+    if let Some(transform) = header.transform() {
+        term.write_line(&format!(
+            "{} Coordinate Transform",
+            style("▶").bold().green()
+        ))
+        .ok();
+        term.write_line(&format!(
+            "  {} [{:.6}, {:.6}, {:.6}]",
+            style("Scale:").dim(),
+            transform.scale().x(),
+            transform.scale().y(),
+            transform.scale().z()
+        ))
+        .ok();
+        term.write_line(&format!(
+            "  {} [{:.6}, {:.6}, {:.6}]",
+            style("Translate:").dim(),
+            transform.translate().x(),
+            transform.translate().y(),
+            transform.translate().z()
+        ))
+        .ok();
+        term.write_line("").ok();
     }
+
+    // Footer
+    term.write_line(&format!(
+        "{} {}",
+        style("━━━").bold().cyan(),
+        style("━━━━━━━━━━━━━━━━━━━━━━━━━━━").bold().cyan()
+    ))
+    .ok();
+    term.write_line("").ok();
 
     Ok(())
 }

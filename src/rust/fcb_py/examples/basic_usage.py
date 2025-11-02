@@ -56,19 +56,24 @@ def demonstrate_sync_reader():
             print(f"  Vertices: {len(feature.vertices)} vertices")
             print(f"  City Objects: {len(feature.city_objects)} objects")
 
-            # Show first city object
+            # Iterate over all city objects in the feature
             if feature.city_objects:
-                first_obj_id = next(iter(feature.city_objects.keys()))
-                first_obj = feature.city_objects[first_obj_id]
-                print(f"    First object ID: {first_obj_id}")
-                print(f"    First object type: {first_obj.type}")
-                print(f"    Geometries: {len(first_obj.geometry)}")
+                for obj_id, city_obj in feature.city_objects.items():
+                    print(f"    Object ID: {obj_id}")
+                    print(f"    Object type: {city_obj.type}")
+                    print(f"    Geometries: {len(city_obj.geometry)}")
 
-                # Show geometry with nested boundaries
-                if first_obj.geometry:
-                    geom = first_obj.geometry[0]
-                    print(f"      Geometry type: {geom.type}")
-                    print(f"      Boundary structure: {type(geom.boundaries)}")
+                    # Show geometry with nested boundaries
+                    if city_obj.geometry:
+                        for geom in city_obj.geometry:
+                            if geom is not None:
+                                print(f"      Geometry type: {geom.geometry_type}")
+                                print(f"      Vertices index: {geom.vertices}")
+                                print(f"      Boundaries: {geom.boundaries}")
+                                if geom.semantics:
+                                    print(f"      Has semantics: {geom.semantics}")
+                            else:
+                                print("      Geometry is None")
 
             feature_count += 1
 
@@ -276,9 +281,7 @@ def demonstrate_api_features():
 async def main():
     """Main example function"""
     print("=== FlatCityBuf Python Bindings Example ===\n")
-    print(
-        "Demonstrates both local file access and HTTP access with CityJSON support\n"
-    )
+    print("Demonstrates both local file access and HTTP access with CityJSON support\n")
 
     # Demonstrate synchronous reader
     demonstrate_sync_reader()

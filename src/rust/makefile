@@ -30,7 +30,7 @@ check-py:
 
 .PHONY: fcb_info
 fcb_info:
-	cargo run -p fcb_cli info -i fcb_core/tests/data/delft_bbox.fcb
+	cargo run -p fcb_cli info -i fcb_core/tests/data/delft.fcb
 
 .PHONY: file_stats
 file_stats:
