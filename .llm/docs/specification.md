@@ -57,42 +57,23 @@ FlatCityBuf supports CityJSON's Geometry Templates for efficient representation 
 
 This separation allows defining complex shapes once in the header and instantiating them multiple times within features using only an index, a reference point index, and a transformation matrix.
 
-### design rationale
-
-the schema design follows several key principles:
-
-1. **flatbuffers efficiency**: uses flatbuffers' zero-copy access for fast data retrieval
-2. **hierarchical structure**: maintains cityjson's hierarchical object model
-3. **shared vertices**: uses indexed vertices to reduce redundancy
-4. **semantic preservation**: maintains rich semantic information from cityjson
-
 ## file storage overview
 
-a flatcitybuf file consists of the following sections:
-
 ```mermaid
-graph TD
-    A[FlatCityBuf File] --> B[Magic Bytes]
-    A --> C[Header Size]
-    A --> D[Header]
-    A --> E[R-tree Index]
-    A --> F[Attribute Index]
-    A --> G[Features]
+block-beta
+    columns 1
+    file["FlatCityBuf File Structure"]
 
-    B --> B1[8 bytes identifier]
-    C --> C1[4 bytes uint32]
-    D --> D1[FlatBuffers Header]
-    E --> E1[Packed R-tree]
-    F --> F1[Static B+tree Index]
-    G --> G1[FlatBuffers Features]
+    block:sections
+        columns 6
+        magic["Magic Bytes<br/>(8 bytes)"]
+        hsize["Header Size<br/>(4 bytes)"]
+        header["Header<br/>(FlatBuffers)"]
+        rtree["R-tree Index<br/>(Spatial)"]
+        attr["Attribute Index<br/>(B+tree)"]
+        features["Features<br/>(FlatBuffers)"]
+    end
 ```
-
-1. **magic bytes**: 8 bytes identifier for the file format ('fcb\0\1\0\0\0\0\0')
-2. **header size**: 4 bytes uint32 indicating the size of the header in bytes
-3. **header**: flatbuffers-encoded header containing metadata, schema, and index information
-4. **r-tree index**: packed r-tree for spatial indexing
-5. **attribute index**: static b+tree indices for attribute queries
-6. **features**: the actual city objects encoded as flatbuffers
 
 each section is aligned to facilitate efficient http range requests, allowing clients to fetch only the parts they need.
 
@@ -301,14 +282,3 @@ the encoding follows these principles:
 2. **enum with extension marker**: special enum values combined with string fields handle extended types
 3. **unified attribute storage**: extension attributes are treated the same as core attributes
 4. **root properties**: extension properties are stored in the header's attributes field
-
-### benefits
-
-this implementation balances:
-
-- **performance**: maintains fast access to core data structures
-- **flexibility**: supports any cityjson extension
-- **self-containment**: makes files usable without external references
-- **simplicity**: uses consistent patterns for extension handling
-
-the schema is agnostic about the validity of extension data, focusing on accurately representing extended cityjson files in an efficient binary format.
