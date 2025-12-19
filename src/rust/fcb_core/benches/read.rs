@@ -1108,7 +1108,7 @@ fn calculate_mean(durations: &[Duration]) -> Duration {
 fn calculate_median(durations: &mut [Duration]) -> Duration {
     durations.sort();
     let len = durations.len();
-    if len % 2 == 0 {
+    if len.is_multiple_of(2) {
         let mid1 = durations[len / 2 - 1].as_nanos();
         let mid2 = durations[len / 2].as_nanos();
         Duration::from_nanos(((mid1 + mid2) / 2) as u64)

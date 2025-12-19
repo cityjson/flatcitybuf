@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.8.1"
 resolution-markers = [
     "python_full_version >= '3.10'",
@@ -40,7 +40,7 @@ wheels = [
 
 [[package]]
 name = "flatcitybuf"
-version = "0.1.2"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "pytest", version = "8.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },

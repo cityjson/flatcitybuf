@@ -1,13 +1,15 @@
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use clap::{ArgAction, Parser, Subcommand};
 use console::{style, Term};
+use fcb_cli::CliError;
 use fcb_core::error::Error;
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     deserializer,
     header_writer::HeaderWriterOptions,
-    read_cityjson_from_reader, CJType, CJTypeKind, CityJSONSeq, FcbReader, FcbWriter,
+    FcbReader, FcbWriter,
 };
+use glob::glob;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::{
     fs::File,
@@ -30,9 +32,9 @@ struct Cli {
 enum Commands {
     /// Convert CityJSON to FCB
     Ser {
-        /// Input file (use '-' for stdin)
-        #[arg(short = 'i', long)]
-        input: String,
+        /// Input files (glob patterns supported, e.g., "cities/*/*.jsonl")
+        #[arg(short = 'i', long, required = true, num_args = 1..)]
+        input: Vec<String>,
 
         /// Output file (use '-' for stdout)
         #[arg(short = 'o', long)]
@@ -125,7 +127,7 @@ struct SerializeOptions {
     ge: bool,
 }
 
-fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(), Error> {
+fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Result<(), CliError> {
     let term = Term::stderr();
     let is_stdout = output == "-";
 
@@ -145,16 +147,29 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         .ok();
     }
 
-    let reader = get_reader(input)?;
-    let writer = get_writer(output)?;
+    // Expand glob patterns and collect all input files
+    let mut input_paths: Vec<PathBuf> = Vec::new();
+    for pattern in inputs {
+        let paths: Vec<PathBuf> = glob(pattern)?.filter_map(|entry| entry.ok()).collect();
+        if paths.is_empty() {
+            // If no glob match, treat as literal path
+            input_paths.push(PathBuf::from(pattern));
+        } else {
+            input_paths.extend(paths);
+        }
+    }
 
-    let reader = BufReader::new(reader);
+    if input_paths.is_empty() {
+        return Err(CliError::NoInputFiles);
+    }
+
+    let writer = get_writer(output)?;
     let writer = BufWriter::new(writer);
 
     // Parse the bbox if provided
     let bbox_parsed = if let Some(bbox_str) = &options.bbox {
         Some(parse_bbox(bbox_str).map_err(|e| {
-            Error::IoError(std::io::Error::new(
+            CliError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("failed to parse bbox: {e}"),
             ))
@@ -169,15 +184,27 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         term.write_line(&format!("{} Configuration", style("▶").bold().green()))
             .ok();
         term.write_line(&format!(
-            "  {} {}",
+            "  {} {} file(s)",
             style("Input:").dim(),
-            if input == "-" {
-                style("stdin").yellow()
-            } else {
-                style(input).yellow()
-            }
+            style(input_paths.len()).yellow()
         ))
         .ok();
+        for (i, path) in input_paths.iter().enumerate().take(5) {
+            term.write_line(&format!(
+                "    {}. {}",
+                style(i + 1).dim(),
+                style(path.display()).yellow()
+            ))
+            .ok();
+        }
+        if input_paths.len() > 5 {
+            term.write_line(&format!(
+                "    {} {} more files...",
+                style("...").dim(),
+                style(input_paths.len() - 5).dim()
+            ))
+            .ok();
+        }
         term.write_line(&format!(
             "  {} {}",
             style("Output:").dim(),
@@ -245,7 +272,7 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         term.write_line("").ok();
     }
 
-    // Create a CityJSONSeq reader
+    // Read and merge input files
     if !is_stdout {
         term.write_line(&format!(
             "{} Reading CityJSON...",
@@ -254,16 +281,9 @@ fn serialize(input: &str, output: &str, options: SerializeOptions) -> Result<(),
         .ok();
     }
 
-    let cj_seq = read_cityjson_from_reader(reader, CJTypeKind::Seq)?;
-
-    let CityJSONSeq { cj, features } = match cj_seq {
-        CJType::Seq(cj_seq) => cj_seq,
-        _ => {
-            return Err(Error::IoError(std::io::Error::other(
-                "failed to read CityJSON Feature",
-            )))
-        }
-    };
+    let merge_result = fcb_cli::merger::merge_files(input_paths)?;
+    let cj = merge_result.metadata;
+    let features = merge_result.features;
 
     if !is_stdout {
         term.write_line(&format!(
@@ -954,7 +974,7 @@ fn show_info(input: PathBuf) -> Result<(), Error> {
     Ok(())
 }
 
-fn main() -> Result<(), Error> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -978,12 +998,14 @@ fn main() -> Result<(), Error> {
                 bbox,
                 ge,
             },
-        ),
-        Commands::Deser { input, output } => deserialize(&input, &output),
-        Commands::Cbor { input, output } => encode_cbor(&input, &output),
-        Commands::Bson { input, output } => encode_bson(&input, &output),
-        Commands::Info { input } => show_info(input),
+        )?,
+        Commands::Deser { input, output } => deserialize(&input, &output)?,
+        Commands::Cbor { input, output } => encode_cbor(&input, &output)?,
+        Commands::Bson { input, output } => encode_bson(&input, &output)?,
+        Commands::Info { input } => show_info(input)?,
     }
+
+    Ok(())
 }
 
 #[cfg(test)]

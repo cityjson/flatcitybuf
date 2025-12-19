@@ -11,6 +11,10 @@ description = "FlatCityBuf is a library for reading and writing CityJSON with Fl
 name = "fcb"
 path = "src/main.rs"
 
+[lib]
+name = "fcb_cli"
+path = "src/lib.rs"
+
 [dependencies]
 fcb_core = { workspace = true, features = ["http"] }
 cjseq = { workspace = true }
@@ -23,3 +27,7 @@ serde_cbor = { workspace = true }
 thiserror = { workspace = true }
 indicatif = { workspace = true }
 console = { workspace = true }
+glob = "0.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }

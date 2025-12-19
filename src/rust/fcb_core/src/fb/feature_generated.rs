@@ -1049,7 +1049,7 @@ impl core::fmt::Debug for CityObject<'_> {
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
 /// `root_as_city_feature_unchecked`.
-pub fn root_as_city_feature(buf: &[u8]) -> Result<CityFeature, flatbuffers::InvalidFlatbuffer> {
+pub fn root_as_city_feature(buf: &[u8]) -> Result<CityFeature<'_>, flatbuffers::InvalidFlatbuffer> {
     flatbuffers::root::<CityFeature>(buf)
 }
 #[inline]
@@ -1061,7 +1061,7 @@ pub fn root_as_city_feature(buf: &[u8]) -> Result<CityFeature, flatbuffers::Inva
 /// `size_prefixed_root_as_city_feature_unchecked`.
 pub fn size_prefixed_root_as_city_feature(
     buf: &[u8],
-) -> Result<CityFeature, flatbuffers::InvalidFlatbuffer> {
+) -> Result<CityFeature<'_>, flatbuffers::InvalidFlatbuffer> {
     flatbuffers::size_prefixed_root::<CityFeature>(buf)
 }
 #[inline]
@@ -1094,14 +1094,14 @@ pub fn size_prefixed_root_as_city_feature_with_opts<'b, 'o>(
 /// Assumes, without verification, that a buffer of bytes contains a CityFeature and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid `CityFeature`.
-pub unsafe fn root_as_city_feature_unchecked(buf: &[u8]) -> CityFeature {
+pub unsafe fn root_as_city_feature_unchecked(buf: &[u8]) -> CityFeature<'_> {
     flatbuffers::root_unchecked::<CityFeature>(buf)
 }
 #[inline]
 /// Assumes, without verification, that a buffer of bytes contains a size prefixed CityFeature and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid size prefixed `CityFeature`.
-pub unsafe fn size_prefixed_root_as_city_feature_unchecked(buf: &[u8]) -> CityFeature {
+pub unsafe fn size_prefixed_root_as_city_feature_unchecked(buf: &[u8]) -> CityFeature<'_> {
     flatbuffers::size_prefixed_root_unchecked::<CityFeature>(buf)
 }
 #[inline]

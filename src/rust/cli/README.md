@@ -52,7 +52,7 @@ fcb ser -i INPUT -o OUTPUT [OPTIONS]
 
 **Options:**
 
-- `-i, --input INPUT` - Input file (use '-' for stdin)
+- `-i, --input INPUT...` - Input file(s) or glob patterns (supports multiple files, use '-' for stdin)
 - `-o, --output OUTPUT` - Output file (use '-' for stdout)
 - `-a, --attr-index ATTRIBUTES` - Comma-separated list of attributes to create index for
 - `-A, --index-all-attributes` - Index all attributes found in the dataset
@@ -64,8 +64,18 @@ fcb ser -i INPUT -o OUTPUT [OPTIONS]
 **Examples:**
 
 ```bash
-# basic conversion
+# basic conversion from CityJSONSeq
 fcb ser -i input.city.jsonl -o output.fcb
+
+# convert CityJSON file (standard .json format)
+fcb ser -i city.city.json -o output.fcb
+
+# multiple input files
+fcb ser -i file1.city.jsonl file2.city.jsonl -o merged.fcb
+
+# glob patterns to process all matching files
+fcb ser -i 'data/*.city.jsonl' -o output.fcb
+fcb ser -i 'cities/**/*.city.json' -o all_cities.fcb
 
 # with attribute indexing
 fcb ser -i delft.city.jsonl -o delft_attr.fcb \
@@ -150,8 +160,11 @@ fcb bson -i INPUT -o OUTPUT
 
 ### Input Formats
 
+- **CityJSON** (`.city.json`) - Standard CityJSON files
 - **CityJSON Text Sequences** (`.city.jsonl`) - Line-delimited CityJSON features
 - **FCB** (`.fcb`) - FlatCityBuf binary format
+
+> **Multi-file Support:** The `ser` command accepts multiple input files and glob patterns. When merging files with different coordinate transforms, vertices are automatically aligned to the first file's transform.
 
 ### Output Formats
 
