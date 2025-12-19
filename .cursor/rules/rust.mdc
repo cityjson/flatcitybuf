@@ -52,6 +52,8 @@ alwaysApply: true
 
 - Follow **Rust’s API guidelines** for public interfaces.
 - Use **builder patterns** for complex configurations.
+- Try to proper trait definition and implementation to invert dependencies and testability.
+- reexport public types and functions from the root crate.
 
 ---
 
@@ -78,11 +80,3 @@ mentation
 
 - Use `tracing` for structured logging.
 - Enable debug assertions wit_assert!()`.
-
----
-
-## Final Notes
-
-- Follow **Rust's idiomatic coding practices**.
-- Endut e, safety, and maintainability**.
-- Maintain a **black-and-white, pixelated/nerdy ltao  will remain robust, efficient, and maintainable across its m crates and modules. 🚀

@@ -7,36 +7,24 @@ alwaysApply: true
 
 ## General Guidelines
 
-- The user is more proficient in programming than Cline and Cusor, but requests Cline's and Cursor assistance for coding to save time.
 - If a test fails more than twice in a row, analyze the current situation and collaborate with the user to determine a solution. Avoid trial-and-error testing without a hypothesis.
-- The user has extensive knowledge gained from GitHub and can implement individual algorithms and libraries faster than Cline and Cursor. Code should be written while explaining to the user, using test cases to verify correctness.
-- However, Cline and Cursor is not good at handling processing logic based on the current context. If the context is unclear, confirm with the user.
-- Once I ask you to do "memory it", you should update [general.mdc](mdc:.cursor/rules/general.mdc) or other corresponding document files such as [productContext.md](mdc:.cursor/rules/memory/productContext.md), [specification.md](mdc:.cursor/rules/memory/specification.md), [progress.md](mdc:.cursor/rules/memory/progress.md) so they are kept update to date. Even I don't ask, you should ask me to save memory or not when you think it's needed.
-
----
-
-# Cline and Cursor Memory Bank
-
-I am a specialized software engineer with a distinct characteristic: my memory resets completely between sessions. This is not a limitation but a driving force for maintaining perfect documentation. After each reset, I rely entirely on the memory bank to understand the project and continue working effectively. At the start of every task, reading all memory bank files is mandatory, not optional.
-
-## Memory Bank Structure
-
-All files are stored under [productContext.md](mdc:.cursor/rules/memory/productContext.md), [progress.md](mdc:.cursor/rules/memory/progress.md), [specification.md](mdc:.cursor/rules/memory/specification.md) and `.cursor/memory/*`. The memory bank consists of mandatory core files and optional context files, all formatted in Markdown.
+- The user has extensive knowledge gained from GitHub and can implement individual algorithms and libraries faster than you. Code should be written while explaining to the user, using test cases to verify correctness.
+- When you work on the bigger tasks, you should plan first and document list of tasks to be done and update progress.md
 
 ### Core Files (Mandatory)
 
-1. **`productContext.md`** [productContext.md](mdc:.cursor/rules/memory/productContext.md)
+1. **`productContext.md`** [productContext.md](mdc:.llm/docs/productContext.md)
    - Explains the purpose of the project.
    - Identifies the problem it solves.
    - Describes expected functionality and user experience goals.
 
-2. **`specification.md`** [specification.md](mdc:.cursor/rules/memory/specification.md)
+2. **`specification.md`** [specification.md](mdc:.llm/docs/specification.md)
    - Explains the detail of FlatCityBuf specification
    - Describes its encoding strategy and decisions made
 
 ### Additional Context Files
 
-Additional files and folders can be created inside `memory/rules/memory*` if they aid in organization:
+Additional files and folders can be created inside `.llm/docs/*` if they aid in organization:
 
 - Documentation for complex features.
 - Integration specifications.
@@ -46,55 +34,7 @@ Additional files and folders can be created inside `memory/rules/memory*` if the
 
 ---
 
-# Git Workflow
-
-## Commit Best Practices
-
-1. **Review Changes**
-
-   ```bash
-   git status
-   git diff
-   git log
-   ```
-
-2. **Analyze Changes**
-   - Identify modified or added files.
-   - Understand the nature of changes (new feature, bug fix, refactoring, etc.).
-   - Evaluate the impact on the project.
-   - Ensure no sensitive information is exposed.
-3. **Create Meaningful Commit Messages**
-
-   ```bash
-   git commit -m "fix: Resolve issue with authentication timeout"
-   ```
-
-## Pull Request Best Practices
-
-1. **Review Branch Status**
-
-   ```bash
-   git status
-   git diff main...HEAD
-   git log
-   ```
-
-2. **Analyze Changes**
-   - Review all commits made since branching off `main`.
-   - Assess change scope and impact.
-   - Ensure no sensitive data is committed.
-3. **Create a Pull Request**
-
-   ```bash
-   gh pr create --title "feat: Improve Rust error handling" --body "Improved error handling with Result<T, E>."
-   ```
-
----
-
-# Local MCP
-
-## `serena`
-
-- `serena` is a tool that can be used to get overview of the code base.
+## Integration with GitHub
+you can expect that runtime has gh CLI, rather than using GitHub MCP, simply use gh CLI to create pull requests, etc.
 
 ---

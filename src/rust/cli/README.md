@@ -4,14 +4,34 @@ A command-line interface for converting between CityJSON and FlatCityBuf (FCB) f
 
 ## Installation
 
+### Option 1: Install from crates.io (Recommended)
+
 ```bash
-cargo install fcb_cli
+cargo install fcb_cli --locked
 ```
 
-Or build from source:
+This installs the `fcb` binary to your Cargo bin directory (usually `~/.cargo/bin/`).
+
+### Option 2: Build from Source
 
 ```bash
-cargo build --release
+# Clone the repository
+git clone https://github.com/cityjson/flatcitybuf.git
+cd flatcitybuf/src/rust
+
+# Build in release mode
+cargo build --release -p fcb_cli
+
+```
+
+### Option 3: Run with Cargo (Development)
+
+```bash
+cd flatcitybuf/src/rust
+cargo run -p fcb_cli -- <command> [args]
+
+# Example: convert CityJSONSeq to FCB
+cargo run -p fcb_cli -- ser -i input.city.jsonl -o output.fcb
 ```
 
 ## Usage
