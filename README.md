@@ -146,22 +146,29 @@ cd wasm && wasm-pack build --target web --release --out-dir ../../ts
 
 ### 🛠️ CLI Usage
 
-#### Convert CityJSONSeq to FlatCityBuf
+#### Convert CityJSON/CityJSONSeq to FlatCityBuf
 
-replace `cargo run -p fcb_cli` with `fcb` in the following commands if you want to use the binary directly.
+Replace `cargo run -p fcb_cli --` with `fcb` in the following commands if you want to use the installed binary directly.
 
 ```bash
-# Basic conversion
-fcb fcb_cli ser -i input.city.jsonl -o output.fcb
+# Basic conversion from CityJSONSeq
+fcb ser -i input.city.jsonl -o output.fcb
 
-# With compression and indexing options
-fcb fcb_cli ser -i data.city.jsonl -o data.fcb
+# Convert standard CityJSON file
+fcb ser -i city.city.json -o output.fcb
+
+# Multiple input files
+fcb ser -i file1.city.jsonl file2.city.jsonl -o merged.fcb
+
+# Glob patterns to process all matching files
+fcb ser -i 'data/*.city.jsonl' -o output.fcb
+fcb ser -i 'cities/**/*.city.json' -o all_cities.fcb
 
 # With spatial index and attribute index
-fcb fcb_cli ser -i data.city.jsonl -o data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
+fcb ser -i data.city.jsonl -o data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
 
 # Show information about the file
-fcb fcb_cli info -i data.fcb
+fcb info -i data.fcb
 ```
 
 ### 🧪 Run Benchmarks
