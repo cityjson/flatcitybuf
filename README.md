@@ -11,7 +11,7 @@
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat&logo=webassembly&logoColor=white)](https://webassembly.org/)
 
-*Bringing the semantic richness of CityJSON with the performance of FlatBuffers*
+_Bringing the semantic richness of CityJSON with the performance of FlatBuffers_
 
 [🚀 Getting Started](#-getting-started) • [📊 Benchmarks](#-performance--benchmarks) • [📖 Documentation](#-documentation) • [🤝 Contributing](#-contributing)
 
@@ -46,13 +46,13 @@ Traditional CityJSON formats face significant challenges in large-scale urban ap
 
 ### 🚀 Key Features
 
-| Feature | Benefit |
-|---------|---------|
-| **⚡ Zero-copy Access** | Access specific city objects without parsing entire files |
-| **☁️ Cloud Optimized** | HTTP range requests for partial data retrieval |
-| **🗺️ Spatial Indexing** | Packed R-tree for lightning-fast spatial queries |
-| **🔍 Attribute Indexing** | Static B+Tree for instant attribute-based filtering |
-| **🌐 Multi-platform** | Rust core with WASM bindings for web applications |
+| Feature                   | Benefit                                                   |
+| ------------------------- | --------------------------------------------------------- |
+| **⚡ Zero-copy Access**   | Access specific city objects without parsing entire files |
+| **☁️ Cloud Optimized**    | HTTP range requests for partial data retrieval            |
+| **🗺️ Spatial Indexing**   | Packed R-tree for lightning-fast spatial queries          |
+| **🔍 Attribute Indexing** | Static B+Tree for instant attribute-based filtering       |
+| **🌐 Multi-platform**     | Rust core with WASM bindings for web applications         |
 
 ---
 
@@ -62,12 +62,12 @@ FlatCityBuf delivers **10-20× faster** data retrieval compared to CityJSONTextS
 
 ### Speed Comparison Results
 
-| Dataset | CityJSON | FlatCityBuf | **Speed Improvement** | Memory Reduction |
-|---------|---------------|------------------|---------------------|------------------|
-| 3DBAG | 56 ms | 6 ms | **8.6×** | 4.7× less memory |
-| 3DBV | 3.8 s | 122ms | **32.6×** | 4.5× less memory |
-| Helsinki | 4.0 s | 132ms | **30.6×** | 2.9× less memory |
-| NYC | 887 ms | 43 ms | **20.7×** | 4.1× less memory |
+| Dataset  | CityJSON | FlatCityBuf | **Speed Improvement** | Memory Reduction |
+| -------- | -------- | ----------- | --------------------- | ---------------- |
+| 3DBAG    | 56 ms    | 6 ms        | **8.6×**              | 4.7× less memory |
+| 3DBV     | 3.8 s    | 122ms       | **32.6×**             | 4.5× less memory |
+| Helsinki | 4.0 s    | 132ms       | **30.6×**             | 2.9× less memory |
+| NYC      | 887 ms   | 43 ms       | **20.7×**             | 4.1× less memory |
 
 > 📈 **Performance**: 8.6-256× faster queries with 2.1-6.4× less memory usage
 
@@ -104,7 +104,15 @@ flatcitybuf/
 
 ### 📦 Installation
 
-#### Package Manager Installation
+#### Package Manager Installation (Recommended)
+
+**Rust CLI**: Install from crates.io
+
+```bash
+cargo install fcb_cli --locked
+```
+
+This installs the `fcb` binary to your Cargo bin directory (usually `~/.cargo/bin/`).
 
 **Python**: Install from PyPI
 
@@ -144,16 +152,16 @@ replace `cargo run -p fcb_cli` with `fcb` in the following commands if you want 
 
 ```bash
 # Basic conversion
-cargo run -p fcb_cli ser -i input.city.jsonl -o output.fcb
+fcb fcb_cli ser -i input.city.jsonl -o output.fcb
 
 # With compression and indexing options
-cargo run -p fcb_cli ser -i data.city.jsonl -o data.fcb
+fcb fcb_cli ser -i data.city.jsonl -o data.fcb
 
 # With spatial index and attribute index
-cargo run -p fcb_cli ser -i data.city.jsonl -o data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
+fcb fcb_cli ser -i data.city.jsonl -o data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
 
 # Show information about the file
-cargo run -p fcb_cli info -i data.fcb
+fcb fcb_cli info -i data.fcb
 ```
 
 ### 🧪 Run Benchmarks
@@ -192,10 +200,10 @@ This project builds upon the excellent work of the geospatial and 3D GIS communi
 ### Technical Foundations
 
 - **[FlatGeobuf](https://github.com/flatgeobuf/flatgeobuf)** - FlatGeobuf team
-  *Licensed under BSD 2-Clause License. Provided the foundational spatial indexing algorithms and FlatBuffers integration patterns.*
+  _Licensed under BSD 2-Clause License. Provided the foundational spatial indexing algorithms and FlatBuffers integration patterns._
 
 - **[CityBuf](https://github.com/3DBAG/CityBuf)** - 3DBAG organisation
-  *Original FlatBuffers schema for CityJSON features, authored by Ravi Peters (3DGI) and Balázs Dukai (3DGI).*
+  _Original FlatBuffers schema for CityJSON features, authored by Ravi Peters (3DGI) and Balázs Dukai (3DGI)._
 
 ### Standards & Specifications
 
