@@ -14,5 +14,8 @@
   "python.defaultInterpreterPath": "${workspaceFolder}/src/rust/fcb_py/.venv/bin/python",
   "python.analysis.extraPaths": [
     "${workspaceFolder}/src/rust/fcb_py/python"
+  ],
+  "cursorpyright.analysis.extraPaths": [
+    "${workspaceFolder}/src/rust/fcb_py/python"
   ]
 }
