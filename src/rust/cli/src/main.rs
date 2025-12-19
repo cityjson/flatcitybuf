@@ -1,9 +1,7 @@
-mod merger;
-mod reader;
-
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use clap::{ArgAction, Parser, Subcommand};
 use console::{style, Term};
+use fcb_cli::CliError;
 use fcb_core::error::Error;
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
@@ -18,35 +16,6 @@ use std::{
     io::{self, BufReader, BufWriter, Read, Write},
     path::PathBuf,
 };
-use thiserror::Error;
-
-/// CLI-specific error type
-#[derive(Error, Debug)]
-pub enum CliError {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("Glob pattern error: {0}")]
-    GlobPattern(#[from] glob::PatternError),
-
-    #[error("Glob error: {0}")]
-    Glob(#[from] glob::GlobError),
-
-    #[error("Unsupported file format for '{0}': {1}")]
-    UnsupportedFormat(String, String),
-
-    #[error("Empty file: {0}")]
-    EmptyFile(String),
-
-    #[error("No input files specified or matched")]
-    NoInputFiles,
-
-    #[error("FCB core error: {0}")]
-    FcbCore(#[from] Error),
-}
 #[derive(Parser)]
 #[command(
     name = "fcb",
@@ -312,7 +281,7 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         .ok();
     }
 
-    let merge_result = merger::merge_files(input_paths)?;
+    let merge_result = fcb_cli::merger::merge_files(input_paths)?;
     let cj = merge_result.metadata;
     let features = merge_result.features;
 

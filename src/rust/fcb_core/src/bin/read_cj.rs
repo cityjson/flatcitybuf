@@ -20,7 +20,7 @@ fn read_cj(input: &str) -> Result<()> {
     let mut document_nummers = Vec::new();
     let mut identifications = Vec::new();
     for (i, feature) in features.iter().enumerate() {
-        if i as u64 % (feature_count / 10) == 0 {
+        if (i as u64).is_multiple_of(feature_count / 10) {
             feature.city_objects.iter().for_each(|(_, co)| {
                 if let Some(attributes) = &co.attributes {
                     if let Some(document_number) =

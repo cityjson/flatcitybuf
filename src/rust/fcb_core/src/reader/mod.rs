@@ -253,13 +253,13 @@ impl<R: Read + Seek> FcbReader<R> {
 }
 
 impl<R: Read> FcbReader<R> {
-    pub fn header(&self) -> Header {
+    pub fn header(&self) -> Header<'_> {
         self.buffer.header()
     }
 
     pub fn root_attr_schema(
         &self,
-    ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<crate::fb::Column>>> {
+    ) -> Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<crate::fb::Column<'_>>>> {
         self.buffer.header().columns()
     }
 
@@ -392,7 +392,7 @@ impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
 }
 
 impl<R: Read> FeatureIter<R, NotSeekable> {
-    pub fn cur_feature(&self) -> CityFeature {
+    pub fn cur_feature(&self) -> CityFeature<'_> {
         self.buffer.feature()
     }
 
@@ -404,7 +404,7 @@ impl<R: Read> FeatureIter<R, NotSeekable> {
         to_cj_feature(fcb_feature, root_attr_schema, semantic_attr_schema)
     }
 
-    pub fn get_features(&mut self) -> Result<Vec<CityFeature>, Error> {
+    pub fn get_features(&mut self) -> Result<Vec<CityFeature<'_>>, Error> {
         // Ok(features)
         todo!("implement")
     }
@@ -421,7 +421,7 @@ impl<R: Read> FeatureIter<R, NotSeekable> {
 }
 
 impl<R: Read + Seek> FeatureIter<R, Seekable> {
-    pub fn cur_feature(&self) -> CityFeature {
+    pub fn cur_feature(&self) -> CityFeature<'_> {
         self.buffer.feature()
     }
     pub fn cur_feature_len(&self) -> usize {
@@ -439,7 +439,7 @@ impl<R: Read + Seek> FeatureIter<R, Seekable> {
         todo!("implement")
     }
 
-    pub fn get_current_feature(&self) -> CityFeature {
+    pub fn get_current_feature(&self) -> CityFeature<'_> {
         self.buffer.feature()
     }
 
@@ -502,13 +502,13 @@ impl<R: Read, S> FeatureIter<R, S> {
         iter
     }
 
-    pub fn header(&self) -> Header {
+    pub fn header(&self) -> Header<'_> {
         self.buffer.header()
     }
 
     pub fn root_attr_schema(
         &self,
-    ) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<crate::fb::Column>>> {
+    ) -> Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<crate::fb::Column<'_>>>> {
         self.buffer.header().columns()
     }
 

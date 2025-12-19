@@ -40,14 +40,11 @@ impl FeatureCollection {
     }
 }
 ///
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Type {
     #[serde(rename = "FeatureCollection")]
+    #[default]
     FeatureCollection,
-}
-
-impl Default for Type {
-    fn default() -> Type {
-        Self::FeatureCollection
-    }
 }

@@ -12,11 +12,11 @@ pub struct FcbBuffer {
 }
 
 impl FcbBuffer {
-    pub fn header(&self) -> Header {
+    pub fn header(&self) -> Header<'_> {
         unsafe { size_prefixed_root_as_header_unchecked(&self.header_buf) }
     }
 
-    pub fn feature(&self) -> CityFeature {
+    pub fn feature(&self) -> CityFeature<'_> {
         unsafe { size_prefixed_root_as_city_feature_unchecked(&self.features_buf) }
     }
 

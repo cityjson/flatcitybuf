@@ -251,7 +251,7 @@ fn calculate_statistics(durations: &[Duration]) -> (f64, f64, f64, f64, f64) {
         .sum::<f64>()
         / durations.len() as f64;
 
-    let median_ms = if sorted_durations.len() % 2 == 0 {
+    let median_ms = if sorted_durations.len().is_multiple_of(2) {
         let mid1 = sorted_durations[sorted_durations.len() / 2 - 1].as_secs_f64() * 1000.0;
         let mid2 = sorted_durations[sorted_durations.len() / 2].as_secs_f64() * 1000.0;
         (mid1 + mid2) / 2.0

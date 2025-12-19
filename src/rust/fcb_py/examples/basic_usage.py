@@ -67,11 +67,15 @@ def demonstrate_sync_reader():
                     if city_obj.geometry:
                         for geom in city_obj.geometry:
                             if geom is not None:
-                                print(f"      Geometry type: {geom.geometry_type}")
+                                print(
+                                    f"      Geometry type: {geom.geometry_type}"
+                                )
                                 print(f"      Vertices index: {geom.vertices}")
                                 print(f"      Boundaries: {geom.boundaries}")
                                 if geom.semantics:
-                                    print(f"      Has semantics: {geom.semantics}")
+                                    print(
+                                        f"      Has semantics: {geom.semantics}"
+                                    )
                             else:
                                 print("      Geometry is None")
 
@@ -281,7 +285,9 @@ def demonstrate_api_features():
 async def main():
     """Main example function"""
     print("=== FlatCityBuf Python Bindings Example ===\n")
-    print("Demonstrates both local file access and HTTP access with CityJSON support\n")
+    print(
+        "Demonstrates both local file access and HTTP access with CityJSON support\n"
+    )
 
     # Demonstrate synchronous reader
     demonstrate_sync_reader()

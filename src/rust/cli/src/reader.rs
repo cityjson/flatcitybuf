@@ -61,8 +61,8 @@ fn read_cityjson_file(path: &Path) -> Result<InputData, CliError> {
     let reader = BufReader::new(file);
 
     // Parse as full CityJSON
-    let cj: CityJSON = serde_json::from_reader(reader)?;
-
+    let mut cj: CityJSON = serde_json::from_reader(reader)?;
+    cj.sort_cjfeatures(cjseq::SortingStrategy::Random);
     // Extract features using cjseq library pattern
     let mut features = Vec::new();
     let mut i = 0;

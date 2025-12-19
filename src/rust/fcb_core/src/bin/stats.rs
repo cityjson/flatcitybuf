@@ -167,11 +167,9 @@ fn analyze_jsonl(path: &Path) -> Result<(u64, f64)> {
         let mut feature_count = 0;
         let mut total_feature_size = 0;
 
-        for line in lines {
-            if let Ok(line_content) = line {
-                total_feature_size += line_content.len();
-                feature_count += 1;
-            }
+        for line_content in lines.flatten() {
+            total_feature_size += line_content.len();
+            feature_count += 1;
         }
 
         let avg_feature_size = if feature_count > 0 {

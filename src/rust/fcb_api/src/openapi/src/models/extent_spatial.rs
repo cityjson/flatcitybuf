@@ -32,14 +32,11 @@ impl ExtentSpatial {
     }
 }
 /// Coordinate reference system of the returned coordinates.  Currently only `https://www.opengis.net/def/crs/EPSG/0/7415` is supported.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Crs {
     #[serde(rename = "https://www.opengis.net/def/crs/EPSG/0/7415")]
+    #[default]
     HttpsColonSlashSlashWwwPeriodOpengisPeriodNetSlashDefSlashCrsSlashEpsgSlash0Slash7415,
-}
-
-impl Default for Crs {
-    fn default() -> Crs {
-        Self::HttpsColonSlashSlashWwwPeriodOpengisPeriodNetSlashDefSlashCrsSlashEpsgSlash0Slash7415
-    }
 }
