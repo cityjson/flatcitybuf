@@ -25,7 +25,7 @@ FlatCityBuf revolutionizes 3D city model storage and retrieval by combining the 
 
 ## Demo
 
-Web prototype can be available from **[here!](https://fcb-web-prototype.netlify.app/)**
+Web prototype can be available from **[https://flatcitybuf-prototype.hideba.me](https://flatcitybuf-prototype.hideba.me/)**
 
 <https://github.com/user-attachments/assets/ab49f026-1907-4a25-a5fb-8bc69e9a102b>
 
