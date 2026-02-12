@@ -48,7 +48,7 @@
     "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached"
   ],
-  "postCreateCommand": "bash -c 'sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ libssl-dev && curl -fsSL https://claude.ai/install.sh | bash && cargo install just --locked && rustup target add wasm32-unknown-unknown && cargo install wasm-pack --locked || true && .devcontainer/install-claude-plugins.sh context7 frontend-design code-review feature-dev code-simplifier clangd-lsp claude-code-setup commit-commands explanatory-output-style frontend-design github greptile hookify learning-output-style playwright pr-review-toolkit pyright-lsp ralph-loop rust-analyzer-lsp serena typescript-lsp'",
+  "postCreateCommand": "bash -c 'sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ libssl-dev && curl -LsSf https://astral.sh/uv/install.sh | sh && curl -fsSL https://claude.ai/install.sh | bash && cargo install just --locked && rustup target add wasm32-unknown-unknown && cargo install wasm-pack --locked || true && .devcontainer/install-claude-plugins.sh context7 frontend-design code-review feature-dev code-simplifier clangd-lsp claude-code-setup commit-commands explanatory-output-style frontend-design github greptile hookify learning-output-style playwright pr-review-toolkit pyright-lsp ralph-loop rust-analyzer-lsp serena typescript-lsp'",
   "remoteUser": "vscode",
   "forwardPorts": [
     8080,
