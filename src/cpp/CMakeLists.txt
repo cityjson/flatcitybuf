@@ -73,11 +73,46 @@ if(APPLE)
     )
 endif()
 
-# Example executable
+# Find nlohmann/json (required for comprehensive_example)
+find_package(nlohmann_json 3.2.0 QUIET)
+if(NOT nlohmann_json_FOUND)
+    message(WARNING "nlohmann/json not found - comprehensive_example requires it")
+    message(STATUS "Install with: brew install nlohmann-json")
+endif()
+
+# Example executables
 add_executable(fcb_example examples/example.cpp ${GENERATED_DIR}/lib.rs.h)
 target_link_libraries(fcb_example fcb)
 target_include_directories(fcb_example PRIVATE ${GENERATED_DIR})
 
+# Local file operations example (no HTTP dependencies)
+add_executable(local_fcb_example examples/local_fcb_example.cpp ${GENERATED_DIR}/lib.rs.h)
+target_link_libraries(local_fcb_example fcb)
+target_include_directories(local_fcb_example PRIVATE ${GENERATED_DIR})
+
+add_executable(fcb_comprehensive_example examples/comprehensive_example.cpp ${GENERATED_DIR}/lib.rs.h)
+target_link_libraries(fcb_comprehensive_example fcb)
+target_include_directories(fcb_comprehensive_example PRIVATE ${GENERATED_DIR})
+
+# Link nlohmann/json for comprehensive_example if found
+if(nlohmann_json_FOUND)
+    target_link_libraries(fcb_comprehensive_example nlohmann_json::nlohmann_json)
+endif()
+
 # Install targets
 install(TARGETS fcb ARCHIVE DESTINATION lib)
 install(FILES ${GENERATED_DIR}/lib.rs.h DESTINATION include/fcb)
+
+# Documentation (Doxygen)
+find_package(Doxygen QUIET)
+if(DOXYGEN_FOUND)
+    add_custom_target(docs
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Generating API documentation with Doxygen"
+        DEPENDS ${GENERATED_DIR}/lib.rs.h
+    )
+    message(STATUS "Doxygen found - 'make docs' available")
+else()
+    message(STATUS "Doxygen not found - install with 'brew install doxygen' for docs")
+endif()
