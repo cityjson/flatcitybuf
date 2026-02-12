@@ -38,8 +38,8 @@ int main(int argc, char *argv[]) {
 
       // Print first 200 chars of JSON
       std::string json = std::string(feature.json);
-      if (json.length() > 200) {
-        json = json.substr(0, 200) + "...";
+      if (json.length() > 1000) {
+        json = json.substr(0, 1000) + "...";
       }
       std::cout << "  JSON: " << json << std::endl;
 

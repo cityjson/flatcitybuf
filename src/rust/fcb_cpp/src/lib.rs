@@ -1,6 +1,6 @@
 //! C++ Bindings for FlatCityBuf Core Library
 //!
-//! This crate provides C++ bindings for the fcb_core library using CXX.
+//! This crate provides C++ bindings for fcb_core library using CXX.
 
 mod reader;
 mod writer;
@@ -14,11 +14,11 @@ mod ffi {
     struct FcbMetadata {
         /// FCB format version
         version: u8,
-        /// Number of features in the file
+        /// Number of features in file
         features_count: u64,
-        /// Whether the file has a spatial index
+        /// Whether to file has a spatial index
         has_spatial_index: bool,
-        /// Whether the file has an attribute index
+        /// Whether to file has an attribute index
         has_attribute_index: bool,
     }
 
@@ -63,10 +63,10 @@ mod ffi {
 
         // ============ Iterator API ============
 
-        /// Advance to the next feature, returns false when done
+        /// Advance to next feature, returns false when done
         fn fcb_iterator_next(iter: &mut FcbFileReaderIterator) -> Result<bool>;
 
-        /// Get the current feature data
+        /// Get to current feature data
         fn fcb_iterator_current(iter: &FcbFileReaderIterator) -> Result<CityFeatureData>;
 
         /// Get the total features count (if known)
@@ -77,13 +77,17 @@ mod ffi {
         /// Create a new FCB writer with CityJSON metadata
         fn fcb_writer_new(metadata_json: &str) -> Result<Box<FcbFileWriter>>;
 
-        /// Add a feature to the writer
+        /// Add a feature to writer
         fn fcb_writer_add_feature(writer: &mut FcbFileWriter, feature_json: &str) -> Result<()>;
 
-        /// Write the FCB file to disk
+        /// Write FCB file to disk
         fn fcb_writer_write(writer: Box<FcbFileWriter>, path: &str) -> Result<()>;
     }
 }
+
+// ============================================================================
+// Re-exports
+// ============================================================================
 
 // Re-export the FFI functions from submodules
 pub use reader::{

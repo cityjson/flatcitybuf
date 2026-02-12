@@ -1,6 +1,7 @@
 //! Writer bindings for C++
 
 use cjseq::{CityJSON, CityJSONFeature};
+use fcb_core::header_writer::HeaderWriterOptions;
 use fcb_core::FcbWriter;
 use std::fs::File;
 use std::io::BufWriter;
@@ -39,8 +40,14 @@ pub fn fcb_writer_write(writer: Box<FcbFileWriter>, path: &str) -> Result<(), St
     let file = File::create(path).map_err(|e| format!("Failed to create file: {}", e))?;
     let buf_writer = BufWriter::new(file);
 
-    let mut fcb_writer = FcbWriter::new(writer.cj_metadata.clone(), None, None, None)
-        .map_err(|e| format!("Failed to create FCB writer: {}", e))?;
+    let header_options = HeaderWriterOptions {
+        feature_count: writer.features.len() as u64,
+        ..HeaderWriterOptions::default()
+    };
+
+    let mut fcb_writer =
+        FcbWriter::new(writer.cj_metadata.clone(), Some(header_options), None, None)
+            .map_err(|e| format!("Failed to create FCB writer: {}", e))?;
 
     for feature in &writer.features {
         fcb_writer

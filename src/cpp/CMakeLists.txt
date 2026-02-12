@@ -20,15 +20,15 @@ set(RUST_LIB_DIR ${CMAKE_SOURCE_DIR}/../rust)
 set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${GENERATED_DIR})
 
-# Build Rust static library
+# Build Rust static library (without http feature to avoid OpenSSL dependency)
 add_custom_command(
     OUTPUT ${RUST_LIB_DIR}/target/release/libfcb_cpp.a
-    COMMAND cargo build --release -p fcb_cpp
+    COMMAND cargo build --release -p fcb_cpp --no-default-features
     WORKING_DIRECTORY ${RUST_LIB_DIR}
     DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs
     DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/reader.rs
     DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/writer.rs
-    COMMENT "Building Rust fcb_cpp library"
+    COMMENT "Building Rust fcb_cpp library (without http feature)"
 )
 
 add_custom_target(rust_library DEPENDS ${RUST_LIB_DIR}/target/release/libfcb_cpp.a)
@@ -71,6 +71,13 @@ if(APPLE)
         "-framework CoreFoundation"
         "-framework SystemConfiguration"
     )
+elseif(UNIX)
+    # Linux: link against OpenSSL if the Rust library was built with http feature
+    find_package(OpenSSL)
+    if(OPENSSL_FOUND)
+        target_link_libraries(fcb OpenSSL::SSL OpenSSL::Crypto)
+        message(STATUS "Linking with OpenSSL: ${OPENSSL_VERSION}")
+    endif()
 endif()
 
 # Find nlohmann/json (required for comprehensive_example)
@@ -93,6 +100,11 @@ target_include_directories(local_fcb_example PRIVATE ${GENERATED_DIR})
 add_executable(fcb_comprehensive_example examples/comprehensive_example.cpp ${GENERATED_DIR}/lib.rs.h)
 target_link_libraries(fcb_comprehensive_example fcb)
 target_include_directories(fcb_comprehensive_example PRIVATE ${GENERATED_DIR})
+
+# Roundtrip test (encode CityJSONSeq -> FCB -> read back)
+add_executable(fcb_roundtrip_test examples/roundtrip_test.cpp ${GENERATED_DIR}/lib.rs.h)
+target_link_libraries(fcb_roundtrip_test fcb)
+target_include_directories(fcb_roundtrip_test PRIVATE ${GENERATED_DIR})
 
 # Link nlohmann/json for comprehensive_example if found
 if(nlohmann_json_FOUND)

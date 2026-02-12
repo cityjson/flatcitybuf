@@ -9,6 +9,9 @@ description = "C++ bindings for FlatCityBuf core library"
 [lib]
 crate-type = ["staticlib"]
 
+[features]
+default = []
+
 [dependencies]
 fcb_core = { workspace = true }
 cxx = { workspace = true }
