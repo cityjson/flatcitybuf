@@ -18,6 +18,11 @@
    - Explains the detail of FlatCityBuf specification
    - Describes its encoding strategy and decisions made
 
+3. **`projectStructure.md`** [projectStructure.md](mdc:.llm/docs/projectStructure.md)
+   - Visual diagram of the project folder structure
+   - Overview of all components and their relationships
+   - Key patterns for workspace organization
+
 ### Additional Context Files
 
 Additional files and folders can be created inside `.llm/docs/*` if they aid in organization:
