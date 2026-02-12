@@ -1,7 +1,6 @@
 {
   "name": "FlatCityBuf Dev Container",
   "image": "mcr.microsoft.com/devcontainers/rust:1-1-bookworm",
-
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
       "installZsh": true,
@@ -14,10 +13,11 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts",
       "nodeGypDependencies": true,
-      "npmPackages": ["typescript"]
+      "npmPackages": [
+        "typescript"
+      ]
     }
   },
-
   "customizations": {
     "vscode": {
       "extensions": [
@@ -27,7 +27,6 @@
         "mutantdino.resourcemonitor",
         "github.copilot",
         "streetsidesoftware.code-spell-checker",
-        "anthropics.claude-code",
         "ms-vscode.cpptools",
         "ms-vscode.cmake-tools"
       ],
@@ -43,32 +42,27 @@
       }
     }
   },
-
   "mounts": [
     "source=${localWorkspaceFolderBasename}-cargo,target=/usr/local/cargo,type=volume",
     "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/src/rust/target,type=volume",
-    "source=${localEnv:HOME}/.claude.json,target=/home/vscode/.claude.json,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.claude-mem,target=/home/vscode/.claude-mem,type=bind,consistency=cached",
-    "source=${localWorkspaceFolder}/.claude,target=${containerWorkspaceFolder}/.claude,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached"
   ],
-
-  "postCreateCommand": "bash -c 'sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ libssl-dev && curl -fsSL https://claude.ai/install.sh | bash && cargo install just --locked && rustup target add wasm32-unknown-unknown && cargo install wasm-pack --locked || true'",
-
+  "postCreateCommand": "bash -c 'sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ libssl-dev && curl -fsSL https://claude.ai/install.sh | bash && cargo install just --locked && rustup target add wasm32-unknown-unknown && cargo install wasm-pack --locked || true && .devcontainer/install-claude-plugins.sh context7 frontend-design code-review feature-dev code-simplifier clangd-lsp claude-code-setup commit-commands explanatory-output-style frontend-design github greptile hookify learning-output-style playwright pr-review-toolkit pyright-lsp ralph-loop rust-analyzer-lsp serena typescript-lsp'",
   "remoteUser": "vscode",
-  "forwardPorts": [8080, 3000],
-
+  "forwardPorts": [
+    8080,
+    3000
+  ],
   "portsAttributes": {
     "8080": {
       "label": "FCB API Server",
       "onAutoForward": "openBrowser"
     }
   },
-
   "runArgs": [
     "--cap-add=SYS_PTRACE",
-    "--security-opt", "seccomp=unconfined"
+    "--security-opt",
+    "seccomp=unconfined"
   ]
 }

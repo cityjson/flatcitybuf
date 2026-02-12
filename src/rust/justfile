@@ -44,7 +44,7 @@ bench:
 
 # Build fcb_core release binary
 build-fcb_core:
-    cargo build --release --bin flatcitybuf_cli
+    cargo build --release -p fcb_core
 
 # Build WASM package (web target, debug)
 wasm-build:
