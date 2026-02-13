@@ -32,6 +32,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install just task runner
+        run: |
+          curl --proto '=https' --tlsv1.2 --silent --show-error --fail "https://github.com/casey/just/releases/download/${{JUST_VERSION}}/just-${{JUST_VERSION}}-${{JUST_OS}}-{{ JUST_ARCH }}.tar.gz" | tar -xz -x -C /usr/local/bin
+          just --version
+        env:
+          JUST_OS: linux
+          JUST_ARCH: x64
+          JUST_VERSION: "1.34.0"
+        shell: bash
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,10 +60,10 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Check Rust crates
-        run: make check-common
+        run: just check-common
 
       - name: Check WASM
-        run: make check-wasm
+        run: just check-wasm
 
   check-python:
     name: Check Python
@@ -64,6 +74,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install just task runner
+        run: |
+          curl --proto '=https' --tlsv1.2 --silent --show-error --fail "https://github.com/casey/just/releases/download/${{JUST_VERSION}}/just-${{JUST_VERSION}}-${{JUST_OS}}-{{ JUST_ARCH }}.tar.gz" | tar -xz -x -C /usr/local/bin
+          just --version
+        env:
+          JUST_OS: linux
+          JUST_ARCH: x64
+          JUST_VERSION: "1.34.0"
+        shell: bash
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -88,4 +108,4 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Check Python package
-        run: make check-py
+        run: just check-py
