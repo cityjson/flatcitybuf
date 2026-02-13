@@ -75,5 +75,4 @@ flamegraph*
 
 build/
 
-
-.claude/settigs.local.json
+.claude/settings.local.json
