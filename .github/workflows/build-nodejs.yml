@@ -1,0 +1,192 @@
+name: Build Node.js Native Bindings
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      publish:
+        description: "Publish to npm"
+        required: false
+        type: boolean
+        default: false
+
+  release:
+    types: [created]
+
+# Run tests on push to main (no build)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/rust/nodejs/**"
+      - "src/ts/**"
+      - ".github/workflows/build-nodejs.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build native bindings for multiple platforms
+  build-native:
+    name: Build ${{ matrix.platform }} (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+            arch: x64
+
+          # Linux ARM64
+          - os: ubuntu-latest
+            platform: linux
+            target: aarch64-unknown-linux-gnu
+            arch: arm64
+
+          # macOS x86_64 (Intel)
+          - os: macos-latest
+            platform: darwin
+            target: x86_64-apple-darwin
+            arch: x64
+
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            platform: darwin
+            target: aarch64-apple-darwin
+            arch: arm64
+
+          # Windows x86_64
+          - os: windows-latest
+            platform: win32
+            target: x86_64-pc-windows-msvc
+            arch: x64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/rust
+          shared-key: "fcb-nodejs-${{ matrix.target }}"
+
+      - name: Add target (if needed)
+        shell: bash
+        run: |
+          target="${{ matrix.target }}"
+          if [ "$target" != "x86_64-unknown-linux-gnu" ] && [ "$target" != "x86_64-apple-darwin" ] && [ "$target" != "x86_64-pc-windows-msvc" ]; then
+            rustup target add "$target"
+          fi
+
+      - name: Install napi-cli
+        run: |
+          npm install -g @napi-rs/cli
+
+      - name: Build native bindings
+        run: |
+          cd src/rust/nodejs
+          napi build --platform --release --target "$target" --js ../../ts/node/index.js --dts ../../ts/node/index.d.ts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            src/ts/node/index.node
+            src/ts/node/index.d.ts
+            src/ts/node/*/index.node
+            src/ts/node/*/index.d.ts
+          if-no-files-found: error
+
+  # Publish to npm (manual trigger or on release)
+  publish-npm:
+    name: Publish to npm
+    needs: build-native
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish == 'true')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GA_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Prepare package layout
+        run: |
+          mkdir -p src/ts/node/linux-x64
+          mkdir -p src/ts/node/linux-arm64
+          mkdir -p src/ts/node/darwin-x64
+          mkdir -p src/ts/node/darwin-arm64
+          mkdir -p src/ts/node/win32-x64
+
+          # Move artifacts to correct locations
+          mv nodejs-linux-x64/*/index.node src/ts/node/linux-x64/ || true
+          mv nodejs-linux-arm64/*/index.node src/ts/node/linux-arm64/ || true
+          mv nodejs-darwin-x64/*/index.node src/ts/node/darwin-x64/ || true
+          mv nodejs-darwin-arm64/*/index.node src/ts/node/darwin-arm64/ || true
+          mv nodejs-win32-x64/*/index.node src/ts/node/win32-x64/ || true
+
+          # Copy shared files to each platform dir
+          for dir in src/ts/node/*/; do
+            cp src/ts/node/index.js "$dir/" || true
+            cp src/ts/node/index.d.ts "$dir/" || true
+          done
+
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "actions[bot]@github.com"
+
+      - name: Bump version
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cd src/ts
+          npm version ${{ github.event.inputs.version_bump }} --no-git-tag-version
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd src/ts
+          npm publish --access public
+
+      - name: Create git tag (if manual)
+        if: |
+          github.event_name == 'workflow_dispatch' && github.event.inputs.version_bump != ''
+        run: |
+          git tag -a "v$(node -p 'require(\"./package.json\"); console.log(require(\"./package.json\").version)' src/ts)"
+          git push origin "v$(node -p 'require(\"./package.json\"); console.log(require(\"./package.json\").version)' src/ts)"

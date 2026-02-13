@@ -1,0 +1,209 @@
+name: Build Go Static Library
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Version tag (e.g., v0.6.0)"
+        required: false
+        type: string
+      create_release:
+        description: "Create GitHub release"
+        required: false
+        type: boolean
+        default: false
+
+  release:
+    types: [created]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build static libraries for multiple architectures
+  build-staticlib:
+    name: Build ${{ matrix.os }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
+
+          # Linux ARM64 (cross-compile)
+          - os: ubuntu-latest
+            arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            cross_compile: true
+
+          # macOS x86_64 (Intel)
+          - os: macos-latest
+            arch: x86_64
+            target: x86_64-apple-darwin
+
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+
+          # Windows x86_64
+          - os: windows-latest
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/rust
+          shared-key: "fcb-go-${{ matrix.target }}"
+
+      - name: Add target (if needed)
+        shell: bash
+        run: |
+          target="${{ matrix.target }}"
+          if [ "$target" != "x86_64-unknown-linux-gnu" ] && [ "$target" != "x86_64-apple-darwin" ] && [ "$target" != "x86_64-pc-windows-msvc" ]; then
+            rustup target add "$target"
+          fi
+
+      - name: Install cross-compilation tools (ARM64 Linux)
+        if: matrix.cross_compile == true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build static library
+        run: |
+          cd src/rust
+          cargo build -p fcb_go --release --target "${{ matrix.target }}"
+
+      - name: Rename artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd src/rust/target
+          archive_name="libfcb_go-${{ matrix.os }}-${{ matrix.arch }}.a"
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            mv release/libfcb_go.a "$archive_name"
+          else
+            mv "${{ matrix.target }}/release/libfcb_go.a" "$archive_name"
+          fi
+          echo "ARCHIVE_NAME=$archive_name" >> $GITHUB_ENV
+
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd src/rust/target
+          $archive_name = "libfcb_go-${{ matrix.os }}-${{ matrix.arch }}.lib"
+          if ("${{ matrix.arch }}" -eq "x86_64") {
+            Move-Item -Path "release\fcb_go.lib" -Destination "$archive_name"
+          } else {
+            Move-Item -Path "${{ matrix.target }}\release\fcb_go.lib" -Destination "$archive_name"
+          }
+          "ARCHIVE_NAME=$archive_name" | Out-File -Encoding ASCII -FilePath $env:GITHUB_ENV
+
+      - name: Upload static library
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            src/rust/target/libfcb_go-*.a
+            src/rust/target/libfcb_go-*.lib
+
+  # Create Go release with prebuilt static libraries
+  create-release:
+    name: Create Go Release
+    needs: build-staticlib
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && inputs.create_release == 'true')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Organize artifacts
+        run: |
+          mkdir -p release/libs
+          mv go-*-x64.* release/libs/ || true
+          mv go-*-aarch64.* release/libs/ || true
+          ls -la release/libs/
+
+      - name: Generate C header
+        run: |
+          cd src/rust/fcb_go
+          cargo build --release
+          # Header is generated to src/go/include by build.rs
+
+      - name: Copy Go source to release
+        run: |
+          mkdir -p release/src/go
+          cp -r src/go/* release/src/go/
+          rm -f release/src/go/include  # Users should generate their own
+
+      - name: Create README for release
+        run: |
+          cat > release/README.md << 'EOF'
+          # FlatCityBuf Go Bindings - Prebuilt Release
+
+          This release contains prebuilt static libraries for multiple platforms.
+
+          ## Quick Start
+
+          1. Download the appropriate `libfcb_go-*.a` file for your platform
+          2. Place it in your project's `lib/` directory
+          3. Install the Go package: `go get github.com/cityjson/flatcitybuf-go/fcb`
+          4. Update your cgo directives:
+
+          \`\`\`go
+          // #cgo LDFLAGS: -L$(SRCDIR)/../lib -lfcb_go -lm -ldl -lpthread -lssl -lcrypto
+          \`\`\`
+
+          ## Platform Files
+
+          | Platform | Architecture | File |
+          |-----------|-------------|-----|
+          | Linux | x86_64 | libfcb_go-Linux-x86_64.a |
+          | Linux | ARM64 | libfcb_go-Linux-aarch64.a |
+          | macOS | x86_64 | libfcb_go-Darwin-x86_64.a |
+          | macOS | ARM64 | libfcb_go-Darwin-aarch64.a |
+          | Windows | x86_64 | libfcb_go-Windows-x86_64.lib |
+
+          ## Building from Source
+
+          See [github.com/cityjson/flatcitybuf](https://github.com/cityjson/flatcitybuf) for full build instructions.
+          EOF
+
+      - name: Create release (manual)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GA_TOKEN: ${{ secrets.GA_TOKEN }}
+        run: |
+          tag="${{ github.event.inputs.version_tag }}"
+          if [ -z "$tag" ]; then
+            echo "Error: version_tag is required for manual releases"
+            exit 1
+          fi
+          gh release create "$tag" --title "$tag" --notes-from-file release/README.md
+
+      - name: Upload release assets
+        if: github.event_name == 'release'
+        env:
+          GA_TOKEN: ${{ secrets.GA_TOKEN }}
+        run: |
+          gh release upload '${{ github.ref_name }}' release/libs/*

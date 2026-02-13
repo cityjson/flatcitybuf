@@ -1,0 +1,103 @@
+name: CI - Node.js & Go
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/rust/nodejs/**"
+      - "src/rust/fcb_go/**"
+      - "src/ts/**"
+      - "src/go/**"
+      - ".github/workflows/ci-nodejs-go.yml"
+
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/rust/nodejs/**"
+      - "src/rust/fcb_go/**"
+      - "src/ts/**"
+      - "src/go/**"
+      - ".github/workflows/ci-nodejs-go.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Node.js tests (bindings must be built first)
+  test-nodejs:
+    name: Test Node.js
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        # Note: native bindings require platform-specific builds
+        # For CI, we test on Ubuntu only
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/rust
+          shared-key: "fcb-nodejs-ci"
+
+      - name: Install napi-cli
+        run: |
+          npm install -g @napi-rs/cli
+
+      - name: Build Node.js bindings (debug)
+        run: |
+          cd src/rust/nodejs && napi build --platform --js ../../ts/node/index.js --dts ../../ts/node/index.d.ts
+
+      - name: Run Node.js tests
+        run: |
+          cd src/ts && node --test test/node.test.mjs
+
+  # Go tests
+  test-go:
+    name: Test Go
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/rust
+          shared-key: "fcb-go-ci"
+
+      - name: Build Go static library (debug)
+        run: |
+          cd src/rust && cargo build -p fcb_go
+
+      - name: Run Go tests
+        run: |
+          cd src/go && CGO_ENABLED=1 go test ./...
