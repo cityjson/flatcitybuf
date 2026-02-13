@@ -122,4 +122,4 @@ jobs:
 
       - name: Run C++ roundtrip test
         run: |
-          ./fcb_roundtrip_comprehensive ../rust/fcb_core/tests/data
+          ./build/fcb_roundtrip_comprehensive ../rust/fcb_core/tests/data
