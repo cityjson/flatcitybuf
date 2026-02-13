@@ -16,7 +16,8 @@
  * @copyright MIT License
  */
 
-#include "fcb.h"           // FlatCityBuf C++ API header
+#include "fcb.h"  // FlatCityBuf C++ API header
+
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -41,7 +42,8 @@ int main(int argc, char* argv[]) {
         std::cout << "Format version: " << static_cast<int>(meta.version) << std::endl;
         std::cout << "Total features: " << meta.features_count << std::endl;
         std::cout << "Has spatial index: " << (meta.has_spatial_index ? "yes" : "no") << std::endl;
-        std::cout << "Has attribute index: " << (meta.has_attribute_index ? "yes" : "no") << std::endl;
+        std::cout << "Has attribute index: " << (meta.has_attribute_index ? "yes" : "no")
+                  << std::endl;
         std::cout << std::endl;
 
         // === Select all features ===

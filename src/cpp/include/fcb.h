@@ -100,7 +100,7 @@
  * Complete CityJSONFeature as a JSON string, ready for parsing
  */
 
-/** @} */ // end of reader group
+/** @} */  // end of reader group
 
 /**
  * @defgroup iterator Iterator API
@@ -140,7 +140,7 @@
  * @return Total feature count, or 0 if unknown
  */
 
-/** @} */ // end of iterator group
+/** @} */  // end of iterator group
 
 /**
  * @defgroup writer Writer API
@@ -183,4 +183,4 @@
  * @note This consumes the writer - it cannot be used after calling write()
  */
 
-/** @} */ // end of writer group
+/** @} */  // end of writer group

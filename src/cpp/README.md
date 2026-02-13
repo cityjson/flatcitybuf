@@ -1,4 +1,4 @@
-# FlatCityBuf C++ Bindings
+#FlatCityBuf C++ Bindings
 
 High-performance C++ bindings for FlatCityBuf (FCB) binary format.
 
@@ -29,38 +29,38 @@ The C++ bindings provide the following functions for reading FCB files:
 auto reader = fcb::fcb_reader_open("buildings.fcb");
 ```
 
-### Getting Metadata
+    ## #Getting Metadata
 ```cpp
-// Get metadata from reader
-auto meta = fcb::fcb_reader_metadata(*reader);
+    // Get metadata from reader
+    auto meta = fcb::fcb_reader_metadata(*reader);
 
 std::cout << "Features: " << meta.features_count << std::endl;
 std::cout << "Has spatial index: " << (meta.has_spatial_index ? "yes" : "no") << std::endl;
 std::cout << "Has attribute index: " << (meta.has_attribute_index ? "yes" : "no") << std::endl;
 ```
 
-### Iterating Features
+    ## #Iterating Features
 
 ```cpp
-// Select all features
-auto iter = fcb::fcb_reader_select_all(std::move(reader));
+    // Select all features
+    auto iter = fcb::fcb_reader_select_all(std::move(reader));
 
 // Iterate through features
 while (fcb::fcb_iterator_next(*iter)) {
     auto feature = fcb::fcb_iterator_current(*iter);
 
-    std::string id = feature.id;       // Feature ID
+    std::string id = feature.id;      // Feature ID
     std::string json = feature.json;  // Feature data as JSON string
 
     // Access specific fields from JSON...
 }
 ```
 
-### Spatial Queries
+    ## #Spatial Queries
 
 ```cpp
-// Define bounding box
-fcb::BoundingBox bbox;
+        // Define bounding box
+        fcb::BoundingBox bbox;
 bbox.min_x = 85000.0;
 bbox.min_y = 446000.0;
 bbox.max_x = 85100.0;
@@ -106,10 +106,10 @@ brew install nlohmann-json
 ### For Remote Access, Use CLI Tool:
 
 ```bash
-# Get metadata from remote FCB file
+#Get metadata from remote FCB file
 fcb info -i https://example.com/data.fcb
 
-# Spatial query on remote file
+#Spatial query on remote file
 fcb info -i https://example.com/data.fcb --bbox 85000 446000 85100 446100
 ```
 
@@ -157,11 +157,11 @@ C++ bindings are in `src/rust/fcb_cpp/`:
 ### Testing
 
 ```bash
-# Build examples
+#Build examples
 cd src/cpp/build
 make local_fcb_example
 
-# Run example
+#Run example
 ./local_fcb_example ../../examples/data/delft.fcb
 ```
 
