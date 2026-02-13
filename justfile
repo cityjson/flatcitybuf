@@ -15,30 +15,30 @@ pre-commit: check-common check-wasm check-py pre-commit-cpp
 
 # Common workspace checks (Rust workspace format, clippy, test, build)
 check-common:
-    cargo fmt
-    cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm --exclude fcb_py
-    cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
-    cargo nextest run --all-features --workspace --exclude fcb_wasm --exclude fcb_py
-    cargo check --all-features --workspace --exclude fcb_wasm --exclude fcb_py
-    cargo build --workspace --all-features --exclude fcb_wasm --exclude fcb_py
+    cd src/rust && cargo fmt
+    cd src/rust && cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm --exclude fcb_py
+    cd src/rust && cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
+    cd src/rust && cargo nextest run --all-features --workspace --exclude fcb_wasm --exclude fcb_py
+    cd src/rust && cargo check --all-features --workspace --exclude fcb_wasm --exclude fcb_py
+    cd src/rust && cargo build --workspace --all-features --exclude fcb_wasm --exclude fcb_py
 
 # Run WASM-specific checks
 check-wasm:
-    cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
-    cargo check -p fcb_wasm --target wasm32-unknown-unknown
-    cargo build -p fcb_wasm --target wasm32-unknown-unknown
+    cd src/rust && cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
+    cd src/rust && cargo check -p fcb_wasm --target wasm32-unknown-unknown
+    cd src/rust && cargo build -p fcb_wasm --target wasm32-unknown-unknown
 
 # Run Python-specific checks
 check-py:
-    cd fcb_py && uv sync --extra dev
-    cd fcb_py && uv run maturin develop
-    cd fcb_py && uv run ruff check --fix .
-    cd fcb_py && uv run ruff format .
-    cd fcb_py && uv run pytest tests/
+    cd src/rust/fcb_py && uv sync --extra dev
+    cd src/rust/fcb_py && uv run maturin develop
+    cd src/rust/fcb_py && uv run ruff check --fix .
+    cd src/rust/fcb_py && uv run ruff format .
+    cd src/rust/fcb_py && uv run pytest tests/
 
 # Run C++ binding checks
 pre-commit-cpp:
-    cd src/cpp && cmake -B build -S . && cmake --build build
+    cd  src/cpp && cmake -B build -S . && cmake --build build
 
 # Run all generation scripts in scripts directory
 gen-all:
@@ -105,7 +105,7 @@ docs:
 
 # Install development tools
 install-tools:
-    cargo install just cargo-watch wasm-pack cargo-audit
+    cd src/rust && cargo install just cargo-watch wasm-pack cargo-audit
 
 # Start dev container
 devcon:
@@ -139,34 +139,34 @@ test-cpp:
 
 # Sync Python dependencies
 py-sync:
-    cd fcb_py && uv sync --extra dev
+    cd src/rust/fcb_py && uv sync --extra dev
 
 # Run Python development
 py-dev:
-    cd fcb_py && uv run maturin develop
+    cd src/rust/fcb_py && uv run maturin develop
 
 # Run Python linter
 py-lint:
-    cd fcb_py && uv run ruff check --fix .
+    cd src/rust/fcb_py && uv run ruff check --fix .
 
 # Format Python code
 py-fmt:
-    cd fcb_py && uv run ruff format .
+    cd src/rust/fcb_py && uv run ruff format .
 
 # Run Python tests
 py-test:
-    cd fcb_py && uv run pytest tests/
+    cd src/rust/fcb_py && uv run pytest tests/
 
 # Clean Python build artifacts
 py-clean:
-    cd fcb_py && cargo clean
+    cd src/rust/fcb_py && cargo clean
 
 # Install Python package in development mode
 py-develop:
-    cd fcb_py && maturin develop
+    cd src/rust/fcb_py && maturin develop
 
 build-py:
-    cd fcb_py && maturin build --release
+    cd src/rust/fcb_py && maturin build --release
 
 # ============================================================================
 # WASM Commands
@@ -186,16 +186,16 @@ build-wasm-release:
 
 # Run FCB info command on test data
 fcb_info:
-    cargo run -p fcb_cli info -i fcb_core/tests/data/delft.fcb
+    cd src/rust && cargo run -p fcb_cli info -i fcb_core/tests/data/delft.fcb
 
 # Generate file statistics (CSV output)
 file-stats:
-    cargo run -p fcb_core --bin stats -- -d fcb_core/benchmark_data/ -f csv
+    cd src/rust && cargo run -p fcb_core --bin stats -- -d fcb_core/benchmark_data/ -f csv
 
 # Run benchmarks
 bench:
-    cargo bench -p fcb_core --bench read -- --release
+    cd src/rust && cargo bench -p fcb_core --bench read -- --release
 
 # Build fcb_core release binary
 build-fcb_core:
-    cargo build --release -p fcb_core
+    cd src/rust && cargo build --release -p fcb_core
