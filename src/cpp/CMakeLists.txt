@@ -106,6 +106,11 @@ add_executable(fcb_roundtrip_test examples/roundtrip_test.cpp ${GENERATED_DIR}/l
 target_link_libraries(fcb_roundtrip_test fcb)
 target_include_directories(fcb_roundtrip_test PRIVATE ${GENERATED_DIR})
 
+# Comprehensive roundtrip tests (tests/ directory)
+add_executable(fcb_roundtrip_comprehensive tests/roundtrip_test.cpp ${GENERATED_DIR}/lib.rs.h)
+target_link_libraries(fcb_roundtrip_comprehensive fcb nlohmann_json::nlohmann_json)
+target_include_directories(fcb_roundtrip_comprehensive PRIVATE ${GENERATED_DIR})
+
 # Link nlohmann/json for comprehensive_example if found
 if(nlohmann_json_FOUND)
     target_link_libraries(fcb_comprehensive_example nlohmann_json::nlohmann_json)
