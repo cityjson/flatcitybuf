@@ -74,3 +74,6 @@ flamegraph*
 *.so
 
 build/
+
+
+.claude/settigs.local.json

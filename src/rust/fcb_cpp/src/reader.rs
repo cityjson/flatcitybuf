@@ -30,9 +30,8 @@ struct IteratorWrapper {
     iter: fcb_core::FeatureIter<BufReader<File>, fcb_core::reader_trait::Seekable>,
 }
 
-// We're using single-threaded access, so this is safe for our use case.
-// C++ bindings will be called from a single thread.
-unsafe impl Send for IteratorWrapper {}
+// Send is implemented automatically: FeatureIter, BufReader, and File are all Send
+// No unsafe impl needed
 
 struct DirectIteratorHelper {
     iter_inner: Option<IteratorWrapper>,
@@ -41,7 +40,8 @@ struct DirectIteratorHelper {
     finished: bool,
 }
 
-unsafe impl Send for DirectIteratorHelper {}
+// Send is implemented automatically for all fields
+// No unsafe impl needed
 
 impl IteratorHelper for DirectIteratorHelper {
     fn next_feature(&mut self) -> Result<bool, String> {
@@ -105,8 +105,14 @@ pub fn fcb_reader_open(path: &str) -> Result<Box<FcbFileReader>, String> {
 pub fn fcb_reader_metadata(reader: &FcbFileReader) -> FcbMetadata {
     let header = reader.inner.header();
 
+    // Parse version from header, fall back to 1 if parsing fails
+    let version = header
+        .version()
+        .parse()
+        .unwrap_or(1);
+
     FcbMetadata {
-        version: 1, // TODO: Extract from header when available
+        version,
         features_count: header.features_count(),
         has_spatial_index: header.index_node_size() > 0,
         has_attribute_index: header
@@ -120,8 +126,10 @@ pub fn fcb_reader_metadata(reader: &FcbFileReader) -> FcbMetadata {
 pub fn fcb_reader_select_all(
     reader: Box<FcbFileReader>,
 ) -> Result<Box<FcbFileReaderIterator>, String> {
-    let iter = reader
-        .inner
+    // Destructure Box to move inner FcbReader
+    let FcbFileReader { inner } = *reader;
+
+    let iter = inner
         .select_all()
         .map_err(|e| format!("Failed to select all features: {}", e))?;
 
@@ -148,8 +156,10 @@ pub fn fcb_reader_select_bbox(
 ) -> Result<Box<FcbFileReaderIterator>, String> {
     let query = SpatialQuery::BBox(bbox.min_x, bbox.min_y, bbox.max_x, bbox.max_y);
 
-    let iter = reader
-        .inner
+    // Destructure Box to move inner FcbReader
+    let FcbFileReader { inner } = *reader;
+
+    let iter = inner
         .select_query(query, None, None)
         .map_err(|e| format!("Failed to select features by bbox: {}", e))?;
 

@@ -40,16 +40,22 @@ pub fn fcb_writer_write(writer: Box<FcbFileWriter>, path: &str) -> Result<(), St
     let file = File::create(path).map_err(|e| format!("Failed to create file: {}", e))?;
     let buf_writer = BufWriter::new(file);
 
+    // Destructure Box to move fields instead of cloning
+    let FcbFileWriter {
+        cj_metadata,
+        features,
+    } = *writer;
+
     let header_options = HeaderWriterOptions {
-        feature_count: writer.features.len() as u64,
+        feature_count: features.len() as u64,
         ..HeaderWriterOptions::default()
     };
 
     let mut fcb_writer =
-        FcbWriter::new(writer.cj_metadata.clone(), Some(header_options), None, None)
+        FcbWriter::new(cj_metadata, Some(header_options), None, None)
             .map_err(|e| format!("Failed to create FCB writer: {}", e))?;
 
-    for feature in &writer.features {
+    for feature in &features {
         fcb_writer
             .add_feature(feature)
             .map_err(|e| format!("Failed to add feature: {}", e))?;
