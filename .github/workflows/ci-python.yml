@@ -5,13 +5,13 @@ on:
     branches: [main]
     paths:
       - "src/rust/fcb_py/**"
-      - ".github/workflows/**"
+      - ".github/workflows/ci-python.yml"
 
   pull_request:
     branches: [main]
     paths:
       - "src/rust/fcb_py/**"
-      - ".github/workflows/**"
+      - ".github/workflows/ci-python.yml"
 
 env:
   CARGO_TERM_COLOR: always
@@ -142,7 +142,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     defaults:
       run:
@@ -240,5 +240,5 @@ jobs:
 
       - name: Test wheel installation
         run: |
-          pip install dist/*cp311*linux*.whl
+          pip install dist/*linux*.whl
           python -c "import flatcitybuf; print(flatcitybuf.__version__)"

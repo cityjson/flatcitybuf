@@ -1,0 +1,38 @@
+#Doxyfile for FlatCityBuf C++ Bindings
+#Auto - generated documentation like rustdoc
+
+PROJECT_NAME = "FlatCityBuf C++ API" PROJECT_NUMBER = 0.1.0 PROJECT_BRIEF =
+    "C++ bindings for reading and writing FlatCityBuf files"
+
+#Output configuration
+    OUTPUT_DIRECTORY = docs GENERATE_HTML = YES GENERATE_LATEX = NO HTML_OUTPUT =
+        html HTML_EXTRA_STYLESHEET =
+
+#Input configuration
+            INPUT =../ rust / fcb_cpp / README.md include / fcb.h build / generated /
+                   lib.rs.h examples FILE_PATTERNS = *.h*.hpp*.cpp*.md RECURSIVE =
+                       YES USE_MDFILE_AS_MAINPAGE =
+                           ../ rust / fcb_cpp /
+                           README.md
+
+#Extraction settings
+                               EXTRACT_ALL = YES EXTRACT_PRIVATE = NO EXTRACT_STATIC = YES
+
+#Source browser
+                               SOURCE_BROWSER = YES INLINE_SOURCES = NO REFERENCED_BY_RELATION =
+                                   YES REFERENCES_RELATION = YES
+
+#Preprocessing
+                                       ENABLE_PREPROCESSING = YES MACRO_EXPANSION =
+                                           YES EXPAND_ONLY_PREDEF = NO
+
+#Output tweaks
+                                               GENERATE_TREEVIEW = YES DISABLE_INDEX =
+                                                   NO FULL_SIDEBAR = NO HTML_COLORSTYLE = LIGHT
+
+#Warnings
+                                                       WARN_IF_UNDOCUMENTED = YES WARN_NO_PARAMDOC =
+                                                           NO
+
+#Graph settings(requires graphviz)
+                                                               HAVE_DOT = NO CLASS_DIAGRAMS = YES

@@ -17,5 +17,6 @@
   ],
   "cursorpyright.analysis.extraPaths": [
     "${workspaceFolder}/src/rust/fcb_py/python"
-  ]
+  ],
+  "cmake.sourceDirectory": "${workspaceFolder}/src/cpp"
 }

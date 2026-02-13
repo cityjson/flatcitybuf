@@ -72,3 +72,7 @@ flamegraph*
 .roo
 .serena/
 *.so
+
+build/
+
+.claude/settings.local.json

@@ -1,0 +1,61 @@
+{
+  "name": "FlatCityBuf Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-1-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZsh": true,
+      "upgradePackages": true,
+    },
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "latest",
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts",
+      "nodeGypDependencies": true,
+      "npmPackages": ["typescript"],
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb",
+        "mutantdino.resourcemonitor",
+        "github.copilot",
+        "streetsidesoftware.code-spell-checker",
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+      ],
+      "settings": {
+        "rust-analyzer.checkOnSave.command": "clippy",
+        "rust-analyzer.cargo.features": "all",
+        "files.watcherExclude": {
+          "**/target/**": true,
+          "**/Cargo.lock": true,
+        },
+        "editor.formatOnSave": true,
+        "cmake.configureOnOpen": false,
+      },
+    },
+  },
+  "mounts": [
+    "source=${localWorkspaceFolderBasename}-cargo,target=/usr/local/cargo,type=volume",
+    "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/src/rust/target,type=volume",
+    "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached",
+    "source=${env:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind",
+  ],
+  "postCreateCommand": "bash -c 'sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ libssl-dev && curl -LsSf https://astral.sh/uv/install.sh | sh && curl -fsSL https://claude.ai/install.sh | bash && cargo install just --locked && rustup target add wasm32-unknown-unknown && cargo install wasm-pack --locked || true && .devcontainer/install-claude-plugins.sh context7 frontend-design code-review feature-dev code-simplifier clangd-lsp claude-code-setup commit-commands explanatory-output-style frontend-design github greptile hookify learning-output-style playwright pr-review-toolkit pyright-lsp ralph-loop rust-analyzer-lsp serena typescript-lsp'",
+  "remoteUser": "vscode",
+  "forwardPorts": [8080, 3000],
+  "portsAttributes": {
+    "8080": {
+      "label": "FCB API Server",
+      "onAutoForward": "openBrowser",
+    },
+  },
+  "runArgs": ["--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined"],
+}

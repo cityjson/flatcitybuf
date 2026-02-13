@@ -5,13 +5,15 @@ on:
     branches: [main]
     paths:
       - "src/rust/**"
-      - ".github/workflows/**"
+      - "src/cpp/**"
+      - ".github/workflows/ci.yml"
 
   pull_request:
     branches: [main]
     paths:
       - "src/rust/**"
-      - ".github/workflows/**"
+      - "src/cpp/**"
+      - ".github/workflows/ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
@@ -32,6 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,10 +55,10 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Check Rust crates
-        run: make check-common
+        run: just check-common
 
       - name: Check WASM
-        run: make check-wasm
+        run: just check-wasm
 
   check-python:
     name: Check Python
@@ -64,6 +69,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -88,4 +96,30 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Check Python package
-        run: make check-py
+        run: just check-py
+
+  check-cpp-roundtrip:
+    name: Check C++ Roundtrip Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: src/cpp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nlohmann-json3-dev pkg-config libssl-dev
+
+      - name: Build and run roundtrip tests
+        run: |
+          mkdir -p build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc) fcb_roundtrip_comprehensive
+
+      - name: Run C++ roundtrip test
+        run: |
+          ./build/fcb_roundtrip_comprehensive ../rust/fcb_core/tests/data

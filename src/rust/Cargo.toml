@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["cli", "fcb_core", "wasm", "fcb_api", "fcb_py"]
+members = ["cli", "fcb_core", "fcb_cpp", "wasm", "fcb_api", "fcb_py"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -52,6 +52,8 @@ proj4rs = "0.1.9"
 crs-definitions = "0.3.1"
 indicatif = "0.17"
 console = "0.15"
+cxx = "1.0"
+cxx-build = "1.0"
 
 #---WASM dependencies---
 getrandom = { version = "0.3.3" }
