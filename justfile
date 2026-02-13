@@ -70,11 +70,11 @@ clean:
 
 # Run tests
 test:
-    cd src/rust && cargo test
+    cd src/rust && just test
 
 # Run tests with output
 test-verbose:
-    cd src/rust && cargo test -- --nocapture
+    cd src/rust &&  cargo test -- --nocapture
 
 # Run clippy linter
 clippy:
