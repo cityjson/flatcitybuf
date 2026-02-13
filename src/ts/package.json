@@ -1,8 +1,8 @@
 {
   "name": "@cityjson/flatcitybuf",
   "type": "module",
-  "version": "0.2.0",
-  "description": "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.",
+  "version": "0.3.0",
+  "description": "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers. Supports both browser (WASM) and Node.js (native).",
   "author": {
     "name": "Hidemichi Baba",
     "email": "baba.papa1120.ba@gmail.com"
@@ -20,17 +20,40 @@
     "cityjson",
     "flatbuffers",
     "wasm",
+    "nodejs",
     "geospatial",
     "3d-city-models"
   ],
+  "exports": {
+    ".": {
+      "browser": {
+        "import": "./fcb_wasm.js",
+        "types": "./fcb_wasm.d.ts"
+      },
+      "node": {
+        "import": "./node/index.js",
+        "types": "./node/index.d.ts"
+      },
+      "default": {
+        "import": "./node/index.js",
+        "types": "./node/index.d.ts"
+      }
+    }
+  },
+  "main": "fcb_wasm.js",
+  "types": "fcb_wasm.d.ts",
   "files": [
     "fcb_wasm_bg.wasm",
     "fcb_wasm.js",
-    "fcb_wasm.d.ts"
+    "fcb_wasm.d.ts",
+    "node/"
   ],
-  "main": "fcb_wasm.js",
-  "types": "fcb_wasm.d.ts",
   "sideEffects": [
     "./snippets/*"
-  ]
+  ],
+  "scripts": {
+    "build:node": "cd ../rust/nodejs && napi build --platform --release --js ../ts/node/index.js --dts ../ts/node/index.d.ts",
+    "build:wasm": "cd ../rust/wasm && wasm-pack build --release --target web --out-dir ../../ts",
+    "build": "npm run build:wasm && npm run build:node"
+  }
 }

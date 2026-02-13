@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["cli", "fcb_core", "fcb_cpp", "wasm", "fcb_api", "fcb_py"]
+members = ["cli", "fcb_core", "fcb_cpp", "wasm", "fcb_api", "fcb_py", "nodejs", "fcb_go"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -54,6 +54,10 @@ indicatif = "0.17"
 console = "0.15"
 cxx = "1.0"
 cxx-build = "1.0"
+
+#---Node.js (napi-rs) dependencies---
+napi = { version = "3.0.0-alpha.24", features = ["async", "tokio_rt", "serde-json"] }
+napi-derive = "3.0.0-alpha.24"
 
 #---WASM dependencies---
 getrandom = { version = "0.3.3" }

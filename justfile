@@ -91,6 +91,54 @@ fmt-check:
 # Full CI check (format, clippy, test)
 ci: fmt-check clippy test
 
+# Build C++ bindings
+build-cpp:
+    cd src/cpp && cmake -B build -S . && cmake --build build
+
+# Clean and rebuild C++ bindings
+clean-cpp: build-cpp
+    rm -rf src/cpp/build
+
+# Build WASM package
+build-wasm:
+    cd src/rust/wasm && wasm-pack build --dev
+
+# Build WASM for production
+build-wasm-release:
+    cd src/rust/wasm && wasm-pack build --release
+
+# Build Node.js native bindings
+build-nodejs:
+    cd src/rust/nodejs && napi build --platform --release --js ../../ts/node/index.js --dts ../../ts/node/index.d.ts
+
+# Build Node.js native bindings (debug)
+build-nodejs-dev:
+    cd src/rust/nodejs && napi build --platform --js ../../ts/node/index.js --dts ../../ts/node/index.d.ts
+
+# Build Go FFI static library (release)
+build-go-lib:
+    cd src/rust && cargo build -p fcb_go --release
+
+# Build Go FFI static library (debug)
+build-go-lib-dev:
+    cd src/rust && cargo build -p fcb_go
+
+# Run Go tests (requires build-go-lib first)
+test-go: build-go-lib
+    cd src/go && CGO_ENABLED=1 go test ./...
+
+# Run the API server
+run-api:
+    cd src/rust && cargo run --bin fcb_api
+
+# Watch for changes and re-run tests
+watch:
+    cd src/rust && cargo watch -x test
+
+# Watch and run clippy
+watch-clippy:
+    cd src/rust && cargo watch -x clippy
+
 # Update dependencies
 update:
     cd src/rust && cargo update

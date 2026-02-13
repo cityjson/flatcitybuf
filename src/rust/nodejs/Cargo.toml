@@ -1,0 +1,26 @@
+[package]
+name = "fcb_nodejs"
+version = "0.6.0"
+edition = "2021"
+authors = ["Hidemichi Baba <baba.papa1120.ba@gmail.com>"]
+license = "MIT"
+description = "Node.js native bindings for FlatCityBuf"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { workspace = true }
+napi-derive = { workspace = true }
+fcb_core = { workspace = true, features = ["http"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+ordered-float = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+
+[build-dependencies]
+napi-build = "2.1"
