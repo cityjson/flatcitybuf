@@ -106,10 +106,7 @@ pub fn fcb_reader_metadata(reader: &FcbFileReader) -> FcbMetadata {
     let header = reader.inner.header();
 
     // Parse version from header, fall back to 1 if parsing fails
-    let version = header
-        .version()
-        .parse()
-        .unwrap_or(1);
+    let version = header.version().parse().unwrap_or(1);
 
     FcbMetadata {
         version,

@@ -51,9 +51,8 @@ pub fn fcb_writer_write(writer: Box<FcbFileWriter>, path: &str) -> Result<(), St
         ..HeaderWriterOptions::default()
     };
 
-    let mut fcb_writer =
-        FcbWriter::new(cj_metadata, Some(header_options), None, None)
-            .map_err(|e| format!("Failed to create FCB writer: {}", e))?;
+    let mut fcb_writer = FcbWriter::new(cj_metadata, Some(header_options), None, None)
+        .map_err(|e| format!("Failed to create FCB writer: {}", e))?;
 
     for feature in &features {
         fcb_writer

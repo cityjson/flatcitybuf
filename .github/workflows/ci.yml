@@ -5,13 +5,13 @@ on:
     branches: [main]
     paths:
       - "src/rust/**"
-      - ".github/workflows/**"
+      - ".github/workflows/ci.yml"
 
   pull_request:
     branches: [main]
     paths:
       - "src/rust/**"
-      - ".github/workflows/**"
+      - ".github/workflows/ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
@@ -115,9 +115,9 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event == 'push' || github.event == 'pull_request'
     paths:
-      - 'src/cpp/**'
-      - 'src/rust/fcb_cpp/**'
-      - '.github/workflows/ci.yml'
+      - "src/cpp/**"
+      - "src/rust/fcb_cpp/**"
+      - ".github/workflows/ci.yml"
     defaults:
       run:
         working-directory: src/cpp

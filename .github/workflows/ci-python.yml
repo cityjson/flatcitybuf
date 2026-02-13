@@ -5,13 +5,13 @@ on:
     branches: [main]
     paths:
       - "src/rust/fcb_py/**"
-      - ".github/workflows/**"
+      - ".github/workflows/ci-python.yml"
 
   pull_request:
     branches: [main]
     paths:
       - "src/rust/fcb_py/**"
-      - ".github/workflows/**"
+      - ".github/workflows/ci-python.yml"
 
 env:
   CARGO_TERM_COLOR: always
