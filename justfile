@@ -165,6 +165,9 @@ py-clean:
 py-develop:
     cd fcb_py && maturin develop
 
+build-py:
+    cd fcb_py && maturin build --release
+
 # ============================================================================
 # WASM Commands
 # ============================================================================
