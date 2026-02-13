@@ -5,21 +5,23 @@ on:
     branches: [main]
     paths:
       - "src/rust/**"
+      - "src/cpp/**"
       - ".github/workflows/ci.yml"
 
   pull_request:
     branches: [main]
     paths:
       - "src/rust/**"
+      - "src/cpp/**"
       - ".github/workflows/ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
 
-# concurrency:
-#   group: ${{ github.workflow }}-${{ github.ref }}
-#   cancel-in-progress: true
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -34,7 +36,7 @@ jobs:
 
       - name: Install just task runner
         run: |
-          curl --proto '=https' --tlsv1.2 --silent --show-error --fail "https://github.com/casey/just/releases/download/${{JUST_VERSION}}/just-${{JUST_VERSION}}-${{JUST_OS}}-{{ JUST_ARCH }}.tar.gz" | tar -xz -x -C /usr/local/bin
+          curl --proto '=https' --tlsv1.2 --silent --show-error --fail "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${JUST_OS}-${JUST_ARCH}.tar.gz" | tar -xz -C /usr/local/bin
           just --version
         env:
           JUST_OS: linux
@@ -77,7 +79,7 @@ jobs:
 
       - name: Install just task runner
         run: |
-          curl --proto '=https' --tlsv1.2 --silent --show-error --fail "https://github.com/casey/just/releases/download/${{JUST_VERSION}}/just-${{JUST_VERSION}}-${{JUST_OS}}-{{ JUST_ARCH }}.tar.gz" | tar -xz -x -C /usr/local/bin
+          curl --proto '=https' --tlsv1.2 --silent --show-error --fail "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${JUST_OS}-${JUST_ARCH}.tar.gz" | tar -xz -C /usr/local/bin
           just --version
         env:
           JUST_OS: linux
@@ -113,11 +115,7 @@ jobs:
   check-cpp-roundtrip:
     name: Check C++ Roundtrip Tests
     runs-on: ubuntu-latest
-    if: github.event == 'push' || github.event == 'pull_request'
-    paths:
-      - "src/cpp/**"
-      - "src/rust/fcb_cpp/**"
-      - ".github/workflows/ci.yml"
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: src/cpp
