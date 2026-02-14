@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.86-slim AS builder
+FROM rust:1.91-slim AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -13,10 +13,6 @@ WORKDIR /app
 # Copy workspace files from src/rust directory
 COPY src/rust/Cargo.toml ./
 COPY src/rust ./
-
-# Remove workspace members that aren't needed for the API and require
-# extra system dependencies (C++ compiler for fcb_cpp, Python headers for fcb_py)
-RUN sed -i 's/members = \[.*\]/members = ["cli", "fcb_core", "wasm", "fcb_api"]/' Cargo.toml
 
 RUN cargo build --release -p fcb_api
 
