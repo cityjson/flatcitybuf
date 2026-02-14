@@ -87,7 +87,6 @@ jobs:
   build-cpp-bindings:
     name: Build C++ Bindings
     needs: create-release
-    if: needs.create-release.outputs.tag_exists == 'false'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -119,7 +118,7 @@ jobs:
       - name: Install CMake
         uses: jwlawson/actions-setup-cmake@v2
         with:
-          cmake-version: '3.26.x'
+          cmake-version: "3.26.x"
 
       - name: Install cxxbridge
         run: cargo install cxxbridge-cmd
