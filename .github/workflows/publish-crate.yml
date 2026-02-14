@@ -36,13 +36,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "actions[bot]@github.com"
 
-      - name: Install cargo-edit
-        run: cargo install cargo-edit
-
       - name: Bump version
         run: |
           cd src/rust
-          cargo workspaces version ${{ github.event.inputs.version_bump }} --yes
+          cargo workspaces version --all --yes --force="fcb*" ${{ github.event.inputs.version_bump }}
 
       - name: Configure cargo for publishing
         run: |
