@@ -2,7 +2,18 @@
 
 C++ bindings for the FlatCityBuf core library, enabling reading and writing of FCB files from C++ applications.
 
-## Building
+## Installation
+
+### Pre-built Binaries (Recommended)
+
+Pre-built binaries are available on [GitHub Releases](https://github.com/cityjson/flatcitybuf/releases) for:
+- Linux (x86_64)
+- macOS (x86_64)
+- Windows (x86_64)
+
+See [INSTALL.md](../../cpp/INSTALL.md) for detailed installation instructions.
+
+## Building from Source
 
 ### Prerequisites
 

@@ -6,6 +6,9 @@ on:
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract_version.outputs.VERSION }}
+      tag_exists: ${{ steps.check_tag.outputs.TAG_EXISTS }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -80,3 +83,132 @@ jobs:
           body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
           draft: false
           prerelease: false
+
+  build-cpp-bindings:
+    name: Build C++ Bindings
+    needs: create-release
+    if: needs.create-release.outputs.tag_exists == 'false'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            artifact_name: fcb_cpp-linux-x86_64
+            cmake_generator: Unix Makefiles
+          - os: macos-latest
+            platform: macos
+            artifact_name: fcb_cpp-macos-x86_64
+            cmake_generator: Unix Makefiles
+          - os: windows-latest
+            platform: windows
+            artifact_name: fcb_cpp-windows-x86_64
+            cmake_generator: Visual Studio 17 2022
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.26.x'
+
+      - name: Install cxxbridge
+        run: cargo install cxxbridge-cmd
+
+      - name: Build Rust static library
+        run: cargo build --release -p fcb_cpp --no-default-features
+        working-directory: ./src/rust
+
+      - name: Configure CMake
+        run: cmake -B build -G "${{ matrix.cmake_generator }}" -DCMAKE_BUILD_TYPE=Release
+        working-directory: ./src/cpp
+
+      - name: Build C++ bindings
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" = "Windows" ]]; then
+            cmake --build build --config Release
+          else
+            cmake --build build -- -j$(nproc)
+          fi
+        working-directory: ./src/cpp
+
+      - name: Prepare release artifacts
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+
+          # Copy static library (Windows .lib renamed to .a for consistency)
+          if [[ "${{ runner.os }}" = "Windows" ]]; then
+            cp src/rust/target/release/fcb_cpp.lib release-artifacts/libfcb_cpp.a
+          else
+            cp src/rust/target/release/libfcb_cpp.a release-artifacts/
+          fi
+
+          # Copy CXX bridge header
+          cp src/cpp/build/generated/lib.rs.h release-artifacts/
+
+          # Copy include directory
+          cp -r src/cpp/include/. release-artifacts/
+
+          # Create package
+          if [[ "${{ runner.os }}" = "Windows" ]]; then
+            7z a -tzip ${{ matrix.artifact_name }}.zip ./release-artifacts/*
+          else
+            tar -czf ${{ matrix.artifact_name }}.tar.gz -C release-artifacts .
+          fi
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}.*
+          retention-days: 90
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ matrix.artifact_name }}.*
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-docs:
+    name: Build Documentation
+    needs: build-cpp-bindings
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen
+        run: sudo apt-get install -y doxygen graphviz
+
+      - name: Generate API documentation
+        run: doxygen Doxyfile
+        working-directory: ./src/cpp
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fcb_cpp-docs
+          path: src/cpp/docs/html
+          retention-days: 90
+
+      - name: Upload documentation to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: src/cpp/docs/html/*
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
