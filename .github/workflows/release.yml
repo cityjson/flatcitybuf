@@ -120,6 +120,22 @@ jobs:
         with:
           cmake-version: "3.26.x"
 
+      - name: Install nlohmann-json
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            brew install nlohmann-json
+          fi
+
+      - name: Install nlohmann-json (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install nlohmann-json:x64-windows
+          echo "CMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
+        shell: bash
+
       - name: Install cxxbridge
         run: cargo install cxxbridge-cmd
 
@@ -128,7 +144,13 @@ jobs:
         working-directory: ./src/rust
 
       - name: Configure CMake
-        run: cmake -B build -G "${{ matrix.cmake_generator }}" -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: |
+          CMAKE_ARGS="-B build -G \"${{ matrix.cmake_generator }}\" -DCMAKE_BUILD_TYPE=Release"
+          if [[ -n "${CMAKE_TOOLCHAIN_FILE}" ]]; then
+            CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
+          fi
+          eval cmake ${CMAKE_ARGS}
         working-directory: ./src/cpp
 
       - name: Build C++ bindings
@@ -137,7 +159,8 @@ jobs:
           if [[ "${{ runner.os }}" = "Windows" ]]; then
             cmake --build build --config Release
           else
-            cmake --build build -- -j$(nproc)
+            NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+            cmake --build build -- -j${NPROC}
           fi
         working-directory: ./src/cpp
 
