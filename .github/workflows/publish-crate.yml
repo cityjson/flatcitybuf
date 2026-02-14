@@ -39,7 +39,7 @@ jobs:
       - name: Bump version
         run: |
           cd src/rust
-          cargo workspaces version --all --yes --force="fcb*" ${{ github.event.inputs.version_bump }}
+          cargo workspaces version --all --yes --force="fcb*" --no-individual-tags ${{ github.event.inputs.version_bump }}
 
       - name: Configure cargo for publishing
         run: |
