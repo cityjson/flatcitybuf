@@ -14,6 +14,10 @@ WORKDIR /app
 COPY src/rust/Cargo.toml ./
 COPY src/rust ./
 
+# Remove workspace members that aren't needed for the API and require
+# extra system dependencies (C++ compiler for fcb_cpp, Python headers for fcb_py)
+RUN sed -i 's/members = \[.*\]/members = ["cli", "fcb_core", "wasm", "fcb_api"]/' Cargo.toml
+
 RUN cargo build --release -p fcb_api
 
 # Runtime stage
