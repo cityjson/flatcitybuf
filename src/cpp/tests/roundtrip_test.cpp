@@ -52,11 +52,11 @@ void test_cityjson_serialization_cycle(const fs::path& test_data_dir) {
         std::string feature_json = value.dump();
         fcb::fcb_writer_add_feature(*writer, feature_json.c_str());
     }
-    fcb::fcb_writer_write(std::move(writer), temp_fcb.c_str());
+    fcb::fcb_writer_write(std::move(writer), temp_fcb.string().c_str());
 
     // 3. Read back from FCB
     std::cout << "\nReading back from FCB..." << std::endl;
-    auto reader = fcb::fcb_reader_open(temp_fcb.c_str());
+    auto reader = fcb::fcb_reader_open(temp_fcb.string().c_str());
 
     // Get metadata
     auto meta = fcb::fcb_reader_metadata(*reader);
@@ -161,11 +161,11 @@ void test_geometry_template_cycle(const fs::path& test_data_dir) {
         std::string feature_json = value.dump();
         fcb::fcb_writer_add_feature(*writer, feature_json.c_str());
     }
-    fcb::fcb_writer_write(std::move(writer), temp_fcb.c_str());
+    fcb::fcb_writer_write(std::move(writer), temp_fcb.string().c_str());
 
     // 3. Read back from FCB
     std::cout << "\nReading back from FCB..." << std::endl;
-    auto reader = fcb::fcb_reader_open(temp_fcb.c_str());
+    auto reader = fcb::fcb_reader_open(temp_fcb.string().c_str());
 
     auto meta = fcb::fcb_reader_metadata(*reader);
     std::cout << "Features in FCB: " << meta.features_count << std::endl;
@@ -239,11 +239,11 @@ void test_extension_serialization_cycle(const fs::path& test_data_dir) {
         std::string feature_json = value.dump();
         fcb::fcb_writer_add_feature(*writer, feature_json.c_str());
     }
-    fcb::fcb_writer_write(std::move(writer), temp_fcb.c_str());
+    fcb::fcb_writer_write(std::move(writer), temp_fcb.string().c_str());
 
     // 3. Read back from FCB
     std::cout << "\nReading back from FCB..." << std::endl;
-    auto reader = fcb::fcb_reader_open(temp_fcb.c_str());
+    auto reader = fcb::fcb_reader_open(temp_fcb.string().c_str());
 
     auto meta = fcb::fcb_reader_metadata(*reader);
     std::cout << "Features in FCB: " << meta.features_count << std::endl;

@@ -20,9 +20,17 @@ set(RUST_LIB_DIR ${CMAKE_SOURCE_DIR}/../rust)
 set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${GENERATED_DIR})
 
+# Platform-specific Rust static library name
+if(WIN32)
+    set(RUST_LIB_NAME fcb_cpp.lib)
+else()
+    set(RUST_LIB_NAME libfcb_cpp.a)
+endif()
+set(RUST_LIB_PATH ${RUST_LIB_DIR}/target/release/${RUST_LIB_NAME})
+
 # Build Rust static library (without http feature to avoid OpenSSL dependency)
 add_custom_command(
-    OUTPUT ${RUST_LIB_DIR}/target/release/libfcb_cpp.a
+    OUTPUT ${RUST_LIB_PATH}
     COMMAND cargo build --release -p fcb_cpp --no-default-features
     WORKING_DIRECTORY ${RUST_LIB_DIR}
     DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs
@@ -31,7 +39,7 @@ add_custom_command(
     COMMENT "Building Rust fcb_cpp library (without http feature)"
 )
 
-add_custom_target(rust_library DEPENDS ${RUST_LIB_DIR}/target/release/libfcb_cpp.a)
+add_custom_target(rust_library DEPENDS ${RUST_LIB_PATH})
 
 # Generate C++ bridge code
 add_custom_command(
@@ -61,8 +69,18 @@ target_include_directories(fcb PUBLIC
 )
 
 target_link_libraries(fcb
-    ${RUST_LIB_DIR}/target/release/libfcb_cpp.a
+    ${RUST_LIB_PATH}
 )
+
+# Windows-specific system libraries needed by Rust
+if(WIN32)
+    target_link_libraries(fcb
+        ws2_32
+        userenv
+        bcrypt
+        ntdll
+    )
+endif()
 
 # Platform-specific linking
 if(APPLE)
