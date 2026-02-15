@@ -203,7 +203,7 @@ jobs:
           files: ${{ matrix.artifact_name }}.*
           generate_release_notes: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GA_TOKEN }}
 
   build-docs:
     name: Build Documentation
@@ -235,4 +235,4 @@ jobs:
           files: src/cpp/docs/html/*
           generate_release_notes: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GA_TOKEN }}
