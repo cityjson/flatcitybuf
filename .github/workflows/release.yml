@@ -199,6 +199,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: v${{ needs.create-release.outputs.version }}
           files: ${{ matrix.artifact_name }}.*
           generate_release_notes: false
         env:
@@ -206,7 +207,7 @@ jobs:
 
   build-docs:
     name: Build Documentation
-    needs: build-cpp-bindings
+    needs: [create-release, build-cpp-bindings]
     runs-on: ubuntu-latest
 
     steps:
@@ -230,6 +231,7 @@ jobs:
       - name: Upload documentation to release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: v${{ needs.create-release.outputs.version }}
           files: src/cpp/docs/html/*
           generate_release_notes: false
         env:
