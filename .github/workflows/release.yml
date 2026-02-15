@@ -176,8 +176,9 @@ jobs:
             cp src/rust/target/release/libfcb_cpp.a release-artifacts/
           fi
 
-          # Copy CXX bridge header
+          # Copy CXX bridge header and source
           cp src/cpp/build/generated/lib.rs.h release-artifacts/
+          cp src/cpp/build/generated/lib.rs.cc release-artifacts/
 
           # Copy include directory
           cp -r src/cpp/include/. release-artifacts/
