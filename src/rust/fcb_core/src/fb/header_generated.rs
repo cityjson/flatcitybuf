@@ -458,8 +458,7 @@ impl<'a> flatbuffers::Verifiable for TextureType {
 impl flatbuffers::SimpleToVerifyInSlice for TextureType {}
 // struct Vector, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vector(pub [u8; 24]);
 impl core::fmt::Debug for Vector {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -807,8 +806,7 @@ impl<'a> GeographicalExtent {
 
 // struct AttributeIndex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct AttributeIndex(pub [u8; 16]);
 impl core::fmt::Debug for AttributeIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -995,8 +993,7 @@ impl<'a> AttributeIndex {
 
 // struct Vec2, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vec2(pub [u8; 16]);
 impl core::fmt::Debug for Vec2 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -1121,8 +1118,7 @@ impl<'a> Vec2 {
 
 // struct DoubleVertex, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct DoubleVertex(pub [u8; 24]);
 impl core::fmt::Debug for DoubleVertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -3486,7 +3482,9 @@ pub fn root_as_header(buf: &[u8]) -> Result<Header<'_>, flatbuffers::InvalidFlat
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
 /// `size_prefixed_root_as_header_unchecked`.
-pub fn size_prefixed_root_as_header(buf: &[u8]) -> Result<Header<'_>, flatbuffers::InvalidFlatbuffer> {
+pub fn size_prefixed_root_as_header(
+    buf: &[u8],
+) -> Result<Header<'_>, flatbuffers::InvalidFlatbuffer> {
     flatbuffers::size_prefixed_root::<Header>(buf)
 }
 #[inline]

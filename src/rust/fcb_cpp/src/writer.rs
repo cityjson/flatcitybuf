@@ -55,13 +55,17 @@ pub fn fcb_writer_write(writer: Box<FcbFileWriter>, path: &str) -> Result<(), St
     // Build attribute schema by scanning all features (required for attribute roundtrip)
     let mut attr_schema = AttributeSchema::new();
     for feature in &features {
-        for (_, co) in &feature.city_objects {
+        for co in feature.city_objects.values() {
             if let Some(attributes) = &co.attributes {
                 attr_schema.add_attributes(attributes);
             }
         }
     }
-    let schema_opt = if attr_schema.is_empty() { None } else { Some(attr_schema) };
+    let schema_opt = if attr_schema.is_empty() {
+        None
+    } else {
+        Some(attr_schema)
+    };
 
     let mut fcb_writer = FcbWriter::new(cj_metadata, Some(header_options), schema_opt, None)
         .map_err(|e| format!("Failed to create FCB writer: {}", e))?;

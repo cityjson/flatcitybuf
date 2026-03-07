@@ -12,7 +12,7 @@ name = "fcb_api"
 path = "src/main.rs"
 
 [dependencies]
-fcb_core = { workspace = true }
+fcb_core = { workspace = true, features = ["http"] }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true, features = ["util"] }

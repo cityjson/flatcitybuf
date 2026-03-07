@@ -238,8 +238,7 @@ impl<'a> flatbuffers::Verifiable for CityObjectType {
 impl flatbuffers::SimpleToVerifyInSlice for CityObjectType {}
 // struct Vertex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub struct Vertex(pub [u8; 12]);
 impl core::fmt::Debug for Vertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
