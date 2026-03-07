@@ -4,11 +4,13 @@ Pre-built binaries for FlatCityBuf C++ bindings are available on [GitHub Release
 
 ## Available Platforms
 
-| Platform         | Asset                         | Archive   |
-| ---------------- | ----------------------------- | --------- |
-| Linux (x86_64)   | `fcb_cpp-linux-x86_64.tar.gz` | `.tar.gz` |
-| macOS (x86_64)   | `fcb_cpp-macos-x86_64.tar.gz` | `.tar.gz` |
-| Windows (x86_64) | `fcb_cpp-windows-x86_64.zip`  | `.zip`    |
+| Platform          | Asset                          | Archive   |
+| ----------------- | ------------------------------ | --------- |
+| Linux (x86_64)    | `fcb_cpp-linux-x86_64.tar.gz`  | `.tar.gz` |
+| Linux (aarch64)   | `fcb_cpp-linux-aarch64.tar.gz` | `.tar.gz` |
+| macOS (x86_64)    | `fcb_cpp-macos-x86_64.tar.gz`  | `.tar.gz` |
+| macOS (aarch64)   | `fcb_cpp-macos-aarch64.tar.gz` | `.tar.gz` |
+| Windows (x86_64)  | `fcb_cpp-windows-x86_64.zip`   | `.zip`    |
 
 ## Package Contents
 
@@ -26,12 +28,22 @@ Each release package contains:
 ### Linux / macOS
 
 ```bash
-# Download the appropriate archive for your platform
-curl -LO https://github.com/cityjson/flatcitybuf/releases/latest/download/fcb_cpp-linux-x86_64.tar.gz
+# Detect your platform and download the matching archive
+ARCH=$(uname -m)
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+if [[ "$OS" == "darwin" ]]; then
+  ASSET="fcb_cpp-macos-${ARCH}.tar.gz"
+else
+  # Map x86_64 / aarch64 directly to asset names
+  ASSET="fcb_cpp-linux-${ARCH}.tar.gz"
+fi
+
+curl -LO "https://github.com/cityjson/flatcitybuf/releases/latest/download/${ASSET}"
 
 # Create install directory and extract
 mkdir -p fcb_cpp
-tar -xzf fcb_cpp-linux-x86_64.tar.gz -C fcb_cpp
+tar -xzf "${ASSET}" -C fcb_cpp
 
 # Option A: Copy to your project's third-party directory
 cp -r fcb_cpp /path/to/your/project/third_party/
@@ -81,7 +93,12 @@ elseif(WIN32)
         ntdll
     )
 elseif(UNIX)
-    target_link_libraries(my_app pthread dl m)
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(my_app
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        pthread dl m
+    )
 endif()
 ```
 
@@ -92,10 +109,12 @@ CXX       = g++
 CXXFLAGS  = -std=c++17 -I./fcb_cpp
 LDFLAGS   = ./fcb_cpp/libfcb_cpp.a -lpthread -ldl -lm
 
-# macOS: append frameworks
+# Platform-specific dependencies
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
     LDFLAGS += -framework Security -framework CoreFoundation -framework SystemConfiguration
+else ifeq ($(UNAME_S),Linux)
+    LDFLAGS += -lssl -lcrypto
 endif
 
 my_app: main.cpp ./fcb_cpp/lib.rs.cc
@@ -110,7 +129,11 @@ Pre-built binaries are built with:
 - **C++**: C++17 standard
 - **CMake**: 3.16+
 
-The pre-built libraries use `--no-default-features` to avoid OpenSSL dependency on Linux. If you need HTTP support, you'll need to build from source.
+> **Linux prerequisite:** OpenSSL development libraries are required at link time. Install with:
+> ```bash
+> sudo apt-get install libssl-dev   # Debian/Ubuntu
+> sudo dnf install openssl-devel    # Fedora/RHEL
+> ```
 
 ## Building from Source
 

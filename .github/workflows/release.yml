@@ -95,9 +95,17 @@ jobs:
             platform: linux
             artifact_name: fcb_cpp-linux-x86_64
             cmake_generator: Unix Makefiles
-          - os: macos-latest
+          - os: ubuntu-24.04-arm
+            platform: linux
+            artifact_name: fcb_cpp-linux-aarch64
+            cmake_generator: Unix Makefiles
+          - os: macos-13
             platform: macos
             artifact_name: fcb_cpp-macos-x86_64
+            cmake_generator: Unix Makefiles
+          - os: macos-latest
+            platform: macos
+            artifact_name: fcb_cpp-macos-aarch64
             cmake_generator: Unix Makefiles
           - os: windows-latest
             platform: windows
@@ -124,7 +132,7 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev
+            sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev libssl-dev
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
             brew install nlohmann-json
           fi

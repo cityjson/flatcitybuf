@@ -6,11 +6,13 @@ C++ bindings for the [FlatCityBuf](https://github.com/cityjson/flatcitybuf) core
 
 Pre-built binaries are available on [GitHub Releases](https://github.com/cityjson/flatcitybuf/releases) for:
 
-| Platform         | Asset                         | Archive   |
-| ---------------- | ----------------------------- | --------- |
-| Linux (x86_64)   | `fcb_cpp-linux-x86_64.tar.gz` | `.tar.gz` |
-| macOS (x86_64)   | `fcb_cpp-macos-x86_64.tar.gz` | `.tar.gz` |
-| Windows (x86_64) | `fcb_cpp-windows-x86_64.zip`  | `.zip`    |
+| Platform          | Asset                          | Archive   |
+| ----------------- | ------------------------------ | --------- |
+| Linux (x86_64)    | `fcb_cpp-linux-x86_64.tar.gz`  | `.tar.gz` |
+| Linux (aarch64)   | `fcb_cpp-linux-aarch64.tar.gz` | `.tar.gz` |
+| macOS (x86_64)    | `fcb_cpp-macos-x86_64.tar.gz`  | `.tar.gz` |
+| macOS (aarch64)   | `fcb_cpp-macos-aarch64.tar.gz` | `.tar.gz` |
+| Windows (x86_64)  | `fcb_cpp-windows-x86_64.zip`   | `.zip`    |
 
 Each release package contains:
 
@@ -78,7 +80,12 @@ elseif(WIN32)
         ntdll
     )
 elseif(UNIX)
-    target_link_libraries(my_app pthread dl m)
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(my_app
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        pthread dl m
+    )
 endif()
 ```
 
@@ -97,10 +104,12 @@ CXX       = g++
 CXXFLAGS  = -std=c++17 -I./fcb_cpp
 LDFLAGS   = ./fcb_cpp/libfcb_cpp.a -lpthread -ldl -lm
 
-# macOS: append frameworks
+# Platform-specific dependencies
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
     LDFLAGS += -framework Security -framework CoreFoundation -framework SystemConfiguration
+else ifeq ($(UNAME_S),Linux)
+    LDFLAGS += -lssl -lcrypto
 endif
 
 my_app: main.cpp ./fcb_cpp/lib.rs.cc
@@ -437,11 +446,17 @@ The pre-built static library (`libfcb_cpp.a`) is a Rust-compiled library and req
 
 | Platform    | Required Libraries                                                                |
 | ----------- | --------------------------------------------------------------------------------- |
-| **Linux**   | `pthread`, `dl`, `m`                                                              |
+| **Linux**   | `ssl`, `crypto` (OpenSSL), `pthread`, `dl`, `m`                                  |
 | **macOS**   | `Security.framework`, `CoreFoundation.framework`, `SystemConfiguration.framework` |
 | **Windows** | `ws2_32`, `userenv`, `bcrypt`, `ntdll`                                            |
 
 These are automatically handled if you follow the CMake or Makefile examples above.
+
+> **Linux note:** OpenSSL (`libssl-dev`) must be installed on your system. Install with:
+> ```bash
+> sudo apt-get install libssl-dev   # Debian/Ubuntu
+> sudo dnf install openssl-devel    # Fedora/RHEL
+> ```
 
 ## HTTP / Remote File Access
 
