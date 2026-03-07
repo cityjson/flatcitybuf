@@ -8,7 +8,8 @@
  * - Iterating through all features
  * - Spatial filtering with bounding box queries
  * - Parsing feature attributes and geometry
- * - Writing FCB files from CityJSON/CityJSONSeq
+ * - Writing FCB files from CityJSONSeq (.city.jsonl)
+ * - Converting FCB files back to CityJSONSeq (.city.jsonl)
  *
  * @note HTTP/remote reading is currently only available in Rust,
  *       not exposed through C++ bindings yet.
@@ -23,6 +24,7 @@
 
 #include <nlohmann/json.hpp>  // For JSON parsing: https://github.com/nlohmann/json
 
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -41,12 +43,83 @@ void example_read_metadata(const std::string& fcb_path) {
         // Get metadata
         auto meta = fcb::fcb_reader_metadata(*reader);
 
-        std::cout << "=== FCB File Metadata ===" << std::endl;
-        std::cout << "Format version: " << static_cast<int>(meta.version) << std::endl;
-        std::cout << "Total features: " << meta.features_count << std::endl;
-        std::cout << "Has spatial index: " << (meta.has_spatial_index ? "yes" : "no") << std::endl;
-        std::cout << "Has attribute index: " << (meta.has_attribute_index ? "yes" : "no")
+        // --- FCB binary format fields ---
+        std::cout << "Format version:    " << static_cast<int>(meta.version) << std::endl;
+        std::cout << "Total features:    " << meta.features_count << std::endl;
+        std::cout << "Spatial index:     " << (meta.has_spatial_index ? "yes" : "no") << std::endl;
+        std::cout << "Attribute index:   " << (meta.has_attribute_index ? "yes" : "no")
                   << std::endl;
+
+        // --- CityJSON metadata: typed convenience fields ---
+        std::cout << "CityJSON version:  " << std::string(meta.cityjson_version) << std::endl;
+
+        if (meta.has_transform) {
+            std::cout << "Transform scale:   [" << meta.transform.scale_x << ", "
+                      << meta.transform.scale_y << ", " << meta.transform.scale_z << "]"
+                      << std::endl;
+            std::cout << "Transform offset:  [" << meta.transform.translate_x << ", "
+                      << meta.transform.translate_y << ", " << meta.transform.translate_z << "]"
+                      << std::endl;
+        } else {
+            std::cout << "Transform:         (not present)" << std::endl;
+        }
+
+        if (meta.has_geographical_extent) {
+            std::cout << "Extent min:        [" << meta.geographical_extent.min_x << ", "
+                      << meta.geographical_extent.min_y << ", " << meta.geographical_extent.min_z
+                      << "]" << std::endl;
+            std::cout << "Extent max:        [" << meta.geographical_extent.max_x << ", "
+                      << meta.geographical_extent.max_y << ", " << meta.geographical_extent.max_z
+                      << "]" << std::endl;
+        } else {
+            std::cout << "Extent:            (not present)" << std::endl;
+        }
+
+        // --- CityJSON metadata: full JSON string ---
+        // metadata_json contains the complete CityJSON header (type, version, transform,
+        // metadata, referenceSystem, extensions). Parse it to access any field.
+        if (!std::string(meta.metadata_json).empty()) {
+            nlohmann::json cj = nlohmann::json::parse(std::string(meta.metadata_json));
+
+            std::cout << "\n--- CityJSON Metadata (from metadata_json) ---" << std::endl;
+
+            if (cj.contains("metadata")) {
+                auto& m = cj["metadata"];
+                if (m.contains("datasetTitle"))
+                    std::cout << "Title:             " << m["datasetTitle"] << std::endl;
+                if (m.contains("datasetIdentifier"))
+                    std::cout << "Identifier:        " << m["datasetIdentifier"] << std::endl;
+                if (m.contains("datasetReferenceDate"))
+                    std::cout << "Reference date:    " << m["datasetReferenceDate"] << std::endl;
+                if (m.contains("referenceSystem"))
+                    std::cout << "CRS:               " << m["referenceSystem"] << std::endl;
+
+                if (m.contains("pointOfContact")) {
+                    auto& poc = m["pointOfContact"];
+                    std::cout << "Point of contact:" << std::endl;
+                    if (poc.contains("contactName"))
+                        std::cout << "  Name:            " << poc["contactName"] << std::endl;
+                    if (poc.contains("emailAddress"))
+                        std::cout << "  Email:           " << poc["emailAddress"] << std::endl;
+                    if (poc.contains("contactType"))
+                        std::cout << "  Type:            " << poc["contactType"] << std::endl;
+                    if (poc.contains("website"))
+                        std::cout << "  Website:         " << poc["website"] << std::endl;
+                    if (poc.contains("address")) {
+                        auto& addr = poc["address"];
+                        std::cout << "  Address:         " << addr.dump() << std::endl;
+                    }
+                }
+            }
+
+            if (cj.contains("extensions") && !cj["extensions"].empty()) {
+                std::cout << "Extensions:" << std::endl;
+                for (auto& [name, ext] : cj["extensions"].items()) {
+                    std::cout << "  " << name << " -> url: " << ext.value("url", "")
+                              << ", version: " << ext.value("version", "") << std::endl;
+                }
+            }
+        }
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
@@ -81,6 +154,30 @@ void example_iterate_all_features(const std::string& fcb_path) {
 
             // Access type attribute
             if (cj_feature.contains("type") && cj_feature["type"] == "CityJSONFeature") {
+                // Vertices — integer coordinates stored in FCB, converted to real-world
+                // using the transform: real = integer * scale + translate
+                if (cj_feature.contains("vertices")) {
+                    auto& verts = cj_feature["vertices"];
+                    std::cout << "  Vertices (" << verts.size() << " total):" << std::endl;
+
+                    size_t show = std::min(verts.size(), size_t(3));
+                    for (size_t v = 0; v < show; v++) {
+                        auto ix = verts[v][0].get<int64_t>();
+                        auto iy = verts[v][1].get<int64_t>();
+                        auto iz = verts[v][2].get<int64_t>();
+                        std::cout << "    [" << v << "] int: [" << ix << ", " << iy << ", " << iz
+                                  << "]";
+                        if (meta.has_transform) {
+                            double rx = ix * meta.transform.scale_x + meta.transform.translate_x;
+                            double ry = iy * meta.transform.scale_y + meta.transform.translate_y;
+                            double rz = iz * meta.transform.scale_z + meta.transform.translate_z;
+                            std::cout << "  real: [" << rx << ", " << ry << ", " << rz << "]";
+                        }
+                        std::cout << std::endl;
+                    }
+                    if (verts.size() > show)
+                        std::cout << "    ... (" << verts.size() - show << " more)" << std::endl;
+                }
                 if (cj_feature.contains("CityObjects")) {
                     auto& city_objects = cj_feature["CityObjects"];
 
@@ -347,24 +444,93 @@ void example_write_fcb() {
  * Line 3: {"type":"CityJSONFeature","id":"...", "CityObjects":{...}}
  * ...
  */
-void example_cityjsonseq_to_fcb(const std::string& cjseq_path) {
+void example_cityjsonseq_to_fcb(const std::string& cjseq_path,
+                                 const std::string& output_fcb_path) {
     std::cout << "\n=== Example 5: CityJSONSeq to FCB ===" << std::endl;
 
+    if (cjseq_path.empty()) {
+        std::cout << "  (skipped — no .city.jsonl path provided)" << std::endl;
+        std::cout << "  Usage: pass a .city.jsonl file as the second argument" << std::endl;
+        return;
+    }
+
     try {
-        // For this example, you would read the CJSEQ file line by line
-        // In production, use a proper CityJSONSeq parser
+        std::ifstream infile(cjseq_path);
+        if (!infile.is_open())
+            throw std::runtime_error("Cannot open: " + cjseq_path);
 
-        std::cout << "Note: This example shows the concept. " << std::endl;
-        std::cout << "      In production, use the CLI tool:" << std::endl;
-        std::cout << "      fcb ser -i input.city.jsonl -o output.fcb" << std::endl;
+        // Line 1: CityJSON header (metadata + empty CityObjects/vertices)
+        std::string header_line;
+        while (std::getline(infile, header_line))
+            if (!header_line.empty()) break;
 
-        // Conceptual code:
-        // 1. Read first line -> extract CityJSON metadata
-        // 2. Create FCB writer with metadata
-        // 3. For each subsequent line:
-        //    - Parse as CityJSONFeature
-        //    - Add to writer
-        // 4. Write FCB file
+        if (header_line.empty())
+            throw std::runtime_error("Empty CityJSONSeq file");
+
+        auto writer = fcb::fcb_writer_new(header_line);
+        size_t feature_count = 0;
+
+        // Subsequent lines: one CityJSONFeature per line
+        std::string line;
+        while (std::getline(infile, line)) {
+            if (line.empty()) continue;
+            fcb::fcb_writer_add_feature(*writer, line);
+            ++feature_count;
+        }
+
+        fcb::fcb_writer_write(std::move(writer), output_fcb_path);
+
+        std::cout << "  Features written: " << feature_count << std::endl;
+        std::cout << "  Output FCB:       " << output_fcb_path << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
+}
+
+// ============================================================================
+// Example 6b: FCB to CityJSONSeq
+// ============================================================================
+
+/**
+ * @brief Convert an FCB file back to CityJSONSeq (.city.jsonl) format.
+ *
+ * The CityJSONSeq format is a newline-delimited JSON sequence:
+ *   Line 1:  CityJSON header (type, version, transform, metadata, extensions, ...)
+ *   Line N+: One CityJSONFeature object per line
+ *
+ * The FCB metadata_json field provides the header line verbatim, and
+ * each feature's json field provides the corresponding CityJSONFeature line.
+ */
+void example_fcb_to_cityjsonseq(const std::string& fcb_path,
+                                 const std::string& output_cjseq_path) {
+    std::cout << "\n=== Example 6b: FCB to CityJSONSeq ===" << std::endl;
+
+    try {
+        auto reader = fcb::fcb_reader_open(fcb_path);
+        auto meta   = fcb::fcb_reader_metadata(*reader);
+
+        if (std::string(meta.metadata_json).empty())
+            throw std::runtime_error("FCB file has no metadata_json; cannot write CityJSONSeq header");
+
+        std::ofstream outfile(output_cjseq_path);
+        if (!outfile.is_open())
+            throw std::runtime_error("Cannot open output file: " + output_cjseq_path);
+
+        // Line 1: CityJSON header derived from FCB metadata
+        outfile << std::string(meta.metadata_json) << "\n";
+
+        // Subsequent lines: one CityJSONFeature JSON per feature
+        auto iter = fcb::fcb_reader_select_all(std::move(reader));
+        size_t feature_count = 0;
+        while (fcb::fcb_iterator_next(*iter)) {
+            auto feature = fcb::fcb_iterator_current(*iter);
+            outfile << std::string(feature.json) << "\n";
+            ++feature_count;
+        }
+
+        std::cout << "  Features written: " << feature_count << std::endl;
+        std::cout << "  Output CityJSONSeq: " << output_cjseq_path << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
@@ -540,14 +706,15 @@ void example_access_geometry(const std::string& fcb_path) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <fcb_file>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <fcb_file> [input.city.jsonl]" << std::endl;
         std::cerr << "\nExamples will use the provided FCB file." << std::endl;
-        std::cerr << "\nTo test writing, the example also creates 'example_output.fcb'"
+        std::cerr << "Optional second argument: a .city.jsonl file to test CityJSONSeq→FCB conversion."
                   << std::endl;
         return 1;
     }
 
-    std::string fcb_path = argv[1];
+    std::string fcb_path  = argv[1];
+    std::string cjseq_in  = (argc >= 3) ? argv[2] : "";
 
     std::cout << "==================================================" << std::endl;
     std::cout << "FlatCityBuf C++ API Comprehensive Examples" << std::endl;
@@ -560,9 +727,12 @@ int main(int argc, char* argv[]) {
     example_access_attributes(fcb_path);
     example_access_geometry(fcb_path);
 
-    // Writing example (doesn't require input file)
+    // Writing examples
     example_write_fcb();
-    example_cityjsonseq_to_fcb("");
+    example_cityjsonseq_to_fcb(cjseq_in, "example_from_cjseq.fcb");
+
+    // Convert FCB back to CityJSONSeq
+    example_fcb_to_cityjsonseq(fcb_path, "example_output.city.jsonl");
 
     std::cout << "\n==================================================" << std::endl;
     std::cout << "All examples completed!" << std::endl;

@@ -128,8 +128,8 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
             if orig_co.attributes != des_feat.city_objects.get(id).unwrap().attributes {
                 println!("  attributes======:");
 
-                let orig_attrs = orig_co.attributes.as_ref().unwrap();
-                let des_attrs = des_feat
+                let _orig_attrs = orig_co.attributes.as_ref().unwrap();
+                let _des_attrs = des_feat
                     .city_objects
                     .get(id)
                     .unwrap()

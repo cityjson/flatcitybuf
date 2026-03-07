@@ -110,10 +110,6 @@ add_executable(fcb_example examples/example.cpp ${GENERATED_DIR}/lib.rs.h)
 target_link_libraries(fcb_example fcb)
 target_include_directories(fcb_example PRIVATE ${GENERATED_DIR})
 
-# Local file operations example (no HTTP dependencies)
-add_executable(local_fcb_example examples/local_fcb_example.cpp ${GENERATED_DIR}/lib.rs.h)
-target_link_libraries(local_fcb_example fcb)
-target_include_directories(local_fcb_example PRIVATE ${GENERATED_DIR})
 
 # Roundtrip test (encode CityJSONSeq -> FCB -> read back)
 add_executable(fcb_roundtrip_test examples/roundtrip_test.cpp ${GENERATED_DIR}/lib.rs.h)
@@ -122,6 +118,11 @@ target_include_directories(fcb_roundtrip_test PRIVATE ${GENERATED_DIR})
 
 # Targets requiring nlohmann/json
 if(nlohmann_json_FOUND)
+    # Local file operations example (no HTTP dependencies)
+    add_executable(local_fcb_example examples/local_fcb_example.cpp ${GENERATED_DIR}/lib.rs.h)
+    target_link_libraries(local_fcb_example fcb nlohmann_json::nlohmann_json)
+    target_include_directories(local_fcb_example PRIVATE ${GENERATED_DIR})
+
     add_executable(fcb_comprehensive_example examples/comprehensive_example.cpp ${GENERATED_DIR}/lib.rs.h)
     target_link_libraries(fcb_comprehensive_example fcb nlohmann_json::nlohmann_json)
     target_include_directories(fcb_comprehensive_example PRIVATE ${GENERATED_DIR})
@@ -131,7 +132,7 @@ if(nlohmann_json_FOUND)
     target_link_libraries(fcb_roundtrip_comprehensive fcb nlohmann_json::nlohmann_json)
     target_include_directories(fcb_roundtrip_comprehensive PRIVATE ${GENERATED_DIR})
 else()
-    message(STATUS "Skipping fcb_comprehensive_example and fcb_roundtrip_comprehensive (nlohmann_json not found)")
+    message(STATUS "Skipping local_fcb_example, fcb_comprehensive_example, and fcb_roundtrip_comprehensive (nlohmann_json not found)")
 endif()
 
 # Install targets

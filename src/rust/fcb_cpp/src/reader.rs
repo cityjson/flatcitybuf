@@ -1,6 +1,7 @@
 //! Reader bindings for C++
 
-use crate::ffi::{BoundingBox, CityFeatureData, FcbMetadata};
+use crate::ffi::{BoundingBox, CityFeatureData, FcbGeographicalExtent, FcbMetadata, FcbTransform};
+use fcb_core::deserializer::to_cj_metadata;
 use fcb_core::{FcbReader, SpatialQuery};
 use std::fs::File;
 use std::io::BufReader;
@@ -105,8 +106,52 @@ pub fn fcb_reader_open(path: &str) -> Result<Box<FcbFileReader>, String> {
 pub fn fcb_reader_metadata(reader: &FcbFileReader) -> FcbMetadata {
     let header = reader.inner.header();
 
-    // Parse version from header, fall back to 1 if parsing fails
+    // FCB binary format version (byte in magic header), fall back to 1
     let version = header.version().parse().unwrap_or(1);
+
+    // CityJSON spec version string (e.g. "2.0")
+    let cityjson_version = header.version().to_string();
+
+    // Coordinate transform
+    let (has_transform, transform) = match header.transform() {
+        Some(t) => (
+            true,
+            FcbTransform {
+                scale_x: t.scale().x(),
+                scale_y: t.scale().y(),
+                scale_z: t.scale().z(),
+                translate_x: t.translate().x(),
+                translate_y: t.translate().y(),
+                translate_z: t.translate().z(),
+            },
+        ),
+        None => (false, FcbTransform::default()),
+    };
+
+    // 3D geographical extent
+    let (has_geographical_extent, geographical_extent) = match header.geographical_extent() {
+        Some(e) => (
+            true,
+            FcbGeographicalExtent {
+                min_x: e.min().x(),
+                min_y: e.min().y(),
+                min_z: e.min().z(),
+                max_x: e.max().x(),
+                max_y: e.max().y(),
+                max_z: e.max().z(),
+            },
+        ),
+        None => (false, FcbGeographicalExtent::default()),
+    };
+
+    // Full CityJSON header as JSON (geometry_templates excluded — can be large)
+    let metadata_json = match to_cj_metadata(&header) {
+        Ok(mut cj) => {
+            cj.geometry_templates = None;
+            serde_json::to_string(&cj).unwrap_or_default()
+        }
+        Err(_) => String::new(),
+    };
 
     FcbMetadata {
         version,
@@ -116,6 +161,12 @@ pub fn fcb_reader_metadata(reader: &FcbFileReader) -> FcbMetadata {
             .attribute_index()
             .map(|a| !a.is_empty())
             .unwrap_or(false),
+        cityjson_version,
+        has_transform,
+        transform,
+        has_geographical_extent,
+        geographical_extent,
+        metadata_json,
     }
 }
 

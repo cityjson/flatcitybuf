@@ -18,7 +18,7 @@ async fn read_http_file_bbox(path: &str) -> Result<(), Box<dyn Error>> {
         .select_query(Query::BBox(minx, miny, maxx, maxy))
         .await?;
     let header = iter.header();
-    let cj = to_cj_metadata(&header)?;
+    let _cj = to_cj_metadata(&header)?;
 
     // let mut writer = BufWriter::new(File::create("delft_http.city.jsonl")?);
     // writeln!(writer, "{}", serde_json::to_string(&cj)?)?;
@@ -55,7 +55,7 @@ async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
         // ),
     ];
 
-    let (cj, features_count) = {
+    let (_cj, features_count) = {
         let header = http_reader.header();
         println!("header: {header:?}");
 
@@ -75,7 +75,7 @@ async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
 
     let feature = features.first().unwrap();
     let mut contains_b3_h_dak_50p = false;
-    let contains_identificatie = false;
+    let _contains_identificatie = false;
     for co in feature.city_objects.values() {
         if co.attributes.is_some() {
             let attrs = co.attributes.as_ref().unwrap();

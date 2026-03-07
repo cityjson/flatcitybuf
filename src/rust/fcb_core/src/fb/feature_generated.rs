@@ -2,8 +2,11 @@
 
 // @generated
 
+use crate::extension_generated::*;
 use crate::geometry_generated::*;
 use crate::header_generated::*;
+use core::cmp::Ordering;
+use core::mem;
 
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
@@ -192,7 +195,7 @@ impl<'a> flatbuffers::Follow<'a> for CityObjectType {
     type Inner = Self;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        let b = unsafe { flatbuffers::read_scalar_at::<u8>(buf, loc) };
         Self(b)
     }
 }
@@ -201,7 +204,9 @@ impl flatbuffers::Push for CityObjectType {
     type Output = CityObjectType;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        unsafe {
+            flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        }
     }
 }
 
@@ -233,7 +238,8 @@ impl<'a> flatbuffers::Verifiable for CityObjectType {
 impl flatbuffers::SimpleToVerifyInSlice for CityObjectType {}
 // struct Vertex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub struct Vertex(pub [u8; 12]);
 impl core::fmt::Debug for Vertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -250,22 +256,31 @@ impl<'a> flatbuffers::Follow<'a> for Vertex {
     type Inner = &'a Vertex;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        <&'a Vertex>::follow(buf, loc)
+        unsafe { <&'a Vertex>::follow(buf, loc) }
     }
 }
 impl<'a> flatbuffers::Follow<'a> for &'a Vertex {
     type Inner = &'a Vertex;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::follow_cast_ref::<Vertex>(buf, loc)
+        unsafe { flatbuffers::follow_cast_ref::<Vertex>(buf, loc) }
     }
 }
 impl<'b> flatbuffers::Push for Vertex {
     type Output = Vertex;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(self as *const Vertex as *const u8, Self::size());
+        let src = unsafe {
+            ::core::slice::from_raw_parts(
+                self as *const Vertex as *const u8,
+                <Self as flatbuffers::Push>::size(),
+            )
+        };
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(4)
     }
 }
 
@@ -275,6 +290,7 @@ impl<'a> flatbuffers::Verifiable for Vertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -389,7 +405,7 @@ impl<'a> flatbuffers::Follow<'a> for CityFeature<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -490,6 +506,7 @@ impl flatbuffers::Verifiable for CityFeature<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("id", Self::VT_ID, true)?
             .visit_field::<flatbuffers::ForwardsUOffset<
@@ -519,7 +536,7 @@ pub struct CityFeatureArgs<'a> {
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Vertex>>>,
     pub appearance: Option<flatbuffers::WIPOffset<Appearance<'a>>>,
 }
-impl Default for CityFeatureArgs<'_> {
+impl<'a> Default for CityFeatureArgs<'a> {
     #[inline]
     fn default() -> Self {
         CityFeatureArgs {
@@ -607,7 +624,7 @@ impl<'a> flatbuffers::Follow<'a> for CityObject<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -820,6 +837,7 @@ impl flatbuffers::Verifiable for CityObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<CityObjectType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
@@ -887,7 +905,7 @@ pub struct CityObjectArgs<'a> {
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>,
     >,
 }
-impl Default for CityObjectArgs<'_> {
+impl<'a> Default for CityObjectArgs<'a> {
     #[inline]
     fn default() -> Self {
         CityObjectArgs {
@@ -1095,14 +1113,14 @@ pub fn size_prefixed_root_as_city_feature_with_opts<'b, 'o>(
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid `CityFeature`.
 pub unsafe fn root_as_city_feature_unchecked(buf: &[u8]) -> CityFeature<'_> {
-    flatbuffers::root_unchecked::<CityFeature>(buf)
+    unsafe { flatbuffers::root_unchecked::<CityFeature>(buf) }
 }
 #[inline]
 /// Assumes, without verification, that a buffer of bytes contains a size prefixed CityFeature and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid size prefixed `CityFeature`.
 pub unsafe fn size_prefixed_root_as_city_feature_unchecked(buf: &[u8]) -> CityFeature<'_> {
-    flatbuffers::size_prefixed_root_unchecked::<CityFeature>(buf)
+    unsafe { flatbuffers::size_prefixed_root_unchecked::<CityFeature>(buf) }
 }
 #[inline]
 pub fn finish_city_feature_buffer<'a, 'b, A: flatbuffers::Allocator + 'a>(

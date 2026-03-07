@@ -527,7 +527,7 @@ fn coordinator() -> Result<()> {
                 "  running {format_name} benchmark ({ITERATIONS} iterations + {WARMUP_ITERATIONS} warmup)... "
             );
 
-            let start = Instant::now();
+            let _start = Instant::now();
             let output = Command::new(std::env::current_exe()?)
                 .args([
                     "--child",
@@ -1076,7 +1076,7 @@ fn run_child(dataset: &Path, format: &str, iterations: u32, warmup: u32) -> Resu
     let std_dev_duration = calculate_std_dev(&durations, mean_duration);
 
     let mean_peak_rss = peak_rss_values.iter().sum::<u64>() / peak_rss_values.len() as u64;
-    let mean_cpu_usage = cpu_usage_values.iter().sum::<f64>() / cpu_usage_values.len() as f64;
+    let _mean_cpu_usage = cpu_usage_values.iter().sum::<f64>() / cpu_usage_values.len() as f64;
 
     eprintln!("benchmark completed: {iterations} iterations");
     eprintln!(

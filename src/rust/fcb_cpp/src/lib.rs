@@ -10,16 +10,68 @@ use writer::FcbFileWriter;
 
 #[cxx::bridge(namespace = "fcb")]
 mod ffi {
+    /// 3D coordinate transform (scale and translation)
+    #[derive(Default)]
+    struct FcbTransform {
+        /// Scale factor for X axis
+        scale_x: f64,
+        /// Scale factor for Y axis
+        scale_y: f64,
+        /// Scale factor for Z axis
+        scale_z: f64,
+        /// Translation offset for X axis
+        translate_x: f64,
+        /// Translation offset for Y axis
+        translate_y: f64,
+        /// Translation offset for Z axis
+        translate_z: f64,
+    }
+
+    /// 3D geographical extent (bounding box with elevation)
+    #[derive(Default)]
+    struct FcbGeographicalExtent {
+        /// Minimum X coordinate
+        min_x: f64,
+        /// Minimum Y coordinate
+        min_y: f64,
+        /// Minimum Z coordinate (elevation)
+        min_z: f64,
+        /// Maximum X coordinate
+        max_x: f64,
+        /// Maximum Y coordinate
+        max_y: f64,
+        /// Maximum Z coordinate (elevation)
+        max_z: f64,
+    }
+
     /// Metadata about an FCB file
     struct FcbMetadata {
         /// FCB format version
         version: u8,
         /// Number of features in file
         features_count: u64,
-        /// Whether to file has a spatial index
+        /// Whether the file has a spatial index
         has_spatial_index: bool,
-        /// Whether to file has an attribute index
+        /// Whether the file has an attribute index
         has_attribute_index: bool,
+
+        /// CityJSON specification version (e.g. "2.0")
+        cityjson_version: String,
+
+        /// Whether a coordinate transform is present
+        has_transform: bool,
+        /// Coordinate transform (scale + translation); valid only if has_transform is true
+        transform: FcbTransform,
+
+        /// Whether a geographical extent is present
+        has_geographical_extent: bool,
+        /// 3D geographical extent; valid only if has_geographical_extent is true
+        geographical_extent: FcbGeographicalExtent,
+
+        /// Full CityJSON header as a JSON string (type, version, transform, metadata,
+        /// referenceSystem, extensions). Parse with your preferred JSON library.
+        /// geometry_templates are excluded.
+        metadata_json: String,
     }
 
     /// 2D bounding box for spatial queries
@@ -97,4 +149,4 @@ pub use reader::{
 pub use writer::{fcb_writer_add_feature, fcb_writer_new, fcb_writer_write};
 
 // Re-export bridge types
-pub use ffi::{BoundingBox, CityFeatureData, FcbMetadata};
+pub use ffi::{BoundingBox, CityFeatureData, FcbGeographicalExtent, FcbMetadata, FcbTransform};

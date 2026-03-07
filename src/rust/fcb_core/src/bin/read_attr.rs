@@ -29,7 +29,7 @@ fn read_fcb_with_attr_index_non_seekable(path: PathBuf) -> Result<()> {
 
     let mut feat_total = 0;
     while let Some(feat_buf) = reader.next()? {
-        let feature = feat_buf.cur_cj_feature()?;
+        let _feature = feat_buf.cur_cj_feature()?;
         feat_total += 1;
         if feat_total == 10 {
             break;

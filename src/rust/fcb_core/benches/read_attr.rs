@@ -181,7 +181,7 @@ pub fn read_benchmark(c: &mut Criterion) {
     // Set sample size to 10 to limit the number of iterations
     group.sample_size(10);
 
-    for &(dataset, (file_without, file_with)) in DATASETS.iter() {
+    for &(dataset, (_file_without, file_with)) in DATASETS.iter() {
         // Benchmark the file without attribute index.
         // group.bench_with_input(
         //     BenchmarkId::new(format!("{} without", dataset), file_without),

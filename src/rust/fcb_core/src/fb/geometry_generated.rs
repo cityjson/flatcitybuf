@@ -2,6 +2,9 @@
 
 // @generated
 
+use core::cmp::Ordering;
+use core::mem;
+
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
 
@@ -129,7 +132,7 @@ impl<'a> flatbuffers::Follow<'a> for SemanticSurfaceType {
     type Inner = Self;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        let b = unsafe { flatbuffers::read_scalar_at::<u8>(buf, loc) };
         Self(b)
     }
 }
@@ -138,7 +141,9 @@ impl flatbuffers::Push for SemanticSurfaceType {
     type Output = SemanticSurfaceType;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        unsafe {
+            flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        }
     }
 }
 
@@ -248,7 +253,7 @@ impl<'a> flatbuffers::Follow<'a> for GeometryType {
     type Inner = Self;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        let b = unsafe { flatbuffers::read_scalar_at::<u8>(buf, loc) };
         Self(b)
     }
 }
@@ -257,7 +262,9 @@ impl flatbuffers::Push for GeometryType {
     type Output = GeometryType;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        unsafe {
+            flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        }
     }
 }
 
@@ -324,25 +331,31 @@ impl<'a> flatbuffers::Follow<'a> for TransformationMatrix {
     type Inner = &'a TransformationMatrix;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        <&'a TransformationMatrix>::follow(buf, loc)
+        unsafe { <&'a TransformationMatrix>::follow(buf, loc) }
     }
 }
 impl<'a> flatbuffers::Follow<'a> for &'a TransformationMatrix {
     type Inner = &'a TransformationMatrix;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::follow_cast_ref::<TransformationMatrix>(buf, loc)
+        unsafe { flatbuffers::follow_cast_ref::<TransformationMatrix>(buf, loc) }
     }
 }
 impl<'b> flatbuffers::Push for TransformationMatrix {
     type Output = TransformationMatrix;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(
-            self as *const TransformationMatrix as *const u8,
-            Self::size(),
-        );
+        let src = unsafe {
+            ::core::slice::from_raw_parts(
+                self as *const TransformationMatrix as *const u8,
+                <Self as flatbuffers::Push>::size(),
+            )
+        };
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(8)
     }
 }
 
@@ -352,6 +365,7 @@ impl<'a> flatbuffers::Verifiable for TransformationMatrix {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -873,7 +887,7 @@ impl<'a> flatbuffers::Follow<'a> for MaterialMapping<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -977,6 +991,7 @@ impl flatbuffers::Verifiable for MaterialMapping<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
@@ -1006,7 +1021,7 @@ pub struct MaterialMappingArgs<'a> {
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub value: Option<u32>,
 }
-impl Default for MaterialMappingArgs<'_> {
+impl<'a> Default for MaterialMappingArgs<'a> {
     #[inline]
     fn default() -> Self {
         MaterialMappingArgs {
@@ -1089,7 +1104,7 @@ impl<'a> flatbuffers::Follow<'a> for TextureMapping<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -1216,6 +1231,7 @@ impl flatbuffers::Verifiable for TextureMapping<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("theme", Self::VT_THEME, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>(
@@ -1255,7 +1271,7 @@ pub struct TextureMappingArgs<'a> {
     pub strings: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub vertices: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
 }
-impl Default for TextureMappingArgs<'_> {
+impl<'a> Default for TextureMappingArgs<'a> {
     #[inline]
     fn default() -> Self {
         TextureMappingArgs {
@@ -1345,7 +1361,7 @@ impl<'a> flatbuffers::Follow<'a> for Geometry<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -1553,6 +1569,7 @@ impl flatbuffers::Verifiable for Geometry<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<GeometryType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("lod", Self::VT_LOD, false)?
@@ -1624,7 +1641,7 @@ pub struct GeometryArgs<'a> {
         >,
     >,
 }
-impl Default for GeometryArgs<'_> {
+impl<'a> Default for GeometryArgs<'a> {
     #[inline]
     fn default() -> Self {
         GeometryArgs {
@@ -1770,7 +1787,7 @@ impl<'a> flatbuffers::Follow<'a> for SemanticObject<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -1873,6 +1890,7 @@ impl flatbuffers::Verifiable for SemanticObject<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<SemanticSurfaceType>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(
@@ -1902,7 +1920,7 @@ pub struct SemanticObjectArgs<'a> {
     pub parent: Option<u32>,
     pub extension_type: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for SemanticObjectArgs<'_> {
+impl<'a> Default for SemanticObjectArgs<'a> {
     #[inline]
     fn default() -> Self {
         SemanticObjectArgs {
@@ -1995,7 +2013,7 @@ impl<'a> flatbuffers::Follow<'a> for GeometryInstance<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -2067,6 +2085,7 @@ impl flatbuffers::Verifiable for GeometryInstance<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<TransformationMatrix>("transformation", Self::VT_TRANSFORMATION, false)?
             .visit_field::<u32>("template", Self::VT_TEMPLATE, false)?
@@ -2084,7 +2103,7 @@ pub struct GeometryInstanceArgs<'a> {
     pub template: u32,
     pub boundaries: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
 }
-impl Default for GeometryInstanceArgs<'_> {
+impl<'a> Default for GeometryInstanceArgs<'a> {
     #[inline]
     fn default() -> Self {
         GeometryInstanceArgs {

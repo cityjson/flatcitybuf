@@ -18,6 +18,8 @@
 
 #include "fcb.h"  // FlatCityBuf C++ API header
 
+#include <nlohmann/json.hpp>  // JSON parsing for metadata_json
+
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -39,11 +41,58 @@ int main(int argc, char* argv[]) {
         auto meta = fcb::fcb_reader_metadata(*reader);
 
         std::cout << "\n=== FCB File Metadata ===" << std::endl;
-        std::cout << "Format version: " << static_cast<int>(meta.version) << std::endl;
-        std::cout << "Total features: " << meta.features_count << std::endl;
-        std::cout << "Has spatial index: " << (meta.has_spatial_index ? "yes" : "no") << std::endl;
-        std::cout << "Has attribute index: " << (meta.has_attribute_index ? "yes" : "no")
+        // --- FCB binary format fields ---
+        std::cout << "Format version:     " << static_cast<int>(meta.version) << std::endl;
+        std::cout << "Total features:     " << meta.features_count << std::endl;
+        std::cout << "Spatial index:      " << (meta.has_spatial_index ? "yes" : "no") << std::endl;
+        std::cout << "Attribute index:    " << (meta.has_attribute_index ? "yes" : "no")
                   << std::endl;
+
+        // --- CityJSON metadata fields ---
+        std::cout << "CityJSON version:   " << std::string(meta.cityjson_version) << std::endl;
+
+        if (meta.has_transform) {
+            std::cout << "Transform scale:    [" << meta.transform.scale_x << ", "
+                      << meta.transform.scale_y << ", " << meta.transform.scale_z << "]"
+                      << std::endl;
+            std::cout << "Transform offset:   [" << meta.transform.translate_x << ", "
+                      << meta.transform.translate_y << ", " << meta.transform.translate_z << "]"
+                      << std::endl;
+        }
+
+        if (meta.has_geographical_extent) {
+            std::cout << "Extent min:         [" << meta.geographical_extent.min_x << ", "
+                      << meta.geographical_extent.min_y << ", " << meta.geographical_extent.min_z
+                      << "]" << std::endl;
+            std::cout << "Extent max:         [" << meta.geographical_extent.max_x << ", "
+                      << meta.geographical_extent.max_y << ", " << meta.geographical_extent.max_z
+                      << "]" << std::endl;
+        }
+
+        // Parse metadata_json to access identifier, title, referenceSystem, extensions, etc.
+        if (!std::string(meta.metadata_json).empty()) {
+            nlohmann::json cj_meta = nlohmann::json::parse(std::string(meta.metadata_json));
+
+            if (cj_meta.contains("metadata")) {
+                auto& m = cj_meta["metadata"];
+                if (m.contains("datasetTitle"))
+                    std::cout << "Title:              " << m["datasetTitle"] << std::endl;
+                if (m.contains("datasetIdentifier"))
+                    std::cout << "Identifier:         " << m["datasetIdentifier"] << std::endl;
+                if (m.contains("datasetReferenceDate"))
+                    std::cout << "Reference date:     " << m["datasetReferenceDate"] << std::endl;
+                if (m.contains("referenceSystem"))
+                    std::cout << "CRS:                " << m["referenceSystem"] << std::endl;
+                if (m.contains("pointOfContact")) {
+                    auto& poc = m["pointOfContact"];
+                    if (poc.contains("contactName"))
+                        std::cout << "Contact:            " << poc["contactName"] << std::endl;
+                }
+            }
+            if (cj_meta.contains("extensions")) {
+                std::cout << "Extensions:         " << cj_meta["extensions"].dump() << std::endl;
+            }
+        }
         std::cout << std::endl;
 
         // === Select all features ===

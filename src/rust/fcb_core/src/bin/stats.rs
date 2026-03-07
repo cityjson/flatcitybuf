@@ -77,7 +77,7 @@ fn analyze_fcb(path: &Path) -> Result<(u64, usize, usize, usize, usize, f64)> {
     println!("analyzing fcb file: {}", path.display());
 
     let file = File::open(path).context("failed to open fcb file")?;
-    let file_size = file.metadata().context("failed to get fcb metadata")?.len();
+    let _file_size = file.metadata().context("failed to get fcb metadata")?.len();
     let reader = BufReader::new(file);
 
     let mut fcb_reader = FcbReader::open(reader)
@@ -120,7 +120,7 @@ fn analyze_fcb(path: &Path) -> Result<(u64, usize, usize, usize, usize, f64)> {
             for co in objects.iter() {
                 for geom in co.geometry().unwrap_or_default().iter() {
                     if let Some(sem) = geom.semantics_objects() {
-                        for sem_obj in sem.iter() {
+                        for _sem_obj in sem.iter() {
                             // println!("sem_obj: {:?}", sem_obj);
                         }
                     }
@@ -456,7 +456,7 @@ fn output_csv(stats: &[FileStats]) -> Result<()> {
 
 fn output_json(stats: &[FileStats]) -> Result<()> {
     // Convert stats to JSON
-    let json = serde_json::to_string_pretty(
+    let _json = serde_json::to_string_pretty(
         &stats
             .iter()
             .map(|s| {

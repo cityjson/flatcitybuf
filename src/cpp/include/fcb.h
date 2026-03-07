@@ -49,13 +49,59 @@
  */
 
 /**
- * @struct fcb::FcbMetadata
- * @brief Metadata about an FCB file
+ * @struct fcb::FcbTransform
+ * @brief 3D coordinate transform (scale and translation)
  *
- * Contains information about the FCB file structure and capabilities.
+ * Stores the CityJSON coordinate transform that converts integer vertex
+ * coordinates to real-world coordinates:
+ *   real = integer * scale + translate
+ *
+ * @var fcb::FcbTransform::scale_x
+ * Scale factor for X axis
+ * @var fcb::FcbTransform::scale_y
+ * Scale factor for Y axis
+ * @var fcb::FcbTransform::scale_z
+ * Scale factor for Z axis
+ * @var fcb::FcbTransform::translate_x
+ * Translation offset for X axis
+ * @var fcb::FcbTransform::translate_y
+ * Translation offset for Y axis
+ * @var fcb::FcbTransform::translate_z
+ * Translation offset for Z axis
+ */
+
+/**
+ * @struct fcb::FcbGeographicalExtent
+ * @brief 3D geographical bounding box
+ *
+ * The geographical extent of all features in the file, in the file's
+ * coordinate reference system. Includes the Z (elevation) dimension.
+ *
+ * @var fcb::FcbGeographicalExtent::min_x
+ * Minimum X coordinate (west boundary)
+ * @var fcb::FcbGeographicalExtent::min_y
+ * Minimum Y coordinate (south boundary)
+ * @var fcb::FcbGeographicalExtent::min_z
+ * Minimum Z coordinate (lowest elevation)
+ * @var fcb::FcbGeographicalExtent::max_x
+ * Maximum X coordinate (east boundary)
+ * @var fcb::FcbGeographicalExtent::max_y
+ * Maximum Y coordinate (north boundary)
+ * @var fcb::FcbGeographicalExtent::max_z
+ * Maximum Z coordinate (highest elevation)
+ */
+
+/**
+ * @struct fcb::FcbMetadata
+ * @brief Metadata about an FCB file and its CityJSON content
+ *
+ * Contains both FCB format information and CityJSON metadata fields.
+ * Check @c has_transform and @c has_geographical_extent before accessing
+ * the corresponding typed fields. All CityJSON metadata is also available
+ * in @c metadata_json as a complete JSON string.
  *
  * @var fcb::FcbMetadata::version
- * FCB format version number
+ * FCB binary format version number
  *
  * @var fcb::FcbMetadata::features_count
  * Total number of CityJSON features in the file
@@ -65,6 +111,27 @@
  *
  * @var fcb::FcbMetadata::has_attribute_index
  * Whether the file contains attribute indexes for property queries
+ *
+ * @var fcb::FcbMetadata::cityjson_version
+ * CityJSON specification version (e.g. "2.0")
+ *
+ * @var fcb::FcbMetadata::has_transform
+ * Whether a coordinate transform is stored in the file
+ *
+ * @var fcb::FcbMetadata::transform
+ * Coordinate transform (scale + translation); only valid if @c has_transform is true
+ *
+ * @var fcb::FcbMetadata::has_geographical_extent
+ * Whether a geographical extent is stored in the file
+ *
+ * @var fcb::FcbMetadata::geographical_extent
+ * 3D geographical extent; only valid if @c has_geographical_extent is true
+ *
+ * @var fcb::FcbMetadata::metadata_json
+ * Full CityJSON header as a JSON string. Contains: type, version, transform,
+ * metadata (identifier, title, referenceDate, referenceSystem, geographicalExtent,
+ * pointOfContact), extensions. geometry_templates are excluded.
+ * Parse with nlohmann::json or any JSON library.
  */
 
 /**

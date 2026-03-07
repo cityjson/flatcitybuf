@@ -4,6 +4,8 @@
 
 use crate::extension_generated::*;
 use crate::geometry_generated::*;
+use core::cmp::Ordering;
+use core::mem;
 
 extern crate flatbuffers;
 use self::flatbuffers::{EndianScalar, Follow};
@@ -116,7 +118,7 @@ impl<'a> flatbuffers::Follow<'a> for ColumnType {
     type Inner = Self;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        let b = unsafe { flatbuffers::read_scalar_at::<u8>(buf, loc) };
         Self(b)
     }
 }
@@ -125,7 +127,9 @@ impl flatbuffers::Push for ColumnType {
     type Output = ColumnType;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        unsafe {
+            flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        }
     }
 }
 
@@ -205,7 +209,7 @@ impl<'a> flatbuffers::Follow<'a> for TextureFormat {
     type Inner = Self;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        let b = unsafe { flatbuffers::read_scalar_at::<u8>(buf, loc) };
         Self(b)
     }
 }
@@ -214,7 +218,9 @@ impl flatbuffers::Push for TextureFormat {
     type Output = TextureFormat;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        unsafe {
+            flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        }
     }
 }
 
@@ -312,7 +318,7 @@ impl<'a> flatbuffers::Follow<'a> for WrapMode {
     type Inner = Self;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        let b = unsafe { flatbuffers::read_scalar_at::<u8>(buf, loc) };
         Self(b)
     }
 }
@@ -321,7 +327,9 @@ impl flatbuffers::Push for WrapMode {
     type Output = WrapMode;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        unsafe {
+            flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        }
     }
 }
 
@@ -407,7 +415,7 @@ impl<'a> flatbuffers::Follow<'a> for TextureType {
     type Inner = Self;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+        let b = unsafe { flatbuffers::read_scalar_at::<u8>(buf, loc) };
         Self(b)
     }
 }
@@ -416,7 +424,9 @@ impl flatbuffers::Push for TextureType {
     type Output = TextureType;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        unsafe {
+            flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        }
     }
 }
 
@@ -448,7 +458,8 @@ impl<'a> flatbuffers::Verifiable for TextureType {
 impl flatbuffers::SimpleToVerifyInSlice for TextureType {}
 // struct Vector, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub struct Vector(pub [u8; 24]);
 impl core::fmt::Debug for Vector {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -465,22 +476,31 @@ impl<'a> flatbuffers::Follow<'a> for Vector {
     type Inner = &'a Vector;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        <&'a Vector>::follow(buf, loc)
+        unsafe { <&'a Vector>::follow(buf, loc) }
     }
 }
 impl<'a> flatbuffers::Follow<'a> for &'a Vector {
     type Inner = &'a Vector;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::follow_cast_ref::<Vector>(buf, loc)
+        unsafe { flatbuffers::follow_cast_ref::<Vector>(buf, loc) }
     }
 }
 impl<'b> flatbuffers::Push for Vector {
     type Output = Vector;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(self as *const Vector as *const u8, Self::size());
+        let src = unsafe {
+            ::core::slice::from_raw_parts(
+                self as *const Vector as *const u8,
+                <Self as flatbuffers::Push>::size(),
+            )
+        };
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(8)
     }
 }
 
@@ -490,6 +510,7 @@ impl<'a> flatbuffers::Verifiable for Vector {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -615,23 +636,31 @@ impl<'a> flatbuffers::Follow<'a> for Transform {
     type Inner = &'a Transform;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        <&'a Transform>::follow(buf, loc)
+        unsafe { <&'a Transform>::follow(buf, loc) }
     }
 }
 impl<'a> flatbuffers::Follow<'a> for &'a Transform {
     type Inner = &'a Transform;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::follow_cast_ref::<Transform>(buf, loc)
+        unsafe { flatbuffers::follow_cast_ref::<Transform>(buf, loc) }
     }
 }
 impl<'b> flatbuffers::Push for Transform {
     type Output = Transform;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src =
-            ::core::slice::from_raw_parts(self as *const Transform as *const u8, Self::size());
+        let src = unsafe {
+            ::core::slice::from_raw_parts(
+                self as *const Transform as *const u8,
+                <Self as flatbuffers::Push>::size(),
+            )
+        };
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(8)
     }
 }
 
@@ -641,6 +670,7 @@ impl<'a> flatbuffers::Verifiable for Transform {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -702,25 +732,31 @@ impl<'a> flatbuffers::Follow<'a> for GeographicalExtent {
     type Inner = &'a GeographicalExtent;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        <&'a GeographicalExtent>::follow(buf, loc)
+        unsafe { <&'a GeographicalExtent>::follow(buf, loc) }
     }
 }
 impl<'a> flatbuffers::Follow<'a> for &'a GeographicalExtent {
     type Inner = &'a GeographicalExtent;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::follow_cast_ref::<GeographicalExtent>(buf, loc)
+        unsafe { flatbuffers::follow_cast_ref::<GeographicalExtent>(buf, loc) }
     }
 }
 impl<'b> flatbuffers::Push for GeographicalExtent {
     type Output = GeographicalExtent;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(
-            self as *const GeographicalExtent as *const u8,
-            Self::size(),
-        );
+        let src = unsafe {
+            ::core::slice::from_raw_parts(
+                self as *const GeographicalExtent as *const u8,
+                <Self as flatbuffers::Push>::size(),
+            )
+        };
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(8)
     }
 }
 
@@ -730,6 +766,7 @@ impl<'a> flatbuffers::Verifiable for GeographicalExtent {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -770,7 +807,8 @@ impl<'a> GeographicalExtent {
 
 // struct AttributeIndex, aligned to 4
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub struct AttributeIndex(pub [u8; 16]);
 impl core::fmt::Debug for AttributeIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -788,23 +826,31 @@ impl<'a> flatbuffers::Follow<'a> for AttributeIndex {
     type Inner = &'a AttributeIndex;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        <&'a AttributeIndex>::follow(buf, loc)
+        unsafe { <&'a AttributeIndex>::follow(buf, loc) }
     }
 }
 impl<'a> flatbuffers::Follow<'a> for &'a AttributeIndex {
     type Inner = &'a AttributeIndex;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::follow_cast_ref::<AttributeIndex>(buf, loc)
+        unsafe { flatbuffers::follow_cast_ref::<AttributeIndex>(buf, loc) }
     }
 }
 impl<'b> flatbuffers::Push for AttributeIndex {
     type Output = AttributeIndex;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src =
-            ::core::slice::from_raw_parts(self as *const AttributeIndex as *const u8, Self::size());
+        let src = unsafe {
+            ::core::slice::from_raw_parts(
+                self as *const AttributeIndex as *const u8,
+                <Self as flatbuffers::Push>::size(),
+            )
+        };
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(4)
     }
 }
 
@@ -814,6 +860,7 @@ impl<'a> flatbuffers::Verifiable for AttributeIndex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -948,7 +995,8 @@ impl<'a> AttributeIndex {
 
 // struct Vec2, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub struct Vec2(pub [u8; 16]);
 impl core::fmt::Debug for Vec2 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -964,22 +1012,31 @@ impl<'a> flatbuffers::Follow<'a> for Vec2 {
     type Inner = &'a Vec2;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        <&'a Vec2>::follow(buf, loc)
+        unsafe { <&'a Vec2>::follow(buf, loc) }
     }
 }
 impl<'a> flatbuffers::Follow<'a> for &'a Vec2 {
     type Inner = &'a Vec2;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::follow_cast_ref::<Vec2>(buf, loc)
+        unsafe { flatbuffers::follow_cast_ref::<Vec2>(buf, loc) }
     }
 }
 impl<'b> flatbuffers::Push for Vec2 {
     type Output = Vec2;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(self as *const Vec2 as *const u8, Self::size());
+        let src = unsafe {
+            ::core::slice::from_raw_parts(
+                self as *const Vec2 as *const u8,
+                <Self as flatbuffers::Push>::size(),
+            )
+        };
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(8)
     }
 }
 
@@ -989,6 +1046,7 @@ impl<'a> flatbuffers::Verifiable for Vec2 {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -1063,7 +1121,8 @@ impl<'a> Vec2 {
 
 // struct DoubleVertex, aligned to 8
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub struct DoubleVertex(pub [u8; 24]);
 impl core::fmt::Debug for DoubleVertex {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -1080,23 +1139,31 @@ impl<'a> flatbuffers::Follow<'a> for DoubleVertex {
     type Inner = &'a DoubleVertex;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        <&'a DoubleVertex>::follow(buf, loc)
+        unsafe { <&'a DoubleVertex>::follow(buf, loc) }
     }
 }
 impl<'a> flatbuffers::Follow<'a> for &'a DoubleVertex {
     type Inner = &'a DoubleVertex;
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::follow_cast_ref::<DoubleVertex>(buf, loc)
+        unsafe { flatbuffers::follow_cast_ref::<DoubleVertex>(buf, loc) }
     }
 }
 impl<'b> flatbuffers::Push for DoubleVertex {
     type Output = DoubleVertex;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src =
-            ::core::slice::from_raw_parts(self as *const DoubleVertex as *const u8, Self::size());
+        let src = unsafe {
+            ::core::slice::from_raw_parts(
+                self as *const DoubleVertex as *const u8,
+                <Self as flatbuffers::Push>::size(),
+            )
+        };
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(8)
     }
 }
 
@@ -1106,6 +1173,7 @@ impl<'a> flatbuffers::Verifiable for DoubleVertex {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.in_buffer::<Self>(pos)
     }
 }
@@ -1220,7 +1288,7 @@ impl<'a> flatbuffers::Follow<'a> for Column<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -1388,6 +1456,7 @@ impl flatbuffers::Verifiable for Column<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<u16>("index", Self::VT_INDEX, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
@@ -1425,7 +1494,7 @@ pub struct ColumnArgs<'a> {
     pub primary_key: bool,
     pub metadata: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for ColumnArgs<'_> {
+impl<'a> Default for ColumnArgs<'a> {
     #[inline]
     fn default() -> Self {
         ColumnArgs {
@@ -1547,7 +1616,7 @@ impl<'a> flatbuffers::Follow<'a> for ReferenceSystem<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -1629,6 +1698,7 @@ impl flatbuffers::Verifiable for ReferenceSystem<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>(
                 "authority",
@@ -1652,7 +1722,7 @@ pub struct ReferenceSystemArgs<'a> {
     pub code: i32,
     pub code_string: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for ReferenceSystemArgs<'_> {
+impl<'a> Default for ReferenceSystemArgs<'a> {
     #[inline]
     fn default() -> Self {
         ReferenceSystemArgs {
@@ -1732,7 +1802,7 @@ impl<'a> flatbuffers::Follow<'a> for Material<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -1870,6 +1940,7 @@ impl flatbuffers::Verifiable for Material<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
             .visit_field::<f64>("ambient_intensity", Self::VT_AMBIENT_INTENSITY, false)?
@@ -1905,7 +1976,7 @@ pub struct MaterialArgs<'a> {
     pub transparency: Option<f64>,
     pub is_smooth: Option<bool>,
 }
-impl Default for MaterialArgs<'_> {
+impl<'a> Default for MaterialArgs<'a> {
     #[inline]
     fn default() -> Self {
         MaterialArgs {
@@ -2023,7 +2094,7 @@ impl<'a> flatbuffers::Follow<'a> for Texture<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -2118,6 +2189,7 @@ impl flatbuffers::Verifiable for Texture<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<TextureFormat>("type_", Self::VT_TYPE_, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<&str>>("image", Self::VT_IMAGE, true)?
@@ -2139,7 +2211,7 @@ pub struct TextureArgs<'a> {
     pub texture_type: Option<TextureType>,
     pub border_color: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f64>>>,
 }
-impl Default for TextureArgs<'_> {
+impl<'a> Default for TextureArgs<'a> {
     #[inline]
     fn default() -> Self {
         TextureArgs {
@@ -2224,7 +2296,7 @@ impl<'a> flatbuffers::Follow<'a> for Appearance<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -2335,6 +2407,7 @@ impl flatbuffers::Verifiable for Appearance<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<flatbuffers::ForwardsUOffset<
                 flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Material>>,
@@ -2372,7 +2445,7 @@ pub struct AppearanceArgs<'a> {
     pub default_theme_texture: Option<flatbuffers::WIPOffset<&'a str>>,
     pub default_theme_material: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for AppearanceArgs<'_> {
+impl<'a> Default for AppearanceArgs<'a> {
     #[inline]
     fn default() -> Self {
         AppearanceArgs {
@@ -2480,7 +2553,7 @@ impl<'a> flatbuffers::Follow<'a> for Header<'a> {
     #[inline]
     unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
         Self {
-            _tab: flatbuffers::Table::new(buf, loc),
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
         }
     }
 }
@@ -2924,6 +2997,7 @@ impl flatbuffers::Verifiable for Header<'_> {
         v: &mut flatbuffers::Verifier,
         pos: usize,
     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
         v.visit_table(pos)?
             .visit_field::<Transform>("transform", Self::VT_TRANSFORM, false)?
             .visit_field::<flatbuffers::ForwardsUOffset<Appearance>>(
@@ -3081,7 +3155,7 @@ pub struct HeaderArgs<'a> {
     pub attributes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
     pub version: Option<flatbuffers::WIPOffset<&'a str>>,
 }
-impl Default for HeaderArgs<'_> {
+impl<'a> Default for HeaderArgs<'a> {
     #[inline]
     fn default() -> Self {
         HeaderArgs {
@@ -3412,9 +3486,7 @@ pub fn root_as_header(buf: &[u8]) -> Result<Header<'_>, flatbuffers::InvalidFlat
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
 /// `size_prefixed_root_as_header_unchecked`.
-pub fn size_prefixed_root_as_header(
-    buf: &[u8],
-) -> Result<Header<'_>, flatbuffers::InvalidFlatbuffer> {
+pub fn size_prefixed_root_as_header(buf: &[u8]) -> Result<Header<'_>, flatbuffers::InvalidFlatbuffer> {
     flatbuffers::size_prefixed_root::<Header>(buf)
 }
 #[inline]
@@ -3448,14 +3520,14 @@ pub fn size_prefixed_root_as_header_with_opts<'b, 'o>(
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid `Header`.
 pub unsafe fn root_as_header_unchecked(buf: &[u8]) -> Header<'_> {
-    flatbuffers::root_unchecked::<Header>(buf)
+    unsafe { flatbuffers::root_unchecked::<Header>(buf) }
 }
 #[inline]
 /// Assumes, without verification, that a buffer of bytes contains a size prefixed Header and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid size prefixed `Header`.
 pub unsafe fn size_prefixed_root_as_header_unchecked(buf: &[u8]) -> Header<'_> {
-    flatbuffers::size_prefixed_root_unchecked::<Header>(buf)
+    unsafe { flatbuffers::size_prefixed_root_unchecked::<Header>(buf) }
 }
 #[inline]
 pub fn finish_header_buffer<'a, 'b, A: flatbuffers::Allocator + 'a>(

@@ -2319,7 +2319,7 @@ mod tests {
         let tree = Stree::<i32>::build(&nodes, 2)?;
         // Capture stream output
         let mut buf = Vec::new();
-        let written = tree.stream_write(&mut buf)?;
+        let _written = tree.stream_write(&mut buf)?;
         // Index size in bytes
         let idx_bytes = Stree::<i32>::tree_size(tree.num_items());
         // payload_data should be appended
