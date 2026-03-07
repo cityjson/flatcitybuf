@@ -99,7 +99,7 @@ jobs:
             platform: linux
             artifact_name: fcb_cpp-linux-aarch64
             cmake_generator: Unix Makefiles
-          - os: macos-13
+          - os: macos-13-large
             platform: macos
             artifact_name: fcb_cpp-macos-x86_64
             cmake_generator: Unix Makefiles
