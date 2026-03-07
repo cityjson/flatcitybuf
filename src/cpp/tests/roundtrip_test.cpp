@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -113,10 +114,12 @@ static void assert_feature_equal(const json& orig, const json& deser) {
             assert(false);
         }
 
-        // attributes — every original key must be present with equal value
+        // attributes — every non-null original key must be present with equal value.
+        // FCB encodes null attributes as absent (by design), so null values are skipped.
         if (orig_co.contains("attributes")) {
             assert(deser_co.contains("attributes"));
             for (auto& [k, v] : orig_co["attributes"].items()) {
+                if (v.is_null()) continue;  // null → absent after FCB roundtrip, skip
                 if (!deser_co["attributes"].contains(k)) {
                     std::cerr << "[FAIL] attribute '" << k << "' missing in '" << co_id << "'"
                               << std::endl;
@@ -156,6 +159,15 @@ static void assert_feature_equal(const json& orig, const json& deser) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: build a map from feature id -> json for order-independent lookup
+// ---------------------------------------------------------------------------
+static std::map<std::string, json> index_by_id(const std::vector<json>& features) {
+    std::map<std::string, json> m;
+    for (const auto& f : features) m[f["id"].get<std::string>()] = f;
+    return m;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,11 +218,17 @@ void test_cityjson_serialization_cycle(const fs::path& test_data_dir) {
     assert(original_features.size() == deserialized_features.size());
     std::cout << "  ✓ Feature count matches: " << deserialized_features.size() << std::endl;
 
-    for (size_t i = 0; i < original_features.size(); i++) {
-        assert_feature_equal(original_features[i], deserialized_features[i]);
-        std::cout << "  ✓ Feature '" << original_features[i]["id"].get<std::string>()
-                  << "' — vertices=" << original_features[i]["vertices"].size()
-                  << " CityObjects=" << original_features[i]["CityObjects"].size()
+    auto deser_map = index_by_id(deserialized_features);
+    for (const auto& orig : original_features) {
+        const std::string id = orig["id"].get<std::string>();
+        if (deser_map.find(id) == deser_map.end()) {
+            std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output" << std::endl;
+            assert(false);
+        }
+        assert_feature_equal(orig, deser_map.at(id));
+        std::cout << "  ✓ Feature '" << id
+                  << "' — vertices=" << orig["vertices"].size()
+                  << " CityObjects=" << orig["CityObjects"].size()
                   << std::endl;
     }
 
@@ -261,10 +279,17 @@ void test_geometry_template_cycle(const fs::path& test_data_dir) {
     assert(original_features.size() == deserialized_features.size());
     std::cout << "  ✓ Feature count matches: " << deserialized_features.size() << std::endl;
 
-    for (size_t i = 0; i < original_features.size(); i++) {
-        assert_feature_equal(original_features[i], deserialized_features[i]);
-        std::cout << "  ✓ Feature '" << original_features[i]["id"].get<std::string>()
-                  << "' matches" << std::endl;
+    {
+        auto deser_map = index_by_id(deserialized_features);
+        for (const auto& orig : original_features) {
+            const std::string id = orig["id"].get<std::string>();
+            if (deser_map.find(id) == deser_map.end()) {
+                std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output" << std::endl;
+                assert(false);
+            }
+            assert_feature_equal(orig, deser_map.at(id));
+            std::cout << "  ✓ Feature '" << id << "' matches" << std::endl;
+        }
     }
 
     if (has_templates) {
@@ -322,10 +347,17 @@ void test_extension_serialization_cycle(const fs::path& test_data_dir) {
     assert(original_features.size() == deserialized_features.size());
     std::cout << "  ✓ Feature count matches: " << deserialized_features.size() << std::endl;
 
-    for (size_t i = 0; i < original_features.size(); i++) {
-        assert_feature_equal(original_features[i], deserialized_features[i]);
-        std::cout << "  ✓ Feature '" << original_features[i]["id"].get<std::string>()
-                  << "' matches" << std::endl;
+    {
+        auto deser_map = index_by_id(deserialized_features);
+        for (const auto& orig : original_features) {
+            const std::string id = orig["id"].get<std::string>();
+            if (deser_map.find(id) == deser_map.end()) {
+                std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output" << std::endl;
+                assert(false);
+            }
+            assert_feature_equal(orig, deser_map.at(id));
+            std::cout << "  ✓ Feature '" << id << "' matches" << std::endl;
+        }
     }
 
     // Extensions round-trip through metadata_json

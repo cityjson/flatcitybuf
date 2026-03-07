@@ -131,7 +131,7 @@ clean-cpp:
 
 # Run C++ roundtrip tests
 test-cpp:
-    cd src/cpp/build && ./fcb_roundtrip_comprehensive ../rust/fcb_core/tests/data
+    cd src/cpp/build && ./fcb_roundtrip_comprehensive ../../rust/fcb_core/tests/data
 
 # ============================================================================
 # Python Commands
