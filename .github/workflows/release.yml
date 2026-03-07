@@ -99,7 +99,7 @@ jobs:
             platform: linux
             artifact_name: fcb_cpp-linux-aarch64
             cmake_generator: Unix Makefiles
-          - os: macos-15-large
+          - os: macos-15
             platform: macos
             artifact_name: fcb_cpp-macos-x86_64
             cmake_generator: Unix Makefiles
@@ -110,6 +110,10 @@ jobs:
           - os: windows-latest
             platform: windows
             artifact_name: fcb_cpp-windows-x86_64
+            cmake_generator: Visual Studio 17 2022
+          - os: windows-11-arm
+            platform: windows
+            artifact_name: fcb_cpp-windows-aarch64
             cmake_generator: Visual Studio 17 2022
 
     steps:
