@@ -1,0 +1,21 @@
+{
+  "name": "flatcitybuf",
+  "version": "0.8.0",
+  "description": "Native C++ reader for the FlatCityBuf cloud-optimized CityJSON format",
+  "homepage": "https://github.com/cityjson/flatcitybuf",
+  "license": "MIT",
+  "dependencies": [
+    "flatbuffers",
+    "nlohmann-json"
+  ],
+  "features": {
+    "curl": {
+      "description": "HTTP range-request reader backed by libcurl",
+      "dependencies": ["curl"]
+    },
+    "tests": {
+      "description": "Build the test suite",
+      "dependencies": ["doctest"]
+    }
+  }
+}

@@ -36,9 +36,18 @@ check-py:
     cd src/rust/fcb_py && uv run ruff format .
     cd src/rust/fcb_py && uv run pytest tests/
 
-# Run C++ binding checks
-pre-commit-cpp:
-    cd  src/cpp && cmake -B build -S . && cmake --build build
+# Run C++ checks (native implementation)
+pre-commit-cpp: check-cpp
+
+# Build and test the native C++ core
+check-cpp:
+    cd src/cpp && cmake -B build-native -S . -DFCB_BUILD_TESTS=ON
+    cd src/cpp && cmake --build build-native
+    cd src/cpp && ctest --test-dir build-native --output-on-failure
+
+# Regenerate the committed FlatBuffers C++ headers
+gen-cpp-fbs:
+    ./scripts/gen_cpp_flatbuffers.sh
 
 # Run all generation scripts in scripts directory
 gen-all:

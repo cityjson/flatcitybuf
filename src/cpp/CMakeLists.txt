@@ -1,154 +1,42 @@
 cmake_minimum_required(VERSION 3.16)
-project(fcb_cpp VERSION 0.1.0 LANGUAGES CXX)
+project(flatcitybuf VERSION 0.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Find cxxbridge CLI tool
-find_program(CXXBRIDGE cxxbridge)
-if(NOT CXXBRIDGE)
-    message(STATUS "cxxbridge not found, installing via cargo...")
-    execute_process(
-        COMMAND cargo install cxxbridge-cmd
-        RESULT_VARIABLE CXXBRIDGE_INSTALL_RESULT
-    )
-    find_program(CXXBRIDGE cxxbridge REQUIRED)
-endif()
+option(FCB_WITH_JSON   "Build the CityJSON conversion component" ON)
+option(FCB_WITH_CURL   "Build the libcurl HTTP range reader"     OFF)
+option(FCB_BUILD_TESTS "Build tests"                             ON)
 
-# Configuration
-set(RUST_LIB_DIR ${CMAKE_SOURCE_DIR}/../rust)
-set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
-file(MAKE_DIRECTORY ${GENERATED_DIR})
+find_package(flatbuffers CONFIG REQUIRED)
 
-# Platform-specific Rust static library name
-if(WIN32)
-    set(RUST_LIB_NAME fcb_cpp.lib)
-else()
-    set(RUST_LIB_NAME libfcb_cpp.a)
-endif()
-set(RUST_LIB_PATH ${RUST_LIB_DIR}/target/release/${RUST_LIB_NAME})
-
-# Build Rust static library (without http feature to avoid OpenSSL dependency)
-add_custom_command(
-    OUTPUT ${RUST_LIB_PATH}
-    COMMAND cargo build --release -p fcb_cpp --no-default-features
-    WORKING_DIRECTORY ${RUST_LIB_DIR}
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/reader.rs
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/writer.rs
-    COMMENT "Building Rust fcb_cpp library (without http feature)"
+add_library(fcb_core_cpp STATIC
+    src/layout.cpp
 )
 
-add_custom_target(rust_library DEPENDS ${RUST_LIB_PATH})
-
-# Generate C++ bridge code
-add_custom_command(
-    OUTPUT ${GENERATED_DIR}/lib.rs.h
-    COMMAND ${CXXBRIDGE} ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs --header > ${GENERATED_DIR}/lib.rs.h
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs
-    COMMENT "Generating C++ header from CXX bridge"
+target_include_directories(fcb_core_cpp PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
 )
-
-add_custom_command(
-    OUTPUT ${GENERATED_DIR}/lib.rs.cc
-    COMMAND ${CXXBRIDGE} ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs > ${GENERATED_DIR}/lib.rs.cc
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs
-    COMMENT "Generating C++ source from CXX bridge"
+target_include_directories(fcb_core_cpp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+target_link_libraries(fcb_core_cpp PUBLIC flatbuffers::flatbuffers)
 
-# Create fcb library
-add_library(fcb STATIC
-    ${GENERATED_DIR}/lib.rs.cc
-)
-
-add_dependencies(fcb rust_library)
-
-target_include_directories(fcb PUBLIC
-    ${GENERATED_DIR}
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-target_link_libraries(fcb
-    ${RUST_LIB_PATH}
-)
-
-# Windows-specific system libraries needed by Rust
-if(WIN32)
-    target_link_libraries(fcb
-        ws2_32
-        userenv
-        bcrypt
-        ntdll
-    )
+if(FCB_WITH_JSON)
+    find_package(nlohmann_json 3.2.0 CONFIG REQUIRED)
+    target_link_libraries(fcb_core_cpp PUBLIC nlohmann_json::nlohmann_json)
+    target_compile_definitions(fcb_core_cpp PUBLIC FCB_WITH_JSON=1)
 endif()
 
-# Platform-specific linking
-if(APPLE)
-    target_link_libraries(fcb
-        "-framework Security"
-        "-framework CoreFoundation"
-        "-framework SystemConfiguration"
-    )
-elseif(UNIX)
-    # Linux: link against OpenSSL if the Rust library was built with http feature
-    find_package(OpenSSL)
-    if(OPENSSL_FOUND)
-        target_link_libraries(fcb OpenSSL::SSL OpenSSL::Crypto)
-        message(STATUS "Linking with OpenSSL: ${OPENSSL_VERSION}")
-    endif()
+if(FCB_WITH_CURL)
+    find_package(CURL REQUIRED)
+    target_link_libraries(fcb_core_cpp PUBLIC CURL::libcurl)
+    target_compile_definitions(fcb_core_cpp PUBLIC FCB_WITH_CURL=1)
 endif()
 
-# Find nlohmann/json (required for comprehensive_example)
-find_package(nlohmann_json 3.2.0 QUIET)
-if(NOT nlohmann_json_FOUND)
-    message(WARNING "nlohmann/json not found - comprehensive_example requires it")
-    message(STATUS "Install with: brew install nlohmann-json")
-endif()
-
-# Example executables
-add_executable(fcb_example examples/example.cpp ${GENERATED_DIR}/lib.rs.h)
-target_link_libraries(fcb_example fcb)
-target_include_directories(fcb_example PRIVATE ${GENERATED_DIR})
-
-
-# Roundtrip test (encode CityJSONSeq -> FCB -> read back)
-add_executable(fcb_roundtrip_test examples/roundtrip_test.cpp ${GENERATED_DIR}/lib.rs.h)
-target_link_libraries(fcb_roundtrip_test fcb)
-target_include_directories(fcb_roundtrip_test PRIVATE ${GENERATED_DIR})
-
-# Targets requiring nlohmann/json
-if(nlohmann_json_FOUND)
-    # Local file operations example (no HTTP dependencies)
-    add_executable(local_fcb_example examples/local_fcb_example.cpp ${GENERATED_DIR}/lib.rs.h)
-    target_link_libraries(local_fcb_example fcb nlohmann_json::nlohmann_json)
-    target_include_directories(local_fcb_example PRIVATE ${GENERATED_DIR})
-
-    add_executable(fcb_comprehensive_example examples/comprehensive_example.cpp ${GENERATED_DIR}/lib.rs.h)
-    target_link_libraries(fcb_comprehensive_example fcb nlohmann_json::nlohmann_json)
-    target_include_directories(fcb_comprehensive_example PRIVATE ${GENERATED_DIR})
-
-    # Comprehensive roundtrip tests (tests/ directory)
-    add_executable(fcb_roundtrip_comprehensive tests/roundtrip_test.cpp ${GENERATED_DIR}/lib.rs.h)
-    target_link_libraries(fcb_roundtrip_comprehensive fcb nlohmann_json::nlohmann_json)
-    target_include_directories(fcb_roundtrip_comprehensive PRIVATE ${GENERATED_DIR})
-else()
-    message(STATUS "Skipping local_fcb_example, fcb_comprehensive_example, and fcb_roundtrip_comprehensive (nlohmann_json not found)")
-endif()
-
-# Install targets
-install(TARGETS fcb ARCHIVE DESTINATION lib)
-install(FILES ${GENERATED_DIR}/lib.rs.h DESTINATION include/fcb)
-
-# Documentation (Doxygen)
-find_package(Doxygen QUIET)
-if(DOXYGEN_FOUND)
-    add_custom_target(docs
-        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Doxyfile
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        COMMENT "Generating API documentation with Doxygen"
-        DEPENDS ${GENERATED_DIR}/lib.rs.h
-    )
-    message(STATUS "Doxygen found - 'make docs' available")
-else()
-    message(STATUS "Doxygen not found - install with 'brew install doxygen' for docs")
+if(FCB_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
