@@ -8,6 +8,7 @@
 #include <fcb/error.hpp>
 #include <fcb/feature.hpp>
 #include <fcb/header.hpp>
+#include <fcb/packed_rtree.hpp>
 #include <fcb/range_reader.hpp>
 
 namespace fcb {
@@ -73,6 +74,12 @@ public:
 
     /// Iterate every feature in stored (Hilbert) order.
     FeatureIterator select_all();
+
+    /// Iterate features whose 2D bounding box intersects `query`.
+    /// The R-tree is 2D only, so any z filtering is the caller's job.
+    /// Returns an empty iterator when nothing matches -- which is distinct
+    /// from a sequential scan, hence IterationMode.
+    FeatureIterator select_bbox(const BBox& query);
 
 private:
     FcbReader(std::shared_ptr<RangeReader> reader, HeaderView header);

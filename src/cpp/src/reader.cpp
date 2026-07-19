@@ -1,5 +1,7 @@
 #include <fcb/reader.hpp>
 
+#include <fcb/packed_rtree.hpp>
+
 #include "detail/checked.hpp"
 #include "detail/feature_access.hpp"
 
@@ -144,6 +146,26 @@ FcbReader FcbReader::open_file(const std::string& path) {
 FcbReader FcbReader::open(std::shared_ptr<RangeReader> reader) {
     HeaderView header = read_header(reader);
     return FcbReader(std::move(reader), std::move(header));
+}
+
+FeatureIterator FcbReader::select_bbox(const BBox& query) {
+    const auto& info = header_.info();
+    const auto& layout = header_.layout();
+
+    if (layout.rtree_size == 0 || info.features_count == 0) {
+        throw Error(ErrorCode::NoIndex, "file has no spatial index");
+    }
+
+    // Index traversal gets its own buffering window. The Rust HTTP reader
+    // coalesces node ranges up to 256 KB (http_reader/mod.rs:213); a window
+    // of that size gives the same effect through the decorator.
+    auto index_reader = std::make_shared<BufferedRangeReader>(reader_, 256 * 1024);
+    auto hits = rtree_search_bbox(*index_reader, layout.rtree_begin,
+                                  info.features_count, info.index_node_size, query);
+
+    auto feature_reader = std::make_shared<BufferedRangeReader>(reader_, 1048576);
+    return FeatureIterator(std::move(feature_reader), header_,
+                           IterationMode::OffsetList, std::move(hits));
 }
 
 FeatureIterator FcbReader::select_all() {
