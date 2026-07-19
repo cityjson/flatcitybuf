@@ -130,6 +130,17 @@ Per-column blob: `[ num_all_nodes × Entry<K> ][ payload section ]` (`static_btr
 
 `StringKey20` is defined but **never produced by the writer**.
 
+### Attribute schema resolution — PER OBJECT, not per file
+
+**Corrected during execution of Task 7a.** Attributes must be decoded against the schema of the `CityObject` that owns them:
+
+- `CityObject.columns` overrides `Header.columns` whenever it is set (`src/fbs/feature.fbs`, and the comment there says so explicitly).
+- This is the normal case, not an edge case: in `examples/data/delft.fcb`, **all 1115 objects that carry attributes declare their own columns**, and the header's 44 columns are never used for decoding.
+- Objects within one feature differ: the `Building` parent carries no attributes while its `BuildingPart` child carries them all. Code must walk all objects rather than assuming object 0.
+- Getting this wrong does **not** fail loudly. Attribute records are not self-delimiting — each value's width comes from its column's type — so a wrong schema desynchronises the remainder of the blob and yields plausible-looking garbage. It surfaced as a nonsense column index (28777, which is ASCII `"ip"` from the middle of a string value).
+
+Every task that decodes attributes (7a, 10's post-filter, 12's conformance) must resolve the schema this way.
+
 ### Known divergences from the Rust reader (deliberate)
 
 These are cases where Rust's reader disagrees with Rust's own writer, or where a sentinel is arguably wrong. Each is a decision, not an oversight — a future implementer must not "fix" C++ to match Rust without reading this.
