@@ -51,11 +51,9 @@ struct AttrValue {
 /// an out-of-range ColumnType (whose width is unknown, so the rest of the
 /// blob cannot be parsed).
 ///
-/// Byte, UByte and Binary ARE decoded here even though the Rust reader hits
-/// `unreachable!()` on them (deserializer.rs:372). That is a bug in the
-/// reader rather than a wire-format rule: the writer emits these types and
-/// their widths are unambiguous, so refusing them would mean this reader
-/// cannot read every file its own reference writer produces.
+/// Byte, UByte and Binary are decoded here. The Rust reader used to hit
+/// `unreachable!()` on them despite the writer emitting them; that has been
+/// fixed upstream, so both implementations handle them.
 std::vector<std::pair<std::string, AttrValue>> decode_attributes(
     bytes_view blob, const std::vector<ColumnInfo>& schema);
 

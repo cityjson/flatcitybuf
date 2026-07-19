@@ -212,12 +212,10 @@ std::vector<SearchResultItem> find_exact(const Tree& t, const KeyValue& key) {
 
             // Separator entries with no right sibling carry K::max_value() as
             // a sentinel, whose offset ALREADY points at the last child group.
-            // Adding node_size then walks off the end of the level. The
-            // reference does exactly that and panics (or underflows in the
-            // streaming path) for any query whose key equals the type maximum
-            // -- Eq(true) on a bool column is enough to trigger it. Clamping
-            // back to `offset` is a no-op for ordinary keys and turns the
-            // crash into the correct answer.
+            // Adding node_size would walk off the end of the level for any
+            // query whose key equals the type maximum -- Eq(true) on a bool
+            // column is enough. Clamping back to `offset` is a no-op for
+            // ordinary keys. The same fix has been applied upstream.
             const std::uint64_t child_level = level - 1;
             if (child >= t.levels[child_level].end) {
                 child = items[hit.index < items.size() ? hit.index : items.size() - 1].offset;
@@ -285,11 +283,10 @@ std::vector<SearchResultItem> scan_range(const Tree& t, const KeyValue& lower,
     //
     // find_partition descends LEFT on an exact hit, so when `upper` is itself
     // a separator key its matching leaf entry sits at exactly
-    // upper_idx + node_size -- one past the reference's scan end, and is
-    // silently dropped. The reference's own test enshrines the bug: it builds
-    // keys 0..18, comments "expects to find exactly 19 items", then asserts 18
-    // (stree.rs:1915-2032). Widening is safe because the filter below rejects
-    // out-of-range keys; it costs at most one extra node read.
+    // upper_idx + node_size -- one past the un-widened scan end, and was
+    // silently dropped. Widening is safe because the filter below rejects
+    // out-of-range keys; it costs at most one extra node read. The same fix
+    // has been applied upstream.
     const std::uint64_t end =
         std::min<std::uint64_t>(upper_idx + 2 * t.node_size, t.leaf_end());
 

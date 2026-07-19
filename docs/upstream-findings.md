@@ -4,9 +4,12 @@ Five defects in `fcb_core` surfaced during the native C++ port. Each is
 reproducible, each caused a deliberate divergence in the C++ reader, and none
 is caught by the existing Rust test suite.
 
-They are written up here rather than filed directly — **filing them as GitHub
-issues is a maintainer decision**, since they are public and some are
-arguably behaviour changes rather than bugs.
+**Status: 2-5 are now FIXED in this branch** (see the `fix(rust)` commit);
+each has a regression test. #1 is not fixed — it changes the written layout
+and needs a maintainer decision. #6 turned out to be real and is fixed with
+#4/#5.
+
+Filing these as public GitHub issues remains a maintainer call.
 
 ---
 
@@ -35,7 +38,7 @@ alignment) and only `check_alignment` is disabled; all other verification runs.
 
 ---
 
-## 2. `Byte` attribute index: writer stores `u8`, reader decodes `i8`
+## 2. `Byte` attribute index: writer stores `u8`, reader decodes `i8` — FIXED
 
 **Where:** `writer/attribute.rs:209`, `writer/attr_index.rs:240` vs
 `reader/attr_query.rs:118`.
@@ -49,7 +52,7 @@ and disagrees with the Rust reader for values above 127.
 
 ---
 
-## 3. `Byte`/`UByte`/`Binary` attributes cannot be read back at all
+## 3. `Byte`/`UByte`/`Binary` attributes cannot be read back at all — FIXED
 
 **Where:** `reader/deserializer.rs:372` — `unreachable!()`.
 
@@ -61,7 +64,7 @@ containing such an attribute is unreadable by the implementation that wrote it.
 
 ---
 
-## 4. `find_range` silently drops its upper boundary item
+## 4. `find_range` silently drops its upper boundary item — FIXED
 
 **Where:** `static_btree/stree.rs:954`.
 
@@ -73,18 +76,22 @@ end — and is dropped.
 This affects every `Le(k)` and range query where `k` is a separator: roughly
 1-in-`branching_factor` of unique keys.
 
-**The existing test encodes the bug.** `test_range_search`
-(`stree.rs:1915-2032`) builds keys 0..18, comments *"expects to find exactly 19
-items"*, then asserts `len() == 18`. Later cases in the same test hedge with
-"we might get different counts … at least 5/3" and never assert the boundary
-keys.
+**Two existing tests encoded the bug**, each contradicting its own comment:
+
+- `test_range_search` builds keys 0..18, comments *"expects to find exactly 19
+  items"*, then asserts `len() == 18`.
+- `test_memory_index_with_complex_data` comments *"1(x2), 2, 3"* and asserts
+  `3`; and comments *"17, 18"* and asserts `1`.
+
+Both are now corrected to match their comments, and two regression tests were
+added.
 
 **C++ divergence:** widens the scan by one node. Safe because the leaf filter
 already rejects out-of-range keys; costs at most one extra node read.
 
 ---
 
-## 5. `Gt`/`Lt`/`Ne` can drop genuine matches
+## 5. `Gt`/`Lt`/`Ne` can drop genuine matches — NOT FIXED upstream
 
 **Where:** `static_btree/query/stream.rs:161-191`.
 
@@ -97,15 +104,17 @@ A feature holding both `k` and `k' > k` is returned by the range scan (via
 `k'`) and also by `find_exact(k)` (via `k`), so the subtraction deletes it. It
 is a false negative for a feature that genuinely matches.
 
-**C++ divergence:** evaluates strict-or-inclusive bounds at the leaf instead of
-subtracting. One traversal, no subtraction, no false negatives.
+**C++ divergence (still live):** evaluates strict-or-inclusive bounds at the
+leaf instead of subtracting. One traversal, no subtraction, no false negatives.
+
+Not fixed upstream: it is a structural change to the query lowering rather
+than a localised correction, and the C++ reader demonstrates the alternative.
 
 ---
 
-## 6. Suspected: `find_exact` on a maximum-valued key walks off the level
+## 6. `find_exact` on a maximum-valued key walks off the level — FIXED
 
-**Status: derived by inspection, not yet reproduced.** Worth a small Rust test
-before filing.
+**Confirmed and fixed**, with a regression test (`test_find_exact_on_max_valued_key`).
 
 Separator entries with no right sibling carry `K::max_value()` as a sentinel
 whose offset already points at the last child group. `find_exact`'s
