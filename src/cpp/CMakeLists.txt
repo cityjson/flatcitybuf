@@ -15,6 +15,7 @@ add_library(fcb_core_cpp STATIC
     src/layout.cpp
     src/range_reader.cpp
     src/header.cpp
+    src/reader.cpp
 )
 
 target_include_directories(fcb_core_cpp PUBLIC
