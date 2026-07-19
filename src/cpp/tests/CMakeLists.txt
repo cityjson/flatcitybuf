@@ -5,6 +5,7 @@ add_executable(fcb_tests
     test_error.cpp
     test_generated_schema.cpp
     test_layout.cpp
+    test_range_reader.cpp
 )
 target_link_libraries(fcb_tests PRIVATE fcb_core_cpp doctest::doctest)
 target_include_directories(fcb_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
