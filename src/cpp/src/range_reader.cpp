@@ -50,7 +50,21 @@ BufferedRangeReader::BufferedRangeReader(std::shared_ptr<RangeReader> inner,
 
 std::uint64_t BufferedRangeReader::total_size() { return inner_->total_size(); }
 
+std::uint64_t BufferedRangeReader::clamped_fetch(std::uint64_t offset,
+                                                 std::uint64_t length) {
+    // Over-fetch to min_req_size, but never past the end of the resource --
+    // otherwise a small valid request near UINT64_MAX becomes an
+    // overflowing one.
+    const std::uint64_t want = std::max<std::uint64_t>(length, min_req_size_);
+    const std::uint64_t total = inner_->total_size();
+    if (offset >= total) return length;
+    return std::min<std::uint64_t>(want, total - offset);
+}
+
 bool BufferedRangeReader::covers(std::uint64_t offset, std::uint64_t length) const {
+    // Validate the request unconditionally: returning early on an empty
+    // cache would let an overflowing range through to the transport.
+    (void)detail::range_end(offset, length);
     if (buf_.empty() || offset < buf_offset_) return false;
     // Throws rather than wrapping; both ends derive from file-supplied values.
     return detail::range_end(offset, length) <=
@@ -70,8 +84,7 @@ std::vector<std::uint8_t> BufferedRangeReader::read(std::uint64_t offset,
     if (length == 0) return {};  // contract: never contact the transport
 
     if (!covers(offset, length)) {
-        const std::uint64_t fetch = std::max<std::uint64_t>(length, min_req_size_);
-        buf_ = inner_->read(offset, fetch);
+        buf_ = inner_->read(offset, clamped_fetch(offset, length));
         buf_offset_ = offset;
     }
 
@@ -102,7 +115,7 @@ void BufferedRangeReader::read_batch(std::vector<RangeRequest>& requests) {
             r.data = slice_from_buffer(r.offset, r.length);
         } else {
             misses.push_back(Miss{i, r.offset, r.length,
-                                  std::max<std::uint64_t>(r.length, min_req_size_)});
+                                  clamped_fetch(r.offset, r.length)});
         }
     }
     if (misses.empty()) return;

@@ -1,5 +1,7 @@
 #include <fcb/key.hpp>
 
+#include <fcb/generated/header_generated.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -321,8 +323,8 @@ KeyValue key_max(KeyKind kind) {
     throw Error(ErrorCode::UnsupportedColumnType, "unknown key kind");
 }
 
-KeyKind key_kind_for_column(::ColumnType type) {
-    switch (type) {
+KeyKind key_kind_for_column(std::uint8_t column_type) {
+    switch (static_cast<::ColumnType>(column_type)) {
         // Byte -> UInt8, deliberately. The writer stores Byte as u8
         // (writer/attribute.rs:209) and builds MemoryIndex<u8>
         // (writer/attr_index.rs:240); only the Rust READER decodes i8

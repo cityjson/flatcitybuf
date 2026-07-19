@@ -133,9 +133,18 @@ std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader,
         if (level >= level_bounds.size()) {
             throw Error(ErrorCode::NoIndex, "rtree level out of range");
         }
-        const bool is_leaf = node_index >= num_nodes - num_items;
-        const std::uint64_t end =
-            std::min<std::uint64_t>(node_index + node_size, level_bounds[level].end);
+        // Child indices come from the file and are hostile. Prove the node
+        // lies within the level we believe we are on BEFORE using it, and
+        // derive leaf-ness from the trusted level rather than from the
+        // index itself.
+        if (node_index < level_bounds[level].start ||
+            node_index >= level_bounds[level].end) {
+            throw Error(ErrorCode::NoIndex, "rtree node index outside its level");
+        }
+        const bool is_leaf = (level == 0);
+        const std::uint64_t end = std::min<std::uint64_t>(
+            detail::checked_add(node_index, node_size, "rtree node end"),
+            level_bounds[level].end);
         if (end <= node_index) continue;
 
         const std::uint64_t length = end - node_index;
@@ -160,10 +169,13 @@ std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader,
             if (is_leaf) {
                 results.push_back(SearchResultItem{item.offset, pos - leaf_nodes_offset});
             } else {
-                if (level == 0) {
-                    throw Error(ErrorCode::NoIndex, "internal node at leaf level");
+                const std::size_t child_level = level - 1;
+                if (item.offset < level_bounds[child_level].start ||
+                    item.offset >= level_bounds[child_level].end) {
+                    throw Error(ErrorCode::NoIndex,
+                                "rtree child index outside the child level");
                 }
-                queue.emplace_back(item.offset, level - 1);
+                queue.emplace_back(item.offset, child_level);
             }
         }
     }

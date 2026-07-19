@@ -29,6 +29,7 @@ struct AttrValue {
         Double,  // Float or Double
         String,  // String or DateTime
         Json,    // Json column, still as its raw text
+        Binary,  // Binary column; `s` holds the raw bytes
     };
 
     Type type = Type::Null;
@@ -46,10 +47,15 @@ struct AttrValue {
 /// column's type. Fixed-width types are packed little-endian; String,
 /// DateTime and Json are a `u32` little-endian byte length then UTF-8.
 ///
-/// Throws on a column index absent from the schema, on a truncated record,
-/// or on Byte/UByte/Binary -- which the writer emits but the Rust reader
-/// rejects at deserializer.rs:372 (`unreachable!()`). Mirroring the
-/// rejection is honest: those branches have never been exercised.
+/// Throws on a column index absent from the schema, a truncated record, or
+/// an out-of-range ColumnType (whose width is unknown, so the rest of the
+/// blob cannot be parsed).
+///
+/// Byte, UByte and Binary ARE decoded here even though the Rust reader hits
+/// `unreachable!()` on them (deserializer.rs:372). That is a bug in the
+/// reader rather than a wire-format rule: the writer emits these types and
+/// their widths are unambiguous, so refusing them would mean this reader
+/// cannot read every file its own reference writer produces.
 std::vector<std::pair<std::string, AttrValue>> decode_attributes(
     bytes_view blob, const std::vector<ColumnInfo>& schema);
 

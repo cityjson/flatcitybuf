@@ -251,10 +251,10 @@ nlohmann::json to_cityjson_feature(const Feature& feature, const HeaderView& hea
         if (feature.object_has_attributes(i)) {
             auto own = feature.object_columns(i);
             auto blob = feature.object_attributes(i);
-            co["attributes"] = blob.empty()
-                                   ? nlohmann::json::object()
-                                   : attributes_to_json(
-                                         blob, own.empty() ? header.info().columns : own);
+            const auto& schema =
+                feature.object_has_columns(i) ? own : header.info().columns;
+            co["attributes"] = blob.empty() ? nlohmann::json::object()
+                                            : attributes_to_json(blob, schema);
         }
 
         std::array<double, 6> extent{};

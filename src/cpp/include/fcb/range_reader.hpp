@@ -105,6 +105,8 @@ private:
     /// Checked: an overflowing offset+length must not wrap into a false
     /// cache hit, which would then build invalid iterators when slicing.
     bool covers(std::uint64_t offset, std::uint64_t length) const;
+    /// Over-fetch size, clamped to the resource so it cannot overflow.
+    std::uint64_t clamped_fetch(std::uint64_t offset, std::uint64_t length);
     std::vector<std::uint8_t> slice_from_buffer(std::uint64_t offset,
                                                 std::uint64_t length) const;
 

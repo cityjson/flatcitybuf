@@ -76,6 +76,11 @@ bool Feature::object_extent(std::size_t i, std::array<double, 6>& out) const {
     return true;
 }
 
+bool Feature::object_has_columns(std::size_t i) const {
+    const auto* obj = object_at(raw(), i);
+    return obj != nullptr && obj->columns() != nullptr;
+}
+
 std::vector<ColumnInfo> Feature::object_columns(std::size_t i) const {
     std::vector<ColumnInfo> out;
     const auto* obj = object_at(raw(), i);
@@ -124,7 +129,22 @@ bool FeatureIterator::next() {
 
     std::uint64_t at = 0;
     if (mode_ == IterationMode::SequentialScan) {
-        if (produced_ >= features_count) {
+        // features_count == 0 means UNKNOWN (header.fbs), not empty. With a
+        // known count we stop after exactly that many; with an unknown count
+        // we run to EOF, as the reference does (reader/mod.rs:488-498).
+        const bool known = features_count > 0;
+        if (known && produced_ >= features_count) {
+            current_ = Feature();
+            // A known count that leaves bytes behind means the file claims
+            // fewer features than it carries.
+            if (cursor_ < total_size) {
+                throw Error(ErrorCode::IoError,
+                            "trailing bytes after " + std::to_string(features_count) +
+                                " features");
+            }
+            return false;
+        }
+        if (!known && cursor_ >= total_size) {
             current_ = Feature();
             return false;
         }
@@ -139,11 +159,22 @@ bool FeatureIterator::next() {
         ++hit_index_;
     }
 
+    // Validate the offset before touching the transport: a hostile leaf
+    // offset must not cause an out-of-resource request.
+    if (at >= total_size) {
+        throw Error(ErrorCode::IoError, "feature offset past end of resource");
+    }
+
     auto prefix = reader_->read(at, 4);
     if (prefix.size() < 4) {
         // Reaching EOF before features_count features is a TRUNCATED file,
         // not a clean end of iteration. Accepting it silently would let a
         // file cut in half read as a valid short file.
+        if (features_count == 0) {
+            // Unknown count: a short read at the end is the normal terminus.
+            current_ = Feature();
+            return false;
+        }
         throw Error(ErrorCode::IoError,
                     "truncated feature section: expected " +
                         std::to_string(features_count) + " features, got " +
@@ -328,7 +359,7 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
                         "column is not indexed: " + cond.field);
         }
 
-        const KeyKind kind = key_kind_for_column(static_cast<::ColumnType>(col->type));
+        const KeyKind kind = key_kind_for_column(col->type);
         if (needs_post_filter(kind)) any_post_filter = true;
 
         auto hits = stree_query(*index_reader, *idx, kind, cond.op, cond.value);
@@ -381,7 +412,7 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
                 if (c.name == cond.field) { col = &c; break; }
             }
             if (col == nullptr) { ok = false; break; }
-            const KeyKind kind = key_kind_for_column(static_cast<::ColumnType>(col->type));
+            const KeyKind kind = key_kind_for_column(col->type);
             if (!needs_post_filter(kind)) continue;
 
             // Existential over CityObjects: attributes may live on any of
@@ -391,7 +422,8 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
                 auto blob = f.object_attributes(i);
                 if (blob.empty()) continue;
                 auto own = f.object_columns(i);
-                const auto& schema = own.empty() ? header_.info().columns : own;
+                const auto& schema =
+                f.object_has_columns(i) ? own : header_.info().columns;
                 for (auto& [name, val] : decode_attributes(blob, schema)) {
                     if (name != cond.field) continue;
                     if (value_satisfies(val, cond.op, cond.value, kind)) matched = true;

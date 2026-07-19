@@ -172,6 +172,10 @@ nlohmann::json attributes_to_json(bytes_view blob, const std::vector<ColumnInfo>
             case AttrValue::Type::UInt: obj[name] = v.u; break;
             case AttrValue::Type::Double: obj[name] = v.d; break;
             case AttrValue::Type::String: obj[name] = v.s; break;
+            case AttrValue::Type::Binary:
+                // Raw bytes have no faithful JSON form; emit as a byte array.
+                obj[name] = std::vector<std::uint8_t>(v.s.begin(), v.s.end());
+                break;
             case AttrValue::Type::Json:
                 // Stored as text; re-parse so it nests as real JSON, which is
                 // what the Rust deserializer does (serde_json::from_str).

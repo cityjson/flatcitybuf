@@ -65,6 +65,11 @@ public:
     /// desynchronises the blob -- records are not self-delimiting -- so this
     /// must be consulted before decode_attributes(). Empty means "use the
     /// header's columns".
+    /// Whether CityObject `i` DECLARES its own column schema. FlatBuffers
+    /// presence is what selects the override, not vector non-emptiness: an
+    /// explicitly empty schema must not silently fall back to the header's.
+    bool object_has_columns(std::size_t i) const;
+
     std::vector<ColumnInfo> object_columns(std::size_t i) const;
 
     /// CityObject `i`'s id.

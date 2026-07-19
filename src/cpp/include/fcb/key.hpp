@@ -5,7 +5,6 @@
 #include <vector>
 
 #include <fcb/error.hpp>
-#include <fcb/generated/header_generated.h>
 #include <fcb/span.hpp>
 
 namespace fcb {
@@ -92,6 +91,10 @@ KeyValue key_max(KeyKind kind);
 
 /// Column type to key kind, following what the WRITER emits.
 /// Byte maps to UInt8, not Int8 -- see the Byte note in key.cpp.
-KeyKind key_kind_for_column(::ColumnType type);
+///
+/// Takes the raw ubyte rather than the generated ::ColumnType so that
+/// consumers of this header never see the generated FlatBuffers API.
+/// ColumnInfo::type carries exactly this value.
+KeyKind key_kind_for_column(std::uint8_t column_type);
 
 }  // namespace fcb

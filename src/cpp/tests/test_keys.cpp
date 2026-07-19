@@ -146,7 +146,11 @@ TEST_CASE("DateTime ordering handles negative seconds") {
 }
 
 TEST_CASE("column type maps to the key kind the WRITER produces") {
-    using CT = ::ColumnType;
+    // Raw ubyte values, matching header.fbs's ColumnType declaration order,
+    // so this test does not depend on the generated API either.
+    struct CT { enum : std::uint8_t { Byte=0,UByte=1,Bool=2,Short=3,UShort=4,Int=5,
+                UInt=6,Long=7,ULong=8,Float=9,Double=10,String=11,Json=12,
+                DateTime=13,Binary=14 }; };
     CHECK(key_kind_for_column(CT::String) == KeyKind::String50);
     CHECK(key_kind_for_column(CT::Json) == KeyKind::String100);
     CHECK(key_kind_for_column(CT::Binary) == KeyKind::String100);
