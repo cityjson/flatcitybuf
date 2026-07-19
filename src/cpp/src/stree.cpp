@@ -209,7 +209,20 @@ std::vector<SearchResultItem> find_exact(const Tree& t, const KeyValue& key) {
             } else {
                 child = items[hit.index].offset;
             }
-            queue.emplace_back(child, level - 1);
+
+            // Separator entries with no right sibling carry K::max_value() as
+            // a sentinel, whose offset ALREADY points at the last child group.
+            // Adding node_size then walks off the end of the level. The
+            // reference does exactly that and panics (or underflows in the
+            // streaming path) for any query whose key equals the type maximum
+            // -- Eq(true) on a bool column is enough to trigger it. Clamping
+            // back to `offset` is a no-op for ordinary keys and turns the
+            // crash into the correct answer.
+            const std::uint64_t child_level = level - 1;
+            if (child >= t.levels[child_level].end) {
+                child = items[hit.index < items.size() ? hit.index : items.size() - 1].offset;
+            }
+            queue.emplace_back(child, child_level);
             continue;
         }
 
@@ -246,18 +259,39 @@ std::uint64_t find_partition(const Tree& t, const KeyValue& key) {
     return node_index;
 }
 
-/// Mirrors Stree::find_range (stree.rs:923-991). INCLUSIVE on both ends.
-std::vector<SearchResultItem> find_range(const Tree& t, const KeyValue& lower,
-                                         const KeyValue& upper) {
-    if (compare_keys(lower, upper) > 0) return {};
-    if (compare_keys(lower, upper) == 0) return find_exact(t, lower);
+/// Leaf scan with independently strict-or-inclusive bounds.
+///
+/// This REPLACES the reference's "range minus exact" lowering for Gt/Lt/Ne
+/// (query/stream.rs:161-191), which is wrong under existential semantics: the
+/// subtraction removes FEATURE OFFSETS, but one feature can appear under
+/// several keys when its CityObjects carry different values of the indexed
+/// attribute. A feature holding both k and k' > k is returned by the range
+/// scan (via k') and also by find_exact(k) (via k), so subtracting deletes a
+/// genuine match. Filtering at the leaf by bound strictness cannot make that
+/// mistake, and costs one traversal instead of two.
+std::vector<SearchResultItem> scan_range(const Tree& t, const KeyValue& lower,
+                                         bool lower_strict, const KeyValue& upper,
+                                         bool upper_strict) {
+    const int lu = compare_keys(lower, upper);
+    if (lu > 0) return {};
+    if (lu == 0 && (lower_strict || upper_strict)) return {};
 
     const std::uint64_t lower_idx = find_partition(t, lower);
     const std::uint64_t upper_idx = find_partition(t, upper);
 
     const std::uint64_t start = std::max<std::uint64_t>(lower_idx, t.leaf_start());
+
+    // Widened by one extra node versus the reference's `upper_idx + node_size`.
+    //
+    // find_partition descends LEFT on an exact hit, so when `upper` is itself
+    // a separator key its matching leaf entry sits at exactly
+    // upper_idx + node_size -- one past the reference's scan end, and is
+    // silently dropped. The reference's own test enshrines the bug: it builds
+    // keys 0..18, comments "expects to find exactly 19 items", then asserts 18
+    // (stree.rs:1915-2032). Widening is safe because the filter below rejects
+    // out-of-range keys; it costs at most one extra node read.
     const std::uint64_t end =
-        std::min<std::uint64_t>(upper_idx + t.node_size, t.leaf_end());
+        std::min<std::uint64_t>(upper_idx + 2 * t.node_size, t.leaf_end());
 
     std::vector<SearchResultItem> out;
     std::uint64_t cur = start;
@@ -265,31 +299,18 @@ std::vector<SearchResultItem> find_range(const Tree& t, const KeyValue& lower,
         const std::uint64_t node_end = std::min<std::uint64_t>(cur + t.node_size, end);
         auto items = read_entries(t.reader, t.index_begin, t.kind, cur, node_end);
         for (std::size_t i = 0; i < items.size(); ++i) {
-            if (compare_keys(items[i].key, lower) >= 0 &&
-                compare_keys(items[i].key, upper) <= 0) {
-                emit_offset(items[i].offset, cur + i - t.leaf_start(), t.reader,
-                            t.payload_begin, t.payload_size, out);
+            const int cl = compare_keys(items[i].key, lower);
+            const int cu = compare_keys(items[i].key, upper);
+            if (lower_strict ? cl > 0 : cl >= 0) {
+                if (upper_strict ? cu < 0 : cu <= 0) {
+                    emit_offset(items[i].offset, cur + i - t.leaf_start(), t.reader,
+                                t.payload_begin, t.payload_size, out);
+                }
             }
         }
         cur = node_end;
     }
     return out;
-}
-
-void subtract(std::vector<SearchResultItem>& from,
-              const std::vector<SearchResultItem>& remove) {
-    if (remove.empty()) return;
-    std::vector<std::uint64_t> drop;
-    drop.reserve(remove.size());
-    for (const auto& r : remove) drop.push_back(r.offset);
-    std::sort(drop.begin(), drop.end());
-
-    from.erase(std::remove_if(from.begin(), from.end(),
-                              [&](const SearchResultItem& s) {
-                                  return std::binary_search(drop.begin(), drop.end(),
-                                                            s.offset);
-                              }),
-               from.end());
 }
 
 }  // namespace
@@ -350,29 +371,42 @@ std::vector<SearchResultItem> stree_query(RangeReader& reader,
            static_cast<std::uint64_t>(index.branching_factor) - 1,
            generate_level_bounds(index.num_unique_items, index.branching_factor)};
 
-    // Operator lowering, mirroring query/stream.rs:161-191. find_range is
-    // inclusive at both ends, so the strict operators subtract the equal set.
+    // Fixed-width string keys are truncated, so ordering AFTER the truncation
+    // point is invisible to the index: two values sharing a 50-byte prefix
+    // compare equal here but may order either way in full. Every string
+    // comparison is therefore widened to include the equal-prefix band, and
+    // select_attr's post-filter applies the real operator to the untruncated
+    // value. Ne in particular must be a FULL scan -- excluding the prefix
+    // matches would drop features whose value merely shares a prefix.
+    const bool is_string = (kind == KeyKind::String20 || kind == KeyKind::String50 ||
+                            kind == KeyKind::String100);
+
     switch (op) {
         case Operator::Eq:
+            // Equal-prefix collisions are candidates, not answers; the
+            // post-filter narrows them.
             return find_exact(t, value);
         case Operator::Ge:
-            return find_range(t, value, key_max(kind));
+            return scan_range(t, value, false, key_max(kind), false);
         case Operator::Le:
-            return find_range(t, key_min(kind), value);
-        case Operator::Gt: {
-            auto r = find_range(t, value, key_max(kind));
-            subtract(r, find_exact(t, value));
-            return r;
-        }
-        case Operator::Lt: {
-            auto r = find_range(t, key_min(kind), value);
-            subtract(r, find_exact(t, value));
-            return r;
-        }
+            return scan_range(t, key_min(kind), false, value, false);
+        case Operator::Gt:
+            // Strict, except for strings where equal-prefix keys must survive
+            // to be judged on their full value.
+            return scan_range(t, value, !is_string, key_max(kind), false);
+        case Operator::Lt:
+            return scan_range(t, key_min(kind), false, value, !is_string);
         case Operator::Ne: {
-            auto r = find_range(t, key_min(kind), key_max(kind));
-            subtract(r, find_exact(t, value));
-            return r;
+            if (is_string) {
+                return scan_range(t, key_min(kind), false, key_max(kind), false);
+            }
+            // Two half-open scans rather than a full scan minus the equal set:
+            // subtraction on feature offsets is wrong when one feature carries
+            // several values of the attribute.
+            auto lo = scan_range(t, key_min(kind), false, value, true);
+            auto hi = scan_range(t, value, true, key_max(kind), false);
+            lo.insert(lo.end(), hi.begin(), hi.end());
+            return lo;
         }
     }
     throw Error(ErrorCode::QueryExecutionError, "unknown operator");

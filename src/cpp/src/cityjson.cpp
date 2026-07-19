@@ -12,6 +12,7 @@
 #include <fcb/generated/header_generated.h>
 
 #include <array>
+#include <cstring>
 #include <string>
 
 namespace fcb {
@@ -100,6 +101,34 @@ nlohmann::json decode_semantics_values(const ::Geometry* g, UIntView values) {
         per_solid.push_back(std::move(grp));
     }
     return per_solid;
+}
+
+nlohmann::json geometry_instance_to_json(const ::GeometryInstance* gi) {
+    nlohmann::json out = nlohmann::json::object();
+    out["type"] = "GeometryInstance";
+    out["template"] = gi->template_();
+
+    // The boundaries array holds exactly one vertex index: CityGML's
+    // "referencePoint" for the instance.
+    auto b = nlohmann::json::array();
+    if (gi->boundaries() != nullptr) {
+        for (std::uint32_t v : *gi->boundaries()) b.push_back(v);
+    }
+    out["boundaries"] = std::move(b);
+
+    // 16 doubles in row-major order. Read via memcpy: like Transform in the
+    // header, this struct can sit at a misaligned internal offset.
+    if (const auto* m = gi->transformation()) {
+        auto mat = nlohmann::json::array();
+        for (std::size_t i = 0; i < 16; ++i) {
+            double d;
+            std::memcpy(&d, reinterpret_cast<const std::uint8_t*>(m) + i * sizeof(double),
+                        sizeof(double));
+            mat.push_back(d);
+        }
+        out["transformationMatrix"] = std::move(mat);
+    }
+    return out;
 }
 
 nlohmann::json geometry_to_json(const ::Geometry* g,
@@ -215,22 +244,41 @@ nlohmann::json to_cityjson_feature(const Feature& feature, const HeaderView& hea
                          : city_object_type_name(static_cast<std::uint8_t>(obj->type()));
 
         // Per-object schema when declared, header schema otherwise.
-        // Always present, even when empty: the reference emits `{}` rather
-        // than omitting the key, and consumers compare against that.
-        auto own = feature.object_columns(i);
-        auto blob = feature.object_attributes(i);
-        co["attributes"] = blob.empty()
-                               ? nlohmann::json::object()
-                               : attributes_to_json(
-                                     blob, own.empty() ? header.info().columns : own);
-
-        if (obj->geometry() != nullptr && obj->geometry()->size() > 0) {
-            auto geoms = nlohmann::json::array();
-            for (const auto* g : *obj->geometry()) {
-                if (g != nullptr) geoms.push_back(geometry_to_json(g, header.info().semantic_columns));
-            }
-            co["geometry"] = std::move(geoms);
+        // Emitted iff the object DECLARES an attributes vector -- a
+        // present-but-empty one becomes `{}`, an absent one is omitted
+        // entirely. The reference distinguishes these and consumers compare
+        // against it.
+        if (feature.object_has_attributes(i)) {
+            auto own = feature.object_columns(i);
+            auto blob = feature.object_attributes(i);
+            co["attributes"] = blob.empty()
+                                   ? nlohmann::json::object()
+                                   : attributes_to_json(
+                                         blob, own.empty() ? header.info().columns : own);
         }
+
+        std::array<double, 6> extent{};
+        if (feature.object_extent(i, extent)) {
+            co["geographicalExtent"] = extent;
+        }
+
+        auto geoms = nlohmann::json::array();
+        if (obj->geometry() != nullptr) {
+            for (const auto* g : *obj->geometry()) {
+                if (g != nullptr) {
+                    geoms.push_back(geometry_to_json(g, header.info().semantic_columns));
+                }
+            }
+        }
+        // Geometry templates: the shape lives once in the header and each
+        // instance references it by index plus a 4x4 placement matrix and a
+        // single reference-point vertex.
+        if (obj->geometry_instances() != nullptr) {
+            for (const auto* gi : *obj->geometry_instances()) {
+                if (gi != nullptr) geoms.push_back(geometry_instance_to_json(gi));
+            }
+        }
+        if (!geoms.empty()) co["geometry"] = std::move(geoms);
 
         if (obj->children() != nullptr && obj->children()->size() > 0) {
             auto kids = nlohmann::json::array();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -47,6 +48,15 @@ public:
     /// Objects commonly differ: in the 3DBAG data a Building parent carries
     /// no attributes while its BuildingPart child carries them all.
     bytes_view object_attributes(std::size_t i) const;
+
+    /// Whether CityObject `i` declares an attributes vector at all.
+    /// Distinct from `object_attributes(i).empty()`: a present-but-empty
+    /// vector is emitted as `"attributes": {}`, an absent one is omitted.
+    bool object_has_attributes(std::size_t i) const;
+
+    /// CityObject `i`'s own bounding box, if it declares one.
+    /// Returns false when absent.
+    bool object_extent(std::size_t i, std::array<double, 6>& out) const;
 
     /// CityObject `i`'s own column schema, if it declares one.
     ///

@@ -55,6 +55,27 @@ bytes_view Feature::object_attributes(std::size_t i) const {
     return bytes_view(a->data(), a->size());
 }
 
+bool Feature::object_has_attributes(std::size_t i) const {
+    const auto* obj = object_at(raw(), i);
+    return obj != nullptr && obj->attributes() != nullptr;
+}
+
+bool Feature::object_extent(std::size_t i, std::array<double, 6>& out) const {
+    const auto* obj = object_at(raw(), i);
+    if (obj == nullptr || obj->geographical_extent() == nullptr) return false;
+    const auto* e = obj->geographical_extent();
+    // memcpy-based reads: these structs can sit at misaligned internal
+    // offsets, same as Transform in the header. See header.cpp.
+    auto rd = [](const void* base, std::size_t off) {
+        double d;
+        std::memcpy(&d, static_cast<const std::uint8_t*>(base) + off, sizeof(double));
+        return d;
+    };
+    out = {rd(e, 0),  rd(e, 8),  rd(e, 16),
+           rd(e, 24), rd(e, 32), rd(e, 40)};
+    return true;
+}
+
 std::vector<ColumnInfo> Feature::object_columns(std::size_t i) const {
     std::vector<ColumnInfo> out;
     const auto* obj = object_at(raw(), i);
