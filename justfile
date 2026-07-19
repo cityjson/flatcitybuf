@@ -49,6 +49,17 @@ check-cpp:
 gen-cpp-fbs:
     ./scripts/gen_cpp_flatbuffers.sh
 
+# Regenerate the C++ conformance corpus (needs the Rust CLI)
+gen-conformance:
+    ./scripts/gen_conformance.sh
+
+# Build and test the native C++ core with the HTTP adapter
+check-cpp-http:
+    cd src/cpp && cmake -B build-curl -S . -DFCB_WITH_CURL=ON -DFCB_BUILD_TESTS=ON
+    cd src/cpp && cmake --build build-curl
+    cd src/cpp && ./tests/run_http_tests.sh python3 tests/range_server.py \
+        ../../examples/data ./build-curl/tests/fcb_tests
+
 # Run all generation scripts in scripts directory
 gen-all:
     @echo "Running all shell scripts in scripts..."
@@ -59,7 +70,7 @@ gen-all:
     @echo "All scripts executed."
 
 # Build entire workspace (Rust + C++ + Python)
-build-all: gen-all build build-cpp build-py
+build-all: gen-all build check-cpp build-py
 
 # ============================================================================
 # Rust Commands
@@ -130,17 +141,9 @@ devcon-build:
 # C++ Commands
 # ============================================================================
 
-# Build C++ bindings
-build-cpp:
-    cd src/cpp && cmake -B build -S . && cmake --build build
-
 # Clean and rebuild C++ bindings
 clean-cpp:
-    cd src/cpp && rm -rf build
-
-# Run C++ roundtrip tests
-test-cpp:
-    cd src/cpp/build && ./fcb_roundtrip_comprehensive ../../rust/fcb_core/tests/data
+    cd src/cpp && rm -rf build build-native build-curl build-asan
 
 # ============================================================================
 # Python Commands

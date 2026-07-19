@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(FCB_WITH_JSON   "Build the CityJSON conversion component" ON)
 option(FCB_WITH_CURL   "Build the libcurl HTTP range reader"     OFF)
 option(FCB_BUILD_TESTS "Build tests"                             ON)
+option(FCB_BUILD_EXAMPLES "Build example programs"               ON)
 
 find_package(flatbuffers CONFIG REQUIRED)
 
@@ -50,3 +51,42 @@ if(FCB_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+if(FCB_BUILD_EXAMPLES)
+    add_executable(fcb_read_local examples/read_local.cpp)
+    target_link_libraries(fcb_read_local PRIVATE fcb_core_cpp)
+
+    add_executable(fcb_read_http examples/read_http.cpp)
+    target_link_libraries(fcb_read_http PRIVATE fcb_core_cpp)
+endif()
+
+# ------------------------------------------------------------- install ---
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+add_library(flatcitybuf::flatcitybuf ALIAS fcb_core_cpp)
+set_target_properties(fcb_core_cpp PROPERTIES EXPORT_NAME flatcitybuf)
+
+install(TARGETS fcb_core_cpp EXPORT flatcitybufTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+# Public headers, including generated/, which already lives under include/
+# so the same include path works in-tree and installed.
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(EXPORT flatcitybufTargets
+        NAMESPACE flatcitybuf::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flatcitybuf)
+
+configure_package_config_file(
+    cmake/flatcitybufConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/flatcitybufConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flatcitybuf)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/flatcitybufConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/flatcitybufConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/flatcitybufConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flatcitybuf)

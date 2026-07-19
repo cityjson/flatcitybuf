@@ -93,23 +93,29 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux
-            artifact_name: fcb_cpp-linux-x86_64
+            artifact_name: flatcitybuf-linux-x86_64
             cmake_generator: Unix Makefiles
+          - os: ubuntu-latest
+            platform: linux
+            artifact_name: flatcitybuf-linux-x86_64-musl
+            cmake_generator: Unix Makefiles
+            rust_target: x86_64-unknown-linux-musl
+            musl: true
           - os: ubuntu-24.04-arm
             platform: linux
-            artifact_name: fcb_cpp-linux-aarch64
+            artifact_name: flatcitybuf-linux-aarch64
             cmake_generator: Unix Makefiles
           - os: macos-15-large
             platform: macos
-            artifact_name: fcb_cpp-macos-x86_64
+            artifact_name: flatcitybuf-macos-x86_64
             cmake_generator: Unix Makefiles
           - os: macos-latest
             platform: macos
-            artifact_name: fcb_cpp-macos-aarch64
+            artifact_name: flatcitybuf-macos-aarch64
             cmake_generator: Unix Makefiles
           - os: windows-latest
             platform: windows
-            artifact_name: fcb_cpp-windows-x86_64
+            artifact_name: flatcitybuf-windows-x86_64
             cmake_generator: Visual Studio 17 2022
 
     steps:
@@ -118,10 +124,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install musl tools
+        if: matrix.musl == true
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
+          targets: ${{ matrix.rust_target || '' }}
 
       - name: Install CMake
         uses: jwlawson/actions-setup-cmake@v2
@@ -144,19 +155,15 @@ jobs:
           echo "CMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
         shell: bash
 
-      - name: Install cxxbridge
-        run: cargo install cxxbridge-cmd
-
-      - name: Build Rust static library
-        run: cargo build --release -p fcb_cpp --no-default-features
-        working-directory: ./src/rust
-
       - name: Configure CMake
         shell: bash
         run: |
           CMAKE_ARGS="-B build -G \"${{ matrix.cmake_generator }}\" -DCMAKE_BUILD_TYPE=Release"
           if [[ -n "${CMAKE_TOOLCHAIN_FILE}" ]]; then
             CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
+          fi
+          if [[ "${{ matrix.musl }}" == "true" ]]; then
+            CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_C_COMPILER=musl-gcc -DCMAKE_EXE_LINKER_FLAGS='-static' -DCMAKE_SHARED_LINKER_FLAGS='-static'"
           fi
           eval cmake ${CMAKE_ARGS}
         working-directory: ./src/cpp
@@ -179,14 +186,14 @@ jobs:
 
           # Copy static library (Windows .lib renamed to .a for consistency)
           if [[ "${{ runner.os }}" = "Windows" ]]; then
-            cp src/rust/target/release/fcb_cpp.lib release-artifacts/libfcb_cpp.a
+            cp src/cpp/build/fcb_core_cpp.lib release-artifacts/libfcb_core_cpp.a
+          elif [[ -n "${{ matrix.rust_target }}" ]]; then
+            cp src/cpp/build/libfcb_core_cpp.a release-artifacts/
           else
-            cp src/rust/target/release/libfcb_cpp.a release-artifacts/
+            cp src/cpp/build/libfcb_core_cpp.a release-artifacts/
           fi
 
           # Copy CXX bridge header and source
-          cp src/cpp/build/generated/lib.rs.h release-artifacts/
-          cp src/cpp/build/generated/lib.rs.cc release-artifacts/
 
           # Copy include directory
           cp -r src/cpp/include/. release-artifacts/
@@ -233,7 +240,7 @@ jobs:
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fcb_cpp-docs
+          name: flatcitybuf-docs
           path: src/cpp/docs/html
           retention-days: 90
 

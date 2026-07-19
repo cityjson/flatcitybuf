@@ -1,0 +1,177 @@
+# Making `fcb_cpp` Self-Contained (No System OpenSSL Required)
+
+## Background
+
+The vcpkg curated registry rejects prebuilt ports that install `.a` libraries **and** depend on
+other vcpkg ports (like `openssl`) at link time. The `fcb_cpp` static library currently requires
+`libssl` on Linux, blocking acceptance.
+
+**Good news:** Your Rust code already uses `reqwest` with `rustls-tls` (pure-Rust TLS — no
+OpenSSL). The system OpenSSL requirement is almost certainly coming from a **transitive dependency**
+being pulled into the `fcb_cpp` static build even though it isn't needed.
+
+---
+
+## Step 1 — Identify the actual culprit
+
+Run this from `src/rust/` to see exactly which crate is pulling in `openssl-sys`:
+
+```bash
+cargo tree -p fcb_cpp --target x86_64-unknown-linux-gnu | grep -E "openssl|native-tls|hyper-tls"
+```
+
+Common suspects given your workspace:
+
+| Crate | Why it might pull OpenSSL |
+|---|---|
+| `http-range-client` | May default to `native-tls` in some feature combos |
+| `reqwest` | Safe — you use `rustls-tls` — but check nothing overrides it |
+| `proj` | Binds to the PROJ C library, which links OpenSSL |
+| `bson` / `serde_cbor` | Unlikely but possible via `ring` or `native-tls` |
+
+---
+
+## Step 2 — Fix: Audit `fcb_core`'s feature flags for `fcb_cpp`
+
+`fcb_cpp/Cargo.toml` depends on `fcb_core` without specifying features:
+
+```toml
+# src/rust/fcb_cpp/Cargo.toml  (current)
+[dependencies]
+fcb_core = { workspace = true }
+```
+
+`fcb_core` has a `default = ["http"]` feature, which activates `http-range-client` with
+`reqwest-async`. Even if you don't use HTTP in the C++ bindings, you're compiling it in.
+
+**Fix — disable default features for `fcb_cpp`:**
+
+```toml
+# src/rust/fcb_cpp/Cargo.toml  (after)
+[dependencies]
+fcb_core = { workspace = true, default-features = false }
+```
+
+This removes the `http` feature (and therefore the entire `reqwest` + `http-range-client` chain)
+from the static library. The C++ bindings only do local file I/O — they don't need HTTP.
+
+> [!IMPORTANT]
+> After this change, verify your C++ reader still compiles and the API surface you expose
+> in `fcb.h` still works. If any C++ API calls an HTTP code path, you'll get a linker error
+> pointing you to what needs adjusting.
+
+---
+
+## Step 3 — Fix: Make `http-range-client` explicitly use `rustls`
+
+In the workspace `Cargo.toml`, `http-range-client` is declared without a TLS backend:
+
+```toml
+# src/rust/Cargo.toml  (current)
+http-range-client = { version = "0.9.0", default-features = false }
+```
+
+When `fcb_core` re-enables it with `features = ["reqwest-async"]`, confirm that the transitive
+`reqwest` pull uses **your** workspace `reqwest` (with `rustls-tls`). This should already be
+the case because of Cargo's workspace dep resolution, but make it explicit:
+
+```toml
+# src/rust/Cargo.toml  (after — workspace.dependencies)
+http-range-client = { version = "0.9.0", default-features = false, features = ["reqwest-async"] }
+```
+
+Then in `fcb_core/Cargo.toml` remove the `features = ["reqwest-async"]` override so it inherits
+from the workspace definition cleanly.
+
+---
+
+## Step 4 — Add a `.cargo/config.toml` assertion (optional but recommended)
+
+Add this to `src/rust/.cargo/config.toml` to make the CI build **fail loudly** if OpenSSL
+is ever introduced again:
+
+```toml
+# src/rust/.cargo/config.toml
+[build]
+# Ensure the fcb_cpp crate never links against system OpenSSL.
+# If this starts failing, run: cargo tree -p fcb_cpp | grep openssl
+rustflags = []
+```
+
+And add a CI check (see Step 6).
+
+---
+
+## Step 5 — Update the GitHub Actions release workflow for `fcb_cpp`
+
+In your release workflow (`.github/workflows/`), the Linux build step probably installs
+`libssl-dev`. Once the dependency is removed, drop that step:
+
+```yaml
+# .github/workflows/release.yml  (remove or guard this)
+- name: Install OpenSSL          # ← DELETE this step for the fcb_cpp job
+  run: sudo apt-get install -y libssl-dev
+```
+
+If you have separate jobs for `fcb_cpp` and `fcb_cli`, only the **CLI job** may still need
+OpenSSL (if the CLI uses `proj` or other C bindings). Keep it there, remove it from the
+C++ bindings job.
+
+---
+
+## Step 6 — Add a CI smoke test to verify no OpenSSL linkage
+
+Add a step to the `fcb_cpp` release job on Linux:
+
+```yaml
+- name: Verify no OpenSSL linkage in libfcb_cpp.a
+  run: |
+    # nm lists symbols; if openssl is linked in, you'll see SSL_ symbols
+    if nm target/release/libfcb_cpp.a 2>/dev/null | grep -q "SSL_"; then
+      echo "ERROR: libfcb_cpp.a links OpenSSL — check cargo tree -p fcb_cpp"
+      exit 1
+    fi
+    echo "OK: no OpenSSL symbols found"
+```
+
+---
+
+## Step 7 — Update `INSTALL.md`
+
+If Steps 2–5 succeed, remove the OpenSSL prerequisite block from `src/cpp/INSTALL.md`:
+
+```markdown
+<!-- REMOVE this entire block -->
+> **Linux prerequisite:** OpenSSL development libraries are required at link time. Install with:
+> ```bash
+> sudo apt-get install libssl-dev
+> ```
+```
+
+And update the CMake example to remove the `find_package(OpenSSL)` / `OpenSSL::SSL` lines
+from the Linux section.
+
+---
+
+## Expected outcome after these changes
+
+| Platform | Before | After |
+|---|---|---|
+| Linux x86_64 | Needs `libssl-dev` at link time | ✅ Fully self-contained |
+| Linux aarch64 | Needs `libssl-dev` at link time | ✅ Fully self-contained |
+| macOS (any arch) | ✅ Already self-contained | ✅ No change |
+| Windows x86_64 | ✅ Already self-contained | ✅ No change |
+
+Once done, update the vcpkg port's `vcpkg.json` to remove the OpenSSL dependency:
+
+```diff
+  "dependencies": [
+-   {
+-     "name": "openssl",
+-     "platform": "linux"
+-   }
+  ]
+```
+
+And update `unofficial-flatcitybuf-config.cmake.in` to remove the `find_dependency(OpenSSL)`
+call and the Linux `INTERFACE_LINK_LIBRARIES` for `OpenSSL::SSL;OpenSSL::Crypto`.
