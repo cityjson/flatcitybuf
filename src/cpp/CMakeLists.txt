@@ -19,6 +19,7 @@ add_library(fcb_core_cpp STATIC
     src/packed_rtree.cpp
     src/key.cpp
     src/attribute.cpp
+    src/geometry.cpp
 )
 
 target_include_directories(fcb_core_cpp PUBLIC
