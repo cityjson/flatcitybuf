@@ -40,6 +40,7 @@ endif()
 
 if(FCB_WITH_CURL)
     find_package(CURL REQUIRED)
+    target_sources(fcb_core_cpp PRIVATE src/http/curl_range_reader.cpp)
     target_link_libraries(fcb_core_cpp PUBLIC CURL::libcurl)
     target_compile_definitions(fcb_core_cpp PUBLIC FCB_WITH_CURL=1)
 endif()
