@@ -56,7 +56,9 @@ fn test_memory_index_with_complex_data() -> Result<()> {
     // Test range queries with edge cases
     // Range that includes duplicates
     let results = index.find_range(Some(1_i64), Some(3_i64))?;
-    assert_eq!(results.len(), 3); // 1(x2), 2, 3
+    // 1(x2), 2, 3 == 4 items. This asserted 3 before find_range stopped
+    // dropping an inclusive upper bound that is also a separator key.
+    assert_eq!(results.len(), 4); // 1(x2), 2, 3
 
     // Range that includes the minimum value
     let results = index.find_range(Some(0_i64), Some(2_i64))?;
@@ -64,7 +66,8 @@ fn test_memory_index_with_complex_data() -> Result<()> {
 
     // Range that includes the maximum value
     let results = index.find_range(Some(17_i64), Some(18_i64))?;
-    assert_eq!(results.len(), 1); // 17, 18
+    // 17, 18 == 2 items; same boundary-drop bug as above.
+    assert_eq!(results.len(), 2); // 17, 18
 
     // Test ranges with open bounds
     let results = index.find_range(Some(15_i64), None)?;

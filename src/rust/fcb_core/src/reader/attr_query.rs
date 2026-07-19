@@ -115,13 +115,18 @@ pub fn add_indices_to_multi_memory_index<R: Read>(
                     )?;
                     multi_index.add_u64_index(col.name().to_string(), index);
                 }
+                // Byte is stored as u8 by the writer (writer/attribute.rs)
+                // and indexed as MemoryIndex<u8> (writer/attr_index.rs), so it
+                // must be read back as u8. Decoding it as i8 turned every
+                // stored value above 127 into a negative number that was never
+                // written.
                 ColumnType::Byte => {
-                    let index = MemoryIndex::<i8>::from_buf(
+                    let index = MemoryIndex::<u8>::from_buf(
                         &mut buf,
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
                     )?;
-                    multi_index.add_i8_index(col.name().to_string(), index);
+                    multi_index.add_u8_index(col.name().to_string(), index);
                 }
                 ColumnType::UByte => {
                     let index = MemoryIndex::<u8>::from_buf(
@@ -253,13 +258,14 @@ pub fn add_indices_to_multi_stream_index<R: Read + Seek>(
                 multi_index.add_u64_index(col.name().to_string(), index, attr_info.length() as u64);
             }
             ColumnType::Byte => {
-                let index = StreamIndex::<i8>::new(
+                // See the Byte note above: the writer stores u8.
+                let index = StreamIndex::<u8>::new(
                     attr_info.num_unique_items() as usize,
                     attr_info.branching_factor(),
                     index_begin,
                     attr_info.length() as u64,
                 );
-                multi_index.add_i8_index(col.name().to_string(), index, attr_info.length() as u64);
+                multi_index.add_u8_index(col.name().to_string(), index, attr_info.length() as u64);
             }
             ColumnType::UByte => {
                 let index = StreamIndex::<u8>::new(

@@ -369,8 +369,44 @@ pub fn decode_attributes(
                 offset += len as usize;
             }
 
-            // TODO: handle other column types
-            _ => unreachable!(),
+            // These are emitted by the writer, so the reader must handle
+            // them: panicking here made any file containing such an attribute
+            // unreadable by the implementation that wrote it.
+            ColumnType::Byte => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(
+                        bytes[offset] as i8,
+                    )),
+                );
+                offset += size_of::<u8>();
+            }
+            ColumnType::UByte => {
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(bytes[offset])),
+                );
+                offset += size_of::<u8>();
+            }
+            ColumnType::Binary => {
+                let len = LittleEndian::read_u32(&bytes[offset..offset + size_of::<u32>()]);
+                offset += size_of::<u32>();
+                let raw = &bytes[offset..offset + len as usize];
+                map.insert(
+                    column.name().to_string(),
+                    serde_json::Value::Array(
+                        raw.iter()
+                            .map(|b| serde_json::Value::Number(serde_json::Number::from(*b)))
+                            .collect(),
+                    ),
+                );
+                offset += len as usize;
+            }
+            // An unknown ColumnType has no known width, so the remainder of
+            // the blob cannot be parsed. Stop rather than guess.
+            _ => {
+                return serde_json::Value::Object(map);
+            }
         }
     }
 
