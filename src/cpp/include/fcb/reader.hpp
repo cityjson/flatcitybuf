@@ -10,6 +10,7 @@
 #include <fcb/header.hpp>
 #include <fcb/packed_rtree.hpp>
 #include <fcb/range_reader.hpp>
+#include <fcb/stree.hpp>
 
 namespace fcb {
 
@@ -80,6 +81,17 @@ public:
     /// Returns an empty iterator when nothing matches -- which is distinct
     /// from a sequential scan, hence IterationMode.
     FeatureIterator select_bbox(const BBox& query);
+
+    /// Iterate features matching every condition (AND).
+    ///
+    /// Fixed-width string keys are truncated to 50 or 100 bytes, so the index
+    /// yields CANDIDATES for those columns; by default each is verified
+    /// against the decoded, untruncated attribute before being returned.
+    /// That makes this stricter than the Rust reader, which returns the
+    /// false positives. Matching is existential: a feature matches if any of
+    /// its CityObjects satisfies the condition. Each feature is returned at
+    /// most once.
+    FeatureIterator select_attr(const AttrQuery& query, AttrQueryOptions opts = {});
 
 private:
     FcbReader(std::shared_ptr<RangeReader> reader, HeaderView header);

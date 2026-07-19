@@ -21,6 +21,7 @@ add_library(fcb_core_cpp STATIC
     src/attribute.cpp
     src/geometry.cpp
     src/cityjson.cpp
+    src/stree.cpp
 )
 
 target_include_directories(fcb_core_cpp PUBLIC
