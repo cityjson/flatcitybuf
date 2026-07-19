@@ -2,51 +2,15 @@
 
 C++ bindings for the [FlatCityBuf](https://github.com/cityjson/flatcitybuf) core library, enabling reading and writing of FCB files from C++ applications. FCB is a cloud-optimized binary format for 3D city models based on [CityJSON](https://www.cityjson.org/).
 
-## Quick Start with Pre-built Binaries
+## Quick Start with vcpkg (Recommended)
 
-Pre-built binaries are available on [GitHub Releases](https://github.com/cityjson/flatcitybuf/releases) for:
-
-| Platform          | Asset                          | Archive   |
-| ----------------- | ------------------------------ | --------- |
-| Linux (x86_64)    | `fcb_cpp-linux-x86_64.tar.gz`  | `.tar.gz` |
-| Linux (aarch64)   | `fcb_cpp-linux-aarch64.tar.gz` | `.tar.gz` |
-| macOS (x86_64)    | `fcb_cpp-macos-x86_64.tar.gz`  | `.tar.gz` |
-| macOS (aarch64)   | `fcb_cpp-macos-aarch64.tar.gz` | `.tar.gz` |
-| Windows (x86_64)  | `fcb_cpp-windows-x86_64.zip`   | `.zip`    |
-
-Each release package contains:
-
-```text
-├── libfcb_cpp.a      # Static library (Rust-compiled core)
-├── lib.rs.h          # CXX bridge generated header (type definitions)
-├── lib.rs.cc         # CXX bridge generated source (must be compiled with your code)
-└── fcb.h             # High-level API header with documentation
-```
-
-### 1. Download and Extract
-
-**Linux / macOS:**
+The easiest way to get started is with [vcpkg](https://vcpkg.io/):
 
 ```bash
-# Download the latest release (replace with your platform)
-curl -LO https://github.com/cityjson/flatcitybuf/releases/latest/download/fcb_cpp-linux-x86_64.tar.gz
-
-# Extract
-mkdir -p fcb_cpp && tar -xzf fcb_cpp-linux-x86_64.tar.gz -C fcb_cpp
+vcpkg install flatcitybuf
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-Invoke-WebRequest -Uri "https://github.com/cityjson/flatcitybuf/releases/latest/download/fcb_cpp-windows-x86_64.zip" -OutFile "fcb_cpp-windows-x86_64.zip"
-Expand-Archive -Path fcb_cpp-windows-x86_64.zip -DestinationPath fcb_cpp
-```
-
-### 2. Integrate with Your Project
-
-#### CMake (Recommended)
-
-Add the following to your `CMakeLists.txt`:
+Then in your `CMakeLists.txt`:
 
 ```cmake
 cmake_minimum_required(VERSION 3.16)
@@ -55,68 +19,22 @@ project(my_city_app LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Path to extracted FlatCityBuf C++ bindings
-set(FCB_DIR ${CMAKE_SOURCE_DIR}/fcb_cpp)
+find_package(flatcitybuf CONFIG REQUIRED)
 
-# Your application — must compile lib.rs.cc (CXX bridge source) alongside your code
-add_executable(my_app main.cpp ${FCB_DIR}/lib.rs.cc)
-
-target_include_directories(my_app PRIVATE ${FCB_DIR})
-
-target_link_libraries(my_app ${FCB_DIR}/libfcb_cpp.a)
-
-# Platform-specific dependencies
-if(APPLE)
-    target_link_libraries(my_app
-        "-framework Security"
-        "-framework CoreFoundation"
-        "-framework SystemConfiguration"
-    )
-elseif(WIN32)
-    target_link_libraries(my_app
-        ws2_32
-        userenv
-        bcrypt
-        ntdll
-    )
-elseif(UNIX)
-    find_package(OpenSSL REQUIRED)
-    target_link_libraries(my_app
-        OpenSSL::SSL
-        OpenSSL::Crypto
-        pthread dl m
-    )
-endif()
+add_executable(my_app main.cpp ${FLATCITYBUF_CXX_BRIDGE_SOURCE})
+target_link_libraries(my_app PRIVATE flatcitybuf::flatcitybuf)
 ```
 
-Then build:
+Build with the vcpkg toolchain:
 
 ```bash
-mkdir build && cd build
-cmake ..
-cmake --build .
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+cmake --build build
 ```
 
-#### Makefile
+> `FLATCITYBUF_CXX_BRIDGE_SOURCE` is a CMake cache variable set by `find_package` that points to `lib.rs.cc` — the CXX bridge source that must be compiled alongside your code. All platform-specific link dependencies are handled automatically.
 
-```makefile
-CXX       = g++
-CXXFLAGS  = -std=c++17 -I./fcb_cpp
-LDFLAGS   = ./fcb_cpp/libfcb_cpp.a -lpthread -ldl -lm
-
-# Platform-specific dependencies
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-    LDFLAGS += -framework Security -framework CoreFoundation -framework SystemConfiguration
-else ifeq ($(UNAME_S),Linux)
-    LDFLAGS += -lssl -lcrypto
-endif
-
-my_app: main.cpp ./fcb_cpp/lib.rs.cc
-    $(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
-```
-
-### 3. Write Your First Program
+### Write Your First Program
 
 ```cpp
 #include "lib.rs.h"
@@ -131,6 +49,11 @@ int main() {
         // Read metadata
         auto meta = fcb::fcb_reader_metadata(*reader);
         std::cout << "Features: " << meta.features_count << std::endl;
+        std::cout << "CityJSON version: " << std::string(meta.cityjson_version) << std::endl;
+        if (meta.has_transform) {
+            std::cout << "Scale: [" << meta.transform.scale_x << ", "
+                      << meta.transform.scale_y << ", " << meta.transform.scale_z << "]\n";
+        }
 
         // Iterate over all features
         auto iter = fcb::fcb_reader_select_all(std::move(reader));
@@ -148,6 +71,22 @@ int main() {
 ```
 
 > **Note:** Include `lib.rs.h` (the CXX-generated header) for type definitions. Optionally include `fcb.h` for Doxygen-documented declarations that re-export `lib.rs.h`.
+
+---
+
+## Manual Installation (without vcpkg)
+
+If you prefer not to use vcpkg, pre-built binaries are available on [GitHub Releases](https://github.com/cityjson/flatcitybuf/releases):
+
+| Platform          | Asset                          |
+| ----------------- | ------------------------------ |
+| Linux (x86_64)    | `fcb_cpp-linux-x86_64.tar.gz`  |
+| Linux (aarch64)   | `fcb_cpp-linux-aarch64.tar.gz` |
+| macOS (x86_64)    | `fcb_cpp-macos-x86_64.tar.gz`  |
+| macOS (aarch64)   | `fcb_cpp-macos-aarch64.tar.gz` |
+| Windows (x86_64)  | `fcb_cpp-windows-x86_64.zip`   |
+
+See [INSTALL.md](INSTALL.md) for detailed manual installation steps, CMake integration without vcpkg, and Makefile examples.
 
 ---
 
@@ -193,12 +132,38 @@ The built artifacts will be at:
 
 ```cpp
 namespace fcb {
-    // File metadata
+    // Coordinate transform (scale + translation)
+    struct FcbTransform {
+        double scale_x, scale_y, scale_z;        // Scale factors per axis
+        double translate_x, translate_y, translate_z; // Translation offsets
+    };
+
+    // 3D geographical bounding box
+    struct FcbGeographicalExtent {
+        double min_x, min_y, min_z;  // Minimum corner (incl. elevation)
+        double max_x, max_y, max_z;  // Maximum corner (incl. elevation)
+    };
+
+    // File and CityJSON metadata
     struct FcbMetadata {
-        uint8_t version;           // FCB format version
-        uint64_t features_count;   // Total number of features
-        bool has_spatial_index;    // Whether R-tree index exists
-        bool has_attribute_index;  // Whether attribute index exists
+        // FCB binary format fields
+        uint8_t  version;              // FCB format version
+        uint64_t features_count;       // Total number of features
+        bool     has_spatial_index;    // Whether R-tree index exists
+        bool     has_attribute_index;  // Whether attribute index exists
+
+        // CityJSON metadata: typed convenience fields
+        rust::String cityjson_version;         // CityJSON spec version (e.g. "2.0")
+        bool         has_transform;            // Whether a transform is present
+        FcbTransform transform;                // Coordinate transform (if has_transform)
+        bool         has_geographical_extent;  // Whether an extent is present
+        FcbGeographicalExtent geographical_extent; // 3D extent (if has_geographical_extent)
+
+        // CityJSON metadata: full JSON string
+        // Contains: type, version, transform, metadata (identifier, title, referenceDate,
+        // referenceSystem, geographicalExtent, pointOfContact), extensions.
+        // geometry_templates are excluded. Parse with your preferred JSON library.
+        rust::String metadata_json;
     };
 
     // Bounding box for spatial queries
@@ -275,6 +240,7 @@ void fcb_writer_write(rust::Box<FcbFileWriter> writer, rust::Str path);
 
 ```cpp
 #include "lib.rs.h"
+#include <nlohmann/json.hpp>
 #include <iostream>
 
 int main(int argc, char* argv[]) {
@@ -283,9 +249,43 @@ int main(int argc, char* argv[]) {
 
         // Inspect metadata
         auto meta = fcb::fcb_reader_metadata(*reader);
-        std::cout << "Version: " << static_cast<int>(meta.version) << std::endl;
-        std::cout << "Features: " << meta.features_count << std::endl;
-        std::cout << "Spatial index: " << (meta.has_spatial_index ? "yes" : "no") << std::endl;
+
+        // FCB binary format fields
+        std::cout << "FCB version:      " << static_cast<int>(meta.version) << std::endl;
+        std::cout << "Features:         " << meta.features_count << std::endl;
+        std::cout << "Spatial index:    " << (meta.has_spatial_index ? "yes" : "no") << std::endl;
+        std::cout << "Attribute index:  " << (meta.has_attribute_index ? "yes" : "no") << std::endl;
+
+        // CityJSON typed fields
+        std::cout << "CityJSON version: " << std::string(meta.cityjson_version) << std::endl;
+
+        if (meta.has_transform) {
+            std::cout << "Scale:    [" << meta.transform.scale_x << ", "
+                      << meta.transform.scale_y << ", " << meta.transform.scale_z << "]\n";
+            std::cout << "Translate:[" << meta.transform.translate_x << ", "
+                      << meta.transform.translate_y << ", " << meta.transform.translate_z << "]\n";
+        }
+
+        if (meta.has_geographical_extent) {
+            std::cout << "Extent min: [" << meta.geographical_extent.min_x << ", "
+                      << meta.geographical_extent.min_y << ", "
+                      << meta.geographical_extent.min_z << "]\n";
+            std::cout << "Extent max: [" << meta.geographical_extent.max_x << ", "
+                      << meta.geographical_extent.max_y << ", "
+                      << meta.geographical_extent.max_z << "]\n";
+        }
+
+        // Full CityJSON header JSON: identifier, title, CRS, extensions, pointOfContact, etc.
+        if (!std::string(meta.metadata_json).empty()) {
+            nlohmann::json cj = nlohmann::json::parse(std::string(meta.metadata_json));
+            if (cj.contains("metadata")) {
+                auto& m = cj["metadata"];
+                if (m.contains("datasetTitle"))
+                    std::cout << "Title: " << m["datasetTitle"] << std::endl;
+                if (m.contains("referenceSystem"))
+                    std::cout << "CRS:   " << m["referenceSystem"] << std::endl;
+            }
+        }
 
         // Iterate all features
         auto iter = fcb::fcb_reader_select_all(std::move(reader));

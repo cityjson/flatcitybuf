@@ -2,6 +2,58 @@
 
 Pre-built binaries for FlatCityBuf C++ bindings are available on [GitHub Releases](https://github.com/cityjson/flatcitybuf/releases).
 
+## Install via vcpkg (Recommended)
+
+The easiest way to use FlatCityBuf in your C++ project is through [vcpkg](https://vcpkg.io/).
+
+### 1. Install flatcitybuf
+
+```bash
+vcpkg install flatcitybuf
+```
+
+### 2. Configure your CMake project
+
+```cmake
+cmake_minimum_required(VERSION 3.16)
+project(my_city_app LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(flatcitybuf CONFIG REQUIRED)
+
+# FLATCITYBUF_CXX_BRIDGE_SOURCE is set by find_package — it points to the
+# CXX bridge source (lib.rs.cc) that must be compiled alongside your code.
+add_executable(my_app main.cpp ${FLATCITYBUF_CXX_BRIDGE_SOURCE})
+target_link_libraries(my_app PRIVATE flatcitybuf::flatcitybuf)
+```
+
+### 3. Build
+
+```bash
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+cmake --build build
+```
+
+That's it — vcpkg handles downloading the correct platform binary, installing headers and the static library, and the CMake config automatically links all platform-specific dependencies (macOS frameworks, Linux OpenSSL, Windows system libs).
+
+### Supported platforms
+
+| Platform         | Architecture    |
+| ---------------- | --------------- |
+| Linux            | x86_64, aarch64 |
+| macOS            | x86_64, aarch64 |
+| Windows          | x86_64          |
+
+> **Linux note:** OpenSSL is installed as a vcpkg dependency automatically.
+
+---
+
+## Manual Installation (without vcpkg)
+
+If you prefer not to use vcpkg, you can download pre-built binaries directly from GitHub Releases.
+
 ## Available Platforms
 
 | Platform          | Asset                          | Archive   |

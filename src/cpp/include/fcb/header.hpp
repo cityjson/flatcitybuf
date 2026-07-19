@@ -44,6 +44,9 @@ struct FileInfo {
     std::uint64_t features_count = 0;
     std::uint16_t index_node_size = 0;
     std::vector<ColumnInfo> columns;
+    /// Schema for SemanticObject.attributes, which is separate from the
+    /// feature attribute schema (Header.semantic_columns in header.fbs).
+    std::vector<ColumnInfo> semantic_columns;
 
     bool has_extent = false;
     std::array<double, 6> geographical_extent{};  // minx,miny,minz,maxx,maxy,maxz

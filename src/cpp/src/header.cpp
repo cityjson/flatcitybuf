@@ -49,10 +49,10 @@ std::uint32_t read_u32_le(const std::vector<std::uint8_t>& b, std::size_t at) {
            (static_cast<std::uint32_t>(b[at + 3]) << 24);
 }
 
-void fill_columns(const ::Header* hdr, FileInfo& info) {
-    const auto* cols = hdr->columns();
+void collect_columns(const flatbuffers::Vector<flatbuffers::Offset<::Column>>* cols,
+                     std::vector<ColumnInfo>& out) {
     if (cols == nullptr) return;
-    info.columns.reserve(cols->size());
+    out.reserve(cols->size());
     for (const auto* c : *cols) {
         if (c == nullptr) continue;
         ColumnInfo ci{};
@@ -60,8 +60,13 @@ void fill_columns(const ::Header* hdr, FileInfo& info) {
         ci.name = c->name() != nullptr ? c->name()->str() : std::string();
         ci.type = static_cast<std::uint8_t>(c->type());
         ci.nullable = c->nullable();
-        info.columns.push_back(std::move(ci));
+        out.push_back(std::move(ci));
     }
+}
+
+void fill_columns(const ::Header* hdr, FileInfo& info) {
+    collect_columns(hdr->columns(), info.columns);
+    collect_columns(hdr->semantic_columns(), info.semantic_columns);
 }
 
 void fill_metadata(const ::Header* hdr, FileInfo& info) {

@@ -20,6 +20,7 @@ add_library(fcb_core_cpp STATIC
     src/key.cpp
     src/attribute.cpp
     src/geometry.cpp
+    src/cityjson.cpp
 )
 
 target_include_directories(fcb_core_cpp PUBLIC
