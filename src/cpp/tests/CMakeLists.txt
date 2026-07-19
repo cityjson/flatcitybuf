@@ -10,6 +10,7 @@ add_executable(fcb_tests
     test_sequential_scan.cpp
     test_packed_rtree.cpp
     test_keys.cpp
+    test_attributes.cpp
 )
 target_link_libraries(fcb_tests PRIVATE fcb_core_cpp doctest::doctest)
 target_include_directories(fcb_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

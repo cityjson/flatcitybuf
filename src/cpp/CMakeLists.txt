@@ -18,6 +18,7 @@ add_library(fcb_core_cpp STATIC
     src/reader.cpp
     src/packed_rtree.cpp
     src/key.cpp
+    src/attribute.cpp
 )
 
 target_include_directories(fcb_core_cpp PUBLIC

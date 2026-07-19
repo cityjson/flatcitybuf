@@ -38,6 +38,44 @@ std::string Feature::id() const {
     return cf->id()->str();
 }
 
+namespace {
+const ::CityObject* object_at(const ::CityFeature* cf, std::size_t i) {
+    if (cf == nullptr || cf->objects() == nullptr) return nullptr;
+    if (i >= cf->objects()->size()) return nullptr;
+    return cf->objects()->Get(static_cast<flatbuffers::uoffset_t>(i));
+}
+}  // namespace
+
+bytes_view Feature::object_attributes(std::size_t i) const {
+    const auto* obj = object_at(raw(), i);
+    if (obj == nullptr || obj->attributes() == nullptr) return {};
+    const auto* a = obj->attributes();
+    return bytes_view(a->data(), a->size());
+}
+
+std::vector<ColumnInfo> Feature::object_columns(std::size_t i) const {
+    std::vector<ColumnInfo> out;
+    const auto* obj = object_at(raw(), i);
+    if (obj == nullptr || obj->columns() == nullptr) return out;
+    out.reserve(obj->columns()->size());
+    for (const auto* c : *obj->columns()) {
+        if (c == nullptr) continue;
+        ColumnInfo ci{};
+        ci.index = c->index();
+        ci.name = c->name() != nullptr ? c->name()->str() : std::string();
+        ci.type = static_cast<std::uint8_t>(c->type());
+        ci.nullable = c->nullable();
+        out.push_back(std::move(ci));
+    }
+    return out;
+}
+
+std::string Feature::object_id(std::size_t i) const {
+    const auto* obj = object_at(raw(), i);
+    if (obj == nullptr || obj->id() == nullptr) return {};
+    return obj->id()->str();
+}
+
 std::size_t Feature::city_object_count() const {
     const ::CityFeature* cf = raw();
     if (cf == nullptr || cf->objects() == nullptr) return 0;

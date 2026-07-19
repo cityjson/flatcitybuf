@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 
+#include <fcb/span.hpp>
+
+namespace fcb { struct ColumnInfo; }
+
 // Generated FlatBuffers types are in the GLOBAL namespace. Forward declare
 // so this public header does not drag them into consumers' scope.
 struct CityFeature;
@@ -38,6 +42,23 @@ public:
 
     /// How many CityObjects this feature carries. Zero when `empty()`.
     std::size_t city_object_count() const;
+
+    /// Raw attribute blob of CityObject `i`, or empty if it has none.
+    /// Objects commonly differ: in the 3DBAG data a Building parent carries
+    /// no attributes while its BuildingPart child carries them all.
+    bytes_view object_attributes(std::size_t i) const;
+
+    /// CityObject `i`'s own column schema, if it declares one.
+    ///
+    /// feature.fbs documents CityObject.columns as overriding the header
+    /// schema when set. Decoding with the wrong schema silently
+    /// desynchronises the blob -- records are not self-delimiting -- so this
+    /// must be consulted before decode_attributes(). Empty means "use the
+    /// header's columns".
+    std::vector<ColumnInfo> object_columns(std::size_t i) const;
+
+    /// CityObject `i`'s id.
+    std::string object_id(std::size_t i) const;
 
     /// Byte offset of this feature RELATIVE to the start of the features
     /// section, matching the offsets stored in the R-tree leaves.
