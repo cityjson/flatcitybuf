@@ -9,7 +9,7 @@ bytemuck = "1.15.0"
 async-trait = { version = "0.1.85", default-features = true }
 flatbuffers = "25.9.23"
 byteorder = "1.5.0"
-cjseq = { package = "cjseq2", version = "0.1.0" }
+cjseq = { package = "cjseq2", version = "0.1.1" }
 tempfile = "3.14.0"
 serde_json = "1.0.133"
 serde = "1.0.200"
@@ -70,11 +70,3 @@ axum = "0.7"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 futures = "0.3"
-
-# TEMPORARY: cjseq2 0.1.0 serializes material/texture indices through
-# `impl JsonIndex for Option<usize>`, which used `Option::iter` and wrapped
-# every index in a one-element array (`1` -> `[1]`, null -> `[]`). That is
-# invalid CityJSON and the C++ reader cannot reproduce it without emitting
-# the same invalid output. Drop this patch once the fix ships in a release.
-[patch.crates-io]
-cjseq2 = { path = "../../../cjseq" }

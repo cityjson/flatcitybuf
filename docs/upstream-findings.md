@@ -164,7 +164,7 @@ the computed child would leave the level. A no-op for ordinary keys.
 
 ---
 
-## 7. `cjseq2` wraps every material/texture index in a one-element array — FIXED (local patch)
+## 7. `cjseq2` wraps every material/texture index in a one-element array — FIXED (0.1.1)
 
 **Where:** `cjseq2` 0.1.0, `impl JsonIndex for Option<usize>::to_value`, not
 FlatCityBuf's own code. Surfaced while porting appearance decoding to C++.
@@ -187,14 +187,17 @@ The emitted CityJSON was invalid against the spec, which wants
 `[[0, 16, 17, 18, 19]]` for a surface's texture ring, not
 `[[], [1]]` and `[[[0], [16], [17], [18], [19]]]`.
 
-**Fix:** mirror the `Option<u32>` impl. Held on a local branch of
-`hideba/cjseq` (`fix/option-usize-serialization`, published 0.1.0 plus that
-one function) and wired in through `[patch.crates-io]` in
-`src/rust/Cargo.toml`.
+**Fix:** mirror the `Option<u32>` impl. Released as cjseq2 0.1.1 and merged
+into `hideba/cjseq`'s `develop`; `src/rust/Cargo.toml` depends on `0.1.1`
+from crates.io, so a fresh clone builds with no local checkout.
 
-**Follow-up required:** that patch points at a sibling checkout, so a fresh
-clone of this repository cannot build the Rust workspace. Publish cjseq2
-0.1.1 and replace the patch with a version bump.
+0.1.1 was cut from the published 0.1.0 tree plus this one function, NOT from
+`develop` HEAD. `develop` also carries an unreleased change (`759b86a`,
+"introduce CityObjectType and SemanticSurfaceType enums") that retypes
+`thetype` on `CityJSON`, `CityObject` and `SemanticsSurface` from `String` to
+enums; `fcb_core` still assigns strings there and fails to compile against it
+with five `E0308` mismatches. Releasing that is a 0.2.0, and needs `fcb_core`
+updated in the same change.
 
 `src/cpp/tests/conformance/geom_temp.expected.jsonl` was regenerated after
 the fix; both readers now emit spec-correct CityJSON. `small.expected.jsonl`
