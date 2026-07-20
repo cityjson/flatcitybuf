@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Sequence
 
 from flatcitybuf.errors import ErrorCode, FcbError
-from flatcitybuf.header import AttrIndexInfo, ColumnInfo, HeaderView
+from flatcitybuf.header import AttrIndexInfo, HeaderView
 from flatcitybuf.keys import (
     KeyKind,
     KeyValue,
@@ -569,7 +569,7 @@ def stree_query(
 
 def _resolve(
     header: HeaderView, condition: AttrCondition
-) -> tuple[ColumnInfo, AttrIndexInfo, KeyKind]:
+) -> tuple[AttrIndexInfo, KeyKind]:
     column = None
     for c in header.info.columns:
         if c.name == condition.column:
@@ -614,7 +614,7 @@ def _resolve(
             f"{condition.value.kind.value} key but the column indexes "
             f"{kind.value}",
         )
-    return column, index, kind
+    return index, kind
 
 
 def search_stree(
@@ -681,7 +681,7 @@ def search_stree(
 
     accumulator: list[SearchResultItem] | None = None
     for condition in conditions:
-        _column, index, kind = _resolve(info, condition)
+        index, kind = _resolve(info, condition)
         hits = stree_query(
             buffered, index, kind, condition.operator, condition.value
         )
