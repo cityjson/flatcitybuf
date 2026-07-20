@@ -134,8 +134,7 @@ def _column_info_from(col: Any, position: int) -> ColumnInfo:
     if name_bytes is None:
         raise FcbError(
             ErrorCode.MISSING_REQUIRED_FIELD,
-            f"column at position {position}: name is required "
-            "but absent",
+            f"column at position {position}: name is required but absent",
         )
     return ColumnInfo(
         index=col.Index(),
@@ -262,10 +261,8 @@ def _collect_attr_indices(
 
     raw: list[tuple[int, int, int, int]] = []
     for i in range(n):
-        index, length, branching_factor, num_unique_items = (
-            struct.unpack_from(
-                _ATTR_INDEX_FMT, buf, vec_pos + i * _ATTR_INDEX_SIZE
-            )
+        index, length, branching_factor, num_unique_items = struct.unpack_from(
+            _ATTR_INDEX_FMT, buf, vec_pos + i * _ATTR_INDEX_SIZE
         )
         raw.append((index, length, branching_factor, num_unique_items))
 
@@ -301,9 +298,7 @@ def read_header(reader: RangeReader) -> HeaderView:
 
     magic = buffered.read(0, MAGIC_SIZE)
     if len(magic) < MAGIC_SIZE or not check_magic_bytes(magic):
-        raise FcbError(
-            ErrorCode.INVALID_MAGIC_BYTES, "not a FlatCityBuf file"
-        )
+        raise FcbError(ErrorCode.INVALID_MAGIC_BYTES, "not a FlatCityBuf file")
 
     size_bytes = buffered.read(MAGIC_SIZE, _HEADER_SIZE_FIELD_SIZE)
     if len(size_bytes) < _HEADER_SIZE_FIELD_SIZE:
@@ -356,9 +351,12 @@ def read_header(reader: RangeReader) -> HeaderView:
 
     cursor = layout.attr_index_begin
     attr_indices: list[AttrIndexInfo] = []
-    for column_index, length, branching_factor, num_unique_items in (
-        raw_attr_indices
-    ):
+    for (
+        column_index,
+        length,
+        branching_factor,
+        num_unique_items,
+    ) in raw_attr_indices:
         attr_indices.append(
             AttrIndexInfo(
                 column_index=column_index,
