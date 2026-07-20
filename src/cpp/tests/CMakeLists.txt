@@ -21,7 +21,7 @@ target_link_libraries(fcb_tests PRIVATE fcb_core_cpp doctest::doctest)
 target_include_directories(fcb_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(fcb_tests PRIVATE
     FCB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/data"
-    FCB_CONFORMANCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/conformance"
+    FCB_CONFORMANCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../conformance"
 )
 
 include(CTest)

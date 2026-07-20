@@ -10,7 +10,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="${REPO_ROOT}/src/cpp/tests/conformance"
+OUT="${REPO_ROOT}/conformance"
 RUST="${REPO_ROOT}/src/rust"
 INPUTS_DIR="${OUT}/inputs"
 
