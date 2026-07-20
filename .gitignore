@@ -53,6 +53,8 @@ __pycache__/
 *.env
 *.venv
 *.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 temp/
 data/
@@ -77,3 +79,4 @@ build/
 
 .claude/settings.local.json
 .claude/worktrees/
+.superpowers/

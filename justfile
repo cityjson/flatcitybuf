@@ -36,6 +36,14 @@ check-py:
     cd src/rust/fcb_py && uv run ruff format .
     cd src/rust/fcb_py && uv run pytest tests/
 
+# Run tests for the pure-Python package (src/py)
+py-test:
+    cd src/py && uv run --extra dev pytest
+
+# Run linter for the pure-Python package (src/py)
+py-lint:
+    cd src/py && uv run --extra dev ruff check .
+
 # Run C++ checks (native implementation)
 pre-commit-cpp: check-cpp
 
@@ -157,16 +165,16 @@ py-sync:
 py-dev:
     cd src/rust/fcb_py && uv run maturin develop
 
-# Run Python linter
-py-lint:
+# Run Python linter (PyO3 extension, src/rust/fcb_py; retired in Task 13)
+fcb-py-lint:
     cd src/rust/fcb_py && uv run ruff check --fix .
 
 # Format Python code
 py-fmt:
     cd src/rust/fcb_py && uv run ruff format .
 
-# Run Python tests
-py-test:
+# Run Python tests (PyO3 extension, src/rust/fcb_py; retired in Task 13)
+fcb-py-test:
     cd src/rust/fcb_py && uv run pytest tests/
 
 # Clean Python build artifacts
