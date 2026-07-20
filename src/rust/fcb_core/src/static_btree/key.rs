@@ -469,7 +469,7 @@ impl<const N: usize> FixedStringKey<N> {
     ///
     /// # Examples
     /// ```
-    /// # use static_btree::key::FixedStringKey; // Adjust path if needed
+    /// # use fcb_core::static_btree::key::FixedStringKey;
     /// let key_short = FixedStringKey::<10>::from_str("hello");
     /// assert_eq!(key_short.to_string_lossy(), "hello");
     ///
@@ -496,7 +496,7 @@ impl<const N: usize> FixedStringKey<N> {
     ///
     /// # Examples
     /// ```
-    /// # use static_btree::key::FixedStringKey; // Adjust path if needed
+    /// # use fcb_core::static_btree::key::FixedStringKey;
     /// let key1 = FixedStringKey::<10>::from_str("test");
     /// assert_eq!(key1.to_string_lossy(), "test");
     ///

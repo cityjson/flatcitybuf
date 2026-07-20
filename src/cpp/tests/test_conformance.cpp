@@ -78,6 +78,11 @@ TEST_CASE("conformance: long_strings") { check_case("long_strings"); }
 TEST_CASE("conformance: duplicate_keys") { check_case("duplicate_keys"); }
 TEST_CASE("conformance: degenerate_extent") { check_case("degenerate_extent"); }
 TEST_CASE("conformance: inferable_types") { check_case("inferable_types"); }
+// `"material": {}` in the source is written as a PRESENT, EMPTY mapping
+// vector (verified against the .fcb), which the reference reports as no
+// appearance at all rather than an empty object. Emitting `"material": {}`
+// here instead fails this case.
+TEST_CASE("conformance: empty_appearance") { check_case("empty_appearance"); }
 
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");
