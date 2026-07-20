@@ -34,8 +34,25 @@ DELFT = Path(__file__).resolve().parents[3] / "examples" / "data" / "delft.fcb"
 #
 # The CRS ("EPSG:7415") was NOT printed by `fcb info` (it has no CRS
 # line) -- it was read the same way (generated bindings against the raw
-# file: ReferenceSystem.Authority()=b"EPSG", Code()=7415) but has no
-# second, independent oracle confirming it. Flagged per the task brief.
+# file: ReferenceSystem.Authority()=b"EPSG", Code()=7415), but it does
+# have a second, independent oracle: conformance/small.expected.jsonl
+# and examples/data/delft.city.jsonl both carry
+# "referenceSystem":"https://www.opengis.net/def/crs/EPSG/0/7415".
+#
+# Column 0's exact fields (index=0, name="b3_bag_bag_overlap", type=10,
+# nullable=True -- for BOTH fixtures, same schema) were read directly
+# with the committed flatc-generated bindings
+# (header_generated.Header.Columns(0)) against the raw fixture bytes,
+# independently of flatcitybuf.header. Cross-checked against the Rust
+# CLI oracle above: `fcb info` walks `header.attribute_index()` (which
+# writer/mod.rs:190-192 sorts ascending by schema/column index before
+# writing) and prints the matching column name first -- "1.
+# b3_bag_bag_overlap" -- confirming column index 0's name independently
+# of the Python bindings.
+_COL0_INDEX = 0
+_COL0_NAME = "b3_bag_bag_overlap"
+_COL0_TYPE = 10
+_COL0_NULLABLE = True
 
 _SCALE = (0.001, 0.001, 0.001)
 _TRANSLATE = (85088.390625, 446394.25, 45.64800262451172)
@@ -109,6 +126,33 @@ def test_small_column_shape() -> None:
     assert col.name != ""
     assert isinstance(col.type, int)
     assert isinstance(col.nullable, bool)
+
+
+def test_small_column_zero_exact_values() -> None:
+    # Pins the actual field values, not just their types: a swap of
+    # index<->type (both plain ints) or a misread Nullable()/Name()
+    # would still satisfy test_small_column_shape's isinstance-only
+    # checks above but would fail here. See the module docstring for
+    # the oracle used.
+    view = _read(CORPUS / "small.fcb")
+    col = view.info.columns[0]
+    assert col.index == _COL0_INDEX
+    assert col.name == _COL0_NAME
+    assert col.type == _COL0_TYPE
+    assert col.nullable == _COL0_NULLABLE
+
+
+@pytest.mark.skipif(not DELFT.exists(), reason="delft.fcb fixture missing")
+def test_delft_column_zero_exact_values() -> None:
+    # Same schema as small.fcb (both conformance fixtures share the
+    # 44-column b3_* attribute schema); pinned separately in case the
+    # fixtures ever diverge.
+    view = _read(DELFT)
+    col = view.info.columns[0]
+    assert col.index == _COL0_INDEX
+    assert col.name == _COL0_NAME
+    assert col.type == _COL0_TYPE
+    assert col.nullable == _COL0_NULLABLE
 
 
 def test_small_attribute_indices() -> None:

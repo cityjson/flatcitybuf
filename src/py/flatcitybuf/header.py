@@ -244,6 +244,22 @@ def _collect_attr_indices(
     vec_pos = hdr._tab.Vector(o)
     buf = hdr._tab.Bytes
 
+    # Cross-check the hand-counted vtable slot against the generated
+    # accessor's own idea of the same offset (Header.AttributeIndexLength()
+    # calls self._tab.Offset(16) internally -- see
+    # generated/header_generated.py:945-949). If header.fbs ever gains a
+    # field before attribute_index, _ATTRIBUTE_INDEX_VTABLE_OFFSET would
+    # silently decode a different vector; this catches that instead of
+    # returning garbage lengths/offsets.
+    if n != hdr.AttributeIndexLength():
+        raise FcbError(
+            ErrorCode.INVALID_FLATBUFFER,
+            "attribute_index vtable slot mismatch: hand-counted "
+            f"offset {_ATTRIBUTE_INDEX_VTABLE_OFFSET} disagrees with "
+            "the generated accessor -- header.fbs field order may "
+            "have changed",
+        )
+
     raw: list[tuple[int, int, int, int]] = []
     for i in range(n):
         index, length, branching_factor, num_unique_items = (
