@@ -39,16 +39,23 @@ class FileRangeReader(RangeReader):
     """Local-file adapter. Mirrors fcb::FileRangeReader
     (range_reader.cpp:17-43).
 
-    Divergence from the C++ reference: range_reader.cpp:30 returns
-    empty for `offset >= total_size()`, treating it as a normal, non-
-    error condition. This Python reader instead raises
-    FcbError(INDEX_OUT_OF_BOUNDS) in that case. See the module's task
-    report for why: the brief's own test_read_past_end_raises requires
-    it, and unlike the C++ core -- which validates every offset against
-    total_size() before it ever reaches this reader (range_reader.hpp:
-    56-59) -- nothing upstream of this from-scratch Python reader
-    performs that validation yet, so the lowest layer raises instead of
-    silently handing back an empty read that could mask a bug.
+    Boundary contract (deliberately narrower than the C++ reference):
+
+    * offset == total_size() (any length, including 0) returns b"" --
+      matches range_reader.cpp:30, which treats `offset >= total_size()`
+      as a normal, non-error condition. The clamp below (`n = min(length,
+      self._size - offset)`) reduces to `min(length, 0)` at this exact
+      boundary, so it falls through to an empty read without needing a
+      special case.
+    * offset > total_size() raises FcbError(INDEX_OUT_OF_BOUNDS). This
+      is the one point of divergence from C++, which returns empty here
+      too. It exists because the brief's own test_read_past_end_raises
+      requires raising past the end, and unlike the C++ core -- which
+      validates every offset against total_size() before it ever reaches
+      this reader (range_reader.hpp:56-59) -- nothing upstream of this
+      from-scratch Python reader performs that validation yet, so the
+      lowest layer raises instead of silently handing back an empty read
+      that could mask a bug.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -75,7 +82,7 @@ class FileRangeReader(RangeReader):
     def read(self, offset: int, length: int) -> bytes:
         if length == 0:
             return b""
-        if offset >= self._size:
+        if offset > self._size:
             raise FcbError(
                 ErrorCode.INDEX_OUT_OF_BOUNDS,
                 f"read offset {offset} is past end of file "

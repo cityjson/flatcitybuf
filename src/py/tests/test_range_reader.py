@@ -7,6 +7,8 @@ from flatcitybuf.errors import ErrorCode, FcbError
 from flatcitybuf.range_reader import BufferedRangeReader
 from flatcitybuf.range_reader import FileRangeReader
 
+CORPUS = Path(__file__).resolve().parents[3] / "conformance"
+
 
 class CountingReader:
     """In-memory RangeReader that records every request, so tests can
@@ -95,8 +97,56 @@ def test_read_past_end_raises_with_error_code(tmp_path: Path) -> None:
     path.write_bytes(b"0123456789")
     r = FileRangeReader(path)
     with pytest.raises(FcbError) as exc_info:
-        r.read(r.total_size(), 1)
+        r.read(r.total_size() + 1, 1)
     assert exc_info.value.code is ErrorCode.INDEX_OUT_OF_BOUNDS
+
+
+def test_read_at_exactly_total_size_returns_empty_not_error(
+    tmp_path: Path,
+) -> None:
+    # Pins the boundary: offset == total_size() falls through the clamp
+    # (min(length, size - offset) == min(length, 0)) to an empty read,
+    # matching range_reader.cpp:30 at this exact value -- it is only
+    # offset > total_size() that this Python reader raises on.
+    path = tmp_path / "data.bin"
+    path.write_bytes(b"0123456789")
+    r = FileRangeReader(path)
+    assert r.read(r.total_size(), 1) == b""
+    assert r.read(r.total_size(), 0) == b""
+
+
+@pytest.mark.parametrize("offset_delta", [-1, 0, 1])
+def test_boundary_at_total_size_through_bare_and_composed_reader(
+    tmp_path: Path, offset_delta: int
+) -> None:
+    # Finding 1 + finding 2 combined: pin offset < total_size, offset ==
+    # total_size, and offset > total_size, through BOTH a bare
+    # FileRangeReader and the FileRangeReader+BufferedRangeReader stack
+    # that Tasks 6-11 actually use (reader.cpp:213 wraps Buffered directly
+    # around the file reader for index/attribute-tree traversal, with no
+    # guaranteed bounds pre-check upstream).
+    data = b"0123456789"
+    path = tmp_path / "data.bin"
+    path.write_bytes(data)
+    total = len(data)
+    offset = total + offset_delta
+
+    bare = FileRangeReader(path)
+    composed = BufferedRangeReader(FileRangeReader(path), fetch_size=4)
+
+    if offset_delta > 0:
+        with pytest.raises(FcbError) as exc_info:
+            bare.read(offset, 1)
+        assert exc_info.value.code is ErrorCode.INDEX_OUT_OF_BOUNDS
+        with pytest.raises(FcbError) as exc_info:
+            composed.read(offset, 1)
+        assert exc_info.value.code is ErrorCode.INDEX_OUT_OF_BOUNDS
+    elif offset_delta == 0:
+        assert bare.read(offset, 1) == b""
+        assert composed.read(offset, 1) == b""
+    else:
+        assert bare.read(offset, 1) == data[offset : offset + 1]
+        assert composed.read(offset, 1) == data[offset : offset + 1]
 
 
 def test_file_range_reader_read_ending_exactly_at_total_size(
@@ -221,3 +271,53 @@ def test_buffered_reader_read_ending_exactly_at_total_size() -> None:
     got = r.read(90, 10)
     assert got == inner.data[90:100]
     assert inner.reads == [(90, 10)]
+
+
+# ------------------------------------------------- composed, real file ---
+#
+# Finding 2: every test above drives BufferedRangeReader with the
+# CountingReader fake as `inner`. Nothing exercises FileRangeReader and
+# BufferedRangeReader composed together, which is exactly how Tasks 6-11
+# will use them (reader.cpp:213 wraps Buffered directly around the file
+# reader for index/attribute-tree traversal, with no bounds pre-check
+# upstream, unlike FeatureIterator::next() which checks `at >= total_size`
+# first -- reader.cpp:130-137). These tests pin that propagation.
+
+
+def test_composed_reader_matches_unbuffered_reads_over_a_real_file() -> None:
+    path = CORPUS / "small.fcb"
+    plain = FileRangeReader(path)
+    composed = BufferedRangeReader(FileRangeReader(path), fetch_size=256)
+
+    total = plain.total_size()
+    assert composed.total_size() == total
+
+    # A handful of scattered ranges, including ones smaller and larger
+    # than fetch_size, and one starting near the end of the file.
+    for offset, length in [
+        (0, 12),
+        (12, 4),
+        (100, 50),
+        (1000, 500),
+        (total - 20, 20),
+    ]:
+        assert composed.read(offset, length) == plain.read(offset, length)
+
+
+def test_composed_reader_read_at_exactly_total_size_returns_empty() -> None:
+    path = CORPUS / "small.fcb"
+    composed = BufferedRangeReader(FileRangeReader(path), fetch_size=256)
+    total = composed.total_size()
+
+    assert composed.read(total, 1) == b""
+    assert composed.read(total, 0) == b""
+
+
+def test_composed_reader_read_past_end_raises() -> None:
+    path = CORPUS / "small.fcb"
+    composed = BufferedRangeReader(FileRangeReader(path), fetch_size=256)
+    total = composed.total_size()
+
+    with pytest.raises(FcbError) as exc_info:
+        composed.read(total + 1, 4)
+    assert exc_info.value.code is ErrorCode.INDEX_OUT_OF_BOUNDS
