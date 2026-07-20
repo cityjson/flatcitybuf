@@ -107,6 +107,42 @@ def test_compute_layout_stacks_sections_with_no_padding() -> None:
     assert layout.feature_begin == 1412
 
 
+def test_compute_layout_suppresses_the_rtree_when_it_is_absent() -> None:
+    # test_layout.cpp:74-82 -- rtree_size is forced to 0 (short-
+    # circuiting rtree_index_size entirely) when either trigger
+    # condition holds, instead of raising via rtree_index_size's
+    # num_items == 0 guard.
+    no_index = compute_layout(
+        header_size=100,
+        features_count=17,
+        index_node_size=0,
+        attr_index_size=0,
+    )
+    assert no_index.rtree_size == 0
+    assert no_index.feature_begin == 112
+
+    no_features = compute_layout(
+        header_size=100,
+        features_count=0,
+        index_node_size=16,
+        attr_index_size=0,
+    )
+    assert no_features.rtree_size == 0
+    assert no_features.feature_begin == 112
+
+
+def test_validate_layout_against_size_accepts_an_exact_fit() -> None:
+    # test_layout.cpp:95-100 -- feature_begin == total_size is a legal
+    # exact fit, not an overflow; only strictly-greater should raise.
+    layout = compute_layout(
+        header_size=100,
+        features_count=17,
+        index_node_size=16,
+        attr_index_size=500,
+    )
+    validate_layout_against_size(layout, total_size=1412)
+
+
 def test_compute_layout_rejects_illegal_header_sizes() -> None:
     # test_layout.cpp:84-89 -- the header-size guard, both directions,
     # including the exact upper boundary (536870912 == 512 MiB).
