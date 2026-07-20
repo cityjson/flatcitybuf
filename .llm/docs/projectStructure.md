@@ -82,13 +82,12 @@ flatcitybuf/
 │   │   ├── 📄 CMakeLists.txt       # CMake build configuration
 │   │   └── 📄 Doxyfile             # Doxygen documentation config
 │   │
-│   └── 📁 ts/                       # TypeScript/JavaScript package
-│       ├── 📄 package.json         # npm package config
-│       ├── 📄 tsconfig.json        # TypeScript config
-│       ├── 📄 fcb_wasm.js          # Generated WASM bindings
-│       ├── 📄 fcb_wasm_bg.wasm     # WebAssembly binary
-│       ├── 📄 fcb_wasm.d.ts        # TypeScript definitions
-│       └── 📄 index.html           # Demo/preview page
+│   └── 📁 ts/                       # npm package dir -- ONE tracked file
+│       └── 📄 package.json         # npm name, version, metadata
+│                                    # fcb_wasm.{js,d.ts}, fcb_wasm_bg.wasm
+│                                    # and snippets/ land here from
+│                                    # `just build-wasm` and are gitignored;
+│                                    # the demo page lives in examples/wasm/
 │
 ├── 📁 data/                         # Development data files
 │   └── out/                        # Output files from conversions

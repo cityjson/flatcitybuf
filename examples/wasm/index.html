@@ -262,7 +262,10 @@
   <pre id="output"></pre>
 
   <script type="module">
-    import init, { HttpFcbReader, WasmAttrQuery, WasmSpatialQuery, cjToObj, cjseqToCj } from './fcb_wasm.js';
+    // The WASM package is built, not committed. Run `just build-wasm` from
+    // the repo root first, then serve the repo root (the import path leaves
+    // this directory, so opening the file directly will not work).
+    import init, { HttpFcbReader, WasmAttrQuery, WasmSpatialQuery, cjToObj, cjseqToCj } from '../../src/ts/fcb_wasm.js';
 
     // Initialize the WASM module once at the beginning
     let wasmInitialized = false;

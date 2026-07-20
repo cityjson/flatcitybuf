@@ -26,7 +26,9 @@
   "files": [
     "fcb_wasm_bg.wasm",
     "fcb_wasm.js",
-    "fcb_wasm.d.ts"
+    "fcb_wasm.d.ts",
+    "fcb_wasm_bg.wasm.d.ts",
+    "snippets"
   ],
   "main": "fcb_wasm.js",
   "types": "fcb_wasm.d.ts",

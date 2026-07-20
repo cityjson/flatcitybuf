@@ -184,13 +184,15 @@ build-py:
 # WASM Commands
 # ============================================================================
 
-# Build WASM package (web target, debug)
+# Build the WASM package into src/ts (debug). Same script CI publishes with,
+# so a local build and a release produce the same tree. The output is
+# gitignored; only src/ts/package.json is tracked.
 build-wasm:
-    cd src/rust/wasm && wasm-pack build --dev
+    ./scripts/build_wasm.sh --dev
 
 # Build WASM for production
 build-wasm-release:
-    cd src/rust/wasm && wasm-pack build --release
+    ./scripts/build_wasm.sh
 
 # ============================================================================
 # CLI Commands
