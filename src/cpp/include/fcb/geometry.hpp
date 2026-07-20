@@ -38,6 +38,34 @@ nlohmann::json decode_boundaries(UIntView solids,
                                  UIntView strings,
                                  UIntView indices);
 
+/// Rebuild a `material.<theme>.values` array from a MaterialMapping.
+///
+/// Material indices sit one level shallower than boundaries: one index per
+/// SURFACE, not per ring. So there is no `surfaces`/`strings` argument --
+/// `shells[i]` is the number of material indices in shell i.
+///
+/// Mirrors decode_materials (geom_decoder.rs:416). Unlike decode_boundaries
+/// this NEVER throws: the reference stops walking when a count array runs
+/// out and emits the short result, and that truncation is observable in the
+/// output we must match.
+nlohmann::json decode_material_values(UIntView solids, UIntView shells, UIntView vertices);
+
+/// Rebuild a `texture.<theme>.values` array from a TextureMapping.
+///
+/// Texture values nest exactly like boundaries -- solid, shell, surface,
+/// ring -- except the innermost list is (texture index, then one UV-vertex
+/// index per ring vertex) rather than vertex indices.
+///
+/// Mirrors decode_textures (geom_decoder.rs:595), including its branch
+/// order: which of the count arrays are populated selects the nesting, and
+/// several branches special-case a length of one. Only the OUTERMOST level
+/// collapses, and only in the solids branch. Also never throws; see above.
+nlohmann::json decode_texture_values(UIntView solids,
+                                     UIntView shells,
+                                     UIntView surfaces,
+                                     UIntView strings,
+                                     UIntView vertices);
+
 #endif  // FCB_WITH_JSON
 
 /// CityJSON name for a GeometryType enumerator, e.g. "MultiSurface".

@@ -21,6 +21,9 @@ namespace fcb {
 static constexpr std::size_t kBodyAlignPad = 0;
 
 const ::Header* HeaderView::raw() const {
+    // A default-constructed HeaderView owns no bytes. Report that rather
+    // than dereferencing the empty shared_ptr, as Feature::raw() does.
+    if (buffer_ == nullptr) return nullptr;
     return GetSizePrefixedHeader(buffer_->data() + kBodyAlignPad);
 }
 

@@ -161,3 +161,41 @@ underflow in the streaming path.
 
 **C++ workaround:** clamps the child index back to the entry's own offset when
 the computed child would leave the level. A no-op for ordinary keys.
+
+---
+
+## 7. `cjseq2` wraps every material/texture index in a one-element array — FIXED (local patch)
+
+**Where:** `cjseq2` 0.1.0, `impl JsonIndex for Option<usize>::to_value`, not
+FlatCityBuf's own code. Surfaced while porting appearance decoding to C++.
+
+```rust
+fn to_value(&self) -> Value {
+    Value::Array(self.iter().map(|x| x.to_value()).collect())  // Option::iter
+}
+```
+
+`Option::iter` yields zero or one element, so `Some(1)` serialized as `[1]`
+and `None` as `[]`. The `Option<u32>` impl directly above it is correct
+(`Number` / `Null`); only `Option<usize>` — used by `MaterialValues` and
+`TextureValues`, and by nothing else — was wrong. Semantics values and
+boundaries were unaffected, which is why this survived: every fixture with
+appearance data agreed with a reader that had the same bug.
+
+The emitted CityJSON was invalid against the spec, which wants
+`"values": [null, 1]` for a MultiSurface's materials and
+`[[0, 16, 17, 18, 19]]` for a surface's texture ring, not
+`[[], [1]]` and `[[[0], [16], [17], [18], [19]]]`.
+
+**Fix:** mirror the `Option<u32>` impl. Held on a local branch of
+`hideba/cjseq` (`fix/option-usize-serialization`, published 0.1.0 plus that
+one function) and wired in through `[patch.crates-io]` in
+`src/rust/Cargo.toml`.
+
+**Follow-up required:** that patch points at a sibling checkout, so a fresh
+clone of this repository cannot build the Rust workspace. Publish cjseq2
+0.1.1 and replace the patch with a version bump.
+
+`src/cpp/tests/conformance/geom_temp.expected.jsonl` was regenerated after
+the fix; both readers now emit spec-correct CityJSON. `small.expected.jsonl`
+changed only in key order.

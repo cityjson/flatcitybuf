@@ -51,32 +51,22 @@ static void check_case(const std::string& name) {
     if (expected[0].contains("transform")) {
         CHECK(actual[0]["transform"] == expected[0]["transform"]);
     }
+    // Geometry templates live only on line 0; the features reference them by
+    // index, so a mismatch here silently corrupts every GeometryInstance.
+    CHECK(actual[0].contains("geometry-templates") ==
+          expected[0].contains("geometry-templates"));
+    if (expected[0].contains("geometry-templates")) {
+        CHECK(actual[0]["geometry-templates"] == expected[0]["geometry-templates"]);
+    }
 
     for (std::size_t i = 1; i < actual.size(); ++i) {
         CAPTURE(i);
         CHECK(actual[i]["id"] == expected[i]["id"]);
         CHECK(actual[i]["vertices"] == expected[i]["vertices"]);
 
-        // KNOWN GAP: appearance (texture/material mappings) is not yet
-        // decoded, so strip it from both sides before comparing rather than
-        // pretend the case passes. Everything else -- ids, types, attributes,
-        // boundaries, semantics, extents, parents/children -- is compared in
-        // full. See "Known gaps" in the plan; geom_temp is the fixture that
-        // exercises textures.
-        json a = actual[i]["CityObjects"];
-        json e = expected[i]["CityObjects"];
-        auto strip_appearance = [](json& objs) {
-            for (auto& [id, co] : objs.items()) {
-                if (!co.contains("geometry")) continue;
-                for (auto& g : co["geometry"]) {
-                    g.erase("texture");
-                    g.erase("material");
-                }
-            }
-        };
-        strip_appearance(a);
-        strip_appearance(e);
-        CHECK(a == e);
+        // Compared in full: ids, types, attributes, boundaries, semantics,
+        // extents, parents/children, and the texture/material mappings.
+        CHECK(actual[i]["CityObjects"] == expected[i]["CityObjects"]);
     }
 }
 

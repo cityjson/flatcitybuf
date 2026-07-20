@@ -103,6 +103,47 @@ nlohmann::json decode_semantics_values(const ::Geometry* g, UIntView values) {
     return per_solid;
 }
 
+/// `material`: theme -> either a single shared-material index or a nested
+/// values array. A mapping with neither a value nor a vertices array is
+/// skipped, so a geometry whose every mapping is skipped still emits an
+/// empty object; the key itself is omitted only when the mapping vector is
+/// absent or empty, which the caller checks (geom_decoder.rs:419).
+nlohmann::json materials_to_json(const flatbuffers::Vector<
+                                 flatbuffers::Offset<::MaterialMapping>>* mappings) {
+    nlohmann::json out = nlohmann::json::object();
+    for (const auto* m : *mappings) {
+        if (m == nullptr) continue;
+        const std::string theme = (m->theme() != nullptr) ? m->theme()->str() : "theme";
+        if (const auto v = m->value()) {
+            out[theme] = {{"value", *v}};
+            continue;
+        }
+        if (m->vertices() == nullptr) continue;
+        out[theme] = {{"values", decode_material_values(as_uint_view(m->solids()),
+                                                        as_uint_view(m->shells()),
+                                                        as_uint_view(m->vertices()))}};
+    }
+    return out;
+}
+
+/// `texture`: theme -> nested values array. Mappings without vertices are
+/// skipped; see materials_to_json for why the object can end up empty.
+nlohmann::json textures_to_json(const flatbuffers::Vector<
+                                flatbuffers::Offset<::TextureMapping>>* mappings) {
+    nlohmann::json out = nlohmann::json::object();
+    for (const auto* m : *mappings) {
+        if (m == nullptr) continue;
+        auto vertices = as_uint_view(m->vertices());
+        if (vertices.empty()) continue;
+        const std::string theme = (m->theme() != nullptr) ? m->theme()->str() : "theme";
+        out[theme] = {{"values", decode_texture_values(as_uint_view(m->solids()),
+                                                       as_uint_view(m->shells()),
+                                                       as_uint_view(m->surfaces()),
+                                                       as_uint_view(m->strings()), vertices)}};
+    }
+    return out;
+}
+
 nlohmann::json geometry_instance_to_json(const ::GeometryInstance* gi) {
     nlohmann::json out = nlohmann::json::object();
     out["type"] = "GeometryInstance";
@@ -177,6 +218,21 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
         out["semantics"] = std::move(sem);
     }
 
+    // Appearance: per-geometry mappings only. The header's `appearance`
+    // object (the materials/textures/vertices-texture arrays these index
+    // into) is deliberately not emitted -- the Rust reader does not emit it
+    // either, and CityJSONSeq consumers read it from the source file.
+    //
+    // An EMPTY mapping vector omits the key entirely: the reference returns
+    // None for an empty slice (geom_decoder.rs:419, :598) and serde drops
+    // the field. Only a vector whose mappings were all skipped yields `{}`.
+    if (g->material() != nullptr && g->material()->size() > 0) {
+        out["material"] = materials_to_json(g->material());
+    }
+    if (g->texture() != nullptr && g->texture()->size() > 0) {
+        out["texture"] = textures_to_json(g->texture());
+    }
+
     return out;
 }
 
@@ -218,6 +274,35 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
     // A CityJSONSeq header line carries no features of its own.
     cj["CityObjects"] = nlohmann::json::object();
     cj["vertices"] = nlohmann::json::array();
+
+    // Geometry templates: shapes shared by every GeometryInstance in the
+    // file, with their own vertex list. Emitted only when BOTH arrays are
+    // present -- a template without vertices indexes nothing
+    // (deserializer.rs:92).
+    const ::Header* hdr = detail::HeaderAccess::get(header);
+    if (hdr != nullptr && hdr->templates() != nullptr &&
+        hdr->templates_vertices() != nullptr) {
+        auto templates = nlohmann::json::array();
+        for (const auto* t : *hdr->templates()) {
+            if (t != nullptr) templates.push_back(geometry_to_json(t, info.semantic_columns));
+        }
+
+        // Template vertices are absolute doubles, NOT quantised: the header
+        // transform does not apply to them. Read via memcpy for the same
+        // reason as Transform -- the struct can sit at a misaligned offset.
+        auto verts = nlohmann::json::array();
+        for (const auto* v : *hdr->templates_vertices()) {
+            std::array<double, 3> xyz{};
+            for (std::size_t i = 0; i < 3; ++i) {
+                std::memcpy(&xyz[i], reinterpret_cast<const std::uint8_t*>(v) + i * sizeof(double),
+                            sizeof(double));
+            }
+            verts.push_back(nlohmann::json::array({xyz[0], xyz[1], xyz[2]}));
+        }
+
+        cj["geometry-templates"] = {{"templates", std::move(templates)},
+                                    {"vertices-templates", std::move(verts)}};
+    }
 
     return cj;
 }

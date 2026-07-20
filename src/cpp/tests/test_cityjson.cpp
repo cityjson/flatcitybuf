@@ -23,6 +23,14 @@ TEST_CASE("metadata emits a valid CityJSON envelope") {
     CHECK(cj["metadata"]["geographicalExtent"].size() == 6);
 }
 
+TEST_CASE("metadata from an empty header does not dereference a null buffer") {
+    // A default-constructed HeaderView owns no bytes. Template decoding
+    // reaches for the raw FlatBuffers header, so this path has to survive.
+    json cj = to_cityjson_metadata(HeaderView{});
+    CHECK(cj["type"] == "CityJSON");
+    CHECK_FALSE(cj.contains("geometry-templates"));
+}
+
 TEST_CASE("a feature emits a valid CityJSONFeature") {
     FcbReader r = FcbReader::open_file(kFixture);
     FeatureIterator it = r.select_all();

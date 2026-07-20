@@ -70,6 +70,37 @@ nlohmann::json collapse(nlohmann::json arr) {
     return arr;
 }
 
+/// u32::MAX marks "no index here" and becomes JSON null, not 4294967295.
+nlohmann::json appearance_index_to_json(std::uint32_t v) {
+    if (v == UINT32_MAX) return nullptr;
+    return v;
+}
+
+/// `count` indices from `vertices`, starting at `cursor`.
+///
+/// Stops early when `vertices` runs out instead of throwing: the reference
+/// guards every push with `if vertex_index < vertices.len()`, so a mapping
+/// that over-claims yields a SHORT array rather than an error, and that is
+/// what the expected output contains.
+nlohmann::json take_appearance_indices(UIntView vertices, std::size_t& cursor,
+                                       std::uint32_t count) {
+    auto out = nlohmann::json::array();
+    for (std::uint32_t i = 0; i < count && cursor < vertices.size(); ++i) {
+        out.push_back(appearance_index_to_json(vertices[cursor++]));
+    }
+    return out;
+}
+
+/// Every material index, flat. The shape used whenever the mapping carries
+/// no usable solids/shells structure.
+nlohmann::json flat_appearance_indices(UIntView vertices) {
+    auto out = nlohmann::json::array();
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        out.push_back(appearance_index_to_json(vertices[i]));
+    }
+    return out;
+}
+
 #endif  // FCB_WITH_JSON
 
 }  // namespace
@@ -138,6 +169,144 @@ nlohmann::json decode_boundaries(UIntView solids,
     auto out = nlohmann::json::array();
     for (std::size_t i = 0; i < indices.size(); ++i) out.push_back(indices[i]);
     return out;
+}
+
+nlohmann::json decode_material_values(UIntView solids, UIntView shells, UIntView vertices) {
+    // No structure to rebuild: one index per surface, in file order. This
+    // covers MultiSurface/CompositeSurface, and also a mapping that declares
+    // solids but no shells -- the reference falls back to flat there too.
+    if (solids.empty() || shells.empty()) return flat_appearance_indices(vertices);
+
+    std::size_t vertex = 0;
+    std::size_t shell = 0;
+
+    // One solid holding several shells: the solid level is dropped, leaving
+    // a list of per-shell index arrays. Note this is NOT the general
+    // collapse rule -- solids == [1] takes the branch below and stays
+    // wrapped (geom_decoder.rs:487).
+    if (solids.size() == 1 && solids[0] > 1) {
+        auto out = nlohmann::json::array();
+        for (std::uint32_t i = 0; i < solids[0] && shell < shells.size(); ++i) {
+            out.push_back(take_appearance_indices(vertices, vertex, shells[shell++]));
+        }
+        return out;
+    }
+
+    // MultiSolid/CompositeSolid: solid -> shell -> indices.
+    auto out = nlohmann::json::array();
+    for (std::size_t s = 0; s < solids.size(); ++s) {
+        auto solid = nlohmann::json::array();
+        for (std::uint32_t i = 0; i < solids[s] && shell < shells.size(); ++i) {
+            solid.push_back(take_appearance_indices(vertices, vertex, shells[shell++]));
+        }
+        // Pushed even when the shell array ran out mid-solid, matching the
+        // reference: a truncated walk still contributes an (empty) entry.
+        out.push_back(std::move(solid));
+    }
+    return out;
+}
+
+namespace {
+
+/// Cursors for the texture walk. Separate from Cursors above because the
+/// texture arrays are walked with skip-on-exhaustion, not throw-on-overrun.
+struct TexCursors {
+    std::size_t shell = 0;
+    std::size_t surface = 0;
+    std::size_t string = 0;
+    std::size_t vertex = 0;
+};
+
+/// One surface: `surfaces[surface]` rings, each a (texture index, UVs) list.
+/// The caller has already checked that `surfaces` is not exhausted.
+nlohmann::json take_tex_surface(UIntView surfaces, UIntView strings, UIntView vertices,
+                                TexCursors& c) {
+    const std::uint32_t ring_count = surfaces[c.surface++];
+    auto out = nlohmann::json::array();
+    for (std::uint32_t i = 0; i < ring_count && c.string < strings.size(); ++i) {
+        out.push_back(take_appearance_indices(vertices, c.vertex, strings[c.string++]));
+    }
+    return out;
+}
+
+/// One shell: `shells[shell]` surfaces. Caller has checked `shells`.
+nlohmann::json take_tex_shell(UIntView shells, UIntView surfaces, UIntView strings,
+                              UIntView vertices, TexCursors& c) {
+    const std::uint32_t surface_count = shells[c.shell++];
+    auto out = nlohmann::json::array();
+    for (std::uint32_t i = 0; i < surface_count && c.surface < surfaces.size(); ++i) {
+        out.push_back(take_tex_surface(surfaces, strings, vertices, c));
+    }
+    return out;
+}
+
+}  // namespace
+
+nlohmann::json decode_texture_values(UIntView solids,
+                                     UIntView shells,
+                                     UIntView surfaces,
+                                     UIntView strings,
+                                     UIntView vertices) {
+    TexCursors c;
+
+    // The branches below are the reference's, in its order. They are not
+    // mutually exclusive by geometry type -- several test length == 1 -- so
+    // reordering them changes the output.
+    if (!solids.empty()) {
+        auto out = nlohmann::json::array();
+        for (std::size_t s = 0; s < solids.size(); ++s) {
+            auto solid = nlohmann::json::array();
+            for (std::uint32_t i = 0; i < solids[s] && c.shell < shells.size(); ++i) {
+                solid.push_back(take_tex_shell(shells, surfaces, strings, vertices, c));
+            }
+            out.push_back(std::move(solid));
+        }
+        // Collapse ONLY here, at the outermost level, and only for a single
+        // solid. Every inner level always wraps.
+        return collapse(std::move(out));
+    }
+
+    // A single shell of surfaces (MultiSurface written with a shell entry).
+    // Guarded on shells.size() == 1: two shells fall through to the surface
+    // branch below, which ignores `shells` entirely.
+    if (!shells.empty() && !surfaces.empty() && shells.size() == 1) {
+        auto out = nlohmann::json::array();
+        for (std::uint32_t i = 0; i < shells[0] && c.surface < surfaces.size(); ++i) {
+            out.push_back(take_tex_surface(surfaces, strings, vertices, c));
+        }
+        return out;
+    }
+
+    // One surface holding several rings: MultiLineString, whose strings are
+    // the lines. Yields the ring list without the surface wrapper.
+    if (surfaces.size() == 1 && strings.size() > 1) {
+        auto out = nlohmann::json::array();
+        for (std::uint32_t i = 0; i < surfaces[0] && c.string < strings.size(); ++i) {
+            out.push_back(take_appearance_indices(vertices, c.vertex, strings[c.string++]));
+        }
+        return out;
+    }
+
+    // MultiSurface/CompositeSurface: surface -> ring.
+    if (!surfaces.empty()) {
+        auto out = nlohmann::json::array();
+        for (std::size_t s = 0; s < surfaces.size(); ++s) {
+            out.push_back(take_tex_surface(surfaces, strings, vertices, c));
+        }
+        return out;
+    }
+
+    // Rings with no surface grouping.
+    if (strings.size() > 1) {
+        auto out = nlohmann::json::array();
+        for (std::size_t s = 0; s < strings.size(); ++s) {
+            out.push_back(take_appearance_indices(vertices, c.vertex, strings[s]));
+        }
+        return out;
+    }
+
+    // MultiPoint, or a single ring: a flat index list.
+    return flat_appearance_indices(vertices);
 }
 
 #endif  // FCB_WITH_JSON
