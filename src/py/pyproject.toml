@@ -24,3 +24,8 @@ files = ["flatcitybuf", "tests"]
 [tool.ruff]
 line-length = 79
 target-version = "py39"
+
+[tool.ruff.lint]
+# Default select (E4, E7, E9, F) doesn't include E501 (line-too-long), so
+# line-length above would otherwise be enforced by nothing.
+extend-select = ["E501"]

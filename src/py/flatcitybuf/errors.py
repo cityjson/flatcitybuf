@@ -15,7 +15,8 @@ class ErrorCode(Enum):
 
 
 class FcbError(Exception):
-    """Every error this package raises. Mirrors fcb::Error in the C++ reader."""
+    """Every error this package raises. Mirrors fcb::Error in the C++
+    reader."""
 
     def __init__(self, code: ErrorCode, message: str) -> None:
         super().__init__(f"{code.value}: {message}")
