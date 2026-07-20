@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from flatcitybuf.errors import ErrorCode, FcbError
@@ -87,6 +87,17 @@ class CityObjectView:
     columns for decoding `attributes`; see attribute.py's
     decode_attributes docstring and the task report for why this is the
     normal case in real data, not an edge case.
+
+    `_raw` is the one exception to this class never handing out its
+    generated FlatBuffers object: cityjson.py needs
+    geometry/geometry_instances/geographical_extent/children/parents,
+    none of which Task 7 scoped into this view (it was built around
+    attributes/columns only). Mirrors detail::FeatureAccess::get in the
+    C++ port -- Python has no friend-class mechanism, so this is a
+    leading-underscore convention instead of an enforced boundary;
+    nothing outside cityjson.py should read it. `repr`/`compare` are
+    suppressed so printing or comparing a CityObjectView does not
+    dump/compare raw FlatBuffers table internals.
     """
 
     id: str
@@ -96,6 +107,22 @@ class CityObjectView:
     attributes: bytes | None
     has_columns: bool
     columns: list[ColumnInfo] | None
+    _raw: Any = field(default=None, repr=False, compare=False)
+
+
+def raw_city_object(view: CityObjectView) -> Any:
+    """Internal gateway to CityObjectView's generated CityObject table.
+    See the class docstring's `_raw` note -- only cityjson.py should
+    call this."""
+    return view._raw
+
+
+def raw_city_feature(feature: Feature) -> Any:
+    """Internal gateway to Feature's generated CityFeature table (for
+    `.Vertices()`/`.Appearance()`, which Task 7's public surface does
+    not expose). Mirrors detail::FeatureAccess::get in the C++ port --
+    only cityjson.py should call this."""
+    return feature._raw
 
 
 def _city_object_view_from(obj: Any) -> CityObjectView:
@@ -120,14 +147,15 @@ def _city_object_view_from(obj: Any) -> CityObjectView:
         attributes=_read_attribute_bytes(obj) if has_attributes else None,
         has_columns=has_columns,
         columns=_columns_from_object(obj) if has_columns else None,
+        _raw=obj,
     )
 
 
 class Feature:
     """One decoded CityFeature. Mirrors fcb::Feature (feature.hpp,
-    reader.cpp:23-109), minus the C++ friend-class dance around a raw
-    generated pointer: Python has no equivalent lifetime hazard to guard
-    against, since this class never hands `_raw` out to callers.
+    reader.cpp:23-109). `_raw` is exposed to cityjson.py only, through
+    the module-level `raw_city_feature` gateway above -- see its
+    docstring.
     """
 
     def __init__(self, raw: Any, byte_offset: int) -> None:

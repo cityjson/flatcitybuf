@@ -108,15 +108,27 @@ class FileInfo:
 
 @dataclass(frozen=True)
 class HeaderView:
-    """A fully parsed header. Mirrors fcb::HeaderView (header.hpp:69-87),
-    minus the C++ friend-class dance that hides the raw generated
-    pointer: Python has no equivalent lifetime hazard to guard against,
-    since read_header() never hands out the generated Header object
-    itself."""
+    """A fully parsed header. Mirrors fcb::HeaderView (header.hpp:69-87).
+
+    `_raw` is the one exception to "read_header() never hands out the
+    generated Header object": cityjson.py's to_cityjson_metadata needs
+    Header.templates()/templates_vertices() (geometry templates), which
+    FileInfo does not carry -- there is no `has_x`-style flag for them
+    the way there is for transform/geographical_extent, since the value
+    itself (a list of raw Geometry tables) is not a plain scalar worth
+    copying out eagerly. C++ solves the equivalent problem with a
+    friend-only accessor (detail::HeaderAccess::get); Python has no
+    friend-class mechanism, so this is a leading-underscore convention
+    instead of an enforced boundary -- nothing outside cityjson.py
+    should read this field. `repr`/`compare` are suppressed so printing
+    or comparing a HeaderView does not dump/compare raw FlatBuffers
+    table internals.
+    """
 
     info: FileInfo
     layout: FileLayout
     attr_indices: list[AttrIndexInfo]
+    _raw: Any = field(default=None, repr=False, compare=False)
 
 
 def _decode_str(b: bytes) -> str:
@@ -368,4 +380,6 @@ def read_header(reader: RangeReader) -> HeaderView:
         )
         cursor += length
 
-    return HeaderView(info=info, layout=layout, attr_indices=attr_indices)
+    return HeaderView(
+        info=info, layout=layout, attr_indices=attr_indices, _raw=hdr
+    )
