@@ -15,10 +15,8 @@
 
 namespace fcb {
 
-/// Leading padding so the size-prefixed FlatBuffer body ends up 8-aligned.
-/// Same reasoning as in header.cpp: the 4-byte size prefix would otherwise
-/// push the body to 4 mod 8 and misalign every 8-byte struct inside it.
-static constexpr std::size_t kBodyAlignPad = 4;
+/// No padding needed; see the note in header.cpp.
+static constexpr std::size_t kBodyAlignPad = 0;
 
 // -------------------------------------------------------------- Feature ---
 
@@ -203,13 +201,9 @@ bool FeatureIterator::next() {
     auto buf = std::make_shared<std::vector<std::uint8_t>>(kBodyAlignPad + raw_buf.size());
     std::copy(raw_buf.begin(), raw_buf.end(), buf->begin() + kBodyAlignPad);
 
-    // check_alignment is disabled for the same reason as the header: the
-    // Rust writer emits internally misaligned structs, so the check can
-    // never pass. All other structural verification still runs.
-    flatbuffers::Verifier::Options opts;
-    opts.check_alignment = false;
+    // Full structural verification, alignment included; see header.cpp.
     flatbuffers::Verifier verifier(buf->data() + kBodyAlignPad,
-                                   buf->size() - kBodyAlignPad, opts);
+                                   buf->size() - kBodyAlignPad);
     if (!VerifySizePrefixedCityFeatureBuffer(verifier)) {
         throw Error(ErrorCode::InvalidFlatbuffer,
                     "feature failed FlatBuffers verification at offset " +

@@ -444,8 +444,20 @@ impl<K: Key> Stree<K> {
 
     // branching_factor is the number of children per node, it'll be B and node_size is B-1
     fn init(&mut self, branching_factor: u16) -> Result<()> {
-        assert!(branching_factor >= 2, "Branching factor must be at least 2");
-        assert!(self.num_leaf_nodes > 0, "Cannot create empty tree");
+        // Return errors rather than panicking: this is library code, and an
+        // attribute with no indexable values is a normal condition when
+        // indexing every column of a heterogeneous dataset -- the writer
+        // skips such columns rather than aborting the whole file.
+        if branching_factor < 2 {
+            return Err(Error::InvalidFormat(format!(
+                "branching factor must be at least 2, got {branching_factor}"
+            )));
+        }
+        if self.num_leaf_nodes == 0 {
+            return Err(Error::InvalidFormat(
+                "cannot build an attribute index with no entries".to_string(),
+            ));
+        }
         self.branching_factor = branching_factor.clamp(2u16, 65535u16);
         self.level_bounds =
             Stree::<K>::generate_level_bounds(self.num_leaf_nodes, self.branching_factor);

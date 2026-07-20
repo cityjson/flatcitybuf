@@ -4,21 +4,39 @@ Five defects in `fcb_core` surfaced during the native C++ port. Each is
 reproducible, each caused a deliberate divergence in the C++ reader, and none
 is caught by the existing Rust test suite.
 
-**Status: 2-5 are now FIXED in this branch** (see the `fix(rust)` commit);
-each has a regression test. #1 is not fixed — it changes the written layout
-and needs a maintainer decision. #6 turned out to be real and is fixed with
-#4/#5.
+**Status: all six are now FIXED in this branch** except #5, which is a
+structural change to the query lowering that the C++ reader demonstrates the
+alternative for. Each fix has a regression test. #1 turned out to be an
+upstream `flatbuffers` bug and is fixed by a version bump, which **changes the
+written file layout**.
+
+A seventh defect surfaced while regenerating fixtures: indexing an attribute
+with no values panicked (`assert!(num_leaf_nodes > 0, "Cannot create empty
+tree")`) instead of returning an error, so `--index-all-attributes` aborted on
+any heterogeneous dataset. Library code should not panic; it now returns an
+error and the writer skips such columns.
 
 Filing these as public GitHub issues remains a maintainer call.
 
 ---
 
-## 1. `Transform` is written at a misaligned offset
+## 1. `Transform` is written at a misaligned offset — FIXED (flatbuffers bump)
 
-**Where:** the header writer, observable in any `.fcb` file.
+**Where:** `flatbuffers` 24.12.23's `finish_size_prefixed`, not FlatCityBuf's
+own code. Observable in any `.fcb` written before the bump.
 
-The `Transform` struct (six doubles, requiring 8-byte alignment) is placed at
-body+68 in the header FlatBuffer — an odd multiple of 4.
+Two structs that both require 8-byte alignment were laid out relative to
+*different* bases, so no placement of the buffer could align both:
+
+```
+field                  off(buf) off(body)  buf%8 body%8
+transform                    72       68      0      4   <- aligned to buf
+geographical_extent         132      128      4      0   <- aligned to body
+```
+
+They sit 60 bytes apart, and 60 % 8 == 4. Shifting the buffer to fix one
+necessarily breaks the other, which is why the C++ verifier's
+`check_alignment` failed at every possible residue.
 
 **Consequences:**
 
@@ -33,8 +51,24 @@ body+68 in the header FlatBuffer — an odd multiple of 4.
 memcpy workaround, or verify any header buffer with C++ `flatbuffers::Verifier`
 defaults.
 
-**C++ workaround:** struct doubles are read via `memcpy` (well-defined at any
-alignment) and only `check_alignment` is disabled; all other verification runs.
+**Fix:** bump the Rust `flatbuffers` pin from 24.3.25 (resolving to 24.12.23)
+to 25.9.23. The newer builder aligns everything relative to the size-prefixed
+buffer start:
+
+```
+transform                    72       68      0   <- both consistent
+geographical_extent         128      124      0
+VerifySizePrefixedHeaderBuffer (check_alignment ON) = 1
+```
+
+**This is a breaking change to the written layout** — files produced before the
+bump keep the old, internally inconsistent alignment. All fixtures in this repo
+were regenerated.
+
+The C++ reader now enables full alignment verification and needs no padding:
+FlatBuffers aligns relative to the buffer start, and `std::vector`'s allocation
+is already 8-aligned. `memcpy` reads for struct doubles are retained as cheap
+defence, since they compile to the same load.
 
 ---
 

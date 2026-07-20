@@ -11,9 +11,14 @@
 
 namespace fcb {
 
-/// Leading padding so the size-prefixed FlatBuffer body ends up 8-aligned.
-/// See the alignment note in read_header().
-static constexpr std::size_t kBodyAlignPad = 4;
+/// No padding needed.
+///
+/// FlatBuffers aligns a size-prefixed buffer's contents relative to the
+/// START OF THE BUFFER (prefix included), so placing the buffer at an
+/// 8-aligned address -- which std::vector's allocation already guarantees --
+/// makes every struct inside correctly aligned. Kept as a named constant so
+/// the reasoning stays visible and the slicing arithmetic reads the same.
+static constexpr std::size_t kBodyAlignPad = 0;
 
 const ::Header* HeaderView::raw() const {
     return GetSizePrefixedHeader(buffer_->data() + kBodyAlignPad);
@@ -178,13 +183,10 @@ HeaderView read_header(std::shared_ptr<RangeReader> reader) {
     // header_size is that prefix, not a bespoke length field.
     //
     // ALIGNMENT: the schema contains 8-byte-aligned structs (Transform,
-    // GeographicalExtent -- vectors of doubles). A size-prefixed buffer puts
-    // the FlatBuffer body 4 bytes into the allocation, so if the buffer
-    // started 8-aligned the body would land at 4 mod 8 and every such struct
-    // would be misaligned -- confirmed by UBSan ("member call on misaligned
-    // address ... for type 'GeographicalExtent'"). std::vector's data() is
-    // at least 8-aligned, so we prepend kBodyAlignPad=4 bytes: the prefix
-    // then sits at data()+4 and the body at data()+8, correctly aligned.
+    // GeographicalExtent -- vectors of doubles). FlatBuffers aligns a
+    // size-prefixed buffer's contents relative to the buffer START, and
+    // std::vector's allocation is already at least 8-aligned, so copying the
+    // bytes into a fresh vector is sufficient.
     const std::uint64_t want = kHeaderSizeSize + static_cast<std::uint64_t>(header_size);
     auto raw_buf = buffered.read(kMagicBytesSize, want);
     if (raw_buf.size() < want) {
@@ -193,29 +195,16 @@ HeaderView read_header(std::shared_ptr<RangeReader> reader) {
     std::vector<std::uint8_t> buf(kBodyAlignPad + raw_buf.size());
     std::copy(raw_buf.begin(), raw_buf.end(), buf.begin() + kBodyAlignPad);
 
-    // Structural verification with check_alignment disabled.
+    // FULL structural verification, alignment check included.
     //
-    // Buffers written by the Rust implementation fail the C++ verifier's
-    // alignment check while passing Rust's own verifier, and they read
-    // correctly here. Verified empirically: the check fails for both the
-    // size-prefixed and plain root forms, at every possible buffer start
-    // residue mod 8, so it is the buffer's internal layout that C++
-    // disagrees with -- not where we happen to place it. Every other check
-    // (max_tables, max_depth, nested buffers) passes.
-    //
-    // Disabling only this check keeps the security-critical verification:
-    // offsets, bounds, vector lengths and required fields are all still
-    // enforced, which is what protects against malicious input. See the
-    // UBSan test run in the suite, which confirms real field accesses are
-    // not misaligned in practice.
-    //
-    // TODO(upstream): file against fcb_core -- the Rust writer should emit
-    // buffers that satisfy the C++ verifier, since the format is meant to
-    // be cross-implementation.
-    flatbuffers::Verifier::Options opts;
-    opts.check_alignment = false;
+    // This used to be disabled: flatbuffers 24.12.23's finish_size_prefixed
+    // laid out 8-byte-aligned structs relative to inconsistent bases, so
+    // Transform and GeographicalExtent ended up 60 bytes apart (60 % 8 == 4)
+    // and no buffer placement could align both. Bumping the Rust writer to
+    // flatbuffers 25.x fixed the layout, so the check now passes and is
+    // enforced.
     flatbuffers::Verifier verifier(buf.data() + kBodyAlignPad,
-                                  buf.size() - kBodyAlignPad, opts);
+                                   buf.size() - kBodyAlignPad);
     if (!VerifySizePrefixedHeaderBuffer(verifier)) {
         throw Error(ErrorCode::InvalidFlatbuffer, "header failed FlatBuffers verification");
     }

@@ -7,7 +7,7 @@ resolver = "2"
 fcb_core = { version = "0.7.2", path = "fcb_core", default-features = false }
 bytemuck = "1.15.0"
 async-trait = { version = "0.1.85", default-features = true }
-flatbuffers = "24.3.25"
+flatbuffers = "25.9.23"
 byteorder = "1.5.0"
 cjseq = { package = "cjseq2", version = "0.1.0" }
 tempfile = "3.14.0"
