@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Sequence
 
 from flatcitybuf.errors import ErrorCode, FcbError
+from flatcitybuf.generated.header_generated import ColumnType
 from flatcitybuf.header import AttrIndexInfo, HeaderView
 from flatcitybuf.keys import (
     KeyKind,
@@ -13,6 +14,7 @@ from flatcitybuf.keys import (
     column_type_to_key_kind,
     compare_keys,
     decode_key,
+    is_string_kind,
     key_max,
     key_min,
     key_serialized_size,
@@ -37,9 +39,10 @@ _OFFSET_SIZE = 8
 _INDEX_FETCH_SIZE = 1_048_576
 
 # Column types the writer indexes as FixedStringKey<100> over a JSON or
-# binary blob. See search_stree's docstring, divergence 2.
-_JSON_COLUMN_TYPE = 12
-_BINARY_COLUMN_TYPE = 14
+# binary blob. See search_stree's docstring, divergence 2. Taken from the
+# GENERATED enum rather than re-spelled as literals, so this file and
+# keys._COLUMN_TYPE_TO_KIND cannot drift apart if header.fbs changes.
+_BLOB_COLUMN_TYPES = (ColumnType.Json, ColumnType.Binary)
 
 
 class Operator(Enum):
@@ -255,7 +258,14 @@ class _Tree:
     ) -> None:
         """Resolve one leaf offset into feature offsets, following a
         payload reference when the MSB is set. Mirrors emit_offset
-        (stree.cpp:128-161)."""
+        (stree.cpp:128-161).
+
+        `index` is the LEAF-RELATIVE ordinal of the entry that produced
+        this hit -- see SearchResultItem's meaning in search_stree's
+        docstring. It is passed through unchanged to every feature
+        behind a payload entry, so all features sharing one key share
+        one index.
+        """
         if not is_payload_ref(offset):
             out.append(SearchResultItem(offset=offset, index=index))
             return
@@ -361,6 +371,9 @@ def _find_exact(tree: _Tree, key: KeyValue) -> list[SearchResultItem]:
             continue
 
         if found:
+            # `- leaf_start` makes the index LEAF-RELATIVE: node_index is
+            # an index into the flat node array, whose leaf level starts
+            # at levels[0][0], not at 0.
             tree.emit(items[at].offset, node_index + at - tree.leaf_start, out)
     return out
 
@@ -445,6 +458,9 @@ def _scan_range(
             cu = compare_keys(entry.key, upper)
             if (cl > 0) if lower_strict else (cl >= 0):
                 if (cu < 0) if upper_strict else (cu <= 0):
+                    # Leaf-relative, exactly as _find_exact emits it:
+                    # `cur` indexes the flat node array, whose leaf level
+                    # begins at leaf_start.
                     tree.emit(entry.offset, cur + i - tree.leaf_start, out)
         cur = node_end
     return out
@@ -532,11 +548,10 @@ def stree_query(
     merely shares a prefix.
     """
     tree = _build_tree(reader, index, kind)
-    is_string = kind in (
-        KeyKind.STRING20,
-        KeyKind.STRING50,
-        KeyKind.STRING100,
-    )
+    # keys.is_string_kind, not a re-spelled tuple: one predicate, so the
+    # widening below cannot disagree with what needs_post_filter
+    # considers a candidate-only column.
+    is_string = is_string_kind(kind)
 
     if operator is Operator.EQ:
         # Equal-prefix collisions are candidates, not answers.
@@ -584,7 +599,7 @@ def _resolve(
     # DIVERGENCE 2, checked BEFORE the "is it indexed" lookup so the
     # rejection does not depend on whether this particular writer
     # emitted an index for the column.
-    if column.type in (_JSON_COLUMN_TYPE, _BINARY_COLUMN_TYPE):
+    if column.type in _BLOB_COLUMN_TYPES:
         raise FcbError(
             ErrorCode.UNSUPPORTED_COLUMN_TYPE,
             f"column {column.name} is Json/Binary: its index is a "
@@ -636,7 +651,19 @@ def search_stree(
     a prefix are indistinguishable here. A caller wanting exact answers
     must re-check each hit against the decoded, untruncated attribute --
     resolving the schema PER CityObject, since CityObject.columns
-    overrides Header.columns.
+    overrides Header.columns. That is FcbReader.select_attr's job
+    (reader.py); this function is deliberately the RAW candidate layer,
+    the equivalent of C++'s AttrQueryOptions.exact_index_only
+    (reader.cpp:388).
+
+    SearchResultItem.index is the LEAF-RELATIVE ORDINAL of the B+tree
+    entry that produced the hit -- i.e. the rank of its (unique) KEY in
+    sorted key order, counting from the first leaf entry. This is NOT
+    the same meaning the packed R-tree gives the field, where it
+    identifies the feature itself: several features can hide behind one
+    payload entry, and they all carry that entry's single index. Use
+    `offset` to identify a feature; `index` only says which key it was
+    found under.
 
     FOUR DELIBERATE DIVERGENCES from Rust's reader are reproduced here,
     so that the Rust, C++ and Python readers agree. Each is a decision,
@@ -671,6 +698,9 @@ def search_stree(
     column or a condition whose key kind does not match its column's.
     """
     if not conditions:
+        # C++ raises ErrorCode::QueryExecutionError here
+        # (reader.cpp:327-329); errors.py has no such member, so this
+        # reuses ATTRIBUTE_INDEX_NOT_FOUND rather than inventing one.
         raise FcbError(
             ErrorCode.ATTRIBUTE_INDEX_NOT_FOUND, "empty attribute query"
         )
@@ -702,16 +732,138 @@ def search_stree(
     return accumulator or []
 
 
+# --------------------------------------------------- post-filtering ---
+#
+# Everything below supports FcbReader.select_attr (reader.py), the public
+# query entry point. It lives here, next to Operator and the lowering it
+# has to undo, rather than in reader.py: reader.py is the top of the
+# layering and imports this module, never the other way round.
+
+
+def condition_key_kind(info: HeaderView, condition: AttrCondition) -> KeyKind:
+    """The key kind `condition`'s column is indexed as, resolved exactly
+    the way search_stree resolves it -- same column lookup, same
+    Json/Binary rejection, same kind-mismatch check. Mirrors the
+    `key_kind_for_column(col->type)` step of FcbReader::select_attr
+    (reader.cpp:359)."""
+    _index, kind = _resolve(info, condition)
+    return kind
+
+
+def needs_post_filter(kind: KeyKind) -> bool:
+    """True if stree_query's answers for `kind` are candidates rather
+    than answers, so select_attr must re-check them against the
+    untruncated value. Mirrors fcb::needs_post_filter
+    (reader.cpp:319-322)."""
+    return is_string_kind(kind)
+
+
+_INT_FACTORIES = {
+    KeyKind.INT8: KeyValue.from_i8,
+    KeyKind.UINT8: KeyValue.from_u8,
+    KeyKind.INT16: KeyValue.from_i16,
+    KeyKind.UINT16: KeyValue.from_u16,
+    KeyKind.INT32: KeyValue.from_i32,
+    KeyKind.UINT32: KeyValue.from_u32,
+    KeyKind.INT64: KeyValue.from_i64,
+    KeyKind.UINT64: KeyValue.from_u64,
+}
+
+
+def _key_from_attr_value(value: object, kind: KeyKind) -> KeyValue | None:
+    """Lift one decoded attribute value (attribute.decode_attributes'
+    output: bool / int / float / str) into a KeyValue of `kind`, or None
+    if it cannot be one. Mirrors the coercion switch in C++'s
+    value_satisfies (reader.cpp:259-305).
+
+    None means "this value cannot satisfy a condition of that kind", not
+    an error: a post-filter that raised on a type mismatch would turn a
+    heterogeneous file into an exception instead of an empty result.
+    """
+    if is_string_kind(kind):
+        # DateTime attributes also arrive as text, but their KEY kind is
+        # DATETIME, so they never reach this branch.
+        if not isinstance(value, str):
+            return None
+        return KeyValue.from_string(kind, value)
+    if kind is KeyKind.BOOL:
+        return KeyValue.from_bool(value) if isinstance(value, bool) else None
+    # bool IS an int in Python: exclude it explicitly before the numeric
+    # branches, or True would compare equal to a 1 in a ULong column.
+    if isinstance(value, bool):
+        return None
+    if kind is KeyKind.FLOAT32 and isinstance(value, (int, float)):
+        return KeyValue.from_f32(float(value))
+    if kind is KeyKind.FLOAT64 and isinstance(value, (int, float)):
+        return KeyValue.from_f64(float(value))
+    factory = _INT_FACTORIES.get(kind)
+    if factory is None or not isinstance(value, int):
+        return None
+    try:
+        return factory(value)
+    except FcbError:
+        # Out of range for the column's width -- a value no key of this
+        # kind could hold cannot equal, or order against, one that can.
+        return None
+
+
+def _compare_result_satisfies(operator: Operator, c: int) -> bool:
+    if operator is Operator.EQ:
+        return c == 0
+    if operator is Operator.NE:
+        return c != 0
+    if operator is Operator.GT:
+        return c > 0
+    if operator is Operator.GE:
+        return c >= 0
+    if operator is Operator.LT:
+        return c < 0
+    if operator is Operator.LE:
+        return c <= 0
+    raise FcbError(  # pragma: no cover - Operator is a closed enum
+        ErrorCode.UNSUPPORTED_COLUMN_TYPE, f"unknown operator: {operator}"
+    )
+
+
+def value_satisfies(value: object, operator: Operator, want: KeyValue) -> bool:
+    """True if a decoded attribute `value` really satisfies `operator`
+    against `want`. Mirrors fcb::value_satisfies (reader.cpp:259-317).
+
+    STRINGS are compared as the FULL, untruncated UTF-8 BYTES -- never as
+    `str` (whose ordering is by code point, not by the byte order the
+    index and every other implementation use) and never through
+    compare_keys, which deliberately compares the TRUNCATED, zero-padded
+    key forms. Undoing that truncation is the entire point of the
+    post-filter.
+
+    Every other kind goes through compare_keys, so float columns keep the
+    ordered_float total order (NaN == NaN, NaN above +inf) rather than
+    Python's `<`.
+    """
+    actual = _key_from_attr_value(value, want.kind)
+    if actual is None:
+        return False
+    if is_string_kind(want.kind):
+        a, b = actual.raw, want.raw
+        c = -1 if a < b else (1 if a > b else 0)
+    else:
+        c = compare_keys(actual, want)
+    return _compare_result_satisfies(operator, c)
+
+
 __all__ = [
     "PAYLOAD_TAG",
     "PAYLOAD_MASK",
     "AttrCondition",
     "Operator",
     "SearchResultItem",
+    "condition_key_kind",
     "decode_payload_entry",
     "is_payload_ref",
+    "needs_post_filter",
     "payload_offset",
     "search_stree",
     "stree_num_nodes",
     "stree_query",
+    "value_satisfies",
 ]

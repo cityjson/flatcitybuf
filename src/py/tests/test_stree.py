@@ -16,11 +16,13 @@ from flatcitybuf.stree import (
     PAYLOAD_TAG,
     AttrCondition,
     Operator,
+    _build_tree,
     decode_payload_entry,
     is_payload_ref,
     payload_offset,
     search_stree,
     stree_num_nodes,
+    value_satisfies,
 )
 
 CORPUS = Path(__file__).resolve().parents[3] / "conformance"
@@ -556,6 +558,437 @@ def test_a_condition_whose_value_kind_mismatches_the_column_raises() -> None:
             [AttrCondition("idx", Operator.EQ, KeyValue.from_f64(1.0))],
         )
     assert exc.value.code == ErrorCode.UNSUPPORTED_COLUMN_TYPE
+
+
+def index_for(reader: FcbReader, name: str) -> AttrIndexInfo:
+    col = next(c for c in reader.header.info.columns if c.name == name)
+    return next(
+        a for a in reader.header.attr_indices if a.column_index == col.index
+    )
+
+
+class MemoryRangeReader:
+    """In-memory RangeReader, for hostile bytes that must not be written
+    to the corpus. Honours range_reader.RangeReader's contract: a read
+    crossing the end returns exactly what exists."""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def total_size(self) -> int:
+        return len(self._data)
+
+    def read(self, offset: int, length: int) -> bytes:
+        if length == 0:
+            return b""
+        return self._data[offset : offset + length]
+
+
+def test_a_crafted_payload_count_is_rejected_before_allocating() -> None:
+    # The brief's hardening case that had no test: a payload entry whose
+    # u32 count is 0xFFFFFFFF asks for 4 + 32 GiB. _Tree.emit must reject
+    # it from `payload_size` BEFORE reading, so the specific message is
+    # asserted -- without that guard the read merely comes back short and
+    # a DIFFERENT error ("truncated payload entry body") is raised, which
+    # a bare pytest.raises(FcbError) could not tell apart.
+    path = CORPUS / "duplicate_keys.fcb"
+    reader = FcbReader.open_file(path)
+    index = index_for(reader, "grp")
+    assert index.num_unique_items == 1  # one key, so one payload entry
+
+    entry_size = 50 + 8  # FixedStringKey<50> + u64 offset
+    tree_bytes = (
+        stree_num_nodes(index.num_unique_items, index.branching_factor)
+        * entry_size
+    )
+    # Node 0 is the root, node 1 the single leaf; take the leaf entry's
+    # offset from the file rather than assuming where the payload starts.
+    leaf_at = index.begin + entry_size + 50
+    data = bytearray(path.read_bytes())
+    leaf_offset = int.from_bytes(data[leaf_at : leaf_at + 8], "little")
+    assert is_payload_ref(leaf_offset)
+    rel = payload_offset(leaf_offset)
+
+    struct.pack_into("<I", data, index.begin + tree_bytes + rel, 0xFFFFFFFF)
+    with pytest.raises(FcbError) as exc:
+        search_stree(
+            MemoryRangeReader(bytes(data)),
+            reader.header,
+            [
+                AttrCondition(
+                    "grp",
+                    Operator.EQ,
+                    KeyValue.from_string(KeyKind.STRING50, "same"),
+                )
+            ],
+        )
+    assert exc.value.code == ErrorCode.ATTRIBUTE_INDEX_NOT_FOUND
+    assert "overruns its section" in str(exc.value)
+
+
+def test_read_entries_refuses_a_range_outside_the_node_region() -> None:
+    # _Tree.read_entries' own bound. It is DEFENCE IN DEPTH: every
+    # public path clamps the range to a level's end first (node_at) or to
+    # leaf_end (_scan_range), and _find_exact validates each child index
+    # against its level, so no corrupt file in the corpus reaches this.
+    # It is therefore exercised directly -- a test going through
+    # search_stree would be absorbed by one of those earlier checks and
+    # would not pin this guard at all.
+    path = CORPUS / "duplicate_keys.fcb"
+    reader = FcbReader.open_file(path)
+    tree = _build_tree(
+        FileRangeReader(path), index_for(reader, "idx"), KeyKind.UINT64
+    )
+    with pytest.raises(FcbError) as exc:
+        tree.read_entries(0, tree.node_count + 1)
+    assert exc.value.code == ErrorCode.INDEX_OUT_OF_BOUNDS
+    assert "outside the" in str(exc.value)
+    # The in-range read it brackets still works.
+    assert len(tree.read_entries(0, tree.node_count)) == tree.node_count
+
+
+def test_an_index_blob_reaching_past_the_end_of_the_file_is_rejected() -> None:
+    # _build_tree's total_size() check. Asserting only FcbError would
+    # pass with the check deleted too: the node read then comes back
+    # empty and raises ATTRIBUTE_INDEX_NOT_FOUND instead. Pin the code
+    # AND the message.
+    path = CORPUS / "duplicate_keys.fcb"
+    reader = FcbReader.open_file(path)
+    col = reader.header.info.columns[1]  # 'idx', a ULong column
+    header = _forge(reader.header, column_index=col.index, begin=1 << 40)
+    with pytest.raises(FcbError) as exc:
+        search_stree(
+            FileRangeReader(path),
+            header,
+            [AttrCondition(col.name, Operator.GE, KeyValue.from_u64(0))],
+        )
+    assert exc.value.code == ErrorCode.INDEX_OUT_OF_BOUNDS
+    assert "outside the file" in str(exc.value)
+
+
+# ------------------------------------- SearchResultItem.index semantics ---
+
+
+def test_index_is_the_leaf_relative_key_ordinal_from_a_range_scan() -> None:
+    # duplicate_keys.fcb's `idx` has 5 unique keys, one per feature, so
+    # the leaf ordinals are exactly 0..4 in KEY order. The tree's leaf
+    # level starts at node 1 (5 leaves + 1 root), so an index that forgot
+    # to subtract leaf_start would read 1..5.
+    path = CORPUS / "duplicate_keys.fcb"
+    reader = FcbReader.open_file(path)
+    truth = values_by_offset(reader, "idx")
+    tree = _build_tree(
+        FileRangeReader(path), index_for(reader, "idx"), KeyKind.UINT64
+    )
+    assert tree.leaf_start == 1
+
+    hits = search_stree(
+        FileRangeReader(path),
+        reader.header,
+        [AttrCondition("idx", Operator.GE, KeyValue.from_u64(0))],
+    )
+    assert sorted(h.index for h in hits) == [0, 1, 2, 3, 4]
+    ranks = {v: r for r, v in enumerate(sorted(v[0] for v in truth.values()))}
+    assert {h.offset: h.index for h in hits} == {
+        off: ranks[vals[0]] for off, vals in truth.items()
+    }
+
+
+def test_index_from_find_exact_is_the_same_leaf_ordinal() -> None:
+    # The other emit site. A constant here would go unnoticed by every
+    # test that keeps only `offset`: pin the value, and pin that the two
+    # sites agree for the same key.
+    path = CORPUS / "duplicate_keys.fcb"
+    reader = FcbReader.open_file(path)
+    truth = values_by_offset(reader, "idx")
+    keys = sorted(v[0] for v in truth.values())
+    pivot = keys[2]
+
+    eq = search_stree(
+        FileRangeReader(path),
+        reader.header,
+        [AttrCondition("idx", Operator.EQ, KeyValue.from_u64(pivot))],
+    )
+    assert [h.index for h in eq] == [2]
+
+    scanned = search_stree(
+        FileRangeReader(path),
+        reader.header,
+        [AttrCondition("idx", Operator.GE, KeyValue.from_u64(0))],
+    )
+    same = next(h for h in scanned if h.offset == eq[0].offset)
+    assert same.index == eq[0].index
+
+
+def test_every_feature_behind_one_payload_entry_shares_its_index() -> None:
+    # Documented semantics: `index` identifies the KEY, not the feature
+    # -- unlike the packed R-tree's field of the same name. All five
+    # features hang off duplicate_keys.fcb's single `grp` key.
+    path = CORPUS / "duplicate_keys.fcb"
+    reader = FcbReader.open_file(path)
+    hits = search_stree(
+        FileRangeReader(path),
+        reader.header,
+        [
+            AttrCondition(
+                "grp",
+                Operator.EQ,
+                KeyValue.from_string(KeyKind.STRING50, "same"),
+            )
+        ],
+    )
+    assert len(hits) == 5
+    assert {h.index for h in hits} == {0}
+    assert len({h.offset for h in hits}) == 5
+
+
+def test_le_on_a_separator_key_needs_the_widened_scan_end() -> None:
+    # _scan_range widens the scan end to upper_idx + 2 * node_size.
+    # find_partition descends LEFT on an exact hit, so when `upper` is
+    # itself a separator key its own leaf entry sits one node PAST the
+    # un-widened end and is silently dropped -- exactly one feature here.
+    path = EXAMPLES / "delft.fcb"
+    reader = FcbReader.open_file(path)
+    index = index_for(reader, "b3_volume_lod22")
+    raw = FileRangeReader(path)
+    separator, _child = struct.unpack_from("<dQ", raw.read(index.begin, 16), 0)
+
+    truth = values_by_offset(reader, "b3_volume_lod22")
+    _r, got = run(
+        path,
+        [
+            AttrCondition(
+                "b3_volume_lod22",
+                Operator.LE,
+                KeyValue.from_f64(separator),
+            )
+        ],
+    )
+    expected = offsets_where(truth, lambda v: v <= separator)
+    assert got == expected
+    # 256, not 255: the boundary feature is the one the un-widened end
+    # loses.
+    assert len(got) == 256
+
+
+# ------------------------------------- string operator lowering (raw) ---
+#
+# stree_query WIDENS Gt/Lt/Ne for fixed-width string keys, because two
+# values sharing a 50-byte prefix are one key on disk. long_strings.fcb
+# holds exactly that pair: "y"*50 + "AAA" and "y"*50 + "BBB", which
+# collapse to a single key. Each assertion below is the CANDIDATE set, so
+# every one of them fails if the operator is lowered the way a numeric
+# column is lowered.
+
+LONG_A = "y" * 50 + "AAA"
+LONG_B = "y" * 50 + "BBB"
+
+
+def _string_candidates(op: Operator, value: str) -> set[int]:
+    _r, got = run(
+        CORPUS / "long_strings.fcb",
+        [
+            AttrCondition(
+                "label", op, KeyValue.from_string(KeyKind.STRING50, value)
+            )
+        ],
+    )
+    return got
+
+
+def test_the_two_long_labels_share_one_on_disk_key() -> None:
+    reader = FcbReader.open_file(CORPUS / "long_strings.fcb")
+    truth = values_by_offset(reader, "label")
+    assert sorted(v[0] for v in truth.values()) == [LONG_A, LONG_B]
+    assert len(LONG_A.encode("utf-8")) > 50
+    assert LONG_A.encode("utf-8")[:50] == LONG_B.encode("utf-8")[:50]
+    assert index_for(reader, "label").num_unique_items == 1
+
+
+def test_gt_on_a_string_column_keeps_the_equal_prefix_band() -> None:
+    # Strict Gt would drop the shared key entirely and return nothing,
+    # losing the "BBB" feature that genuinely IS greater.
+    assert _string_candidates(Operator.GT, LONG_A) == {0, 340}
+
+
+def test_lt_on_a_string_column_keeps_the_equal_prefix_band() -> None:
+    # Strict Lt would drop the shared key and lose the "AAA" feature.
+    assert _string_candidates(Operator.LT, LONG_B) == {0, 340}
+
+
+def test_ne_on_a_string_column_is_a_full_scan() -> None:
+    # The numeric lowering (two half-open scans around the key) would
+    # exclude the shared key and return nothing, losing "BBB".
+    assert _string_candidates(Operator.NE, LONG_A) == {0, 340}
+    assert _string_candidates(Operator.NE, LONG_B) == {0, 340}
+
+
+# ------------------------------------------ post-filtering the widening ---
+#
+# Cross-checked against the C++ reader's FcbReader::select_attr, run
+# out-of-band on the same fixtures; both result sets are recorded in the
+# task report's fix-pass section.
+
+
+def _verified(path: Path, column: str, op: Operator, value: str) -> set[int]:
+    reader = FcbReader.open_file(path)
+    return {
+        h.offset
+        for h in reader.select_attr(
+            [
+                AttrCondition(
+                    column, op, KeyValue.from_string(KeyKind.STRING50, value)
+                )
+            ]
+        )
+    }
+
+
+def test_select_attr_undoes_the_string_widening() -> None:
+    # C++ reference (select_attr on long_strings.fcb): Eq AAA -> [a@0],
+    # Ne AAA -> [b@340], Gt AAA -> [b@340], Lt BBB -> [a@0], while the
+    # raw index returns both features for every one of them.
+    path = CORPUS / "long_strings.fcb"
+    assert _verified(path, "label", Operator.EQ, LONG_A) == {0}
+    assert _verified(path, "label", Operator.EQ, LONG_B) == {340}
+    assert _verified(path, "label", Operator.NE, LONG_A) == {340}
+    assert _verified(path, "label", Operator.GT, LONG_A) == {340}
+    assert _verified(path, "label", Operator.GT, LONG_B) == set()
+    assert _verified(path, "label", Operator.LT, LONG_B) == {0}
+    assert _verified(path, "label", Operator.LT, LONG_A) == set()
+    assert _verified(path, "label", Operator.LE, LONG_A) == {0}
+    assert _verified(path, "label", Operator.GE, LONG_A) == {0, 340}
+
+
+def test_select_attr_exact_index_only_is_the_raw_candidate_set() -> None:
+    # Verification can only remove, never add (test_stree.cpp:216-240).
+    path = CORPUS / "long_strings.fcb"
+    reader = FcbReader.open_file(path)
+    for op in (Operator.EQ, Operator.NE, Operator.GT, Operator.LT):
+        query = [
+            AttrCondition(
+                "label", op, KeyValue.from_string(KeyKind.STRING50, LONG_A)
+            )
+        ]
+        raw = {h.offset for h in reader.select_attr(query, True)}
+        verified = {h.offset for h in reader.select_attr(query)}
+        assert raw == {0, 340}
+        assert verified <= raw
+
+
+def test_select_attr_agrees_with_the_decoded_truth_on_every_operator() -> None:
+    # An independent re-derivation: decode every CityObject's `species`
+    # with its own schema and apply the operator to the FULL UTF-8 bytes,
+    # existentially over a feature's objects. geom_temp.fcb is the
+    # fixture where two of four features carry the attribute at all, and
+    # one feature carries TWO different values across its 14 objects.
+    path = CORPUS / "geom_temp.fcb"
+    reader = FcbReader.open_file(path)
+    truth = values_by_offset(reader, "species")
+    assert sorted(len(v) for v in truth.values()) == [0, 0, 1, 14]
+
+    for want in ("1640", "1800"):
+        w = want.encode("utf-8")
+        cases = [
+            (Operator.EQ, lambda v: v.encode("utf-8") == w),
+            (Operator.NE, lambda v: v.encode("utf-8") != w),
+            (Operator.GT, lambda v: v.encode("utf-8") > w),
+            (Operator.GE, lambda v: v.encode("utf-8") >= w),
+            (Operator.LT, lambda v: v.encode("utf-8") < w),
+            (Operator.LE, lambda v: v.encode("utf-8") <= w),
+        ]
+        for op, predicate in cases:
+            got = _verified(path, "species", op, want)
+            assert got == offsets_where(truth, predicate), (op, want)
+
+
+def test_a_feature_without_the_attribute_never_matches_not_even_ne() -> None:
+    # reader.cpp:419-426 -- verification is existential over CityObjects,
+    # and an object that lacks the attribute contributes nothing. So Ne
+    # does NOT return the two geom_temp.fcb features that have no
+    # `species` at all, even though "absent" is arguably != "1640".
+    path = CORPUS / "geom_temp.fcb"
+    reader = FcbReader.open_file(path)
+    truth = values_by_offset(reader, "species")
+    without = {off for off, vals in truth.items() if not vals}
+    assert len(without) == 2
+    assert _verified(path, "species", Operator.NE, "1640") == {13296, 18504}
+    assert not (_verified(path, "species", Operator.NE, "1640") & without)
+
+
+def test_select_attr_leaves_a_numeric_column_untouched() -> None:
+    # needs_post_filter is false for every non-string kind, so select_attr
+    # returns search_stree's answer unchanged -- verifying a numeric
+    # column would mean decoding every candidate feature for nothing.
+    path = CORPUS / "duplicate_keys.fcb"
+    reader = FcbReader.open_file(path)
+    query = [AttrCondition("idx", Operator.NE, KeyValue.from_u64(2))]
+    assert reader.select_attr(query) == search_stree(
+        FileRangeReader(path), reader.header, query
+    )
+
+
+def test_select_attr_rejects_an_empty_or_unknown_query() -> None:
+    reader = FcbReader.open_file(CORPUS / "small.fcb")
+    with pytest.raises(FcbError):
+        reader.select_attr([])
+    with pytest.raises(FcbError):
+        reader.select_attr(
+            [AttrCondition("nope", Operator.EQ, KeyValue.from_u64(1))]
+        )
+
+
+# ------------------------------------------ the post-filter comparator ---
+
+
+def test_value_satisfies_compares_full_bytes_not_truncated_keys() -> None:
+    key = KeyValue.from_string(KeyKind.STRING50, LONG_A)
+    # compare_keys would call these EQUAL (same 50-byte key); the
+    # post-filter must not.
+    assert value_satisfies(LONG_A, Operator.EQ, key)
+    assert not value_satisfies(LONG_B, Operator.EQ, key)
+    assert value_satisfies(LONG_B, Operator.GT, key)
+    assert value_satisfies(LONG_B, Operator.NE, key)
+    assert not value_satisfies(LONG_B, Operator.LT, key)
+
+
+def test_value_satisfies_compares_the_raw_bytes_of_the_query_key() -> None:
+    # A key can be built from BYTES that are not valid UTF-8 -- a key
+    # read off disk may have been cut mid-codepoint (keys.py's
+    # `original_string` says so). There is no `str` that round-trips
+    # those, so the comparison is on `raw`.
+    key = KeyValue.from_string(KeyKind.STRING50, b"\xc3")
+    assert key.original_string == "�"
+    assert key.original_string.encode("utf-8") != key.raw
+    assert not value_satisfies(key.original_string, Operator.EQ, key)
+    assert value_satisfies("~", Operator.LT, key)  # 0x7e < 0xc3
+    assert value_satisfies("ÿ", Operator.GT, key)  # c3 bf > c3
+
+
+def test_value_satisfies_uses_the_ordered_float_total_order() -> None:
+    nan = float("nan")
+    assert value_satisfies(nan, Operator.EQ, KeyValue.from_f64(nan))
+    assert value_satisfies(nan, Operator.GT, KeyValue.from_f64(float("inf")))
+    assert value_satisfies(0.0, Operator.EQ, KeyValue.from_f64(-0.0))
+    assert value_satisfies(1, Operator.EQ, KeyValue.from_f64(1.0))
+
+
+def test_value_satisfies_refuses_values_that_are_not_of_the_kind() -> None:
+    # None of these can satisfy ANY operator, including Ne: a mismatch
+    # means "this attribute is not a value of that column's key kind".
+    u64 = KeyValue.from_u64(1)
+    assert not value_satisfies("1", Operator.EQ, u64)
+    assert not value_satisfies("1", Operator.NE, u64)
+    # bool is an int in Python; it must not equal 1 in a numeric column.
+    assert not value_satisfies(True, Operator.EQ, u64)
+    assert value_satisfies(True, Operator.EQ, KeyValue.from_bool(True))
+    assert not value_satisfies(1, Operator.EQ, KeyValue.from_bool(True))
+    # Out of range for the column's width, so equal to nothing in it.
+    assert not value_satisfies(300, Operator.EQ, KeyValue.from_u8(44))
+    assert not value_satisfies(300, Operator.GT, KeyValue.from_u8(44))
+    assert not value_satisfies(
+        1, Operator.EQ, KeyValue.from_string(KeyKind.STRING50, "1")
+    )
 
 
 def test_columninfo_lookup_is_by_name_not_position() -> None:

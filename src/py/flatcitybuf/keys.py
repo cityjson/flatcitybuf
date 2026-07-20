@@ -65,6 +65,19 @@ _STRING_KINDS = frozenset(
     {KeyKind.STRING20, KeyKind.STRING50, KeyKind.STRING100}
 )
 
+
+def is_string_kind(kind: KeyKind) -> bool:
+    """True for the fixed-width string kinds, whose on-disk keys are
+    TRUNCATED and therefore only ever yield query candidates. Mirrors
+    fcb::needs_post_filter (reader.cpp:319-322).
+
+    Exported so callers (stree.py's operator lowering and select_attr's
+    post-filter) test membership through one predicate instead of
+    re-spelling the kind tuple.
+    """
+    return kind in _STRING_KINDS
+
+
 _SIZES = {
     KeyKind.INT8: 1,
     KeyKind.UINT8: 1,
