@@ -76,3 +76,4 @@ flamegraph*
 build/
 
 .claude/settings.local.json
+.claude/worktrees/
