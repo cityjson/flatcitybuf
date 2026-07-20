@@ -43,6 +43,7 @@ py-test:
 # Run linter for the pure-Python package (src/py)
 py-lint:
     cd src/py && uv run --extra dev ruff check .
+    cd src/py && uv run --extra dev ruff format --check .
 
 # Run C++ checks (native implementation)
 pre-commit-cpp: check-cpp
