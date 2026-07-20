@@ -21,9 +21,20 @@ packages = ["flatcitybuf"]
 strict = true
 files = ["flatcitybuf", "tests"]
 
+# flatc-generated code is machine output: it never satisfies mypy strict
+# (untyped defs, untyped calls, etc). `exclude` alone would not be enough,
+# because excluded modules are still analyzed when a typed module imports
+# from them; `ignore_errors` on the module itself silences that while still
+# letting hand-written modules import names from it normally.
+[[tool.mypy.overrides]]
+module = "flatcitybuf.generated.*"
+ignore_errors = true
+
 [tool.ruff]
 line-length = 79
 target-version = "py39"
+# Machine-generated FlatBuffers bindings; not subject to our lint rules.
+extend-exclude = ["flatcitybuf/generated"]
 
 [tool.ruff.lint]
 # Default select (E4, E7, E9, F) doesn't include E501 (line-too-long), so
