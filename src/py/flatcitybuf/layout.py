@@ -53,6 +53,20 @@ def rtree_index_size(num_items: int, node_size: int) -> int:
     node_size < 2 (Rust asserts node_size >= 2; a smaller value means the
     file is corrupt, so we reject rather than clamp) or num_items == 0
     (the accumulation loop would never terminate).
+
+    No upper-bound guard on node_size: the Format Reference notes
+    `clamp(ns, 2, 65535)`, but that clamp is a no-op in both reference
+    implementations -- Rust's assert on `node_size >= 2` runs before its
+    clamp ever executes, and C++ takes node_size as `std::uint16_t`, so
+    it is physically incapable of exceeding 65535. Neither
+    implementation has an observable "reject/clamp values above 65535"
+    behavior to port. Python's plain `int` has no such type ceiling,
+    but every real caller decodes this value from an actual 2-byte
+    field (see Task 5+'s header parsing), so it can never legitimately
+    exceed 65535 in practice. Adding a new guard here would invent
+    behavior neither reference exhibits, so it is intentionally
+    omitted; see test_rtree_index_size_does_not_clamp_an_out_of_range_
+    node_size in test_layout.py for the pinned pass-through behavior.
     """
     if node_size < 2:
         raise FcbError(
@@ -98,11 +112,7 @@ def compute_layout(
 
     Raises FcbError{ILLEGAL_HEADER_SIZE} when header_size is out of range.
     """
-    if not (
-        _HEADER_MIN_BUFFER_SIZE
-        <= header_size
-        <= _HEADER_MAX_BUFFER_SIZE
-    ):
+    if not (_HEADER_MIN_BUFFER_SIZE <= header_size <= _HEADER_MAX_BUFFER_SIZE):
         raise FcbError(
             ErrorCode.ILLEGAL_HEADER_SIZE,
             f"illegal header size: {header_size}",
@@ -128,9 +138,7 @@ def compute_layout(
     )
 
 
-def validate_layout_against_size(
-    layout: FileLayout, total_size: int
-) -> None:
+def validate_layout_against_size(layout: FileLayout, total_size: int) -> None:
     """Throws unless the computed sections fit inside the resource. Call
     this immediately after compute_layout, before issuing any index
     read."""
