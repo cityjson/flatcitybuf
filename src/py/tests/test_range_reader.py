@@ -122,7 +122,7 @@ def test_boundary_at_total_size_through_bare_and_composed_reader(
     # Finding 1 + finding 2 combined: pin offset < total_size, offset ==
     # total_size, and offset > total_size, through BOTH a bare
     # FileRangeReader and the FileRangeReader+BufferedRangeReader stack
-    # that Tasks 6-11 actually use (reader.cpp:213 wraps Buffered directly
+    # that Tasks 6-11 actually use (reader.cpp:248 wraps Buffered directly
     # around the file reader for index/attribute-tree traversal, with no
     # guaranteed bounds pre-check upstream).
     data = b"0123456789"
@@ -278,10 +278,10 @@ def test_buffered_reader_read_ending_exactly_at_total_size() -> None:
 # Finding 2: every test above drives BufferedRangeReader with the
 # CountingReader fake as `inner`. Nothing exercises FileRangeReader and
 # BufferedRangeReader composed together, which is exactly how Tasks 6-11
-# will use them (reader.cpp:213 wraps Buffered directly around the file
+# will use them (reader.cpp:248 wraps Buffered directly around the file
 # reader for index/attribute-tree traversal, with no bounds pre-check
 # upstream, unlike FeatureIterator::next() which checks `at >= total_size`
-# first -- reader.cpp:130-137). These tests pin that propagation.
+# first -- reader.cpp:162-163). These tests pin that propagation.
 
 
 def test_composed_reader_matches_unbuffered_reads_over_a_real_file() -> None:

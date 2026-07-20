@@ -47,15 +47,16 @@ class FileRangeReader(RangeReader):
       self._size - offset)`) reduces to `min(length, 0)` at this exact
       boundary, so it falls through to an empty read without needing a
       special case.
-    * offset > total_size() raises FcbError(INDEX_OUT_OF_BOUNDS). This
-      is the one point of divergence from C++, which returns empty here
-      too. It exists because the brief's own test_read_past_end_raises
-      requires raising past the end, and unlike the C++ core -- which
-      validates every offset against total_size() before it ever reaches
-      this reader (range_reader.hpp:56-59) -- nothing upstream of this
-      from-scratch Python reader performs that validation yet, so the
-      lowest layer raises instead of silently handing back an empty read
-      that could mask a bug.
+    * offset > total_size() raises FcbError(INDEX_OUT_OF_BOUNDS),
+      unless length == 0 (returns b""). This is the one point of
+      divergence from C++, which returns empty here too. It exists
+      because the brief's own test_read_past_end_raises requires raising
+      past the end, and unlike the C++ core -- which validates every
+      offset against total_size() before it ever reaches this reader
+      (range_reader.hpp:56-59) -- nothing upstream of this from-scratch
+      Python reader performs that validation yet, so the lowest layer
+      raises instead of silently handing back an empty read that could
+      mask a bug.
     """
 
     def __init__(self, path: str | Path) -> None:
