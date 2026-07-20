@@ -180,11 +180,12 @@ nlohmann::json decode_material_values(UIntView solids, UIntView shells, UIntView
     std::size_t vertex = 0;
     std::size_t shell = 0;
 
-    // One solid holding several shells: the solid level is dropped, leaving
-    // a list of per-shell index arrays. Note this is NOT the general
-    // collapse rule -- solids == [1] takes the branch below and stays
-    // wrapped (geom_decoder.rs:487).
-    if (solids.size() == 1 && solids[0] > 1) {
+    // A single Solid: one array of indices per shell, no solid wrapper.
+    // Guarded on solids.size() alone. An earlier `solids[0] > 1` sent a
+    // Solid with exactly ONE shell into the MultiSolid branch below, which
+    // returned it a level deeper than it was written -- and one exterior
+    // shell is the commonest shape there is (geom_decoder.rs:471).
+    if (solids.size() == 1) {
         auto out = nlohmann::json::array();
         for (std::uint32_t i = 0; i < solids[0] && shell < shells.size(); ++i) {
             out.push_back(take_appearance_indices(vertices, vertex, shells[shell++]));
@@ -277,9 +278,13 @@ nlohmann::json decode_texture_values(UIntView solids,
         return out;
     }
 
-    // One surface holding several rings: MultiLineString, whose strings are
-    // the lines. Yields the ring list without the surface wrapper.
-    if (surfaces.size() == 1 && strings.size() > 1) {
+    // One surface holding rings: MultiLineString, whose strings are the
+    // lines. Yields the ring list without the surface wrapper. Not guarded
+    // on strings.size() > 1 -- a single-string MultiLineString then fell
+    // through to the surface branch and gained a level. The MultiSurface
+    // look-alike is distinguishable: it also carries shells == [1], which
+    // the branch above claims first (geom_decoder.rs:737).
+    if (surfaces.size() == 1 && !strings.empty()) {
         auto out = nlohmann::json::array();
         for (std::uint32_t i = 0; i < surfaces[0] && c.string < strings.size(); ++i) {
             out.push_back(take_appearance_indices(vertices, c.vertex, strings[c.string++]));

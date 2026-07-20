@@ -469,9 +469,13 @@ pub(crate) fn decode_materials(
                         .collect();
 
                     CjMaterialValues::Indices(indices)
-                } else if solids.len() == 1 && solids[0] > 1 {
-                    // This is a single Solid with multiple shells (test case 3)
-                    // We want a flat structure of shell values
+                } else if solids.len() == 1 {
+                    // A single Solid: one level of shell values, no solid
+                    // wrapper. Guarded on solids.len() alone -- an earlier
+                    // `solids[0] > 1` sent a Solid with exactly ONE shell
+                    // into the MultiSolid branch below, so the commonest
+                    // shape of all (a building with only an exterior shell)
+                    // came back one level deeper than it went in.
                     let mut shell_values = Vec::new();
                     let mut vertex_index = 0;
                     let mut shell_index = 0;
@@ -734,12 +738,13 @@ pub(crate) fn decode_textures(
             }
 
             CjTextureValues::Nested(surface_values)
-        } else if !surfaces.is_empty()
-            && surfaces.len() == 1
-            && !strings.is_empty()
-            && strings.len() > 1
-        {
-            // For MultiLineString case (test case 2) - one surface with multiple strings
+        } else if surfaces.len() == 1 && !strings.is_empty() {
+            // MultiLineString: one surface, its strings are the lines.
+            // Not guarded on `strings.len() > 1`: a single-string
+            // MultiLineString then fell through to the MultiSurface branch
+            // and gained a level. The two are distinguishable because the
+            // MultiSurface encoding also carries `shells == [1]`, which the
+            // branch above claims first.
             let mut string_values = Vec::new();
             let mut vertex_index = 0;
             let mut string_index = 0;

@@ -103,6 +103,104 @@ nlohmann::json decode_semantics_values(const ::Geometry* g, UIntView values) {
     return per_solid;
 }
 
+/// A [double] colour vector as a JSON array, or null when absent.
+///
+/// The reference asserts the length (3 for materials, 4 for border
+/// colours) and PANICS otherwise. A reader must not abort on a malformed
+/// file, so a wrong length is emitted as-is and left for the consumer --
+/// the array is what the file says it is either way.
+nlohmann::json color_to_json(const flatbuffers::Vector<double>* c) {
+    if (c == nullptr) return nullptr;
+    auto out = nlohmann::json::array();
+    for (double v : *c) out.push_back(v);
+    return out;
+}
+
+/// The `appearance` object a CityJSONFeature carries: the materials and
+/// textures its geometry mappings index into, plus the UV vertices those
+/// textures address. Mirrors deserializer.rs:502-599.
+nlohmann::json appearance_to_json(const ::Appearance* a) {
+    nlohmann::json out = nlohmann::json::object();
+
+    if (a->materials() != nullptr) {
+        auto materials = nlohmann::json::array();
+        for (const auto* m : *a->materials()) {
+            if (m == nullptr) continue;
+            nlohmann::json j = nlohmann::json::object();
+            j["name"] = (m->name() != nullptr) ? m->name()->str() : "";
+            // Every other field is optional and omitted when unset, which
+            // is what serde's skip_serializing_if does on the Rust side.
+            if (const auto v = m->ambient_intensity()) j["ambientIntensity"] = *v;
+            if (auto c = color_to_json(m->diffuse_color()); !c.is_null()) j["diffuseColor"] = c;
+            if (auto c = color_to_json(m->emissive_color()); !c.is_null()) j["emissiveColor"] = c;
+            if (auto c = color_to_json(m->specular_color()); !c.is_null()) j["specularColor"] = c;
+            if (const auto v = m->shininess()) j["shininess"] = *v;
+            if (const auto v = m->transparency()) j["transparency"] = *v;
+            if (const auto v = m->is_smooth()) j["isSmooth"] = *v;
+            materials.push_back(std::move(j));
+        }
+        out["materials"] = std::move(materials);
+    }
+
+    if (a->textures() != nullptr) {
+        auto textures = nlohmann::json::array();
+        for (const auto* t : *a->textures()) {
+            if (t == nullptr) continue;
+            nlohmann::json j = nlohmann::json::object();
+            // CityJSON spells the format upper case and the two enums
+            // below lower case; the reference falls back to the first
+            // enumerator for an unknown value rather than failing.
+            j["type"] = (t->type() == ::TextureFormat::JPG) ? "JPG" : "PNG";
+            j["image"] = (t->image() != nullptr) ? t->image()->str() : "";
+            if (const auto w = t->wrap_mode()) {
+                switch (*w) {
+                    case ::WrapMode::Wrap: j["wrapMode"] = "wrap"; break;
+                    case ::WrapMode::Mirror: j["wrapMode"] = "mirror"; break;
+                    case ::WrapMode::Clamp: j["wrapMode"] = "clamp"; break;
+                    case ::WrapMode::Border: j["wrapMode"] = "border"; break;
+                    case ::WrapMode::None:
+                    default: j["wrapMode"] = "none"; break;
+                }
+            }
+            if (const auto tt = t->texture_type()) {
+                switch (*tt) {
+                    case ::TextureType::Specific: j["textureType"] = "specific"; break;
+                    case ::TextureType::Typical: j["textureType"] = "typical"; break;
+                    case ::TextureType::Unknown:
+                    default: j["textureType"] = "unknown"; break;
+                }
+            }
+            if (auto c = color_to_json(t->border_color()); !c.is_null()) j["borderColor"] = c;
+            textures.push_back(std::move(j));
+        }
+        out["textures"] = std::move(textures);
+    }
+
+    // UV pairs. Vec2 is a struct of two doubles; read via memcpy for the
+    // same alignment reason as Transform and DoubleVertex.
+    if (a->vertices_texture() != nullptr) {
+        auto uvs = nlohmann::json::array();
+        for (const auto* v : *a->vertices_texture()) {
+            double u;
+            double w;
+            std::memcpy(&u, reinterpret_cast<const std::uint8_t*>(v), sizeof(double));
+            std::memcpy(&w, reinterpret_cast<const std::uint8_t*>(v) + sizeof(double),
+                        sizeof(double));
+            uvs.push_back(nlohmann::json::array({u, w}));
+        }
+        out["vertices-texture"] = std::move(uvs);
+    }
+
+    if (a->default_theme_texture() != nullptr) {
+        out["default-theme-texture"] = a->default_theme_texture()->str();
+    }
+    if (a->default_theme_material() != nullptr) {
+        out["default-theme-material"] = a->default_theme_material()->str();
+    }
+
+    return out;
+}
+
 /// `material`: theme -> either a single shared-material index or a nested
 /// values array. A mapping with neither a value nor a vertices array is
 /// skipped, so a geometry whose every mapping is skipped still emits an
@@ -393,6 +491,13 @@ nlohmann::json to_cityjson_feature(const Feature& feature, const HeaderView& hea
         }
     }
     out["vertices"] = std::move(verts);
+
+    // The materials, textures and UV vertices this feature's geometry
+    // mappings index into. Without it the mappings reference nothing a
+    // consumer can resolve (deserializer.rs:503).
+    if (cf->appearance() != nullptr) {
+        out["appearance"] = appearance_to_json(cf->appearance());
+    }
 
     return out;
 }

@@ -67,6 +67,11 @@ static void check_case(const std::string& name) {
         // Compared in full: ids, types, attributes, boundaries, semantics,
         // extents, parents/children, and the texture/material mappings.
         CHECK(actual[i]["CityObjects"] == expected[i]["CityObjects"]);
+
+        // And the WHOLE line, so a key we never thought to emit fails here
+        // instead of passing silently. Checking only the keys above is what
+        // hid the missing per-feature `appearance` object.
+        CHECK(actual[i] == expected[i]);
     }
 }
 

@@ -202,3 +202,54 @@ updated in the same change.
 `src/cpp/tests/conformance/geom_temp.expected.jsonl` was regenerated after
 the fix; both readers now emit spec-correct CityJSON. `small.expected.jsonl`
 changed only in key order.
+
+---
+
+## 8. Two appearance shapes lost a nesting level on round trip — FIXED
+
+**Where:** `fcb_core/src/reader/geom_decoder.rs`, `decode_materials` and
+`decode_textures`. Found while porting the decoders to C++, confirmed by
+round-tripping real CityJSON through our own writer and reader
+(`fcb_core/tests/appearance_roundtrip.rs`).
+
+Both decoders pick a nesting depth from which count arrays are populated,
+and two of those guards were too strict:
+
+**Materials, `solids == [1]`.** The single-Solid branch was guarded on
+`solids.len() == 1 && solids[0] > 1`, so a Solid with exactly ONE shell fell
+into the MultiSolid branch:
+
+```
+in:  "material": {"winter": {"values": [[0, 1]]}}
+out: "material": {"winter": {"values": [[[0, 1]]]}}
+```
+
+One exterior shell is the commonest geometry there is, so this affected
+most buildings carrying materials. Guard is now `solids.len() == 1`.
+
+**Textures, a single-string MultiLineString.** The MultiLineString branch
+required `strings.len() > 1`, so one string fell through to the MultiSurface
+branch and likewise gained a level. The two shapes ARE distinguishable: the
+MultiSurface encoding also carries `shells == [1]`, claimed by an earlier
+branch. Guard is now `!strings.is_empty()`.
+
+Both fixes are mirrored in the C++ reader (`src/cpp/src/geometry.cpp`); the
+two decoders must change together. No conformance fixture changed, because
+`geom_temp` happens to exercise neither branch — which is exactly why unit
+tests over the reference's own output could not have caught this, and only a
+round trip through the writer did.
+
+### Two related quirks that are NOT reachable — documented, not fixed
+
+- `decode_textures` skips its shell branch when `shells.len() > 1`, losing
+  the shell grouping. The encoder pushes a `shells` entry only for a depth-3
+  node, and two such nodes require a depth-4 parent that always pushes a
+  `solids` entry, so `shells.len() > 1` with empty `solids` cannot be
+  written by us.
+- The MultiLineString branch iterates `surfaces[0]` rather than
+  `strings.len()`, which would drop surplus strings. The encoder always
+  emits `surfaces == [strings.len()]` for that shape.
+
+Both are reachable only from hand-built or third-party files. Deciding the
+nesting from the enclosing `Geometry`'s type, rather than from which count
+arrays are populated, would remove this whole class of ambiguity.
