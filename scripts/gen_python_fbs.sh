@@ -45,6 +45,48 @@ INIT="${OUT}/__init__.py"
       | head -1 | xargs basename | sed 's/\.py$//')"
     echo "from .${module} import ${cls} as ${cls}"
   done
+  echo
+  cat <<'PYEOF'
+# flatc's Python `--gen-onefile` generator emits one file per top-level
+# .fbs passed to it and does NOT import types that live in another one
+# of those files, even when a table references them across an
+# `include` -- e.g. feature.fbs's `CityObject.columns` is a vector of
+# `Column`, which is defined in header_generated.py, not
+# feature_generated.py; `CityObject.geometry` similarly needs
+# `Geometry` from geometry_generated.py. Each such accessor's generated
+# body still does `obj = Column()` / `obj = Geometry()` unqualified, so
+# Python resolves the name against the *defining* module's globals at
+# call time and raises NameError there -- confirmed empirically against
+# conformance/small.fcb (CityObject.Columns) and examples/data/delft.fcb
+# (CityObject.Geometry); see the Task 7 report for the reproduction.
+#
+# Fix: backfill every submodule with every class this package
+# re-exports, for any name that module doesn't already define itself.
+# This covers every current and future cross-file reference generically,
+# rather than hand-listing the specific accessors that happen to need
+# it. It is a no-op for names a module defines directly (guarded by
+# hasattr) and safe because no two of the schemas define a class with
+# the same name (this generation step would already have produced an
+# ambiguous `from .<module> import <cls>` line above if they did).
+from . import extension_generated as _extension_generated
+from . import feature_generated as _feature_generated
+from . import geometry_generated as _geometry_generated
+from . import header_generated as _header_generated
+
+for _mod in (
+    _extension_generated,
+    _feature_generated,
+    _geometry_generated,
+    _header_generated,
+):
+    for _name, _value in list(globals().items()):
+        if _name.startswith("_"):
+            continue
+        if not hasattr(_mod, _name):
+            setattr(_mod, _name, _value)
+
+del _mod, _name, _value
+PYEOF
 } > "${INIT}"
 
 echo "Python bindings written to ${OUT}"

@@ -12,6 +12,11 @@ class ErrorCode(Enum):
     IO_ERROR = "io error"
     UNSUPPORTED_COLUMN_TYPE = "unsupported column type"
     ATTRIBUTE_INDEX_NOT_FOUND = "attribute index not found"
+    # Mirrors fcb::ErrorCode::InvalidAttributeValue (error.hpp), used by
+    # attribute.cpp's `need()` helper (truncated record) and its
+    # unknown-column-index check -- both raised while decoding a
+    # feature/CityObject attribute blob (attribute.py).
+    INVALID_ATTRIBUTE_VALUE = "invalid attribute value"
 
 
 class FcbError(Exception):
