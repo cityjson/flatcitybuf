@@ -16,6 +16,7 @@ import { BufferedRangeReader, BytesRangeReader } from './io/range-reader.js'
 import type { RangeReader, ReadOpts } from './io/range-reader.js'
 import { queryToBBox, searchRtree } from './packed-rtree/index.js'
 import type { SearchResultItem, SpatialQuery } from './packed-rtree/index.js'
+import { intersectHits, searchAttributes } from './static-btree/index.js'
 
 /** A cursor over features. `featuresCount` is `undefined` when the header
  *  does not know it: the format writes 0 for UNKNOWN, not for empty, so it
@@ -285,9 +286,16 @@ export class FcbReader {
    *      request.
    *   2. Run the search. A spatial query descends the packed R-tree with the
    *      header's OWN `index_node_size`; a hardcoded 16 mis-traverses any file
-   *      written with another node size.
+   *      written with another node size. An attribute query descends one
+   *      static B+tree per condition. For a `String` column the B+tree
+   *      answers with CANDIDATES, because its keys are truncated to 50 bytes
+   *      -- Task 15's post-filter is what turns those into answers.
    *   3. Page the sorted result list. `featuresCount` still reports the total
    *      match count, not the page size.
+   *
+   *  A `where` and a `spatial` given together are AND-intersected on feature
+   *  offset: both index searches return their hits sorted ascending and
+   *  de-duplicated, so the intersection is a sorted merge.
    *
    *  The `signal` is threaded into the actual reads on BOTH paths, not merely
    *  held here: into the R-tree traversal and each hit's feature read when
@@ -303,32 +311,41 @@ export class FcbReader {
     const limit = validatePageArg(opts?.limit, 'limit')
     const offset = validatePageArg(opts?.offset, 'offset') ?? 0
 
-    if (opts?.where !== undefined && opts.where.length > 0) {
-      throw new FcbError(ErrorCode.QueryExecutionError, 'attribute queries not implemented yet')
-    }
     // Validates the geometry and rejects `nearest`, before any I/O.
     if (opts?.spatial !== undefined) queryToBBox(opts.spatial)
 
     const readOpts: ReadOpts | undefined =
       opts?.signal === undefined ? undefined : { signal: opts.signal }
     const info = this.headerView.info
+    const where = opts?.where !== undefined && opts.where.length > 0 ? opts.where : undefined
 
-    if (opts?.spatial !== undefined) {
-      if (this.headerView.layout.rtreeSize === 0) {
-        throw new FcbError(ErrorCode.NoIndex, 'file has no spatial index')
+    if (opts?.spatial !== undefined || where !== undefined) {
+      let hits: SearchResultItem[] | undefined
+      if (opts?.spatial !== undefined) {
+        if (this.headerView.layout.rtreeSize === 0) {
+          throw new FcbError(ErrorCode.NoIndex, 'file has no spatial index')
+        }
+        hits = await searchRtree(
+          this.reader,
+          this.headerView.layout.rtreeBegin,
+          info.featuresCount,
+          info.indexNodeSize,
+          opts.spatial,
+          readOpts,
+        )
       }
-      const hits = await searchRtree(
-        this.reader,
-        this.headerView.layout.rtreeBegin,
-        info.featuresCount,
-        info.indexNodeSize,
-        opts.spatial,
-        readOpts,
-      )
-      const page = limit === undefined ? hits.slice(offset) : hits.slice(offset, offset + limit)
+      if (where !== undefined) {
+        // Attribute hits are already sorted ascending by offset and
+        // de-duplicated, which is what `intersectHits` (a sorted merge)
+        // requires of both sides; `searchRtree` sorts its own the same way.
+        const attr = await searchAttributes(this.reader, this.headerView, where, readOpts)
+        hits = hits === undefined ? attr : intersectHits(hits, attr)
+      }
+      const all = hits ?? []
+      const page = limit === undefined ? all.slice(offset) : all.slice(offset, offset + limit)
       const gen = readHits(this.reader, this.headerView, page, readOpts)
       return {
-        featuresCount: hits.length,
+        featuresCount: all.length,
         [Symbol.asyncIterator]: () => gen,
       }
     }

@@ -261,11 +261,9 @@ describe('bbox search', () => {
 })
 
 describe('not yet implemented', () => {
-  it('rejects an attribute query until Task 14 lands', async () => {
-    const r = await FcbReader.fromBytes(bytes('small.fcb'))
-    await expect(r.select({ where: [{ field: 'a', operator: 'Eq', value: 1 }] }))
-      .rejects.toThrow(/attribute queries not implemented yet/)
-  })
+  // The attribute-query rejection that used to live here is gone: Task 14
+  // implemented `where`, and test/stree.test.ts now pins its behaviour
+  // against the C++ reader's result sets.
 
   it('rejects a nearest query until Task 16 lands', async () => {
     const r = await FcbReader.fromBytes(bytes('small.fcb'))

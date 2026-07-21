@@ -37,6 +37,22 @@ export type * from './cityjson/types.js'
 export { intersects, searchRtree } from './packed-rtree/index.js'
 export type { BBox, NodeItem, SearchResultItem, SpatialQuery } from './packed-rtree/index.js'
 
+// Attribute B+tree. Only the query surface is published, on the same rule the
+// R-tree block above states: `searchAttributes` is the attribute-query entry
+// point for a caller who wants raw hits without the `FcbReader` facade, and
+// `searchStree` runs a single condition against a single column's index.
+// `KeyKind`/`keyKindForColumn` are what `searchStree`'s signature is spelled
+// in, and `DateTimeKey` is the only way to spell a condition value for a
+// DateTime column (a JS `Date` cannot carry nanoseconds). Traversal internals
+// -- entries, level bounds, payload decoding -- stay unexported; the tests
+// reach them through `../src/static-btree/index.js`.
+//
+// The four deliberate divergences from the Rust reader that a query caller
+// must know about are documented in `static-btree/query.ts`'s module
+// docstring.
+export { keyKindForColumn, searchAttributes, searchStree } from './static-btree/index.js'
+export type { DateTimeKey, KeyKind } from './static-btree/index.js'
+
 // The reader facade.
 export { FcbReader } from './reader.js'
 export type { AttrCondition, FeatureCursor, Operator, SelectOptions } from './reader.js'
