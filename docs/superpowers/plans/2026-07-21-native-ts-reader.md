@@ -1368,10 +1368,23 @@ git commit -m "feat(ts): feature framing, sequential scan, per-object attribute 
 **Interfaces:**
 - Produces:
   ```ts
-  export function decodeBoundaries(solids: Uint32Array, shells: Uint32Array, surfaces: Uint32Array, strings: Uint32Array, indices: Uint32Array): unknown[]
-  export function decodeMaterialValues(solids: readonly number[], shells: readonly number[], values: readonly number[]): unknown
-  export function decodeTextureValues(solids: readonly number[], shells: readonly number[], surfaces: readonly number[], strings: readonly number[], values: readonly number[]): unknown
-  export function decodeSemantics(...): { surfaces: unknown[]; values: unknown }
+  // AMENDED during Task 9. The signatures below were originally array-driven
+  // (no `type` parameter). That is exactly the shape-inference upstream
+  // finding #8 DELETED: both references dispatch on the geometry type and
+  // nothing infers depth from which index arrays happen to be populated
+  // (src/cpp/src/geometry.cpp:159,222,266,330;
+  //  src/rust/fcb_core/src/reader/geom_decoder.rs:367,496 and its header
+  //  comment; docs/upstream-findings.md:238-260). The original block's
+  //  expected value `decodeTextureValues([], [], [1], [4], [0,10,11,12])
+  //  === [[0,10,11,12]]` is unreachable for all eight geometry types.
+  export function decodeBoundaries(type: GeometryType, solids: UInts, shells: UInts, surfaces: UInts, strings: UInts, indices: UInts): IndexTree[]
+  export function decodeMaterialValues(type: GeometryType, solids: UInts, shells: UInts, vertices: UInts): AppearanceValue[]
+  export function decodeTextureValues(type: GeometryType, solids: UInts, shells: UInts, surfaces: UInts, strings: UInts, vertices: UInts): AppearanceValue[]
+  export function decodeSemanticsValues(type: GeometryType, solids: UInts, shells: UInts, values: UInts): SemanticsValue[]
+  /** Returns null when the geometry declares no semantics at all, so Task 10
+   *  never has to test a vtable slot (cf. src/cpp/src/cityjson.cpp:341). */
+  export function decodeSemantics(geometry: Geometry, semanticColumns: readonly ColumnInfo[]): { surfaces: SemanticSurface[]; values: SemanticsValue[] | null } | null
+  export function geometryTypeName(type: number): string
   /** Reads the OPTIONAL shared-material scalar. Returns undefined when the
    *  field is absent and 0 when it is present and zero -- a distinction
    *  `if (m.value())` destroys. */
@@ -1432,6 +1445,8 @@ describe('texture values', () => {
   })
 })
 ```
+
+**The test block above is stale in the same way the signatures were** — it omits the leading `type` argument, and its "MultiSurface look-alike is distinguished by its shells entry" case asserts precisely the shape-inference finding #8 deleted. Take the real cases from `src/cpp/tests/test_geometry.cpp` instead.
 
 Add equivalent cases for `decodeBoundaries` and `decodeSemantics`, ported from `src/cpp/tests/test_geometry.cpp`. If a needed expected value is not in the C++ tests, obtain it with the oracle technique — do not hand-derive it.
 
