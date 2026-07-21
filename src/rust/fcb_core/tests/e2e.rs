@@ -268,16 +268,17 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                             });
 
                         // A geometry -- its type, boundaries, semantics,
-                        // material and texture -- must round-trip exactly. This
-                        // used to be a `println!` of the differences, which is
-                        // how a lost nesting level could go unnoticed for
-                        // months. The per-member reporting below is kept for
-                        // when this fires.
-                        assert_eq!(
-                            orig_geom, des_geom,
-                            "geometry[{i}] must round-trip unchanged"
-                        );
-
+                        // material and texture -- must round-trip exactly.
+                        // This used to be a `println!` of the differences,
+                        // which is how a lost nesting level could go
+                        // unnoticed for months.
+                        //
+                        // The per-member reporting runs BEFORE the
+                        // assertion, not after it. Below the `assert_eq!`
+                        // it was unreachable -- the assertion has already
+                        // panicked by the time an inequality could be
+                        // observed. Here it prints, and then the assertion
+                        // fails the test.
                         if orig_geom != des_geom {
                             println!("  geometry[{}] with LOD {:?} differs:", i, orig_geom.lod());
                             // `boundaries` is per-variant now, so the whole
@@ -314,6 +315,11 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                                 (None, None) => {}
                             }
                         }
+
+                        assert_eq!(
+                            orig_geom, des_geom,
+                            "geometry[{i}] must round-trip unchanged"
+                        );
                     }
                 }
             } else if orig_co.geometry.is_some() != des_co.geometry.is_some() {
