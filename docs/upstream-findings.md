@@ -276,4 +276,11 @@ of them is not valid CityJSON — which is why the second bug above, a textured
 single-string `MultiLineString`, describes an input that should never have been
 accepted in the first place.
 
-The C++ reader still infers, and this change has not yet been mirrored there.
+This is mirrored in the C++ reader (`src/cpp/src/geometry.cpp`), which no
+longer infers either: `decode_boundaries`, `decode_semantics_values`,
+`decode_material_values` and `decode_texture_values` all take a `GeometryKind`
+and switch on it, exactly as the Rust decoders switch on `GeometryType`. As
+with the two fixes above, the two decoders must change together — a depth rule
+that holds in one reader and not the other is a file that round-trips through
+`fcb_core` and not through the C++ reader, which is the harder bug of the two
+to find.
