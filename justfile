@@ -204,6 +204,7 @@ ts-test:
 
 ts-lint:
     cd src/ts && npx tsc --noEmit
+    cd src/ts && npx tsc --noEmit -p tsconfig.test.json
 
 ts-build:
     cd src/ts && npm run build
