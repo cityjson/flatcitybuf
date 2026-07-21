@@ -9,10 +9,23 @@ validate nothing and would mask exactly the bugs this exists to catch.
 Query parameters select deliberately awkward server behaviour so the client's
 fallback paths are exercised:
 
-    ?ignore_range=1   answer 200 with the entire body despite a Range header
-    ?bad_range=1      answer 206 with a malformed Content-Range
-    ?wrong_offset=1   answer 206 with a range the client did not ask for
-    ?no_etag=1        omit the ETag/Last-Modified validators
+    ?ignore_range=1     answer 200 with the entire body despite a Range header
+    ?bad_range=1        answer 206 with a malformed Content-Range
+    ?wrong_offset=1     answer 206 with a range the client did not ask for
+    ?no_etag=1          omit the ETag/Last-Modified validators
+    ?no_cors_expose=1   send Access-Control-Allow-Origin but NOT
+                        Access-Control-Expose-Headers, so a cross-origin
+                        browser client cannot read Content-Range/
+                        Content-Length off the response even though the
+                        server sent them -- exercises the client's
+                        RangeHeadersNotExposed failure path (Task 19)
+
+Every response (regardless of the modes above) carries
+`Access-Control-Allow-Origin: *` and, unless `no_cors_expose` is set,
+`Access-Control-Expose-Headers: Content-Range, Content-Length` -- real
+servers must opt in to exposing those two to cross-origin JS, and a Node
+`fetch` (which does not enforce CORS at all) cannot exercise that failure
+mode. `no_cors_expose` exists so a browser-based test can.
 
 Binds port 0 and prints the chosen port on stdout so a test harness can find
 it without guessing.
@@ -51,6 +64,17 @@ class RangeHandler(BaseHTTPRequestHandler):
             self.send_header("ETag", ETAG)
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(extra_len))
+        # A real cross-origin client only gets to read a handful of
+        # "safelisted" response headers unless the server opts in via
+        # Access-Control-Expose-Headers -- Content-Range is not one of the
+        # safelisted ones, so without this a browser fetch() would see a
+        # 206 with `Content-Range: null`, indistinguishable here from a
+        # server that never sent it. `no_cors_expose` omits the second
+        # header (but keeps Allow-Origin) so that failure path is
+        # reproducible on demand.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        if "no_cors_expose" not in opts:
+            self.send_header("Access-Control-Expose-Headers", "Content-Range, Content-Length")
 
     def do_HEAD(self):
         path, opts = self._resolve()

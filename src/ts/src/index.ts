@@ -6,6 +6,8 @@ export { ErrorCode, FcbError } from './errors.js'
 export { BufferedRangeReader, BytesRangeReader } from './io/range-reader.js'
 export type { RangeReader, ReadOpts } from './io/range-reader.js'
 export { BlobRangeReader } from './io/blob.js'
+export { DEFAULT_FETCH_SIZE, FetchRangeReader, OPEN_PREFETCH_SIZE } from './io/fetch.js'
+export type { FetchRangeReaderOpts } from './io/fetch.js'
 
 // Header.
 export { readHeader } from './header/index.js'

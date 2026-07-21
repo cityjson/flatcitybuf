@@ -10,7 +10,9 @@ import type { Feature } from './feature/index.js'
 import { readHeader } from './header/index.js'
 import type { HeaderView } from './header/index.js'
 import { BlobRangeReader } from './io/blob.js'
-import { BytesRangeReader } from './io/range-reader.js'
+import { DEFAULT_FETCH_SIZE, FetchRangeReader, OPEN_PREFETCH_SIZE } from './io/fetch.js'
+import type { FetchRangeReaderOpts } from './io/fetch.js'
+import { BufferedRangeReader, BytesRangeReader } from './io/range-reader.js'
 import type { RangeReader } from './io/range-reader.js'
 
 /** A cursor over features. `featuresCount` is `undefined` when the header
@@ -113,6 +115,34 @@ export class FcbReader {
 
   static async fromBlob(blob: Blob): Promise<FcbReader> {
     return FcbReader.fromReader(new BlobRangeReader(blob))
+  }
+
+  /** Opens a remote `.fcb` file over `fetch`, with strict validation of the
+   *  server's Range support (see `io/fetch.ts`).
+   *
+   *  Unlike `fromReader`, this DOES wrap the source in a
+   *  `BufferedRangeReader` -- `fromReader`'s docstring explains why it
+   *  itself does not (matching the C++ reference, and leaving request
+   *  counting visible to callers who need it), and says a chatty transport
+   *  should compose one. HTTP is exactly that transport: without buffering,
+   *  the two `read()` calls `readFeature` makes per feature (a 4-byte size
+   *  prefix, then a `4 + len` body read that re-reads those same 4 bytes)
+   *  would each become a separate HTTP request.
+   *
+   *  The buffer starts at `OPEN_PREFETCH_SIZE` so its first miss -- forced
+   *  by `readHeader`'s very first `read()` call -- asks the underlying
+   *  `FetchRangeReader` for EXACTLY the window that reader already cached
+   *  during `open()` (`io/fetch.ts`'s `prefetch`), which is why opening
+   *  costs one physical request rather than two. Once the header is parsed,
+   *  the window is widened to `fetchSize` (`DEFAULT_FETCH_SIZE`, 1 MB,
+   *  unless overridden) for the feature scan that follows -- mirrors
+   *  `http_reader/mod.rs`'s own reset of `min_req_size` after `_open`. */
+  static async fromUrl(url: string, opts?: FetchRangeReaderOpts): Promise<FcbReader> {
+    const source = await FetchRangeReader.open(url, opts)
+    const buffered = new BufferedRangeReader(source, OPEN_PREFETCH_SIZE)
+    const reader = await FcbReader.fromReader(buffered)
+    buffered.setMinRequestSize(opts?.fetchSize ?? DEFAULT_FETCH_SIZE)
+    return reader
   }
 
   get header(): HeaderView {
