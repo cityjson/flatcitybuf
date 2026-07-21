@@ -183,6 +183,15 @@ containing such an attribute is unreadable by the implementation that wrote it.
 **C++ divergence:** decodes all three. Their widths are unambiguous (1, 1, and
 `u32` length + bytes), so there is no reason to refuse them.
 
+> **NOTE — this C++ divergence is stale; see item 2a.** Current
+> `src/cpp/src/attribute.cpp` and `src/py/flatcitybuf/attribute.py` both
+> *reject* `Byte`/`UByte`/`Binary` with `UnsupportedColumnType`, each still
+> citing the `unreachable!()` this item records as fixed. The source comments
+> at `src/cpp/src/attribute.cpp` and `src/py/flatcitybuf/attribute.py` carry
+> the same stale justification, as does `src/cpp/src/key.cpp`'s mirror-image
+> claim about `reader/attr_query.rs:118`. A future pass should reconcile all
+> four together.
+
 ---
 
 ## 4. `find_range` silently drops its upper boundary item — FIXED
