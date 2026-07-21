@@ -75,7 +75,14 @@ pub(crate) struct TextureMapping {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct GMSemantics {
     pub(crate) surfaces: Vec<CjSemanticsSurface>, // List of semantic surfaces
-    pub(crate) values: Vec<u32>,                  // Semantic values corresponding to surfaces
+    /// One semantic value per surface, or `None` for `"values": null`.
+    ///
+    /// `semantics.values` is required-but-nullable, so an explicit `null` is
+    /// valid CityJSON and is *not* the same as an empty array: re-emitting it
+    /// as `[]` (or, for a two-shell `Solid`, as `[[], []]`) produces a document
+    /// the schema rejects. `None` is stored as an absent vector, exactly as
+    /// `MaterialMapping::NullValues` and `TextureMapping::has_values` do.
+    pub(crate) values: Option<Vec<u32>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -412,12 +419,13 @@ fn push_semantics_shell(
 }
 
 /// Flattens a `semantics` member: its surfaces verbatim, its values one entry
-/// per surface.
+/// per surface — or no vector at all for `"values": null`.
 pub(crate) fn encode_semantics(semantics: &CjSemantics, boundaries: &GMBoundaries) -> GMSemantics {
-    let mut values = Vec::new();
-    if let Some(v) = semantics.values.as_ref() {
+    let values = semantics.values.as_ref().map(|v| {
+        let mut values = Vec::new();
         encode_semantics_values(v, boundaries, &mut values);
-    }
+        values
+    });
 
     GMSemantics {
         surfaces: semantics.surfaces.to_vec(),
@@ -633,7 +641,7 @@ mod tests {
         ];
 
         assert_eq!(expected_semantics_surfaces, encoded_semantics.surfaces);
-        assert_eq!(vec![0, 0, NULL, 1, 2], encoded_semantics.values);
+        assert_eq!(Some(vec![0, 0, NULL, 1, 2]), encoded_semantics.values);
 
         //CompositeSolid
         let composite_solid = geom(json!({
@@ -677,7 +685,7 @@ mod tests {
 
         assert_eq!(expected_semantics_surfaces, encoded_semantics.surfaces);
         assert_eq!(
-            vec![0, 1, 1, NULL, NULL, NULL, NULL],
+            Some(vec![0, 1, 1, NULL, NULL, NULL, NULL]),
             encoded_semantics.values
         );
         Ok(())
@@ -702,7 +710,7 @@ mod tests {
         let encoded = encode(&solid);
         let semantics = encoded.semantics.expect("semantics must be encoded");
         // Two surfaces in the first shell, one in the second.
-        assert_eq!(semantics.values, vec![0, 0, NULL]);
+        assert_eq!(semantics.values, Some(vec![0, 0, NULL]));
     }
 
     #[test]

@@ -934,7 +934,10 @@ pub(crate) fn to_geometry<'a>(
 
             (
                 Some(fbb.create_vector(&semantics_objects)),
-                Some(fbb.create_vector(&values)),
+                // Absent, not empty, for `"values": null` -- which is valid
+                // CityJSON (required-but-nullable) and is not the same thing as
+                // an empty array.
+                values.map(|values| fbb.create_vector(&values)),
             )
         });
 

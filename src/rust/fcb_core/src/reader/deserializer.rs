@@ -659,22 +659,21 @@ pub(crate) fn decode_geometry(
         .unwrap_or_default();
     let geometry_type = g.type_();
 
-    let semantics: Option<CjSemantics> = if let (Some(semantics_objects), Some(semantics)) =
-        (g.semantics_objects(), g.semantics())
-    {
+    // The surfaces decide whether there is a `semantics` member at all; the
+    // values vector being absent is `"values": null`, which is a member with a
+    // null value rather than no member.
+    let semantics: Option<CjSemantics> = g.semantics_objects().map(|semantics_objects| {
         let semantics_objects = semantics_objects.iter().collect::<Vec<_>>();
-        let semantics = semantics.iter().collect::<Vec<_>>();
-        Some(decode_semantics(
+        let semantics_values = g.semantics().map(|v| v.iter().collect::<Vec<_>>());
+        decode_semantics(
             &solids,
             &shells,
             geometry_type,
             semantics_objects,
-            semantics,
+            semantics_values,
             semantic_attr_schema,
-        ))
-    } else {
-        None
-    };
+        )
+    });
 
     // Decode material mappings if present
     let material = if let Some(material_mappings) = g.material() {

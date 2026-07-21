@@ -698,3 +698,87 @@ fn the_appearance_palette_roundtrips() -> Result<()> {
     );
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// semantics nullability
+// ---------------------------------------------------------------------------
+
+/// `semantics.values` is *required but nullable*: `geomprimitives.schema.json`
+/// types it `["array", "null"]` and lists it in `required`, and `cjseq` keeps
+/// it without `skip_serializing_if` for exactly that reason.
+///
+/// An explicit `null` is therefore not the same as an empty array, and the
+/// difference is not cosmetic: a two-shell `Solid` whose null values came back
+/// as `[[], []]` claims two shells' worth of empty semantic runs, which is a
+/// document no validator accepts. The values vector is stored absent rather
+/// than empty, the same absent-vs-empty trick `MaterialMapping::NullValues`
+/// uses.
+#[test]
+fn a_null_semantics_values_roundtrips_as_null() -> Result<()> {
+    // MultiSurface: the shallow case, which used to come back as `[]`.
+    let geometry = json!({
+        "type": "MultiSurface",
+        "lod": "1",
+        "boundaries": [[[0, 1, 2]], [[3, 4, 5]]],
+        "semantics": {
+            "surfaces": [{"type": "RoofSurface"}],
+            "values": null
+        }
+    });
+    let (orig, decoded, _, _) = roundtrip_geometry(geometry.clone(), 6)?;
+    assert_eq!(serde_json::to_value(&orig)?, geometry);
+    let decoded_json = serde_json::to_value(&decoded)?;
+    assert_eq!(
+        decoded_json["semantics"]["values"],
+        Value::Null,
+        "an explicit null must not come back as [], got {decoded_json}"
+    );
+    assert_eq!(decoded_json, geometry);
+
+    // Solid with two shells: the case that used to come back as `[[], []]`.
+    let geometry = json!({
+        "type": "Solid",
+        "lod": "1",
+        "boundaries": [
+            [[[0, 1, 2]], [[3, 4, 5]]],
+            [[[6, 7, 8]]]
+        ],
+        "semantics": {
+            "surfaces": [{"type": "RoofSurface"}],
+            "values": null
+        }
+    });
+    let (orig, decoded, _, _) = roundtrip_geometry(geometry.clone(), 9)?;
+    assert_eq!(serde_json::to_value(&orig)?, geometry);
+    let decoded_json = serde_json::to_value(&decoded)?;
+    assert_eq!(
+        decoded_json["semantics"]["values"],
+        Value::Null,
+        "an explicit null must not come back as [[], []], got {decoded_json}"
+    );
+    assert_eq!(decoded_json, geometry);
+    Ok(())
+}
+
+/// The control for the test above: an *empty* `values` array is a different
+/// document from a null one, and must stay empty rather than becoming null.
+#[test]
+fn an_empty_semantics_values_stays_empty() -> Result<()> {
+    let geometry = json!({
+        "type": "MultiSurface",
+        "lod": "1",
+        "boundaries": [[[0, 1, 2]]],
+        "semantics": {
+            "surfaces": [{"type": "RoofSurface"}],
+            "values": []
+        }
+    });
+    let (_, decoded, _, _) = roundtrip_geometry(geometry.clone(), 3)?;
+    let decoded_json = serde_json::to_value(&decoded)?;
+    assert_eq!(
+        decoded_json["semantics"]["values"],
+        json!([]),
+        "an empty array must not come back as null, got {decoded_json}"
+    );
+    Ok(())
+}

@@ -228,10 +228,20 @@ pub(crate) fn decode_semantics(
     shells: &[u32],
     geometry_type: GeometryType,
     semantics_objects: Vec<SemanticObject>,
-    semantics_values: Vec<u32>,
+    semantics_values: Option<Vec<u32>>,
     semantic_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
 ) -> Semantics {
     let surfaces = decode_semantics_surfaces(&semantics_objects, semantic_attr_schema);
+
+    // No values vector at all is `"values": null` -- a member whose value is
+    // null, which the schema requires to be present and permits to be null.
+    let Some(semantics_values) = semantics_values else {
+        return Semantics {
+            surfaces,
+            values: None,
+            other: HashMap::new(),
+        };
+    };
 
     let mut cursor = 0usize;
     let mut take_shell = |n: usize, values: &[u32]| -> Vec<Option<usize>> {
