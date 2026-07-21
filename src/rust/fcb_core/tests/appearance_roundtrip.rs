@@ -4,29 +4,41 @@
 //! (`FcbWriter`), decode with the real reader (`FcbReader`), and compare the
 //! decoded `material`/`texture` members of the geometry against the input.
 //! They also dump the raw FlatBuffers mapping arrays (solids/shells/surfaces/
-//! strings/vertices) that the encoder actually emitted, so each decoder quirk
-//! can be classified as reachable-through-our-own-writer or decode-only.
+//! strings/vertices) that the encoder actually emitted, which is what makes the
+//! point of the type-driven decoder visible: **several geometry types flatten
+//! to byte-identical arrays**, and only the stored geometry type tells them
+//! apart.
 //!
-//! Investigated quirks (see `fcb_core/src/reader/geom_decoder.rs`):
-//! 1. materials: `solids == [1]` (Solid with exactly one shell) falls into the
-//!    MultiSolid decode branch and comes back one level deeper. REACHABLE.
-//! 2. textures: a MultiLineString with a single string fails the
-//!    `strings.len() > 1` guard and decodes one level deeper. REACHABLE.
-//! 3. textures: `shells.len() > 1` with no solids would drop the shell
-//!    grouping, but the encoder never emits that shape (multiple shell entries
-//!    always come with a solids entry). DECODE-ONLY.
-//! 4. textures: the MultiLineString branch iterates `surfaces[0]` times
-//!    instead of `strings.len()`, but the encoder guarantees
-//!    `surfaces == [strings.len()]` for that shape. DECODE-ONLY.
+//! The pairs that collide, each proved below by a `*_flatten_identically` test:
+//!
+//! | these two                          | emit identical arrays because       |
+//! |------------------------------------|-------------------------------------|
+//! | `Solid`, one-solid `MultiSolid`    | `solids == [n]` either way          |
+//! | `MultiSurface`, `CompositeSurface` | same depth, no other difference     |
+//! | `MultiSolid`, `CompositeSolid`     | same depth, no other difference     |
+//!
+//! Before the decoder took the geometry type as a parameter it guessed from
+//! `solids.len() == 1` / `shells.len() == 1` / `strings.len() > 1`, and every
+//! one of those collisions decoded at the wrong depth for one member of the
+//! pair. That is finding #8.
+//!
+//! Note which types appear here and which do not: `geomprimitives.schema.json`
+//! gives `MultiPoint` and `MultiLineString` no `material` and no `texture`
+//! member and declares `additionalProperties: false`, so appearance on one of
+//! them is not valid CityJSON. They are covered for boundaries and semantics
+//! instead.
 
 use anyhow::Result;
-use cjseq::{CityJSONFeature, Geometry as CjGeometry};
+use cjseq::{
+    CityJSONFeature, Geometry as CjGeometry, MaterialReference, TextureReference,
+};
 use fcb_core::{
     attribute::AttributeSchema, deserializer, header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
 use pretty_assertions::assert_eq;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::io::{BufReader, Cursor};
 
 /// Raw arrays of one FlatBuffers `MaterialMapping`, as emitted by the encoder.
@@ -48,6 +60,14 @@ struct TextureDump {
     surfaces: Vec<u32>,
     strings: Vec<u32>,
     vertices: Vec<u32>,
+}
+
+fn material_of(g: &CjGeometry) -> Option<&HashMap<String, MaterialReference>> {
+    g.common().and_then(|c| c.material.as_ref())
+}
+
+fn texture_of(g: &CjGeometry) -> Option<&HashMap<String, TextureReference>> {
+    g.common().and_then(|c| c.texture.as_ref())
 }
 
 /// Encodes a single-geometry CityJSONSeq with the real writer, decodes it with
@@ -157,49 +177,255 @@ fn roundtrip_geometry(
     println!("encoder emitted texture mappings: {texture_dumps:?}");
     println!(
         "input    material: {:?}\ninput    texture: {:?}",
-        orig_geom.material, orig_geom.texture
+        material_of(&orig_geom),
+        texture_of(&orig_geom)
     );
     println!(
         "decoded  material: {:?}\ndecoded  texture: {:?}",
-        decoded_geom.material, decoded_geom.texture
+        material_of(&decoded_geom),
+        texture_of(&decoded_geom)
     );
 
     Ok((orig_geom, decoded_geom, material_dumps, texture_dumps))
 }
 
-/// Regression: material values on a Solid with exactly one shell. The
-/// encoder emits `solids == [1]`, which used to fail the decoder's
-/// `solids[0] > 1` guard and take the MultiSolid branch, returning the
-/// values one level deeper than the input. The commonest shape there is --
-/// a building with only an exterior shell.
+/// Asserts that a geometry round-trips whole — type, lod, boundaries,
+/// semantics, material and texture — by comparing the serialized CityJSON,
+/// which is the only comparison that would catch a depth change.
+fn assert_roundtrips(geometry: Value, vertex_count: usize) -> Result<(Vec<MaterialDump>, Vec<TextureDump>)>
+{
+    let (orig, decoded, materials, textures) = roundtrip_geometry(geometry.clone(), vertex_count)?;
+    assert_eq!(
+        serde_json::to_value(&decoded)?,
+        serde_json::to_value(&orig)?,
+        "the decoded geometry must be the input geometry"
+    );
+    // And the input must be exactly what was written, so a test whose expected
+    // value was quietly normalized on the way in cannot pass vacuously.
+    assert_eq!(
+        serde_json::to_value(&orig)?,
+        geometry,
+        "the parsed input must be the JSON the test wrote"
+    );
+    Ok((materials, textures))
+}
+
+// ---------------------------------------------------------------------------
+// the collisions: types whose flattened arrays are indistinguishable
+// ---------------------------------------------------------------------------
+
+/// A `Solid` with one shell and a `MultiSolid` with one solid of one shell emit
+/// byte-identical material *and* texture arrays. Only the stored geometry type
+/// separates them, which is exactly what finding #8 was: the decoder guessed
+/// from `solids.len()` and sent one of the two to the wrong depth.
 #[test]
-fn material_solid_single_shell_roundtrips() -> Result<()> {
+fn solid_and_single_solid_multisolid_flatten_identically() -> Result<()> {
+    let solid = json!({
+        "type": "Solid",
+        "lod": "1",
+        "boundaries": [[[[0, 1, 2, 3]], [[4, 5, 6, 7]]]],
+        "material": {"winter": {"values": [[0, 1]]}},
+        "texture": {"winter": {"values": [[[[0, 8, 9, 10, 11]]], [[[1, 12, 13, 14, 15]]]]}}
+    });
+    let multi_solid = json!({
+        "type": "MultiSolid",
+        "lod": "1",
+        "boundaries": [[[[[0, 1, 2, 3]], [[4, 5, 6, 7]]]]],
+        "material": {"winter": {"values": [[[0, 1]]]}},
+        "texture": {"winter": {"values": [[[[[0, 8, 9, 10, 11]]], [[[1, 12, 13, 14, 15]]]]]}}
+    });
+
+    let (solid_materials, solid_textures) = assert_roundtrips(solid, 8)?;
+    let (multi_materials, multi_textures) = assert_roundtrips(multi_solid, 8)?;
+
+    assert_eq!(
+        solid_materials, multi_materials,
+        "a Solid and a one-solid MultiSolid must emit identical material arrays"
+    );
+    assert_eq!(
+        solid_textures, multi_textures,
+        "a Solid and a one-solid MultiSolid must emit identical texture arrays"
+    );
+    Ok(())
+}
+
+/// `MultiSurface` and `CompositeSurface` differ only in their name; likewise
+/// `MultiSolid` and `CompositeSolid`. Each pair must still round-trip to its
+/// own type.
+#[test]
+fn same_depth_types_flatten_identically() -> Result<()> {
+    let surface_body = json!({
+        "lod": "1",
+        "boundaries": [[[0, 1, 2]], [[3, 4, 5]]],
+        "material": {"winter": {"values": [0, 1]}},
+        "texture": {"winter": {"values": [[[0, 6, 7, 8]], [[1, 9, 10, 11]]]}}
+    });
+    let with_type = |t: &str, body: &Value| {
+        let mut v = body.clone();
+        v.as_object_mut()
+            .expect("object")
+            .insert("type".to_string(), json!(t));
+        v
+    };
+
+    let (ms_m, ms_t) = assert_roundtrips(with_type("MultiSurface", &surface_body), 6)?;
+    let (cs_m, cs_t) = assert_roundtrips(with_type("CompositeSurface", &surface_body), 6)?;
+    assert_eq!(ms_m, cs_m);
+    assert_eq!(ms_t, cs_t);
+
+    let solid_body = json!({
+        "lod": "1",
+        "boundaries": [[[[[0, 1, 2]]]], [[[[3, 4, 5]]]]],
+        "material": {"winter": {"values": [[[0]], [[1]]]}},
+        "texture": {"winter": {"values": [[[[[0, 6, 7, 8]]]], [[[[1, 9, 10, 11]]]]]}}
+    });
+    let (msol_m, msol_t) = assert_roundtrips(with_type("MultiSolid", &solid_body), 6)?;
+    let (csol_m, csol_t) = assert_roundtrips(with_type("CompositeSolid", &solid_body), 6)?;
+    assert_eq!(msol_m, csol_m);
+    assert_eq!(msol_t, csol_t);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// one case per geometry type
+// ---------------------------------------------------------------------------
+
+/// `MultiPoint` can carry neither `material` nor `texture` — the schema names
+/// neither and forbids additional properties — so this covers what it *can*
+/// carry, and pins that the depth-1 boundaries survive.
+#[test]
+fn multipoint_roundtrips() -> Result<()> {
+    let geometry = json!({
+        "type": "MultiPoint",
+        "lod": "1",
+        "boundaries": [0, 1, 2, 3],
+        "semantics": {
+            "surfaces": [{"type": "RoofSurface"}],
+            "values": [0, null, 0, null]
+        }
+    });
+    let (materials, textures) = assert_roundtrips(geometry, 4)?;
+    assert!(materials.is_empty());
+    assert!(textures.is_empty());
+    Ok(())
+}
+
+/// Likewise `MultiLineString`. The old test here gave one a `texture`, which is
+/// not valid CityJSON: the schema types `MultiLineString` with no `texture`
+/// member at all. The depth-2 boundaries and the flat semantics are what it
+/// actually has.
+#[test]
+fn multilinestring_roundtrips() -> Result<()> {
+    let geometry = json!({
+        "type": "MultiLineString",
+        "lod": "1",
+        "boundaries": [[0, 1, 2]],
+        "semantics": {
+            "surfaces": [{"type": "RoofSurface"}],
+            "values": [0]
+        }
+    });
+    assert_roundtrips(geometry, 3)?;
+
+    // More than one string, so the single-string case above is not the only
+    // shape exercised.
+    let geometry = json!({
+        "type": "MultiLineString",
+        "lod": "1",
+        "boundaries": [[0, 1], [2, 3], [4, 5]],
+        "semantics": {
+            "surfaces": [{"type": "RoofSurface"}],
+            "values": [0, null, 0]
+        }
+    });
+    assert_roundtrips(geometry, 6)?;
+    Ok(())
+}
+
+#[test]
+fn multisurface_roundtrips() -> Result<()> {
+    let geometry = json!({
+        "type": "MultiSurface",
+        "lod": "1",
+        "boundaries": [[[0, 1, 2]], [[3, 4, 5]], [[6, 7, 8]]],
+        "material": {"winter": {"values": [0, null, 1]}},
+        "texture": {
+            "winter": {"values": [[[0, 9, 10, 11]], [[null]], [[1, 12, 13, 14]]]}
+        }
+    });
+    let (materials, textures) = assert_roundtrips(geometry, 9)?;
+
+    // What the encoder actually emits for this shape.
+    assert_eq!(materials.len(), 1);
+    assert_eq!(materials[0].solids, Vec::<u32>::new());
+    assert_eq!(materials[0].shells, Vec::<u32>::new());
+    assert_eq!(materials[0].vertices, vec![0, u32::MAX, 1]);
+
+    assert_eq!(textures[0].solids, Vec::<u32>::new());
+    assert_eq!(textures[0].shells, vec![3]);
+    assert_eq!(textures[0].surfaces, vec![1, 1, 1]);
+    Ok(())
+}
+
+/// A single-surface `MultiSurface`: the shape whose texture arrays used to be
+/// confusable with a `MultiLineString`'s.
+#[test]
+fn multisurface_single_surface_roundtrips() -> Result<()> {
+    let geometry = json!({
+        "type": "MultiSurface",
+        "lod": "1",
+        "boundaries": [[[0, 1, 2]]],
+        "material": {"winter": {"values": [0]}},
+        "texture": {"winter": {"values": [[[0, 3, 4, 5]]]}}
+    });
+    let (_, textures) = assert_roundtrips(geometry, 3)?;
+    assert_eq!(textures[0].shells, vec![1]);
+    assert_eq!(textures[0].surfaces, vec![1]);
+    assert_eq!(textures[0].strings, vec![4]);
+    Ok(())
+}
+
+#[test]
+fn compositesurface_roundtrips() -> Result<()> {
+    let geometry = json!({
+        "type": "CompositeSurface",
+        "lod": "1",
+        "boundaries": [[[0, 1, 2]], [[3, 4, 5]]],
+        "material": {"winter": {"values": [0, 1]}, "summer": {"value": 3}},
+        "texture": {"winter": {"values": [[[0, 6, 7, 8]], [[1, 9, 10, 11]]]}}
+    });
+    let (materials, _) = assert_roundtrips(geometry, 6)?;
+    // Two themes, one of them a whole-object `value`.
+    assert_eq!(materials.len(), 2);
+    assert!(materials.iter().any(|m| m.value == Some(3)));
+    Ok(())
+}
+
+/// The commonest shape of all: a building with only an exterior shell. Its
+/// material values used to come back one level too deep.
+#[test]
+fn solid_single_shell_roundtrips() -> Result<()> {
     let geometry = json!({
         "type": "Solid",
         "lod": "1",
-        // One shell with two surfaces.
         "boundaries": [[[[0, 1, 2, 3]], [[4, 5, 6, 7]]]],
-        // Solid material values: one array per shell, one index per surface.
-        "material": {"winter": {"values": [[0, 1]]}}
+        "material": {"winter": {"values": [[0, 1]]}},
+        "texture": {"winter": {"values": [[[[0, 8, 9, 10, 11]], [[1, 12, 13, 14, 15]]]]}}
     });
-    let (orig, decoded, materials, _) = roundtrip_geometry(geometry, 8)?;
+    let (materials, textures) = assert_roundtrips(geometry, 8)?;
 
-    // What the encoder actually emits for this shape.
     assert_eq!(materials.len(), 1);
     assert_eq!(materials[0].solids, vec![1]);
     assert_eq!(materials[0].shells, vec![2]);
     assert_eq!(materials[0].vertices, vec![0, 1]);
 
-    assert_eq!(orig.material, decoded.material);
-    let decoded_values = serde_json::to_value(&decoded.material)?;
-    assert_eq!(decoded_values, json!({"winter": {"values": [[0, 1]]}}));
+    assert_eq!(textures[0].solids, vec![1]);
+    assert_eq!(textures[0].shells, vec![2]);
     Ok(())
 }
 
-/// Control for quirk 1: a Solid with two shells round-trips its material
-/// values unchanged (`solids == [2]` passes the `solids[0] > 1` guard).
 #[test]
-fn material_solid_two_shells_roundtrips() -> Result<()> {
+fn solid_two_shells_roundtrips() -> Result<()> {
     let geometry = json!({
         "type": "Solid",
         "lod": "1",
@@ -207,134 +433,146 @@ fn material_solid_two_shells_roundtrips() -> Result<()> {
             [[[0, 1, 2, 3]], [[4, 5, 6, 7]]],
             [[[8, 9, 10, 11]]]
         ],
-        "material": {"winter": {"values": [[0, 1], [2]]}}
+        "material": {"winter": {"values": [[0, 1], [2]]}},
+        "texture": {
+            "winter": {"values": [
+                [[[0, 12, 13, 14, 15]], [[1, 16, 17, 18, 19]]],
+                [[[2, 20, 21, 22, 23]]]
+            ]}
+        }
     });
-    let (orig, decoded, materials, _) = roundtrip_geometry(geometry, 12)?;
-
+    let (materials, textures) = assert_roundtrips(geometry, 12)?;
     assert_eq!(materials[0].solids, vec![2]);
     assert_eq!(materials[0].shells, vec![2, 1]);
-    assert_eq!(orig.material, decoded.material);
+    assert_eq!(textures[0].solids, vec![2]);
+    assert_eq!(textures[0].shells, vec![2, 1]);
     Ok(())
 }
 
-/// Regression: texture values on a MultiLineString
-/// with a single string. The encoder emits `surfaces == [1]`,
-/// `strings == [n]`; `strings.len() == 1` fails the decoder's
-/// `strings.len() > 1` guard, so decoding falls through to the MultiSurface
-/// branch and returns the values one level deeper than the input.
 #[test]
-fn texture_multilinestring_single_string_roundtrips() -> Result<()> {
+fn multisolid_roundtrips() -> Result<()> {
     let geometry = json!({
-        "type": "MultiLineString",
+        "type": "MultiSolid",
         "lod": "1",
-        "boundaries": [[0, 1, 2]],
-        // One value array per string: [texture index, uv indices...].
-        "texture": {"winter": {"values": [[0, 10, 11, 12]]}}
+        "boundaries": [
+            [[[[0, 1, 2]]], [[[3, 4, 5]]]],
+            [[[[6, 7, 8]]]]
+        ],
+        "material": {"winter": {"values": [[[0], [1]], [[2]]]}},
+        "texture": {
+            "winter": {"values": [
+                [[[[0, 9, 10, 11]]], [[[1, 12, 13, 14]]]],
+                [[[[2, 15, 16, 17]]]]
+            ]}
+        }
     });
-    let (orig, decoded, _, textures) = roundtrip_geometry(geometry, 3)?;
-
-    // What the encoder actually emits for this shape.
-    assert_eq!(textures.len(), 1);
-    assert_eq!(textures[0].solids, Vec::<u32>::new());
-    assert_eq!(textures[0].shells, Vec::<u32>::new());
-    assert_eq!(textures[0].surfaces, vec![1]);
-    assert_eq!(textures[0].strings, vec![4]);
-    assert_eq!(textures[0].vertices, vec![0, 10, 11, 12]);
-
-    assert_eq!(orig.texture, decoded.texture);
-    let decoded_values = serde_json::to_value(&decoded.texture)?;
-    assert_eq!(decoded_values, json!({"winter": {"values": [[0, 10, 11, 12]]}}));
+    let (materials, textures) = assert_roundtrips(geometry, 9)?;
+    assert_eq!(materials[0].solids, vec![2, 1]);
+    assert_eq!(materials[0].shells, vec![1, 1, 1]);
+    assert_eq!(materials[0].vertices, vec![0, 1, 2]);
+    assert_eq!(textures[0].solids, vec![2, 1]);
+    assert_eq!(textures[0].shells, vec![1, 1, 1]);
     Ok(())
 }
 
-/// Control for quirk 2: the encoder output for a MultiSurface with one
-/// surface differs from a single-string MultiLineString only by the extra
-/// `shells == [1]` entry, so the decoder could distinguish the two shapes;
-/// this one round-trips correctly through the shell branch.
 #[test]
-fn texture_multisurface_single_surface_roundtrips() -> Result<()> {
+fn compositesolid_roundtrips() -> Result<()> {
     let geometry = json!({
-        "type": "MultiSurface",
-        "lod": "1",
-        "boundaries": [[[0, 1, 2]]],
-        "texture": {"winter": {"values": [[[0, 10, 11, 12]]]}}
+        "type": "CompositeSolid",
+        "lod": "2.2",
+        "boundaries": [
+            [[[[0, 1, 2]], [[3, 4, 5]]]],
+            [[[[6, 7, 8]]]]
+        ],
+        "material": {"winter": {"values": [[[0, 1]], [[2]]]}},
+        "texture": {
+            "winter": {"values": [
+                [[[[0, 9, 10, 11]], [[1, 12, 13, 14]]]],
+                [[[[2, 15, 16, 17]]]]
+            ]}
+        },
+        "semantics": {
+            "surfaces": [{"type": "RoofSurface"}, {"type": "WallSurface"}],
+            "values": [[[0, 1]], [[null]]]
+        }
     });
-    let (orig, decoded, _, textures) = roundtrip_geometry(geometry, 3)?;
-
-    assert_eq!(textures[0].shells, vec![1]);
-    assert_eq!(textures[0].surfaces, vec![1]);
-    assert_eq!(textures[0].strings, vec![4]);
-    assert_eq!(orig.texture, decoded.texture);
+    let (materials, textures) = assert_roundtrips(geometry, 9)?;
+    assert_eq!(materials[0].solids, vec![1, 1]);
+    assert_eq!(materials[0].shells, vec![2, 1]);
+    assert_eq!(textures[0].solids, vec![1, 1]);
+    assert_eq!(textures[0].shells, vec![2, 1]);
     Ok(())
 }
 
-/// Quirk 3 (DECODE-ONLY): the decoder's shell branch is guarded on
-/// `shells.len() == 1`, so `shells.len() > 1` with no solids would fall to
-/// the surfaces branch and lose the shell grouping. However, the encoder
-/// pushes one `shells` entry per depth-3 node in the values tree, and more
-/// than one depth-3 node requires a depth-4 parent, which always pushes a
-/// `solids` entry. This test shows the closest real inputs: a Solid with two
-/// shells emits `solids == [2]` alongside `shells == [1, 1]` (decoded by the
-/// solids branch), and a MultiSurface with two surfaces emits a single
-/// `shells == [2]` entry. Both round-trip correctly; `shells.len() > 1`
-/// without solids is unreachable from our writer.
+// ---------------------------------------------------------------------------
+// nullability
+// ---------------------------------------------------------------------------
+
+/// `material.values` is nullable at *every* level, not only at the leaf, and a
+/// `None` must come back as `null` and never as `[]` — that is finding #7.
 #[test]
-fn texture_shell_shapes_always_carry_solids_or_single_shell_entry() -> Result<()> {
-    // Solid, two shells, one surface each.
+fn null_material_shells_and_solids_roundtrip() -> Result<()> {
+    // A whole null shell on a Solid.
     let geometry = json!({
         "type": "Solid",
         "lod": "1",
         "boundaries": [
-            [[[0, 1, 2, 3]]],
-            [[[4, 5, 6, 7]]]
+            [[[0, 1, 2, 3]], [[4, 5, 6, 7]]],
+            [[[8, 9, 10, 11]]]
         ],
-        "texture": {"winter": {"values": [[[[0, 10, 11, 12, 13]]], [[[1, 14, 15, 16, 17]]]]}}
+        "material": {"winter": {"values": [[0, 1], null]}}
     });
-    let (orig, decoded, _, textures) = roundtrip_geometry(geometry, 8)?;
+    assert_roundtrips(geometry, 12)?;
 
-    // Two shell entries are always accompanied by a solids entry.
-    assert_eq!(textures[0].solids, vec![2]);
-    assert_eq!(textures[0].shells, vec![1, 1]);
-    assert_eq!(textures[0].surfaces, vec![1, 1]);
-    assert_eq!(orig.texture, decoded.texture);
-
-    // MultiSurface, two surfaces: a single shells entry with value 2.
+    // A whole null solid on a CompositeSolid.
     let geometry = json!({
-        "type": "MultiSurface",
+        "type": "CompositeSolid",
         "lod": "1",
-        "boundaries": [[[0, 1, 2]], [[3, 4, 5]]],
-        "texture": {"winter": {"values": [[[0, 10, 11, 12]], [[0, 13, 14, 15]]]}}
+        "boundaries": [
+            [[[[0, 1, 2]]]],
+            [[[[3, 4, 5]]]]
+        ],
+        "material": {"winter": {"values": [[[0]], null]}}
     });
-    let (orig, decoded, _, textures) = roundtrip_geometry(geometry, 6)?;
-
-    assert_eq!(textures[0].solids, Vec::<u32>::new());
-    assert_eq!(textures[0].shells, vec![2]); // len 1, passes the == 1 guard
-    assert_eq!(textures[0].surfaces, vec![1, 1]);
-    assert_eq!(orig.texture, decoded.texture);
+    assert_roundtrips(geometry, 6)?;
     Ok(())
 }
 
-/// Quirk 4 (DECODE-ONLY): the decoder's MultiLineString branch iterates
-/// `surfaces[0]` times instead of `strings.len()`, which would drop surplus
-/// strings if `surfaces[0] < strings.len()`. However, for the only shape
-/// reaching that branch (no solids/shells, depth-2 values tree) the encoder
-/// pushes exactly one `surfaces` entry whose value is the number of leaf
-/// strings, so `surfaces == [strings.len()]` always holds and nothing is
-/// dropped.
+/// An explicit `"values": null` is not the same as an absent `values`: the
+/// schema requires exactly one of `value`/`values` but separately permits
+/// `null`, so re-emitting the first as the second produces a document a
+/// validator rejects.
 #[test]
-fn texture_multilinestring_multiple_strings_roundtrips() -> Result<()> {
+fn an_explicitly_null_material_values_roundtrips() -> Result<()> {
     let geometry = json!({
-        "type": "MultiLineString",
+        "type": "MultiSurface",
         "lod": "1",
-        "boundaries": [[0, 1], [2, 3], [4, 5]],
-        "texture": {"winter": {"values": [[0, 10, 11], [0, 12, 13], [0, 14, 15]]}}
+        "boundaries": [[[0, 1, 2]]],
+        "material": {"winter": {"values": null}}
     });
-    let (orig, decoded, _, textures) = roundtrip_geometry(geometry, 6)?;
+    let (orig, decoded, _, _) = roundtrip_geometry(geometry, 3)?;
+    assert_eq!(
+        serde_json::to_value(material_of(&orig))?,
+        json!({"winter": {"values": null}}),
+        "the input itself must keep its explicit null"
+    );
+    assert_eq!(
+        serde_json::to_value(material_of(&decoded))?,
+        serde_json::to_value(material_of(&orig))?
+    );
+    Ok(())
+}
 
-    // Encoder invariant that keeps the decoder's surfaces[0] loop safe.
-    assert_eq!(textures[0].surfaces, vec![3]);
-    assert_eq!(textures[0].strings, vec![3, 3, 3]);
-    assert_eq!(textures[0].surfaces[0] as usize, textures[0].strings.len());
-    assert_eq!(orig.texture, decoded.texture);
+/// A texture is nullable only at the leaf: an untextured ring is `[null]`, not
+/// `null`. The `[null]` spelling must survive at every depth.
+#[test]
+fn an_untextured_ring_roundtrips_as_a_null_leaf() -> Result<()> {
+    let geometry = json!({
+        "type": "Solid",
+        "lod": "1",
+        "boundaries": [[[[0, 1, 2]], [[3, 4, 5]]]],
+        "texture": {"winter": {"values": [[[[0, 6, 7, 8]], [[null]]]]}}
+    });
+    assert_roundtrips(geometry, 6)?;
     Ok(())
 }
