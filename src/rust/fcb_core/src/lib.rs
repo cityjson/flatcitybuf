@@ -25,6 +25,7 @@
 //! FlatGeobuf portions remain under their original BSD 2-Clause License.
 
 mod cj_utils;
+pub mod obj;
 mod cjerror;
 mod const_vars;
 pub mod error;

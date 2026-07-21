@@ -3,19 +3,20 @@ use std::{collections::HashMap, mem::size_of};
 use crate::{
     error::Error,
     fb::*,
-    geom_decoder::{decode, decode_materials, decode_semantics, decode_textures},
+    geom_decoder::{
+        decode_materials, decode_points, decode_rings, decode_semantics, decode_shells,
+        decode_solids, decode_surfaces, decode_textures,
+    },
 };
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
-    Address as CjAddress, Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON,
-    CityJSONFeature, CityObject as CjCityObject, Extension as CjExtension,
-    ExtensionFile as CjExtensionFile, Geometry as CjGeometry,
-    GeometryTemplates as CjGeometryTemplates, GeometryType as CjGeometryType,
-    MaterialObject as CjMaterial, Metadata as CjMetadata, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, TextFormat as CjTextFormat,
-    TextType as CjTextType, TextureObject as CjTexture, Transform as CjTransform,
-    WrapMode as CjWrapMode,
+    Address as CjAddress, Appearance as CjAppearance, CityJSON, CityJSONFeature,
+    CityObject as CjCityObject, CityObjectType as CjCityObjectType, Geometry as CjGeometry,
+    GeometryCommon as CjGeometryCommon, GeometryTemplates as CjGeometryTemplates,
+    Metadata as CjMetadata, PointOfContact as CjPointOfContact,
+    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, Transform as CjTransform,
 };
+use serde_json::{json, Value};
 
 use super::meta::{Column as MetaColumn, ColumnType as MetaColumnType, Meta};
 
@@ -32,21 +33,21 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
 
     // Extract extensions if present
     if let Some(extensions_vec) = header.extensions() {
-        let mut extensions_map = HashMap::new();
+        let mut extensions_map = serde_json::Map::new();
         for extension in extensions_vec.iter() {
             if let Some(name) = extension.name() {
-                let url = extension.url().unwrap_or_default().to_string();
-                let version = extension.version().unwrap_or_default().to_string();
-
-                // Create a CityJSONExtension with metadata
-                let cj_extension = CjExtension { url, version };
-
-                extensions_map.insert(name.to_string(), cj_extension);
+                extensions_map.insert(
+                    name.to_string(),
+                    json!({
+                        "url": extension.url().unwrap_or_default(),
+                        "version": extension.version().unwrap_or_default(),
+                    }),
+                );
             }
         }
 
         if !extensions_map.is_empty() {
-            cj.extensions = Some(extensions_map);
+            cj.extensions = Some(Value::Object(extensions_map));
         }
     }
 
@@ -59,7 +60,6 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
         )
     });
     cj.version = header.version().to_string();
-    cj.thetype = String::from("CityJSON");
 
     let geographical_extent = header
         .geographical_extent()
@@ -87,6 +87,7 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
         reference_date: header.reference_date().map(|r| r.to_string()),
         reference_system,
         title: header.title().map(|t| t.to_string()),
+        other: HashMap::new(),
     });
 
     // Decode Geometry Templates if present
@@ -98,10 +99,12 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
             .map(|g| decode_geometry(g, semantic_attr_schema)) // Use local decode_geometry
             .collect::<Result<Vec<_>, _>>()?;
 
-        let vertices_templates = fb_vertices
-            .iter()
-            .map(|v| [v.x(), v.y(), v.z()])
-            .collect::<Vec<_>>();
+        let vertices_templates = Value::Array(
+            fb_vertices
+                .iter()
+                .map(|v| json!([v.x(), v.y(), v.z()]))
+                .collect(),
+        );
 
         cj.geometry_templates = Some(CjGeometryTemplates {
             templates,
@@ -177,72 +180,86 @@ pub(crate) fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact
             .ok_or(Error::MissingRequiredField("email_address".to_string()))?
             .to_string(),
         website: header.poc_website().map(|w| w.to_string()),
+        organization: None,
         address: to_cj_address(header),
+        other: HashMap::new(),
     })
 }
 
+/// Rebuilds the free-form `address` object from the header's fixed fields.
+/// Members the writer had nothing to write are simply absent, which is what
+/// the schema wants — it names no required member at all.
 pub(crate) fn to_cj_address(header: &Header) -> Option<CjAddress> {
-    let thoroughfare_number = header
-        .poc_address_thoroughfare_number()
-        .and_then(|n| n.parse::<i64>().ok())?;
-    let thoroughfare_name = header.poc_address_thoroughfare_name()?;
-    let locality = header.poc_address_locality()?;
-    let postal_code = header.poc_address_postcode()?;
-    let country = header.poc_address_country()?;
+    let mut members: HashMap<String, Value> = HashMap::new();
+    let mut insert = |key: &str, value: Option<&str>| {
+        if let Some(value) = value.filter(|v| !v.is_empty()) {
+            members.insert(key.to_string(), Value::String(value.to_string()));
+        }
+    };
+    insert(
+        "thoroughfareNumber",
+        header.poc_address_thoroughfare_number(),
+    );
+    insert("thoroughfareName", header.poc_address_thoroughfare_name());
+    insert("locality", header.poc_address_locality());
+    insert("postcode", header.poc_address_postcode());
+    insert("country", header.poc_address_country());
 
-    Some(CjAddress {
-        thoroughfare_number,
-        thoroughfare_name: thoroughfare_name.to_string(),
-        locality: locality.to_string(),
-        postal_code: postal_code.to_string(),
-        country: country.to_string(),
-    })
+    if members.is_empty() {
+        None
+    } else {
+        Some(CjAddress { members })
+    }
 }
 
-pub(crate) fn to_cj_co_type(co_type: CityObjectType, extension_type: Option<&str>) -> String {
-    // If this is an extension type and extension_type is available, use it
-    if co_type == CityObjectType::ExtensionObject {
-        if let Some(extension_type) = extension_type {
-            return extension_type.to_string();
-        }
-    }
-    // Otherwise use the standard mapping
+/// The CityJSON spelling of a FlatBuffers City Object type.
+///
+/// `ExtensionObject` carries its CityJSON name in `extension_type`, which the
+/// spec requires to start with `+`.
+pub(crate) fn to_cj_co_type(
+    co_type: CityObjectType,
+    extension_type: Option<&str>,
+) -> CjCityObjectType {
     match co_type {
-        CityObjectType::Bridge => "Bridge".to_string(),
-        CityObjectType::BridgePart => "BridgePart".to_string(),
-        CityObjectType::BridgeInstallation => "BridgeInstallation".to_string(),
-        CityObjectType::BridgeConstructiveElement => "BridgeConstructiveElement".to_string(),
-        CityObjectType::BridgeRoom => "BridgeRoom".to_string(),
-        CityObjectType::BridgeFurniture => "BridgeFurniture".to_string(),
-        CityObjectType::Building => "Building".to_string(),
-        CityObjectType::BuildingPart => "BuildingPart".to_string(),
-        CityObjectType::BuildingInstallation => "BuildingInstallation".to_string(),
-        CityObjectType::BuildingConstructiveElement => "BuildingConstructiveElement".to_string(),
-        CityObjectType::BuildingFurniture => "BuildingFurniture".to_string(),
-        CityObjectType::BuildingStorey => "BuildingStorey".to_string(),
-        CityObjectType::BuildingRoom => "BuildingRoom".to_string(),
-        CityObjectType::BuildingUnit => "BuildingUnit".to_string(),
-        CityObjectType::CityFurniture => "CityFurniture".to_string(),
-        CityObjectType::CityObjectGroup => "CityObjectGroup".to_string(),
-        CityObjectType::GenericCityObject => "GenericCityObject".to_string(),
-        CityObjectType::LandUse => "LandUse".to_string(),
-        CityObjectType::OtherConstruction => "OtherConstruction".to_string(),
-        CityObjectType::PlantCover => "PlantCover".to_string(),
-        CityObjectType::SolitaryVegetationObject => "SolitaryVegetationObject".to_string(),
-        CityObjectType::TINRelief => "TINRelief".to_string(),
-        CityObjectType::Road => "Road".to_string(),
-        CityObjectType::Railway => "Railway".to_string(),
-        CityObjectType::Waterway => "Waterway".to_string(),
-        CityObjectType::TransportSquare => "TransportSquare".to_string(),
-        CityObjectType::Tunnel => "Tunnel".to_string(),
-        CityObjectType::TunnelPart => "TunnelPart".to_string(),
-        CityObjectType::TunnelInstallation => "TunnelInstallation".to_string(),
-        CityObjectType::TunnelConstructiveElement => "TunnelConstructiveElement".to_string(),
-        CityObjectType::TunnelHollowSpace => "TunnelHollowSpace".to_string(),
-        CityObjectType::TunnelFurniture => "TunnelFurniture".to_string(),
-        CityObjectType::WaterBody => "WaterBody".to_string(),
-        CityObjectType::ExtensionObject => "Unknown".to_string(), // Fallback if extension_type is None
-        _ => "Unknown".to_string(),
+        CityObjectType::Bridge => CjCityObjectType::Bridge,
+        CityObjectType::BridgePart => CjCityObjectType::BridgePart,
+        CityObjectType::BridgeInstallation => CjCityObjectType::BridgeInstallation,
+        CityObjectType::BridgeConstructiveElement => CjCityObjectType::BridgeConstructiveElement,
+        CityObjectType::BridgeRoom => CjCityObjectType::BridgeRoom,
+        CityObjectType::BridgeFurniture => CjCityObjectType::BridgeFurniture,
+        CityObjectType::Building => CjCityObjectType::Building,
+        CityObjectType::BuildingPart => CjCityObjectType::BuildingPart,
+        CityObjectType::BuildingInstallation => CjCityObjectType::BuildingInstallation,
+        CityObjectType::BuildingConstructiveElement => {
+            CjCityObjectType::BuildingConstructiveElement
+        }
+        CityObjectType::BuildingFurniture => CjCityObjectType::BuildingFurniture,
+        CityObjectType::BuildingStorey => CjCityObjectType::BuildingStorey,
+        CityObjectType::BuildingRoom => CjCityObjectType::BuildingRoom,
+        CityObjectType::BuildingUnit => CjCityObjectType::BuildingUnit,
+        CityObjectType::CityFurniture => CjCityObjectType::CityFurniture,
+        CityObjectType::CityObjectGroup => CjCityObjectType::CityObjectGroup,
+        CityObjectType::GenericCityObject => CjCityObjectType::GenericCityObject,
+        CityObjectType::LandUse => CjCityObjectType::LandUse,
+        CityObjectType::OtherConstruction => CjCityObjectType::OtherConstruction,
+        CityObjectType::PlantCover => CjCityObjectType::PlantCover,
+        CityObjectType::SolitaryVegetationObject => CjCityObjectType::SolitaryVegetationObject,
+        CityObjectType::TINRelief => CjCityObjectType::TINRelief,
+        CityObjectType::Road => CjCityObjectType::Road,
+        CityObjectType::Railway => CjCityObjectType::Railway,
+        CityObjectType::Waterway => CjCityObjectType::Waterway,
+        CityObjectType::TransportSquare => CjCityObjectType::TransportSquare,
+        CityObjectType::Tunnel => CjCityObjectType::Tunnel,
+        CityObjectType::TunnelPart => CjCityObjectType::TunnelPart,
+        CityObjectType::TunnelInstallation => CjCityObjectType::TunnelInstallation,
+        CityObjectType::TunnelConstructiveElement => CjCityObjectType::TunnelConstructiveElement,
+        CityObjectType::TunnelHollowSpace => CjCityObjectType::TunnelHollowSpace,
+        CityObjectType::TunnelFurniture => CjCityObjectType::TunnelFurniture,
+        CityObjectType::WaterBody => CjCityObjectType::WaterBody,
+        // ExtensionObject, and any tag a newer writer may add.
+        _ => CjCityObjectType::Extension(
+            extension_type.unwrap_or("+UnknownCityObject").to_string(),
+        ),
     }
 }
 
@@ -413,6 +430,18 @@ pub fn decode_attributes(
     serde_json::Value::Object(map)
 }
 
+/// Adds `key` only when the value is present, so an absent member stays absent
+/// rather than coming back as `null`.
+fn insert_opt<T: serde::Serialize>(obj: &mut serde_json::Map<String, Value>, key: &str, v: Option<T>) {
+    if let Some(v) = v {
+        obj.insert(key.to_string(), json!(v));
+    }
+}
+
+fn to_color(color: Option<flatbuffers::Vector<'_, f64>>) -> Option<Vec<f64>> {
+    color.map(|c| c.iter().collect())
+}
+
 pub fn to_cj_feature(
     feature: CityFeature,
     root_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
@@ -471,22 +500,26 @@ pub fn to_cj_feature(
                     })
                 };
 
-                let children_roles = co
-                    .children_roles()
-                    .map(|c| c.iter().map(|s| s.to_string()).collect());
+                // An unspecified role is `null` in CityJSON, and the writer
+                // spells that as the empty string.
+                let children_roles = co.children_roles().map(|c| {
+                    c.iter()
+                        .map(|s| (!s.is_empty()).then(|| s.to_string()))
+                        .collect()
+                });
 
-                let cjco = CjCityObject::new(
-                    to_cj_co_type(co.type_(), co.extension_type()),
-                    geographical_extent,
-                    attributes,
-                    final_geometries, // Use the combined list
-                    co.children()
-                        .map(|c| c.iter().map(|s| s.to_string()).collect()),
-                    children_roles,
-                    co.parents()
-                        .map(|p| p.iter().map(|s| s.to_string()).collect()),
-                    None, // Assuming appearance is handled elsewhere or not needed here
-                );
+                let mut cjco =
+                    CjCityObject::new(to_cj_co_type(co.type_(), co.extension_type()));
+                cjco.geographical_extent = geographical_extent;
+                cjco.attributes = attributes;
+                cjco.geometry = final_geometries;
+                cjco.children = co
+                    .children()
+                    .map(|c| c.iter().map(|s| s.to_string()).collect());
+                cjco.children_roles = children_roles;
+                cjco.parents = co
+                    .parents()
+                    .map(|p| p.iter().map(|s| s.to_string()).collect());
                 Ok((co.id().to_string(), cjco)) // Return Result for map operation
             })
             .collect(); // Collect Results from map
@@ -509,30 +542,23 @@ pub fn to_cj_feature(
             default_theme_material: None,
         };
 
-        // Decode materials
+        // Decode materials. A CityJSON material is a free-form object; only
+        // the members the writer actually stored are put back, so an absent
+        // one stays absent rather than reappearing as `null`.
         if let Some(materials) = appearance.materials() {
             let cj_materials = materials
                 .iter()
                 .map(|m| {
-                    // Helper function to convert color vectors
-                    let convert_color = |color_opt: Option<flatbuffers::Vector<'_, f64>>| {
-                        color_opt.map(|c| {
-                            let color_vec: Vec<f64> = c.iter().collect();
-                            assert!(color_vec.len() == 3, "color must be a vector of 3 elements");
-                            [color_vec[0], color_vec[1], color_vec[2]]
-                        })
-                    };
-
-                    CjMaterial {
-                        name: m.name().to_string(),
-                        ambient_intensity: m.ambient_intensity(),
-                        diffuse_color: convert_color(m.diffuse_color()),
-                        emissive_color: convert_color(m.emissive_color()),
-                        specular_color: convert_color(m.specular_color()),
-                        shininess: m.shininess(),
-                        transparency: m.transparency(),
-                        is_smooth: m.is_smooth(),
-                    }
+                    let mut obj = serde_json::Map::new();
+                    obj.insert("name".to_string(), json!(m.name()));
+                    insert_opt(&mut obj, "ambientIntensity", m.ambient_intensity());
+                    insert_opt(&mut obj, "diffuseColor", to_color(m.diffuse_color()));
+                    insert_opt(&mut obj, "emissiveColor", to_color(m.emissive_color()));
+                    insert_opt(&mut obj, "specularColor", to_color(m.specular_color()));
+                    insert_opt(&mut obj, "shininess", m.shininess());
+                    insert_opt(&mut obj, "transparency", m.transparency());
+                    insert_opt(&mut obj, "isSmooth", m.is_smooth());
+                    Value::Object(obj)
                 })
                 .collect();
 
@@ -544,33 +570,37 @@ pub fn to_cj_feature(
             let cj_textures = textures
                 .iter()
                 .map(|t| {
-                    CjTexture {
-                        image: t.image().to_string(),
-                        texture_format: match t.type_() {
-                            TextureFormat::PNG => CjTextFormat::Png,
-                            TextureFormat::JPG => CjTextFormat::Jpg,
-                            _ => CjTextFormat::Png, // Default to PNG
-                        },
-                        wrap_mode: t.wrap_mode().map(|w| match w {
-                            WrapMode::None => CjWrapMode::None,
-                            WrapMode::Wrap => CjWrapMode::Wrap,
-                            WrapMode::Mirror => CjWrapMode::Mirror,
-                            WrapMode::Clamp => CjWrapMode::Clamp,
-                            WrapMode::Border => CjWrapMode::Border,
-                            _ => CjWrapMode::None, // Default to None
+                    let mut obj = serde_json::Map::new();
+                    obj.insert(
+                        "type".to_string(),
+                        json!(match t.type_() {
+                            TextureFormat::JPG => "JPG",
+                            _ => "PNG",
                         }),
-                        texture_type: t.texture_type().map(|t| match t {
-                            TextureType::Unknown => CjTextType::Unknown,
-                            TextureType::Specific => CjTextType::Specific,
-                            TextureType::Typical => CjTextType::Typical,
-                            _ => CjTextType::Unknown, // Default to Unknown
+                    );
+                    obj.insert("image".to_string(), json!(t.image()));
+                    insert_opt(
+                        &mut obj,
+                        "wrapMode",
+                        t.wrap_mode().map(|w| match w {
+                            WrapMode::Wrap => "Wrap",
+                            WrapMode::Mirror => "Mirror",
+                            WrapMode::Clamp => "Clamp",
+                            WrapMode::Border => "Border",
+                            _ => "None",
                         }),
-                        border_color: t.border_color().map(|c| {
-                            let color_vec: Vec<f64> = c.iter().collect();
-                            assert!(color_vec.len() == 4, "color must be a vector of 4 elements");
-                            [color_vec[0], color_vec[1], color_vec[2], color_vec[3]]
+                    );
+                    insert_opt(
+                        &mut obj,
+                        "textureType",
+                        t.texture_type().map(|t| match t {
+                            TextureType::Specific => "Specific",
+                            TextureType::Typical => "Typical",
+                            _ => "Unknown",
                         }),
-                    }
+                    );
+                    insert_opt(&mut obj, "borderColor", to_color(t.border_color()));
+                    Value::Object(obj)
                 })
                 .collect::<Vec<_>>();
 
@@ -582,7 +612,7 @@ pub fn to_cj_feature(
             cj_appearance.vertices_texture = Some(
                 vertices_texture
                     .iter()
-                    .map(|v| [v.u(), v.v()])
+                    .map(|v| vec![v.u(), v.v()])
                     .collect::<Vec<_>>(),
             );
         }
@@ -626,7 +656,8 @@ pub(crate) fn decode_geometry(
         .boundaries()
         .map(|v| v.iter().collect::<Vec<_>>())
         .unwrap_or_default();
-    let boundaries = decode(&solids, &shells, &surfaces, &strings, &indices);
+    let geometry_type = g.type_();
+
     let semantics: Option<CjSemantics> = if let (Some(semantics_objects), Some(semantics)) =
         (g.semantics_objects(), g.semantics())
     {
@@ -635,7 +666,7 @@ pub(crate) fn decode_geometry(
         Some(decode_semantics(
             &solids,
             &shells,
-            g.type_(),
+            geometry_type,
             semantics_objects,
             semantics,
             semantic_attr_schema,
@@ -646,27 +677,65 @@ pub(crate) fn decode_geometry(
 
     // Decode material mappings if present
     let material = if let Some(material_mappings) = g.material() {
-        decode_materials(&material_mappings.iter().collect::<Vec<_>>())
+        decode_materials(geometry_type, &material_mappings.iter().collect::<Vec<_>>())
     } else {
         None
     };
 
     // Decode texture mappings if present
     let texture = if let Some(texture_mappings) = g.texture() {
-        decode_textures(&texture_mappings.iter().collect::<Vec<_>>())
+        decode_textures(geometry_type, &texture_mappings.iter().collect::<Vec<_>>())
     } else {
         None
     };
 
-    Ok(CjGeometry {
-        thetype: g.type_().to_cj(),
-        lod: g.lod().map(|v| v.to_string()),
-        boundaries,
+    let common = CjGeometryCommon {
         semantics,
         material,
         texture,
-        template: None,
-        transformation_matrix: None,
+    };
+    let lod = g.lod().map(|v| v.to_string());
+
+    // The geometry type selects the depth of `boundaries`; nothing looks at
+    // which of the count arrays happen to be populated.
+    Ok(match geometry_type {
+        GeometryType::MultiPoint => CjGeometry::MultiPoint {
+            lod,
+            boundaries: decode_points(&indices),
+            common,
+        },
+        GeometryType::MultiLineString => CjGeometry::MultiLineString {
+            lod,
+            boundaries: decode_rings(&strings, &indices),
+            common,
+        },
+        GeometryType::MultiSurface => CjGeometry::MultiSurface {
+            lod,
+            boundaries: decode_surfaces(&surfaces, &strings, &indices),
+            common,
+        },
+        GeometryType::CompositeSurface => CjGeometry::CompositeSurface {
+            lod,
+            boundaries: decode_surfaces(&surfaces, &strings, &indices),
+            common,
+        },
+        GeometryType::MultiSolid => CjGeometry::MultiSolid {
+            lod,
+            boundaries: decode_solids(&solids, &shells, &surfaces, &strings, &indices),
+            common,
+        },
+        GeometryType::CompositeSolid => CjGeometry::CompositeSolid {
+            lod,
+            boundaries: decode_solids(&solids, &shells, &surfaces, &strings, &indices),
+            common,
+        },
+        // `Solid`, and any tag a newer writer may add: a Solid is the shape
+        // the writer falls back to as well, so the two agree.
+        _ => CjGeometry::Solid {
+            lod,
+            boundaries: decode_shells(&shells, &surfaces, &strings, &indices),
+            common,
+        },
     })
 }
 
@@ -690,8 +759,7 @@ pub(crate) fn decode_geometry_instance(instance: &GeometryInstance) -> Result<Cj
                     msg: format!("geometryinstance boundaries should contain exactly one vertex index, found {}", fb_boundaries.len())
                 });
             }
-            let reference_vertex_index = fb_boundaries.get(0);
-            CjBoundaries::Indices(vec![reference_vertex_index])
+            vec![fb_boundaries.get(0) as usize]
         }
         None => {
             return Err(Error::MissingRequiredField(
@@ -724,15 +792,13 @@ pub(crate) fn decode_geometry_instance(instance: &GeometryInstance) -> Result<Cj
         fb_matrix.m33(),
     ];
 
-    Ok(CjGeometry {
-        thetype: CjGeometryType::GeometryInstance,
-        lod: None, // LOD is not typically associated directly with the instance itself
+    // A GeometryInstance has no lod, semantics, material or texture: they live
+    // on the template it refers to, which is why the variant does not have
+    // fields for them.
+    Ok(CjGeometry::GeometryInstance {
         boundaries,
-        semantics: None,
-        material: None,
-        texture: None,
-        template: Some(template_index as usize),
-        transformation_matrix: Some(transformation_matrix_array),
+        template: template_index as usize,
+        transformation_matrix: transformation_matrix_array,
     })
 }
 
@@ -741,77 +807,6 @@ pub(crate) fn to_cj_vertices(vertices: Vec<&Vertex>) -> Vec<Vec<i64>> {
         .iter()
         .map(|v| vec![v.x() as i64, v.y() as i64, v.z() as i64])
         .collect()
-}
-
-/// Convert a FlatBuffer Extension to a CityJSON ExtensionFile
-///
-/// # Arguments
-///
-/// * `extension` - The FlatBuffer Extension object to convert
-///
-/// # Returns
-///
-/// A Result containing the converted CityJSON ExtensionFile
-pub(crate) fn to_cj_extension_file(extension: &Extension) -> Result<CjExtensionFile, Error> {
-    let name = extension.name().unwrap_or_default().to_string();
-    let description = extension.description().unwrap_or_default().to_string();
-    let url = extension.url().unwrap_or_default().to_string();
-    let version = extension.version().unwrap_or_default().to_string();
-    let version_city_json = extension.version_cityjson().unwrap_or_default().to_string();
-
-    // Parse the stringified JSON components
-    let extra_attributes = if let Some(attr_str) = extension.extra_attributes() {
-        if attr_str.is_empty() {
-            serde_json::Value::Null
-        } else {
-            serde_json::from_str(attr_str).unwrap_or(serde_json::Value::Null)
-        }
-    } else {
-        serde_json::Value::Null
-    };
-
-    let extra_city_objects = if let Some(objs_str) = extension.extra_city_objects() {
-        if objs_str.is_empty() {
-            serde_json::Value::Null
-        } else {
-            serde_json::from_str(objs_str).unwrap_or(serde_json::Value::Null)
-        }
-    } else {
-        serde_json::Value::Null
-    };
-
-    let extra_root_properties = if let Some(props_str) = extension.extra_root_properties() {
-        if props_str.is_empty() {
-            serde_json::Value::Null
-        } else {
-            serde_json::from_str(props_str).unwrap_or(serde_json::Value::Null)
-        }
-    } else {
-        serde_json::Value::Null
-    };
-
-    let extra_semantic_surfaces = if let Some(surfaces_str) = extension.extra_semantic_surfaces() {
-        if surfaces_str.is_empty() {
-            serde_json::Value::Null
-        } else {
-            serde_json::from_str(surfaces_str).unwrap_or(serde_json::Value::Null)
-        }
-    } else {
-        serde_json::Value::Null
-    };
-
-    Ok(CjExtensionFile {
-        thetype: "CityJSONExtension".to_string(),
-        name,
-        description,
-        url,
-        version,
-        version_city_json,
-        extra_attributes,
-        extra_city_objects,
-        extra_root_properties,
-        extra_semantic_surfaces,
-    })
 }
 
 #[cfg(test)]
@@ -853,22 +848,19 @@ mod tests {
         // Decode the instance
         let cj_geometry = decode_geometry_instance(&geometry_instance)?;
 
-        // Verify the decoded geometry
-        assert_eq!(cj_geometry.thetype, CjGeometryType::GeometryInstance);
-        assert_eq!(cj_geometry.template, Some(5));
-
-        // Check boundaries
-        match &cj_geometry.boundaries {
-            CjBoundaries::Indices(indices) => {
-                assert_eq!(indices.len(), 1);
-                assert_eq!(indices[0], 42);
-            }
-            _ => panic!("Expected Indices boundaries"),
-        }
-
-        // Check transformation matrix
-        assert!(cj_geometry.transformation_matrix.is_some());
-        let matrix = cj_geometry.transformation_matrix.unwrap();
+        // Verify the decoded geometry. The variant carries `template`,
+        // `transformationMatrix` and single-index boundaries by construction,
+        // so an irrefutable-let would be a weaker assertion than this match.
+        let CjGeometry::GeometryInstance {
+            boundaries,
+            template,
+            transformation_matrix: matrix,
+        } = cj_geometry
+        else {
+            panic!("expected a GeometryInstance");
+        };
+        assert_eq!(template, 5);
+        assert_eq!(boundaries, vec![42]);
         assert_eq!(matrix[0], 1.0); // First element
         assert_eq!(matrix[12], 10.0); // Translation X
         assert_eq!(matrix[13], 10.0); // Translation Y

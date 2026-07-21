@@ -1,5 +1,5 @@
 use crate::packed_rtree::Error as PackedRtreeError;
-use cjseq::error::CjseqError;
+use cjseq::CjseqError;
 use flatbuffers::InvalidFlatbuffer;
 use serde_json;
 use thiserror::Error;
