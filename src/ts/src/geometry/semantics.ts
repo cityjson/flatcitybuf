@@ -50,8 +50,14 @@ const GENERIC_SURFACE = '+GenericSurface'
  *
  *  Compared with `=== 0xffffffff` and never with `| 0` or `~v`: JS bitwise
  *  operators are 32-bit SIGNED, so `4294967295 | 0 === -1` and any such test
- *  turns a real index into a sentinel or the other way round. */
-const NULL_INDEX = 0xffffffff
+ *  turns a real index into a sentinel or the other way round.
+ *
+ *  Exported because appearance.ts reuses this SAME wire constant under its
+ *  own local name (`NULL_COUNT`) for a different role: a count-array entry
+ *  meaning "this whole shell/solid is null", not an index-array entry
+ *  meaning "no index". One `0xffffffff` literal, two names for its two
+ *  jobs. */
+export const NULL_INDEX = 0xffffffff
 
 export function indexOrNull(v: number): number | null {
   return v === NULL_INDEX ? null : v

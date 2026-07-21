@@ -15,16 +15,18 @@
  *  the reference. */
 import { GeometryType } from '../generated/geometry-type.js'
 import type { UInts } from './boundaries.js'
-import { countAt, indexOrNull } from './semantics.js'
+import { countAt, indexOrNull, NULL_INDEX } from './semantics.js'
 
 /** An appearance values array: indices nested to the geometry's depth, with
  *  `null` for the u32::MAX sentinel at any level that permits it. */
 export type AppearanceValue = number | null | AppearanceValue[]
 
-/** The u32::MAX sentinel, spelled out for the count arrays, where it means a
- *  whole null shell or solid rather than a null index. Compared with `===`;
- *  see indexOrNull for why `| 0` and `~v` are banned. */
-const NULL_COUNT = 0xffffffff
+/** The SAME u32::MAX wire sentinel as `NULL_INDEX` (semantics.ts), reused
+ *  under this local name for the count arrays, where it means a whole null
+ *  shell or solid rather than a null index -- a different role, not a
+ *  different value, so this is an alias rather than a second literal.
+ *  Compared with `===`; see NULL_INDEX for why `| 0` and `~v` are banned. */
+const NULL_COUNT = NULL_INDEX
 
 /** Reads the OPTIONAL shared-material scalar off a `MaterialMapping`.
  *
@@ -182,10 +184,18 @@ export function decodeTextureValues(
 
     default: {
       // MultiPoint, MultiLineString and GeometryInstance cannot carry a
-      // texture; read whatever is there at the shallowest legal depth. A
-      // single-string MultiLineString keeps its depth here -- no
-      // `strings.length > 1` guard, which is the texture half of finding #8.
-      // The `max(1)` is the reference's (geom_decoder.rs:542) and is what
+      // texture; read whatever is there at the shallowest legal depth --
+      // which is a SURFACE (surface -> ring -> index, three levels), the
+      // same depth as MultiSurface, via `c.takeSurface()` below. This is NOT
+      // a two-level MultiLineString-shaped read: there is no dedicated
+      // MultiLineString branch here to gate with a `strings.length > 1`
+      // guard. That guard, on decode_textures' own MultiLineString branch,
+      // was the texture half of finding #8 -- but the branch it lived on is
+      // gone, folded into this one shallowest-legal-depth fallback. Pinned by
+      // the `falls back to max(surfaces, 1) surfaces` test: `strings=[3,3]`
+      // under one `surfaces` entry decodes to ONE surface of two rings, not
+      // two rings.
+      // The `max(1)` is the reference's (geom_decoder.rs:570) and is what
       // makes a textureless count array still produce one empty surface.
       const n = Math.max(surfaces.length, 1)
       for (let i = 0; i < n; i++) out.push(c.takeSurface())

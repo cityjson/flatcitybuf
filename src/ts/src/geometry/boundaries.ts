@@ -133,10 +133,14 @@ export function decodeBoundaries(
       return out
 
     case GeometryType.MultiLineString:
-      // One ring per `strings` entry, even when there is exactly ONE -- a
-      // single-string MultiLineString keeps its depth (finding #8, texture
-      // half). `surfaces` holds one redundant entry (== strings.length); it
-      // is ignored.
+      // One ring per `strings` entry, even when there is exactly ONE -- this
+      // decoder's own instance of the depth-from-type rule above (never
+      // infer depth from which array is populated). The guard that inferred
+      // depth from `strings.length > 1` on this SAME shape was upstream
+      // finding #8's texture half, but it lived in `decode_textures`, never
+      // in this boundary decoder -- there is no `strings.length > 1` guard
+      // to remove here because there never was one. `surfaces` holds one
+      // redundant entry (== strings.length); it is ignored.
       for (let i = 0; i < strings.length; i++) out.push(c.takeRing())
       return out
 
@@ -162,8 +166,11 @@ export function decodeBoundaries(
     default:
       // Solid and GeometryInstance: one shell per `shells` entry; `solids` is
       // the redundant one, and is NOT consulted -- a Solid drops the solid
-      // level even when `solids === [1]` (finding #8, material half). Do not
-      // reintroduce a `solids[0] > 1` guard.
+      // level even when `solids === [1]`. This decoder's own instance of the
+      // depth-from-type rule above; the guard that inferred depth from
+      // `solids.length == 1` on this SAME shape was upstream finding #8's
+      // material half, but it lived in `decode_materials`, never in this
+      // boundary decoder. Do not reintroduce a `solids[0] > 1` guard here.
       for (let i = 0; i < shells.length; i++) out.push(c.takeShell())
       return out
   }

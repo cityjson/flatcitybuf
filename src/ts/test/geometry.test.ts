@@ -48,7 +48,9 @@ describe('boundaries: MultiLineString', () => {
   it('keeps the depth of a SINGLE string', () => {
     // A single string is the interesting case: by the arrays alone it is
     // indistinguishable from a one-ring MultiSurface. No `strings.length > 1`
-    // guard -- that guard is the texture half of finding #8.
+    // guard here -- that guard, on the SAME shape, was finding #8's texture
+    // half, but it lived in `decode_textures`, never in this boundary
+    // decoder.
     expect(decodeBoundaries(GeometryType.MultiLineString, [], [], [], [4], [0, 1, 2, 3]))
       .toEqual([[0, 1, 2, 3]])
   })
@@ -95,7 +97,9 @@ describe('boundaries: the solid types', () => {
   })
 
   it('gives a MultiSolid one more level than a Solid from the SAME arrays', () => {
-    // Finding #8 on the boundary side, in one assertion. `solids === [1]` is
+    // The boundary decoder's own instance of the depth-from-type rule, in
+    // one assertion -- not finding #8 itself, which was material/texture-
+    // specific, but the same ambiguity it exploited. `solids === [1]` is
     // what both shapes write; only the type tells them apart.
     expect(decodeBoundaries(GeometryType.MultiSolid, solids, shells, surfaces, strings, idx))
       .toEqual([[[[[0, 1, 2]], [[3, 4, 5]]]]])
@@ -288,6 +292,26 @@ describe('decodeSemantics', () => {
         { type: 'WallSurface', parent: 0 },
       ],
       values: [0, null, 1],
+    })
+  })
+
+  it('keeps a PRESENT-but-EMPTY children vector as `children: []`, not as an absent key', () => {
+    // Pins a DELIBERATE divergence from the C++ reader, which guards on
+    // `size() > 0` (cityjson.cpp:359) and so drops `children` entirely for
+    // this exact input. This port follows the Rust reference instead, which
+    // keys on FIELD PRESENCE alone (`s.children().map(...)`,
+    // geom_decoder.rs:158-160): a present-but-empty vector still becomes
+    // `Some(vec![])`, i.e. a `children` key with an empty array. The
+    // `children: [1]` case above cannot pin this choice -- a `size() > 0`
+    // guard would accept a non-empty vector the same way the presence check
+    // does, so only an EMPTY-but-present vector tells the two rules apart.
+    const g = buildGeometry({
+      type: GeometryType.MultiSurface,
+      objects: [{ type: SemanticSurfaceType.RoofSurface, children: [] }],
+    })
+    expect(decodeSemantics(g, [])).toEqual({
+      surfaces: [{ type: 'RoofSurface', children: [] }],
+      values: null,
     })
   })
 
