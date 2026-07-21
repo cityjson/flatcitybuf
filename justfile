@@ -195,6 +195,20 @@ build-wasm-release:
     ./scripts/build_wasm.sh
 
 # ============================================================================
+# TypeScript Commands
+# ============================================================================
+
+# TypeScript reader
+ts-test:
+    cd src/ts && npm ci && npx vitest run
+
+ts-lint:
+    cd src/ts && npx tsc --noEmit
+
+ts-build:
+    cd src/ts && npm run build
+
+# ============================================================================
 # CLI Commands
 # ============================================================================
 

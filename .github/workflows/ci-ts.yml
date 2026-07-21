@@ -1,0 +1,47 @@
+name: TypeScript CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/ts/**"
+      - ".github/workflows/ci-ts.yml"
+
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/ts/**"
+      - ".github/workflows/ci-ts.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Run tests
+        run: just ts-test
+
+      - name: Typecheck
+        run: just ts-lint
+
+      - name: Build
+        run: just ts-build

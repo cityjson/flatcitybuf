@@ -1,16 +1,2 @@
-# wasm-pack output, produced by `just build-wasm` locally and by
-# .github/workflows/publish-npm.yml at publish time. Never committed:
-# regenerate it instead of pulling it from git.
-#
-# package.json is NOT here -- it is hand-maintained and holds the npm
-# name and version, which is why the build copies individual artifacts in
-# rather than `cp -r pkg/*`. That copy is what once overwrote this file
-# with wasm-pack's own `*`, which silently untracked the whole directory.
-fcb_wasm.js
-fcb_wasm.d.ts
-fcb_wasm_bg.wasm
-fcb_wasm_bg.wasm.d.ts
-snippets/
-
 node_modules/
-package-lock.json
+dist/
