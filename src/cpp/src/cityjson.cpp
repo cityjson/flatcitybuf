@@ -383,9 +383,17 @@ nlohmann::json point_of_contact_address_to_json(const FileInfo& info) {
 /// emailAddress" on the Rust side -- it is a hard failure for the entire
 /// metadata line. C++ must match that rather than silently emitting an
 /// incomplete object.
+///
+/// The gate below is on `info.has_poc_email`, NOT `info.poc_email.empty()`.
+/// Rust's check is `header.poc_email().ok_or(...)`  a present-but-empty
+/// flatbuffer string is `Some("")`, which satisfies `ok_or` and yields
+/// `email_address: ""`; only a genuinely absent field is `None` and throws.
+/// `poc_email.empty()` cannot make that distinction on its own, since both
+/// "absent" and "present but empty" flatten to the same empty
+/// `std::string`, so a separate presence flag is required here.
 nlohmann::json point_of_contact_to_json(const FileInfo& info) {
     if (info.poc_contact_name.empty()) return nullptr;
-    if (info.poc_email.empty()) {
+    if (!info.has_poc_email) {
         throw Error(ErrorCode::MissingRequiredField, "email_address");
     }
 

@@ -69,6 +69,17 @@ struct FileInfo {
     std::string poc_role;
     std::string poc_phone;
     std::string poc_email;
+    /// Whether `poc_email` was actually present in the header, as opposed to
+    /// absent. `poc_email` alone cannot tell those apart: a present-but-empty
+    /// flatbuffer string and an absent one both flatten to `""`. This flag
+    /// exists solely so the required-field check in
+    /// `point_of_contact_to_json` (cityjson.cpp) can match Rust's
+    /// `poc_email().ok_or(...)`, which succeeds on `Some("")`. It does not
+    /// extend to the other `poc_*`/top-level string fields, whose
+    /// absent-vs-empty conflation remains a disclosed, out-of-scope
+    /// limitation (they only ever cause a silently omitted key, not a
+    /// throw).
+    bool has_poc_email = false;
     std::string poc_website;
     /// Address sub-object: emitted only when ALL FIVE are present AND the
     /// thoroughfare number parses as an integer (deserializer.rs:172-182,

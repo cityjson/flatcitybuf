@@ -120,7 +120,10 @@ void fill_metadata(const ::Header* hdr, FileInfo& info) {
     }
     if (hdr->poc_role() != nullptr) info.poc_role = hdr->poc_role()->str();
     if (hdr->poc_phone() != nullptr) info.poc_phone = hdr->poc_phone()->str();
-    if (hdr->poc_email() != nullptr) info.poc_email = hdr->poc_email()->str();
+    if (hdr->poc_email() != nullptr) {
+        info.poc_email = hdr->poc_email()->str();
+        info.has_poc_email = true;
+    }
     if (hdr->poc_website() != nullptr) info.poc_website = hdr->poc_website()->str();
     if (hdr->poc_address_thoroughfare_number() != nullptr) {
         info.poc_address_thoroughfare_number = hdr->poc_address_thoroughfare_number()->str();

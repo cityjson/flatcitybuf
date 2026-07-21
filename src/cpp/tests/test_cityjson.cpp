@@ -127,6 +127,29 @@ TEST_CASE("pointOfContact without emailAddress fails like Rust's required field"
     }
 }
 
+TEST_CASE("pointOfContact with a present-but-empty emailAddress does not throw") {
+    // cjseq2's PointOfContact::email_address is required, but Rust's gate is
+    // `header.poc_email().ok_or(...)` -- a flatbuffer string that is present
+    // yet empty is `Some("")`, which satisfies `ok_or` and yields
+    // `email_address: ""`. Only a genuinely ABSENT poc_email is `None` and
+    // throws (covered by the test above). `""` (a non-null, zero-length C
+    // string) makes the header builder emit a present-but-empty flatbuffer
+    // string, exactly like the Rust oracle would accept.
+    auto bytes = build_header_only_file("Test Team", /*poc_email=*/"");
+    auto reader = std::make_shared<testing::FakeRangeReader>(bytes);
+    HeaderView header = read_header(reader);
+
+    REQUIRE(header.info().poc_contact_name == "Test Team");
+    REQUIRE(header.info().has_poc_email);
+    REQUIRE(header.info().poc_email.empty());
+
+    json cj = to_cityjson_metadata(header);
+    REQUIRE(cj.contains("metadata"));
+    REQUIRE(cj["metadata"].contains("pointOfContact"));
+    CHECK(cj["metadata"]["pointOfContact"]["contactName"] == "Test Team");
+    CHECK(cj["metadata"]["pointOfContact"]["emailAddress"] == "");
+}
+
 TEST_CASE("a feature emits a valid CityJSONFeature") {
     FcbReader r = FcbReader::open_file(kFixture);
     FeatureIterator it = r.select_all();
