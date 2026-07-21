@@ -22,17 +22,18 @@ applications keep their own threading model.
 | `include/fcb/` | public headers |
 | `include/fcb/generated/` | committed flatc output (consumers never need flatc) |
 | `src/` | implementation; `src/detail/` is internal |
-| `tests/` | doctest suite, conformance corpus, range-capable HTTP test server |
+| `tests/` | doctest suite, range-capable HTTP test server |
 | `examples/` | `read_local.cpp`, `read_http.cpp` |
 
 ## Verification
 
 Output is checked against the Rust reader on the full Delft fixture — all 1115
 features, compared as parsed JSON trees rather than text, since key order and
-float formatting legitimately differ. A conformance corpus covers edge cases
-the main fixture does not reach: single-feature files, prefix-colliding
-strings, duplicate keys forcing payload entries, zero-area extents, and
-geometry templates.
+float formatting legitimately differ. The conformance corpus in `conformance/`
+at the repository root — shared with the Rust, Python and TypeScript readers —
+covers edge cases the main fixture does not reach: single-feature files,
+prefix-colliding strings, duplicate keys forcing payload entries, zero-area
+extents, and geometry templates.
 
 The suite runs clean under ASan and UBSan.
 

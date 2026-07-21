@@ -65,6 +65,11 @@ src/rust/fcb_core/tests/data/*.json
 *.fcb
 
 !examples/**/*.fcb
+
+# The conformance corpus IS committed: it is the shared oracle for four
+# readers, the TypeScript CI has no Rust toolchain to regenerate it, and
+# pinning the bytes is the point. 172 KB of .fcb in total.
+!conformance/*.fcb
 .cursor/mcp.json
 
 *.plist

@@ -56,6 +56,15 @@ enum Commands {
         #[arg(long)]
         attr_branching_factor: Option<u16>,
 
+        /// Node size of the spatial R-tree index (default 16)
+        #[arg(long)]
+        index_node_size: Option<u16>,
+
+        /// Write a features_count of 0, which means "unknown" and forces
+        /// readers to scan to EOF. Conformance fixtures only.
+        #[arg(long, action = ArgAction::SetTrue)]
+        no_feature_count: bool,
+
         /// Bounding box filter in format "minx,miny,maxx,maxy"
         #[arg(short = 'b', long)]
         bbox: Option<String>,
@@ -123,6 +132,8 @@ struct SerializeOptions {
     index_all_attributes: bool,
     no_spatial_index: bool,
     attr_branching_factor: Option<u16>,
+    index_node_size: Option<u16>,
+    no_feature_count: bool,
     bbox: Option<String>,
     ge: bool,
 }
@@ -460,8 +471,14 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
 
     let header_options = HeaderWriterOptions {
         write_index: !options.no_spatial_index,
-        feature_count: filtered_features.len() as u64,
-        index_node_size: options.attr_branching_factor.unwrap_or(16),
+        feature_count: if options.no_feature_count {
+            0
+        } else {
+            filtered_features.len() as u64
+        },
+        // The R-tree node size, NOT the attribute B+tree branching factor:
+        // they are unrelated knobs and were previously driven by one flag.
+        index_node_size: options.index_node_size.unwrap_or(16),
         attribute_indices: attr_index_vec.clone(),
         geographical_extent: geo_extent,
     };
@@ -690,17 +707,12 @@ fn deserialize(input: &str, output: &str) -> Result<(), Error> {
     // Write header
     writeln!(writer, "{}", serde_json::to_string(&cj)?)?;
 
-    // Write features
-    let feat_count = header.features_count();
-    let mut feat_num = 0;
+    // Write features. The iterator stops at the declared feature count, or at
+    // EOF when the header declares 0, which means "unknown". Breaking here on
+    // `features_count` instead truncated such a file to a single feature.
     while let Ok(Some(feat_buf)) = fcb_reader.next() {
         let feature = feat_buf.cur_cj_feature()?;
         writeln!(writer, "{}", serde_json::to_string(&feature)?)?;
-
-        feat_num += 1;
-        if feat_num >= feat_count {
-            break;
-        }
     }
 
     if output != "-" {
@@ -991,6 +1003,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             index_all_attributes,
             no_spatial_index,
             attr_branching_factor,
+            index_node_size,
+            no_feature_count,
             bbox,
             ge,
         } => serialize(
@@ -1001,6 +1015,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 index_all_attributes,
                 no_spatial_index,
                 attr_branching_factor,
+                index_node_size,
+                no_feature_count,
                 bbox,
                 ge,
             },

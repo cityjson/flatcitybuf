@@ -82,6 +82,12 @@ TEST_CASE("conformance: single_feature") { check_case("single_feature"); }
 TEST_CASE("conformance: long_strings") { check_case("long_strings"); }
 TEST_CASE("conformance: duplicate_keys") { check_case("duplicate_keys"); }
 TEST_CASE("conformance: degenerate_extent") { check_case("degenerate_extent"); }
+// One feature carrying two values of the same indexed attribute (h = 1 and
+// h = 9 on two BuildingParts), which no other fixture has.
+TEST_CASE("conformance: multi_object_attrs") { check_case("multi_object_attrs"); }
+// String values that agree in the first 50 bytes -- the width of a B+tree
+// string key -- plus values shorter than 50 bytes, which are zero-padded.
+TEST_CASE("conformance: colliding_strings") { check_case("colliding_strings"); }
 TEST_CASE("conformance: inferable_types") { check_case("inferable_types"); }
 // `"material": {}` in the source is written as a PRESENT, EMPTY mapping
 // vector (verified against the .fcb), which the reference reports as no

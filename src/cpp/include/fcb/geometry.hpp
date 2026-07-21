@@ -56,7 +56,7 @@ enum class GeometryKind : std::uint8_t {
 // An earlier version of this file dispatched on the outermost populated array
 // and collapsed a single-element level into that element. That inference cost
 // a nesting level on every one-solid MultiSolid and CompositeSolid, in both
-// `material.values` and `texture.values`; see tests/conformance/inputs/
+// `material.values` and `texture.values`; see conformance/inputs/
 // appearance_depths.city.jsonl, which fails for any reader that infers.
 // ---------------------------------------------------------------------------
 
