@@ -200,6 +200,20 @@ export class Feature {
  *  prefix would otherwise ask for ~4 GiB); check `at + 4 + len` against the
  *  resource size; then read and COPY all `4 + len` bytes, prefix included.
  *
+ *  TWO `reader.read` calls per feature, deliberately: a 4-byte prefix read at
+ *  step 1, then a `4 + len` body read at step 5 that starts at the SAME
+ *  offset `at` and so re-reads those same 4 bytes. The length has to be
+ *  known before the body read can be sized, and re-reading the prefix (rather
+ *  than splicing the already-read 4 bytes onto a second `[at+4, at+4+len)`
+ *  read) keeps the body a single contiguous read starting at `at`, which is
+ *  what makes the size-prefixed FlatBuffers accessor in step 6 work directly
+ *  on `bytes` with no reassembly. The cost is real: a sequential scan issues
+ *  2x as many `read` calls as there are features (plus the header's own
+ *  reads), not 1x -- doubled syscalls over `fromFile`, doubled HTTP requests
+ *  over a raw (unbuffered) network reader. `FcbReader.fromReader`'s docstring
+ *  says the same thing from the caller's side; see it for what to do about
+ *  the HTTP case.
+ *
  *  The copy is load-bearing twice over:
  *   1. Durability. `RangeReader.read` may return a view into a buffer the
  *      reader reuses or overwrites on its next call (BufferedRangeReader

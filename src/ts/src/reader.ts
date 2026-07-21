@@ -86,7 +86,20 @@ export class FcbReader {
    *  wrapping unconditionally would hide how many requests a scan really
    *  makes, which is precisely what the HTTP work needs to be able to see and
    *  tune. A caller over a chatty transport composes
-   *  `new BufferedRangeReader(source)` itself. */
+   *  `new BufferedRangeReader(source)` itself.
+   *
+   *  A sequential scan through the resulting cursor issues TWO `read` calls
+   *  per feature, not one: `readFeature` (src/feature/index.ts) reads the
+   *  4-byte size prefix, then re-reads those same 4 bytes as part of a second,
+   *  `4 + len`-byte read for the body. See `readFeature`'s docstring for why.
+   *  This reader does nothing to hide that -- a request-count assertion
+   *  against `reader.reads.length` should expect `2 * featuresCount` (plus
+   *  the header's own reads), not `featuresCount`. `fromFile` inherits this
+   *  as-is: `FileRangeReader` has no internal buffering, so a sequential scan
+   *  costs two `pread` syscalls per feature. Callers for whom request count
+   *  matters -- HTTP chief among them -- should wrap their source in
+   *  `new BufferedRangeReader(source)` before calling `fromReader`, exactly as
+   *  the paragraph above already says for caching in general. */
   static async fromReader(reader: RangeReader): Promise<FcbReader> {
     return new FcbReader(reader, await readHeader(reader))
   }

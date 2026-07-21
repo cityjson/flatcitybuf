@@ -133,6 +133,71 @@ describe('attribute schema resolution', () => {
     expect(checked).toBeGreaterThan(0)
   })
 
+  it("pins one CityObject's decoded attributes against the CityJSONSeq oracle", async () => {
+    // The regex test above only proves keys are printable, which is true of
+    // ANY schema (including a wrongly-fallen-back-to header one) because
+    // column names are printable by construction. This test pins a concrete
+    // decoded result against an independent oracle, so a wrong schema shows
+    // up as a value/key MISMATCH, not just non-garbage text.
+    //
+    // Chosen object: the `Building` CityObject of feature
+    // `NL.IMBAG.Pand.0503100000012869` (the parent, sharing the feature's
+    // id -- delft.fcb's first feature). It declares its OWN 43-entry column
+    // schema, which differs from the header's 44 columns -- see the
+    // "discriminates" assertion below, and the deliberate-fallback check
+    // documented in the task-8 report. Decoding this object's attribute blob
+    // against the header's 44-column schema instead of its own would
+    // desynchronise the record stream (columns are not self-delimiting) and
+    // either throw on an out-of-range column index or, worse, silently
+    // produce different garbage keys/values -- either way this assertion
+    // would fail, which is what makes it a real discriminator and not just
+    // another printability check.
+    const featureId = 'NL.IMBAG.Pand.0503100000012869'
+    const oracleLine = readFileSync(resolve(DATA, 'delft.city.jsonl'), 'utf8')
+      .split('\n')
+      .find((l) => l.includes(`"id":"${featureId}"`))
+    if (oracleLine === undefined) throw new Error(`oracle line for ${featureId} not found`)
+    const oracleCo = (JSON.parse(oracleLine) as {
+      CityObjects: Record<string, { attributes?: Record<string, unknown> }>
+    }).CityObjects[featureId]
+    if (oracleCo === undefined) throw new Error(`oracle CityObject ${featureId} not found`)
+    // A record with a JSON `null` value has no attribute record at all in the
+    // binary blob (nothing to decode for "absent"), so it is not expected to
+    // come back out of `decodeAttributes` either.
+    const expected: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(oracleCo.attributes ?? {})) {
+      if (v !== null) expected[k] = v
+    }
+    expect(Object.keys(expected).length).toBeGreaterThan(0)
+
+    const r = await open(resolve(DATA, 'delft.fcb'))
+    let actual: Record<string, unknown> | undefined
+    let ownColumnCount: number | undefined
+    for await (const f of await r.selectAll()) {
+      if (f.id !== featureId) continue
+      const idx = f.cityObjects().findIndex((o) => o.id === featureId)
+      const obj = f.cityObjects()[idx]
+      if (obj === undefined) continue
+      ownColumnCount = obj.columns().length
+      // Normalize bigint (the Long/ULong policy) back to number so this can
+      // be compared structurally against oracle JSON, which has no bigint.
+      actual = Object.fromEntries(
+        Object.entries(f.attributes(idx)).map(([k, v]) => [k, typeof v === 'bigint' ? Number(v) : v]),
+      )
+      break
+    }
+    if (actual === undefined) throw new Error(`feature ${featureId} not found in delft.fcb`)
+
+    // Discriminates: the object's own schema (43 columns) really does differ
+    // from the header's (44) -- so a fallback to the header schema is not a
+    // vacuous no-op on this file.
+    expect(ownColumnCount).toBe(43)
+    expect(r.header.info.columns.length).toBe(44)
+    expect(ownColumnCount).not.toBe(r.header.info.columns.length)
+
+    expect(actual).toStrictEqual(expected)
+  })
+
   it('distinguishes an absent attributes vector from an empty one', async () => {
     const r = await open(resolve(CORPUS, 'small.fcb'))
     for await (const f of await r.selectAll()) {
