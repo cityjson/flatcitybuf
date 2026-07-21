@@ -22,8 +22,10 @@ that leverage.
 
 - **Writing `.fcb` files.** Reader only, same as the C++ and Python ports.
 - **`cjToObj`** (CityJSON → Wavefront OBJ). Dropped, not ported. Not reader logic.
-- **`cjseqToCj`** (CityJSONSeq → CityJSON merge). Dropped, not ported. It is a pure JSON
-  transform that a consumer can write in a few lines; the demo app will own its copy.
+- **`cjseqToCj`** (CityJSONSeq → CityJSON merge). Dropped, not ported. Note it is *not*
+  trivial — the Rust version also merges features, deduplicates vertices and updates the
+  transform — so the demo does not reimplement it; the demo simply does not offer whole-
+  file merging. Porting it later is an additive, independently testable utility.
 - **Byte-identical output vs Rust for FlatBuffers sections.** Golden comparisons are on
   parsed JSON trees, never strings.
 
@@ -40,14 +42,26 @@ that leverage.
 2. **Same document, "Known divergences from the Rust reader"** — four deliberate
    choices (`Byte` decodes as `u8`; `Json`/`Binary` index queries rejected; float
    `max_value()` is `+inf` so NaN-keyed features are invisible to range queries;
-   `DateTime` `min_value()` is epoch 0 so pre-1970 timestamps are invisible to
-   `Le`/`Ne`). **TypeScript must make the same four choices**, so all four
-   implementations agree, and must document them in the public docstring of the query
-   API as C++ and Python do.
-3. **`docs/upstream-findings.md`** — eight defects found during the C++ port. #7 and #8
-   matter here: appearance indices must serialize as `1`/`null`, never `[1]`/`[]`, and
-   two appearance shapes used to lose a nesting level. The corpus encodes the correct
-   answers.
+   `DateTime` `min_value()` is epoch 0 so pre-1970 timestamps are invisible to `Lt`,
+   `Le` and `Ne`). **TypeScript makes the same four choices**, matching C++ and Python
+   — Rust's *reader* still differs on the first (it decodes `Byte` as `i8`, which the
+   writer never produces) — and documents them in the public docstring of the query API
+   as C++ and Python do.
+3. **`docs/upstream-findings.md`** — defects found during the C++ port. Three matter
+   directly here:
+   - **#5, `Gt`/`Lt`/`Ne` can drop genuine matches — NOT FIXED upstream.** The Format
+     Reference's "operator lowering" row describes Rust's lowering: `Gt` is
+     `find_range(k, MAX)` *minus* `find_exact(k)`, and the subtraction operates on
+     feature offsets. A feature whose CityObjects carry both `k` and `k' > k` is
+     returned by the range scan via `k'` and also by `find_exact(k)` via `k`, so the
+     subtraction deletes a genuine match. **TypeScript must NOT port this lowering.** It
+     follows C++ instead: evaluate strict-or-inclusive bounds at the leaf, one
+     traversal, no subtraction (`docs/upstream-findings.md:130-145`). This is the one
+     place where the Format Reference documents the reference implementation faithfully
+     and the reference implementation is wrong.
+   - **#7 and #8:** appearance indices must serialize as `1`/`null`, never `[1]`/`[]`,
+     and two appearance shapes used to lose a nesting level. The corpus encodes the
+     correct answers.
 4. **`docs/superpowers/plans/2026-07-20-native-python-core.md`** — the closest prior
    port in spirit. Its task-by-task structure is the model for this plan.
 
@@ -80,7 +94,7 @@ the injection. This caught a wrong hand-derivation during the C++ port.
 | Packed R-tree `bbox` | ✅ | |
 | Packed R-tree `pointIntersects` | ✅ | Degenerate bbox |
 | Packed R-tree `pointNearest` | ✅ | No prior port exists; isolated as the last task |
-| Attribute B+tree queries | ✅ | Highest-risk task; severable |
+| Attribute B+tree queries | ✅ | Highest-risk task; severable. Includes the **mandatory string post-filter** below |
 | `limit` / `offset` pagination | ✅ | `featuresCount` still reports total matches |
 | HTTP range via `fetch` | ✅ | |
 | Browser `File` / `Blob` | ✅ | New — the wasm binding never supported local files |
@@ -91,6 +105,35 @@ the injection. This caught a wrong hand-derivation during the C++ port.
 | `cjToObj`, `cjseqToCj` | ❌ | Dropped |
 
 Breaking API changes relative to the wasm package are explicitly allowed.
+
+### Attribute queries return candidates, not answers
+
+A `String` (or `Json`/`Binary`) index stores a **fixed-width truncated, zero-padded**
+key, so distinct values collide — and not only long ones: `"a"` and `"a\0"` have
+identical index representations. The B+tree therefore yields a **candidate set**, and
+every `String`-keyed predicate requires a **post-filter** that decodes each candidate's
+full, untruncated attribute and re-evaluates the predicate against it, existentially
+over the feature's CityObjects. C++ does exactly this and says so
+(`src/cpp/src/reader.cpp:394-412`); Python needed the same fix.
+
+Two consequences the design must respect: the post-filter is **not gated on query
+length**, and it must run **before** `featuresCount` and pagination, or both report
+candidate counts rather than match counts. Full-string comparison during post-filtering
+uses UTF-8 byte ordering, not JavaScript string ordering (hazard 7).
+
+### Trust model
+
+**Input `.fcb` files are trusted.** The framing is bounds-checked — magic, header size,
+section offsets, feature length prefixes, a maximum feature size, and checked arithmetic
+throughout — but there is no FlatBuffers verifier in JavaScript (hazard 2), so a
+malformed or hostile file can still drive a generated accessor to read a nested table,
+vtable or vector offset that points outside its section, and the result may be a throw,
+a plausible default, or garbage. Length checks are **not** a substitute for
+verification, and this document does not pretend otherwise.
+
+This is a deliberate, documented limitation, stated in the README. Porting a
+schema-aware structural verifier is a well-defined additive task if a consumer ever
+needs to read untrusted URLs; it is out of scope for v1.
 
 ---
 
@@ -187,47 +230,88 @@ import { fromFile } from '@cityjson/flatcitybuf/node'   // node:fs
 reader.header           // FileInfo: featuresCount, transform, extent, crs, columns…
 reader.cityjson()       // the CityJSON metadata object (line 1 of a CityJSONSeq)
 
-const cursor = reader.select({
-  bbox:  [minX, minY, maxX, maxY],       // or point: [x, y], or nearest: [x, y]
-  where: [['b3_h_dak_50p', 'Gt', 2.0]],  // AND-intersected
+const cursor = await reader.select({
+  spatial: { kind: 'bbox', value: [minX, minY, maxX, maxY] },
+  where:   [['b3_h_dak_50p', 'Gt', 2.0]],   // AND-intersected
   limit: 100, offset: 200,
-  signal,                                 // AbortSignal, cancels in-flight ranges
+  signal,                                    // cancels in-flight ranges
 })
 
-cursor.featuresCount    // total matches, ignoring limit/offset — may be undefined
+cursor.featuresCount    // exact total matches, ignoring limit/offset; 0 means none
 
 for await (const f of cursor) {
   f.id
-  f.attributes()        // decoded on demand, per-object schema
+  f.cityObjects()       // lazy per-object handles
+  f.attributes(i)       // object i's attributes, decoded on demand, own schema
   f.toCityJSON()        // full CityJSONFeature, decoded on demand
 }
 ```
 
 ### API decisions
 
-- **`select()` is one method, not five.** `select_all` / `select_spatial` /
-  `select_attr_query` and their `_paged` twins collapse into one options object.
-  Omitting every field is a full scan. Spatial and attribute predicates combine — the
-  wasm API cannot express that today.
+- **`select()` is one method, not five,** and it is **`async`**. `select_all` /
+  `select_spatial` / `select_attr_query` and their `_paged` twins collapse into one
+  options object; omitting every field is a full scan. It must be awaited because
+  resolving the hit list — index traversal, string post-filtering, spatial∩attribute
+  intersection — is asynchronous, and `featuresCount` is meaningless until that is done.
+  A property that starts `undefined` and mutates during iteration would be
+  timing-dependent and is explicitly rejected. **An empty result reports `0`,** not
+  `undefined`; Rust's `count > 0 ? Some(count) : None` is a bug, not precedent.
+- **The spatial predicate is a discriminated union,** so `bbox` / `point` / `nearest`
+  are mutually exclusive at the type level rather than by convention.
+- **`nearest` combined with `where` is rejected** in v1 with an `FcbError`, at the type
+  level and at runtime. "Nearest feature satisfying the predicate" and "the nearest
+  feature, then filtered" are different algorithms with different costs; neither is
+  silently assumed. Either can be added later without breaking the API.
 - **The cursor is a plain `AsyncIterable`,** so `for await` works and early `break`
   cancels cleanly. No `next()` returning `undefined` as a sentinel, no `free()`, no
   `Symbol.dispose`. That entire category of wasm API disappears.
-- **The cursor yields a lazy `Feature` handle,** not a decoded object. `.id`,
-  `.attributes()` and `.toCityJSON()` each decode on demand, so an app that filters
-  10,000 features by attribute and renders 50 never decodes 9,950 geometries. The handle
-  is backed by a private copy of the feature's bytes (see hazard 9) and is documented as
-  valid only until the next iteration step; `toCityJSON()` returns an independent
-  object that outlives it.
-- **Errors are `FcbError extends Error`** with a `code` field from the same `ErrorCode`
-  set as C++ and Python, so all four implementations report failures identically.
+- **The cursor yields a `Feature` handle that is durable and immutable.** It owns a
+  private copy of the feature's bytes (see hazard 9), so advancing the cursor does not
+  invalidate it and it may be retained, stored or decoded later. Decoding is lazy —
+  `.attributes(i)` and `.toCityJSON()` each decode on demand — so an app that filters
+  10,000 features by attribute and renders 50 never decodes 9,950 geometries, but there
+  are no lifetime rules to get wrong. (Generation-checked invalidation was considered
+  and rejected: it adds machinery, surprises users, and cannot work anyway because
+  already-decoded values necessarily outlive the handle.)
+- **Attributes are per CityObject, not per feature.** `CityFeature` holds `objects`, and
+  each `CityObject` carries its own `attributes` blob and optional `columns` override —
+  which is the normal case, not an edge case. The API therefore exposes
+  `feature.cityObjects()` handles with `attributes()` on each, and
+  `feature.attributes(i)` as shorthand. There is no feature-level `attributes()`,
+  because there is no such thing on the wire. **`Header.semantic_columns` and
+  semantic-object attribute blobs are a separate decode path** and are decoded with the
+  semantics they belong to.
+- **`AttrValue = number | bigint | string | boolean | Uint8Array | JsonValue | null`.**
+  Covering every wire type the reference decodes: `Json` columns yield parsed JSON
+  values, `Binary` columns yield `Uint8Array`, and **`DateTime` yields an ISO-8601
+  string, not a `Date`** — matching Rust, and because `Date` cannot represent the key's
+  sub-second nanoseconds. Query values for `DateTime` conditions take a separate exact
+  representation (seconds + nanos, or an ISO string) for the same reason.
+- **64-bit integer policy:** `Long`/`ULong` attribute values **always** decode to
+  `bigint` — never data-dependent, never lossy. `toCityJSON()` takes an explicit
+  `int64` policy (`'lossy-number'` by default, so emitted CityJSON is always
+  JSON-serializable and conformance comparison works; `'decimal-string'` and `'error'`
+  also available). Query values accept `bigint` or a safe-integer `number`; an unsafe
+  `number` is rejected rather than silently rounded. `featuresCount` is `number` after a
+  guarded conversion. BigInt is used internally wherever it is load-bearing (hazard 3).
+- **`features_count == 0` in the header means *unknown*, not empty.** A sequential scan
+  must run to EOF rather than stopping at zero, as the C++ reader does.
+- **Errors are `FcbError extends Error` with a `code` field.** The taxonomy is designed
+  for TypeScript rather than copied: it starts from the C++ `ErrorCode` set and adds the
+  failure modes only this port has (`RangeNotSupported`, `RangeHeadersNotExposed`,
+  `UnsupportedQueryCombination`, `ReentrantIteration`). The C++ and Python sets are not
+  identical to each other either, so promising cross-implementation identity would be
+  false.
 - **`fromUrl` is `async`** because opening prefetches magic + header + the top R-tree
   levels in one request, as the Rust HTTP reader does.
-- **64-bit integer policy:** `Long`/`ULong` attribute values decode to `number` when
-  `Number.isSafeInteger` holds — the overwhelmingly common case — and to `bigint`
-  otherwise. `AttrValue = number | bigint | string | boolean | Date | null`. Documented
-  consequence: `JSON.stringify` of a feature carrying a value above 2^53 requires a
-  replacer. `featuresCount` is `number` after a guarded conversion. BigInt is used
-  internally wherever it is load-bearing (hazard 3) and never leaks beyond that.
+- **`fromBytes` copies the supplied bytes.** Otherwise later mutation or `ArrayBuffer`
+  detachment (a `postMessage` transfer, a growing `WebAssembly.Memory`) silently
+  corrupts an open reader.
+- **Input validation at the boundary:** `limit` and `offset` must be non-negative safe
+  integers; bbox coordinates must be finite and non-inverted; `RangeReader.read` offsets
+  and lengths must be non-negative integers within `size()`. Rejected with `FcbError`,
+  not coerced.
 
 ---
 
@@ -275,7 +359,9 @@ inspected from npm, numeric claims run in Node/V8).
    generated accessor; enforce a max feature size before allocating; validate that the
    4-byte feature prefix and the header size land inside `size()` before constructing a
    `ByteBuffer`. This posture belongs in `layout.ts` and `feature/index.ts` from the
-   start — retrofitting it later is a diff across the whole codebase.
+   start — retrofitting it later is a diff across the whole codebase. **But framing
+   checks are not verification** and must not be described as if they were: see "Trust
+   model" above for what this design does and does not promise.
 
 3. **64-bit values: `Number` is safe for file positions; BigInt is mandatory for B+tree
    entry offsets until the payload tag is stripped, and for `Long`/`ULong` key
@@ -313,7 +399,7 @@ inspected from npm, numeric claims run in Node/V8).
    vtable probing is needed. The residual hazard is that `0` is falsy: `if
    (mapping.value())` silently drops shared-material 0 — the exact case the Python plan
    calls out — as does `value() || fallback`. Every presence check must be `!== null`,
-   and a lint rule banning truthiness tests on these accessors is cheap insurance.
+   and each affected field gets a test pinning the zero-vs-absent distinction.
    Related trap: *vector element* accessors return `0`, not `null`, when the vector is
    absent; vector presence is `…Length() > 0` or `…Array() !== null`, never an element
    read.
@@ -369,7 +455,7 @@ inspected from npm, numeric claims run in Node/V8).
     forgotten `, true` yields plausible-looking garbage — a byteswapped f64 bbox is
     still a finite f64. Mitigated structurally by `le.ts`, a tiny module wrapping
     `getF64` / `getU64` / `getU32` / `getU16` with the flag baked in; raw `DataView`
-    method calls are forbidden elsewhere by lint rule. The `flatbuffers` runtime needs no
+    method calls do not appear elsewhere. The `flatbuffers` runtime needs no
     help — it reads byte-wise LE.
 
 11. **The wasm binding being replaced has JS-boundary bugs. Do not port them as
@@ -418,7 +504,6 @@ queue-driven loop — so they port to `async`/`await` mechanically:
 interface RangeReader {
   read(offset: number, length: number, opts?: { signal?: AbortSignal }): Promise<Uint8Array>
   size(): number                       // resolved once at open, then synchronous
-  readBatch?(ranges: Range[]): Promise<Uint8Array[]>   // optional, defaults to read()×n
 }
 ```
 
@@ -427,9 +512,14 @@ first 206, files from `stat`, Blobs have `.size` synchronously, and the only thi
 needs it is sizing the last feature. Making it per-call async would infect every bounds
 check for nothing.
 
-`readBatch` is the C++ port's "batching, not asynchrony" primitive reinterpreted for a
-world that has both — it lets a future multipart-range or parallel-fetch adapter slot in
-without touching the traversals.
+`read` returns **exactly** `length` bytes or throws — a short read is an error, never a
+silently truncated buffer — and validates that offset and length are non-negative
+integers inside `size()`.
+
+A `readBatch` primitive was considered and **deferred**: no traversal in this design
+issues one, and adding a method today for a hypothetical multipart-range adapter is
+speculative. It can be added without breaking the interface if the request-log
+benchmarks show it is needed.
 
 **No synchronous fast path.** `Blob`/`File` reads are irreducibly async, so a sync path
 would cover only the fully-in-memory case; `await` on an already-resolved promise is a
@@ -456,12 +546,15 @@ is on a real CDN.
 
 ### Concurrency and failure modes
 
-- **Ownership, not coalescing.** Rust sidesteps overlapping traversals by having
-  `select_*` consume the reader. TS copies that model: a query returns a cursor that
-  captures the reader, and starting a second query while one is live is documented as
-  unsupported on the same reader. (Promise-sharing by exact `offset:length` key was
-  considered and rejected for v1: it is ineffective for overlapping-but-unequal ranges
-  unless fetches are aligned to a block grid.)
+- **Per-query buffered readers over one shared immutable source.** Concurrent queries on
+  one `FcbReader` are supported: each `select()` creates its own `BufferedRangeReader`
+  over the shared source, so no two traversals contend for one buffer. This is what the
+  C++ port does (`src/cpp/src/reader.cpp:245`, `:439`) and it maps cleanly to JS. Rust's
+  alternative — `select_*` *consumes* the reader — was rejected: a cursor that is created
+  and never iterated would hold the lock indefinitely, which in a UI is a leak with no
+  diagnostic. (Promise-sharing by exact `offset:length` key was also considered and
+  rejected: it is ineffective for overlapping-but-unequal ranges unless physical fetches
+  are aligned to a block grid.)
 - **Single-consumer iterators.** Two overlapping `next()` calls on one cursor would
   interleave their position updates — a hazard Rust cannot represent (`&mut self`).
   The cursor holds the in-flight promise and **throws `FcbError` on a re-entrant
@@ -478,6 +571,11 @@ is on a real CDN.
   `arrayBuffer()` of a possibly-10 GB body — and throw a descriptive error suggesting
   `fromBytes(await (await fetch(url)).arrayBuffer())` for files the caller knows are
   small. The wasm client's silent acceptance here is a bug, not a behaviour to match.
+- **Validate the whole `Content-Range`, not just its presence:** the returned start and
+  end must equal what was requested, the total must be consistent across responses, and
+  the body length must match the range. A proxy that serves a *different* range than
+  requested is otherwise indistinguishable from a correct response, and every subsequent
+  offset is silently wrong.
 - **CORS header visibility.** Cross-origin, `Content-Range` and `Content-Length` are
   readable only if the server sends `Access-Control-Expose-Headers` naming them. A 206
   with an invisible `Content-Range` means `size()` cannot be learned at open — detect it
@@ -511,16 +609,18 @@ The one algorithm with no Python or C++ port to copy. Rust has it in three forms
 - **Cost of a naive async port:** one serial round trip per heap pop, nothing
   pipelineable. Typically 5-15; degenerate cases (query point far outside the extent,
   heavily overlapping bboxes) can pop hundreds of ranges serially.
-- **Design:** (1) **whole-index fast path** — `rtree_size` is known before any traversal,
-  and for `delft.fcb` the entire R-tree is 47,640 bytes, one request well under the
-  256 KB combine threshold; below the threshold, fetch it all and run the in-memory
-  algorithm with zero further index I/O. This makes `pointNearest` *cheaper* than bbox
-  for most real files and lets the in-memory port be exercised by the same unit tests as
-  the streaming one. (2) **Above the threshold, batch by wave** — drain every heap entry
-  below the current best, coalesce their ranges with the existing wasted-bytes merge
-  rule (which the Rust nearest branch never got), issue them concurrently, then
-  re-drain. Admissibility is unaffected: processing a superset of the minimal node set
-  can only tighten `best` sooner. Round trips collapse to O(depth) waves.
+- **Design, v1:** port the exact serial Rust algorithm, plus a **whole-index fast path**.
+  `rtree_size` is known before any traversal, and for `delft.fcb` the entire R-tree is
+  47,640 bytes — one request, well under the 256 KB combine threshold. Below that
+  threshold, fetch the whole index and run the in-memory algorithm with zero further
+  index I/O. This makes `pointNearest` *cheaper* than bbox for most real files and lets
+  the in-memory port be exercised by the same unit tests as the streaming one.
+- **Deferred:** wave batching above the threshold — draining every heap entry below the
+  current best, coalescing their ranges with the wasted-bytes merge rule the Rust nearest
+  branch never got, and issuing them concurrently. Admissibility would be unaffected
+  (processing a superset of the minimal node set can only tighten `best` sooner) and it
+  would collapse round trips to O(depth) waves, but it is an optimization for files above
+  ~6,100 features and should be justified by a request-log benchmark before it is built.
 
 ---
 
@@ -548,8 +648,14 @@ The one algorithm with no Python or C++ port to copy. Rust has it in three forms
   `File`. Node-only tests would leave the actual shipping target untested. **No core
   task may depend on browser mode:** everything passes in Node first, browser runs are an
   additive CI job.
-- **HTTP misbehaviour:** 200-instead-of-206, truncated `Content-Range`, invisible CORS
-  headers, `AbortSignal` firing mid-descent.
+- **HTTP misbehaviour:** 200-instead-of-206, a `Content-Range` that does not match the
+  request, invisible CORS headers, short bodies, `AbortSignal` firing mid-descent.
+- **Malformed-framing cases**, each asserting a clean `FcbError` rather than a crash or
+  silent garbage: header size beyond the file, a feature length prefix that overruns the
+  feature section, a feature offset outside it, an attribute-index section shorter than
+  its declared `length`, duplicate or out-of-order `AttributeIndex` declarations, a
+  branching factor outside `[2, 65535]`, and arithmetic that would overflow a safe
+  integer. These are framing checks, not verification — see "Trust model".
 - **Request counts:** the batching assertions described above.
 
 **Process conventions**, same as the previous three ports: strict TDD (write the failing
@@ -572,24 +678,38 @@ still leaves a shippable reader.
 | **B. Read a file** | header → `FileInfo`; feature framing + sequential scan; per-object attribute decode (BigInt policy lands here) | a local-file / Blob scanner |
 | **C. Emit CityJSON** | boundaries, semantics, appearance; CityJSON + CityJSONFeature emission; **conformance suite green** | a conformant local reader — the real milestone |
 | **D. Go remote** | `fetch` source: 206/`Content-Range`/CORS/abort handling, open prefetch, batching | a remote sequential reader — already replaces the wasm module's `select_all` use case |
-| **E. Query** | packed R-tree bbox + pointIntersects (in-memory *and* streaming) with request-log assertions; pagination; keys module; B+tree | full wasm parity minus nearest |
+| **E1. Spatial query** | packed R-tree bbox + pointIntersects (in-memory *and* streaming) with request-log assertions; pagination | a spatial reader |
+| **E2. Attribute candidates** | keys module (encodings, BigInt comparators, sentinels, byte-wise string compare); B+tree traversal with **C++'s strict-bound lowering, not Rust's subtraction**; the four deliberate divergences | attribute queries over non-string columns |
+| **E3. Post-filter and composition** | full-value post-filtering of string-keyed predicates; spatial ∩ attribute composition; exact `featuresCount` and pagination *after* post-filtering | full wasm parity minus nearest |
 | **F. The risky one** | `pointNearest` | — |
-| **G. Retire** | port the demo to `examples/web`; delete `src/rust/wasm` and the checked-in `.wasm`/`.js` artifacts; rewrite `publish-npm.yml`; update `README.md` and `.llm/docs/projectStructure.md`; write up the wasm defects in `docs/upstream-findings.md` | the actual goal |
+| **G. Retire** | port the demo to `examples/web`; delete `src/rust/wasm`; repo-wide sweep (below) | the actual goal |
 
 Notes:
 
 - **Conformance lands at C, before any networking**, so decoding bugs and transport bugs
   are never debugged simultaneously. This is the opposite of how the wasm binding grew.
-- **The keys module precedes the B+tree** and is pure functions, fully unit-testable
-  without I/O.
-- **The B+tree is the highest-risk item** (it was the hardest part of the C++ port, and
-  TS adds BigInt tag handling, BigInt key comparators and byte-wise string comparison on
-  top). It is the last *core* feature so its slip cuts nothing else.
+- **Stage E is split into three** because the original single stage was a dependency
+  inversion: it bundled spatial traversal, key codecs, B+tree traversal, post-filtering,
+  composition, exact counts and pagination while claiming a B+tree slip "cuts nothing
+  else" — untrue if pagination and counting live in the same stage. As split, a slip in
+  E2 costs only attribute queries, and a slip in E3 costs only string-column predicates
+  and combined queries. E3 depends on complete attribute decoding from B, which is why B
+  precedes it.
+- **The keys module is pure functions**, fully unit-testable without I/O, so E2 front-loads
+  its own risk.
 - **`pointNearest` is isolated and last.** If it slips, E has already shipped everything
   the current wasm package offers except nearest-point search.
+- **Semantic-object attribute decoding belongs with semantics in stage C**, not with
+  final polish — it is a decode path, not a query feature.
 - **Deletion is last**, mirroring Task 13 of the Python plan — the wasm build keeps
   working for consumers until the replacement passes conformance and the demo runs in a
-  real browser.
+  real browser. Retirement is a repo-wide sweep, not a directory delete: the Rust
+  workspace members and wasm-only dependencies, `justfile` recipes,
+  `scripts/build_wasm.sh`, the checked-in `src/ts/fcb_wasm*` artifacts, `package.json`
+  `files`/`exports`/`main`/`types`, `publish-npm.yml`, `examples/`, `README.md`,
+  `CONTRIBUTING.md` and `.llm/docs/projectStructure.md`. Acceptance is a clean
+  `cargo build --workspace`, a clean package build and pack, and the demo running against
+  the published artifact.
 
 ## Dependencies and risks
 
@@ -605,3 +725,19 @@ Notes:
   format-bug detector available.** Anything TS must special-case to match Rust is a
   finding for `docs/upstream-findings.md`, alongside the four wasm defects already
   identified.
+
+## Review history
+
+- **Advisor pass (Fable):** produced `2026-07-21-native-ts-reader-hazards-analysis.md`.
+  Contributed the verified `flatc` flag set, the absence of a JS FlatBuffers verifier,
+  the BigInt boundary analysis, the `pointNearest` algorithm description, and four
+  defects in the wasm binding being replaced.
+- **Reviewer pass (codex `gpt-5.6-sol`, read-only):** found two blocking correctness
+  defects in the first draft — that it adopted Rust's known-broken `Gt`/`Lt`/`Ne`
+  lowering (upstream finding #5) and omitted the mandatory string post-filter — plus the
+  `select()`-must-be-async, durable-`Feature`, per-CityObject-attributes, `AttrValue`
+  completeness, `features_count == 0`, per-query-buffered-reader and stage-E-split
+  corrections. Both blocking claims were independently verified against
+  `docs/upstream-findings.md:130-145` and `src/cpp/src/reader.cpp:394-412` before being
+  applied. Its recommendation to always use `bigint` for `Long`/`ULong` superseded an
+  earlier decision in this design.
