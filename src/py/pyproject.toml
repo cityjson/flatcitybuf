@@ -17,6 +17,16 @@ dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.12", "mypy>=1.11"]
 [tool.hatch.build.targets.wheel]
 packages = ["flatcitybuf"]
 
+[tool.pytest.ini_options]
+markers = [
+    "benchmark: measures wall-clock time (test_benchmark.py); slow and timing-sensitive, so excluded from the default run -- pass `-m benchmark` explicitly to run it.",
+]
+# `not benchmark` by default so a plain `pytest` stays fast; an explicit
+# `-m benchmark` on the command line overrides this (pytest keeps only
+# the LAST -m expression when several are given, and command-line args
+# are appended after addopts).
+addopts = "-m 'not benchmark'"
+
 [tool.mypy]
 strict = true
 files = ["flatcitybuf", "tests"]

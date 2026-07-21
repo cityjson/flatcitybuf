@@ -141,6 +141,24 @@ def test_present_but_empty_attributes_differ_from_absent() -> None:
     assert absent_obj.attributes is None
 
 
+# ------------------------------------------ signed vs unsigned width ---
+
+
+def test_ulong_decodes_unsigned_past_the_i64_boundary() -> None:
+    # Codex review (Task 12): the oracle-backed ULong test above only
+    # ever exercises the value 42, which round-trips identically whether
+    # attribute.py's format table used "<Q" (correct) or "<q" -- a
+    # regression there would pass unnoticed. 0x8000000000000000 does
+    # not: it is exactly 2**63, negative if ever decoded signed.
+    blob = struct.pack("<HQ", 0, 0x8000000000000000)
+    schema = [
+        ColumnInfo(index=0, name="a", type=ColumnType.ULong, nullable=True)
+    ]
+    decoded = decode_attributes(blob, schema)
+    assert decoded["a"] == 9223372036854775808
+    assert decoded["a"] > 0
+
+
 # --------------------------------------------- schema desync (trap) ---
 
 

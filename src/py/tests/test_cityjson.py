@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import json
+import struct
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+from flatcitybuf.cityjson import _decode_attributes_for_json
+from flatcitybuf.cityjson import _decode_semantics_values
 from flatcitybuf.cityjson import city_object_type_name
 from flatcitybuf.cityjson import to_cityjson_feature
 from flatcitybuf.cityjson import to_cityjson_metadata
 from flatcitybuf.errors import ErrorCode, FcbError
+from flatcitybuf.generated.geometry_generated import GeometryType
+from flatcitybuf.generated.header_generated import ColumnType
+from flatcitybuf.header import ColumnInfo
 from flatcitybuf.reader import FcbReader
 
 CORPUS = Path(__file__).resolve().parents[3] / "conformance"
@@ -123,6 +130,48 @@ def test_every_feature_in_delft_emits_without_error() -> None:
     assert with_attrs > 0
 
 
+def test_json_columns_are_reparsed_not_left_as_text() -> None:
+    # decode_attributes (attribute.py) deliberately keeps a `Json`
+    # column's value as raw text -- its own docstring says re-parsing it
+    # is "Task 8's job when emitting CityJSON". That re-parse was
+    # missing: to_cityjson_feature passed the raw string straight
+    # through, which test_conformance.py's whole-line comparison
+    # caught (both inferable_types.fcb and noise_extension.fcb disagreed
+    # with the Rust oracle only on their Json-typed attribute). Mirrors
+    # the Rust reader's serde_json::from_str (deserializer.rs:363-369)
+    # and cityjson.cpp's nlohmann::json::parse (attribute.cpp:179-183).
+    r = FcbReader.open_file(CORPUS / "inferable_types.fcb")
+    (feature,) = list(r.select_all())
+    f = to_cityjson_feature(feature, r.header)
+    (co,) = f["CityObjects"].values()
+    assert co["attributes"]["a_json"] == {"nested": [1, 2, 3]}
+
+    features_by_id = _features_by_id(CORPUS / "noise_extension.fcb")
+    co2 = features_by_id["1234"]["CityObjects"]["1234"]
+    assert co2["attributes"]["+noise-buildingLNightMax"] == {
+        "uom": "dB",
+        "value": 43.123,
+    }
+
+
+def test_malformed_json_column_text_raises_rather_than_passing_through() -> (
+    None
+):
+    # Hand-built blob: a real reader must not silently emit a string (or
+    # swallow the error) for a Json column whose stored text does not
+    # actually parse -- that would hide file corruption. Neither
+    # reference reader tolerates this either (Rust's serde_json::from_str
+    # unwraps; deserializer.rs:363-369).
+    text = b"{not valid json"
+    blob = struct.pack("<HI", 0, len(text)) + text
+    schema = [
+        ColumnInfo(index=0, name="a_json", type=ColumnType.Json, nullable=True)
+    ]
+    with pytest.raises(FcbError) as exc_info:
+        _decode_attributes_for_json(blob, schema)
+    assert exc_info.value.code is ErrorCode.INVALID_ATTRIBUTE_VALUE
+
+
 @pytest.mark.skipif(not DELFT.exists(), reason="delft.fcb fixture missing")
 def test_object_types_are_real_cityjson_names() -> None:
     r = FcbReader.open_file(DELFT)
@@ -164,6 +213,20 @@ def test_city_object_type_names_cover_the_enum_and_reject_nonsense() -> None:
     with pytest.raises(FcbError) as exc_info:
         city_object_type_name(200)
     assert exc_info.value.code is ErrorCode.INVALID_FLATBUFFER
+
+
+def test_u32_max_becomes_none_in_the_flat_semantics_values_shape() -> None:
+    # Codex review (Task 12): every committed fixture's semantics.values
+    # happens to be either fully populated or nested one/two levels deep
+    # (small.fcb's Solid geometries, geom_temp's), so the u32::MAX ->
+    # null conversion was pinned only for the (unrelated) material-index
+    # path in test_geometry.py, never for THIS function's flat shape --
+    # the one MultiSurface/CompositeSurface/MultiLineString/MultiPoint
+    # actually use (neither one_deep nor two_deep in
+    # _decode_semantics_values, cityjson.py:249).
+    assert _decode_semantics_values(
+        GeometryType.MultiSurface, [], [], [0, 0xFFFFFFFF, 2]
+    ) == [0, None, 2]
 
 
 # --------------------------------------------- empty_appearance.fcb ---
@@ -295,3 +358,68 @@ def test_no_material_key_omitted_when_geometry_declares_none() -> None:
     assert features["no_material"] == expected["no_material"]
     geom = features["no_material"]["CityObjects"]["no_material"]["geometry"][0]
     assert "material" not in geom
+
+
+# ------------------------------------ numpy vs pure-Python parity (Task 12) --
+
+# Task 12's benchmark found the per-element FlatBuffers accessor loop
+# behind cityjson.py's _uint_list (geometry solids/shells/surfaces/
+# strings/boundaries/semantics, SemanticObject.children,
+# MaterialMapping/TextureMapping's own uint vectors) and feature.py's
+# Feature.vertices() to be the dominant cost of a full scan, and added an
+# optional numpy.frombuffer bulk-decode path for both. Both paths MUST
+# produce identical output -- this is not assumed, it is tested, by
+# forcing `import numpy` to fail from inside those functions (without
+# uninstalling the package) and comparing against the same fixtures read
+# with numpy available.
+#
+# `sys.modules["numpy"] = None` is the standard trick for this: any
+# future bare `import numpy` sees the poisoned cache entry and raises
+# ImportError immediately, but flatbuffers' OWN already-executed
+# `import numpy as np` (flatbuffers/number_types.py, evaluated once at
+# that module's import time, long before this test runs) keeps the real
+# module object it already bound -- so the generated `XxxAsNumpy()`
+# accessors this file's numpy path calls into keep working normally.
+# Only OUR function-local imports (inside _uint_list and
+# _vertices_via_numpy) are affected, which is exactly the "numpy not
+# installed" case this proves the fallback for.
+_NUMPY_PARITY_CASES = ["geom_temp", "geom_decoder_edges", "small"]
+
+
+def _all_lines(name: str) -> list[dict[str, Any]]:
+    r = FcbReader.open_file(CORPUS / f"{name}.fcb")
+    return [to_cityjson_metadata(r.header)] + [
+        to_cityjson_feature(f, r.header) for f in r.select_all()
+    ]
+
+
+@pytest.mark.parametrize("name", _NUMPY_PARITY_CASES)
+def test_numpy_and_pure_python_paths_agree(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("numpy")  # the "numpy available" half needs it
+
+    with_numpy = _all_lines(name)
+
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    without_numpy = _all_lines(name)
+
+    assert with_numpy == without_numpy
+
+
+@pytest.mark.skipif(not DELFT.exists(), reason="delft.fcb fixture missing")
+def test_numpy_and_pure_python_paths_agree_on_delft(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("numpy")
+
+    r = FcbReader.open_file(DELFT)
+    with_numpy = [to_cityjson_feature(f, r.header) for f in r.select_all()]
+
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    r2 = FcbReader.open_file(DELFT)
+    without_numpy = [
+        to_cityjson_feature(f, r2.header) for f in r2.select_all()
+    ]
+
+    assert with_numpy == without_numpy

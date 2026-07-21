@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from enum import Enum
+from typing import Iterator
 
 
 class ErrorCode(Enum):
@@ -26,3 +28,33 @@ class FcbError(Exception):
     def __init__(self, code: ErrorCode, message: str) -> None:
         super().__init__(f"{code.value}: {message}")
         self.code = code
+
+
+@contextmanager
+def reraise_as_invalid_flatbuffer(message: str) -> Iterator[None]:
+    """Wrap a block of generated-FlatBuffers-accessor calls so nothing
+    escapes the public surface un-wrapped (reader.py's _parse_feature
+    docstring: "No FlatBuffers Verifier exists in this Python runtime
+    (Task 3's finding), so a malformed body surfaces as whatever
+    exception the flatbuffers runtime or our own decoding raises").
+
+    _parse_feature applies this at the INITIAL GetRootAs/Feature(...)
+    call only; deeper accessors reached later -- Feature.city_objects/
+    vertices (feature.py) and every field cityjson.py reads off the raw
+    generated tables in to_cityjson_feature/to_cityjson_metadata -- were
+    not covered, so a corruption that only manifests when reading e.g.
+    a geometry's semantics vector could leak a bare IndexError/
+    struct.error/AttributeError past the public surface instead of an
+    FcbError (Codex review, Task 12: reproduced by pointing
+    CityObject.Objects at an out-of-bounds vector).
+
+    FcbError itself passes through unchanged: it is already the
+    library's own error, not a symptom of a missing Verifier, and
+    wrapping it again would lose the original code/message.
+    """
+    try:
+        yield
+    except FcbError:
+        raise
+    except Exception as exc:
+        raise FcbError(ErrorCode.INVALID_FLATBUFFER, message) from exc

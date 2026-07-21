@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from flatcitybuf.errors import ErrorCode, FcbError
+from flatcitybuf.errors import reraise_as_invalid_flatbuffer
 from flatcitybuf.header import ColumnInfo
 from flatcitybuf.header import _column_info_from
 
@@ -16,6 +17,15 @@ from flatcitybuf.header import _column_info_from
 # Columns()/ColumnsLength() accessors, which are unaffected by the numpy
 # / per-element-call concerns that motivate reaching in for attributes.
 _ATTRIBUTES_VTABLE_OFFSET = 16
+
+# feature.fbs:61-66 -- CityFeature's field order: id(0), objects(1),
+# vertices(2), appearance(3) -> vertices' vtable slot is (2 + 2) * 2 =
+# 8. Vertex is a `struct {x:int; y:int; z:int}` (12 bytes, native LE),
+# not a scalar, so flatc does not generate a `VerticesAsNumpy()`
+# accessor for it the way it does for plain `[uint]` fields (see
+# cityjson.py's _uint_list) -- reaching into `_tab` directly is the only
+# way to bulk-decode this one.
+_VERTICES_VTABLE_OFFSET = 8
 
 
 def _decode_str(b: bytes) -> str:
@@ -52,6 +62,37 @@ def _read_attribute_bytes(obj: Any) -> bytes:
         )
     start = obj._tab.Vector(o)
     return bytes(obj._tab.Bytes[start : start + length])
+
+
+def _vertices_via_numpy(
+    np: Any, raw: Any, length: int
+) -> list[tuple[int, int, int]] | None:
+    """Bulk-decode CityFeature.vertices with one `numpy.frombuffer` call
+    instead of `length` per-element FlatBuffers table reads. Profiling a
+    full scan of delft.fcb (Task 12's benchmark) found the per-element
+    loop this replaces to be a measurable share of scan time, alongside
+    the geometry uint-vector fields cityjson.py's _uint_list already
+    accelerates the same way -- see that function's docstring for why
+    flatc's own generated `XxxAsNumpy` accessors cover THOSE fields but
+    not this one (Vertex is a struct, not a scalar).
+
+    Returns None (falling back to the caller's per-element loop) if the
+    vtable-offset cross-check fails, mirroring _read_attribute_bytes's
+    defensive pattern -- a schema change to feature.fbs that shifted
+    this field's slot would otherwise silently decode the wrong vector
+    as if it were vertices.
+    """
+    tab = raw._tab
+    o = tab.Offset(_VERTICES_VTABLE_OFFSET)
+    if o == 0:
+        return [] if length == 0 else None
+    if tab.VectorLen(o) != length:
+        return None
+    start = tab.Vector(o)
+    n_bytes = length * 12
+    body = tab.Bytes[start : start + n_bytes]
+    arr = np.frombuffer(body, dtype="<i4", count=length * 3).reshape(length, 3)
+    return [(int(x), int(y), int(z)) for x, y, z in arr.tolist()]
 
 
 def _columns_from_object(obj: Any) -> list[ColumnInfo]:
@@ -174,18 +215,43 @@ class Feature:
         self._raw = raw
 
     def city_objects(self) -> list[CityObjectView]:
-        return [
-            _city_object_view_from(self._raw.Objects(j))
-            for j in range(self._raw.ObjectsLength())
-        ]
+        # Codex review (Task 12): _parse_feature (reader.py) only wraps
+        # the INITIAL GetRootAs/Feature(...) call in
+        # reraise_as_invalid_flatbuffer; this deeper accessor -- called
+        # directly by a caller of select_all(), and by cityjson.py's
+        # to_cityjson_feature -- was not covered, so a corrupt Objects
+        # vector could leak a bare IndexError/struct.error past the
+        # public surface instead of an FcbError.
+        with reraise_as_invalid_flatbuffer(
+            "failed to decode feature's city objects"
+        ):
+            return [
+                _city_object_view_from(self._raw.Objects(j))
+                for j in range(self._raw.ObjectsLength())
+            ]
 
     def vertices(self) -> list[tuple[int, int, int]]:
         # feature.fbs:55-59 -- Vertex is a struct of 3 plain (non-null)
         # int32 fields; these are the raw scaled integers on disk, not
         # transformed coordinates -- applying header.scale/translate is
-        # Task 8's job when emitting CityJSON.
-        out: list[tuple[int, int, int]] = []
-        for j in range(self._raw.VerticesLength()):
-            v = self._raw.Vertices(j)
-            out.append((v.X(), v.Y(), v.Z()))
-        return out
+        # Task 8's job when emitting CityJSON. Same un-wrapped-exception
+        # gap as city_objects() above, closed the same way.
+        with reraise_as_invalid_flatbuffer(
+            "failed to decode feature's vertices"
+        ):
+            length = self._raw.VerticesLength()
+            if length == 0:
+                return []
+            try:
+                import numpy as np
+            except ImportError:
+                np = None  # type: ignore[assignment]
+            if np is not None:
+                bulk = _vertices_via_numpy(np, self._raw, length)
+                if bulk is not None:
+                    return bulk
+            out: list[tuple[int, int, int]] = []
+            for j in range(length):
+                v = self._raw.Vertices(j)
+                out.append((v.X(), v.Y(), v.Z()))
+            return out

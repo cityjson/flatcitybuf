@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from flatcitybuf.attribute import decode_attributes
 from flatcitybuf.errors import ErrorCode, FcbError
+from flatcitybuf.errors import reraise_as_invalid_flatbuffer
 from flatcitybuf.feature import Feature, raw_city_feature, raw_city_object
 from flatcitybuf.generated.geometry_generated import GeometryType
+from flatcitybuf.generated.header_generated import ColumnType
 from flatcitybuf.generated.header_generated import TextureFormat
 from flatcitybuf.generated.header_generated import Vector as _Vector
 from flatcitybuf.geometry import decode_boundaries
@@ -119,13 +122,78 @@ def _decode_str(b: bytes) -> str:
     return b.decode("utf-8", errors="replace")
 
 
-def _uint_list(length: int, get: Callable[[int], int]) -> List[int]:
+def _uint_list(
+    length: int,
+    get: Callable[[int], int],
+    as_numpy: Optional[Callable[[], Any]] = None,
+) -> List[int]:
     """Materialises a generated `length`/`get(j)` accessor pair (e.g.
     Geometry.SolidsLength/Solids) into a plain Python list, the input
     shape geometry.py's decoders expect. Equivalent to cityjson.cpp's
     as_uint_view, minus the zero-copy view (Python has no borrowed-slice
-    equivalent over a FlatBuffers vector worth the ceremony here)."""
+    equivalent over a FlatBuffers vector worth the ceremony here).
+
+    `as_numpy` is the field's generated `XxxAsNumpy` accessor (e.g.
+    `Geometry.SolidsAsNumpy`) -- flatbuffers-python already generates
+    one for every scalar-vector field, wrapping `numpy.frombuffer` over
+    the raw vector bytes (flatbuffers/encode.py). Profiling a full scan
+    of delft.fcb (Task 12's benchmark) found this per-element `get(j)`
+    loop to be the dominant cost -- millions of individual FlatBuffers
+    table reads for a handful of large boundaries/solids/shells arrays
+    per feature. When numpy is importable, this decodes the whole
+    vector in ONE bulk call instead; when it is not, or the vector is
+    empty (where the generated accessor returns a bare `0`, not an
+    array), it falls back to the per-element loop unchanged. The two
+    paths are asserted to agree in test_cityjson.py -- see the task
+    report.
+    """
+    if length == 0:
+        return []
+    if as_numpy is not None:
+        try:
+            import numpy as np
+        except ImportError:
+            np = None  # type: ignore[assignment]
+        if np is not None:
+            arr = as_numpy()
+            if isinstance(arr, np.ndarray):
+                result: List[int] = arr.tolist()
+                return result
     return [get(j) for j in range(length)]
+
+
+def _decode_attributes_for_json(
+    blob: bytes, schema: Sequence[ColumnInfo]
+) -> Dict[str, Any]:
+    """decode_attributes plus the one thing it deliberately leaves for
+    CityJSON emission (its own docstring): a `Json`-typed column's text
+    is re-parsed so it nests as real JSON, rather than surviving as a
+    string. Mirrors the Rust reader's serde_json::from_str
+    (deserializer.rs:363-369) and cityjson.cpp's nlohmann::json::parse
+    (attribute.cpp:179-183).
+
+    Both reference readers assume the embedded text IS valid JSON (Rust
+    unwraps, C++ passes allow_exceptions=false but then still asserts on
+    the writer having produced valid text); this raises rather than
+    silently emitting a string or a null on malformed input, since a
+    reader must not paper over a corrupt file.
+    """
+    values = decode_attributes(blob, schema)
+    json_columns = {c.name for c in schema if c.type == ColumnType.Json}
+    if not json_columns:
+        return values
+    for name in json_columns:
+        raw = values.get(name)
+        if isinstance(raw, str):
+            try:
+                values[name] = json.loads(raw)
+            except ValueError as exc:
+                raise FcbError(
+                    ErrorCode.INVALID_ATTRIBUTE_VALUE,
+                    f"column '{name}' has type Json but its stored "
+                    "text is not valid JSON",
+                ) from exc
+    return values
 
 
 def _read_semantic_attribute_bytes(so: Any) -> bytes:
@@ -242,9 +310,11 @@ def _materials_to_json(
 
         if m.VerticesIsNone():
             continue
-        solids = _uint_list(m.SolidsLength(), m.Solids)
-        shells = _uint_list(m.ShellsLength(), m.Shells)
-        vertices = _uint_list(m.VerticesLength(), m.Vertices)
+        solids = _uint_list(m.SolidsLength(), m.Solids, m.SolidsAsNumpy)
+        shells = _uint_list(m.ShellsLength(), m.Shells, m.ShellsAsNumpy)
+        vertices = _uint_list(
+            m.VerticesLength(), m.Vertices, m.VerticesAsNumpy
+        )
         out[theme] = {
             "values": decode_material_values(solids, shells, vertices)
         }
@@ -262,17 +332,21 @@ def _textures_to_json(
         m = get(j)
         if m is None:
             continue
-        vertices = _uint_list(m.VerticesLength(), m.Vertices)
+        vertices = _uint_list(
+            m.VerticesLength(), m.Vertices, m.VerticesAsNumpy
+        )
         if not vertices:
             continue
         theme_bytes = m.Theme()
         theme = (
             _decode_str(theme_bytes) if theme_bytes is not None else "theme"
         )
-        solids = _uint_list(m.SolidsLength(), m.Solids)
-        shells = _uint_list(m.ShellsLength(), m.Shells)
-        surfaces = _uint_list(m.SurfacesLength(), m.Surfaces)
-        strings = _uint_list(m.StringsLength(), m.Strings)
+        solids = _uint_list(m.SolidsLength(), m.Solids, m.SolidsAsNumpy)
+        shells = _uint_list(m.ShellsLength(), m.Shells, m.ShellsAsNumpy)
+        surfaces = _uint_list(
+            m.SurfacesLength(), m.Surfaces, m.SurfacesAsNumpy
+        )
+        strings = _uint_list(m.StringsLength(), m.Strings, m.StringsAsNumpy)
         out[theme] = {
             "values": decode_texture_values(
                 solids, shells, surfaces, strings, vertices
@@ -391,7 +465,9 @@ def _geometry_instance_to_json(gi: Any) -> Dict[str, Any]:
         "template": gi.Template(),
         # The boundaries array holds exactly one vertex index: CityGML's
         # "referencePoint" for the instance.
-        "boundaries": _uint_list(gi.BoundariesLength(), gi.Boundaries),
+        "boundaries": _uint_list(
+            gi.BoundariesLength(), gi.Boundaries, gi.BoundariesAsNumpy
+        ),
     }
 
     tm = gi.Transformation()
@@ -437,11 +513,13 @@ def _geometry_to_json(
     if lod is not None:
         out["lod"] = _decode_str(lod)
 
-    solids = _uint_list(g.SolidsLength(), g.Solids)
-    shells = _uint_list(g.ShellsLength(), g.Shells)
-    surfaces = _uint_list(g.SurfacesLength(), g.Surfaces)
-    strings = _uint_list(g.StringsLength(), g.Strings)
-    boundaries = _uint_list(g.BoundariesLength(), g.Boundaries)
+    solids = _uint_list(g.SolidsLength(), g.Solids, g.SolidsAsNumpy)
+    shells = _uint_list(g.ShellsLength(), g.Shells, g.ShellsAsNumpy)
+    surfaces = _uint_list(g.SurfacesLength(), g.Surfaces, g.SurfacesAsNumpy)
+    strings = _uint_list(g.StringsLength(), g.Strings, g.StringsAsNumpy)
+    boundaries = _uint_list(
+        g.BoundariesLength(), g.Boundaries, g.BoundariesAsNumpy
+    )
 
     out["boundaries"] = decode_boundaries(
         solids, shells, surfaces, strings, boundaries
@@ -476,10 +554,12 @@ def _geometry_to_json(
 
             if so.AttributesLength() > 0:
                 blob = _read_semantic_attribute_bytes(so)
-                s.update(decode_attributes(blob, semantic_columns))
+                s.update(_decode_attributes_for_json(blob, semantic_columns))
 
             if so.ChildrenLength() > 0:
-                s["children"] = _uint_list(so.ChildrenLength(), so.Children)
+                s["children"] = _uint_list(
+                    so.ChildrenLength(), so.Children, so.ChildrenAsNumpy
+                )
 
             surfaces_json.append(s)
 
@@ -489,7 +569,9 @@ def _geometry_to_json(
                 g.Type(),
                 solids,
                 shells,
-                _uint_list(g.SemanticsLength(), g.Semantics),
+                _uint_list(
+                    g.SemanticsLength(), g.Semantics, g.SemanticsAsNumpy
+                ),
             ),
         }
 
@@ -590,6 +672,22 @@ def to_cityjson_metadata(header: HeaderView) -> Dict[str, Any]:
     A CityJSONSeq header line carries no features of its own, hence the
     empty `CityObjects`/`vertices`.
     """
+    # Codex review (Task 12): reader.py's _parse_feature and
+    # header.py's read_header wrap the FlatBuffers accessors they call
+    # directly, but the deep field-by-field traversal this function and
+    # to_cityjson_feature do -- geometry, semantics, appearance,
+    # templates -- was not covered, so a corruption several levels deep
+    # (e.g. a hostile templates_vertices count) could leak a bare
+    # IndexError/struct.error/AttributeError past the public surface
+    # instead of an FcbError. See reraise_as_invalid_flatbuffer's
+    # docstring.
+    with reraise_as_invalid_flatbuffer(
+        "failed to build CityJSON metadata from the header"
+    ):
+        return _to_cityjson_metadata_impl(header)
+
+
+def _to_cityjson_metadata_impl(header: HeaderView) -> Dict[str, Any]:
     info = header.info
     hdr = header._raw
     cj: Dict[str, Any] = {"type": "CityJSON", "version": info.cityjson_version}
@@ -658,7 +756,21 @@ def to_cityjson_feature(
     feature: Feature, header: HeaderView
 ) -> Dict[str, Any]:
     """One CityJSONFeature. Mirrors cityjson.cpp's to_cityjson_feature
-    (cityjson.cpp:408-503)."""
+    (cityjson.cpp:408-503).
+
+    Wrapped in reraise_as_invalid_flatbuffer for the same reason
+    to_cityjson_metadata is -- see its docstring (Codex review, Task
+    12).
+    """
+    with reraise_as_invalid_flatbuffer(
+        f"failed to build CityJSON for feature {feature.id!r}"
+    ):
+        return _to_cityjson_feature_impl(feature, header)
+
+
+def _to_cityjson_feature_impl(
+    feature: Feature, header: HeaderView
+) -> Dict[str, Any]:
     cf = raw_city_feature(feature)
     if cf is None:
         raise FcbError(ErrorCode.MISSING_REQUIRED_FIELD, "empty feature")
@@ -691,7 +803,7 @@ def to_cityjson_feature(
                 schema = view.columns
             blob = view.attributes or b""
             co["attributes"] = (
-                {} if not blob else decode_attributes(blob, schema)
+                {} if not blob else _decode_attributes_for_json(blob, schema)
             )
 
         extent = obj.GeographicalExtent()

@@ -170,3 +170,33 @@ def test_select_all_rejects_trailing_bytes_after_the_declared_count(
     with pytest.raises(FcbError) as exc_info:
         list(r.select_all())
     assert exc_info.value.code is ErrorCode.IO_ERROR
+
+
+class _CorruptRawFeature:
+    """A `CityFeature`-shaped object whose `Objects` vector is corrupt
+    in a way `GetRootAs` alone cannot catch -- there is no FlatBuffers
+    Verifier in this Python runtime (Task 3's finding), so a bad
+    length/offset several fields deep only surfaces once something
+    actually walks into it, not at parse time."""
+
+    def Id(self) -> bytes:
+        return b"corrupt"
+
+    def ObjectsLength(self) -> int:
+        return 3
+
+    def Objects(self, j: int) -> object:
+        raise IndexError("simulated out-of-bounds CityObject vector read")
+
+
+def test_city_objects_wraps_corruption_found_after_parsing() -> None:
+    # Codex review (Task 12): _parse_feature wraps only the initial
+    # GetRootAs/Feature(...) call; Feature.city_objects() -- called
+    # directly here, and by to_cityjson_feature -- previously let a raw
+    # IndexError/struct.error escape the public surface instead of an
+    # FcbError once something deeper than the initial parse turned out
+    # to be corrupt.
+    feature = Feature(_CorruptRawFeature(), 0)
+    with pytest.raises(FcbError) as exc_info:
+        feature.city_objects()
+    assert exc_info.value.code is ErrorCode.INVALID_FLATBUFFER

@@ -215,6 +215,26 @@ def search_rtree(
                         ErrorCode.INDEX_OUT_OF_BOUNDS,
                         "rtree child index outside the child level",
                     )
+                # Being inside the child level is not enough: a valid
+                # child offset is always the FIRST index of a node_size
+                # group (every group the writer emits starts at
+                # child_start + k*node_size). A hostile offset that
+                # lands mid-group would still pass the range check
+                # above, and `end = min(node_index + node_size,
+                # level_end)` below would then read `node_size` items
+                # starting mid-group -- silently reading the wrong
+                # entries (dropping the true group's first item and
+                # spilling into the next group's) rather than raising.
+                # Codex review (Task 12): reproduced with num_items=2,
+                # node_size=2, a root child offset of 2 instead of 1 --
+                # in range but not group-aligned, and the leaf at
+                # offset 1 (never visited) went missing from the result
+                # with no error at all.
+                if (item.offset - child_start) % node_size != 0:
+                    raise FcbError(
+                        ErrorCode.INDEX_OUT_OF_BOUNDS,
+                        "rtree child index is not aligned to a node group",
+                    )
                 queue.append((item.offset, child_level))
 
     results.sort(key=lambda r: r.offset)

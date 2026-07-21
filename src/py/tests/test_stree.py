@@ -17,6 +17,9 @@ from flatcitybuf.stree import (
     AttrCondition,
     Operator,
     _build_tree,
+    _find_exact,
+    _find_partition,
+    _Tree,
     decode_payload_entry,
     is_payload_ref,
     payload_offset,
@@ -357,7 +360,7 @@ def test_multiple_conditions_are_anded_and_strictly_narrow() -> None:
         path,
         [AttrCondition("b3_bouwlagen", Operator.GE, KeyValue.from_u64(1))],
     )
-    _r, two = run(
+    reader, two = run(
         path,
         [
             AttrCondition("b3_bouwlagen", Operator.GE, KeyValue.from_u64(1)),
@@ -367,6 +370,16 @@ def test_multiple_conditions_are_anded_and_strictly_narrow() -> None:
     assert one and two
     assert len(two) < len(one)
     assert two <= one
+
+    # Codex review (Task 12): the three assertions above would also pass
+    # for an implementation that dropped the second condition entirely
+    # and then returned an arbitrary nonempty proper subset of `one` --
+    # neither "strictly fewer" nor "a subset" proves the SECOND condition
+    # was applied at all, let alone correctly. Compare against the exact
+    # answer, independently derived from decoded ground truth.
+    truth = values_by_offset(reader, "b3_bouwlagen")
+    expected_two = offsets_where(truth, lambda v: 1 <= v <= 2)
+    assert two == expected_two
 
 
 def test_results_contain_no_duplicate_offsets() -> None:
@@ -584,13 +597,9 @@ class MemoryRangeReader:
         return self._data[offset : offset + length]
 
 
-def test_a_crafted_payload_count_is_rejected_before_allocating() -> None:
-    # The brief's hardening case that had no test: a payload entry whose
-    # u32 count is 0xFFFFFFFF asks for 4 + 32 GiB. _Tree.emit must reject
-    # it from `payload_size` BEFORE reading, so the specific message is
-    # asserted -- without that guard the read merely comes back short and
-    # a DIFFERENT error ("truncated payload entry body") is raised, which
-    # a bare pytest.raises(FcbError) could not tell apart.
+def _crafted_payload_count_fixture(count: int) -> tuple[FcbReader, bytes]:
+    """duplicate_keys.fcb's `grp` payload entry, with its declared u32
+    count overwritten -- shared by the two ceiling tests below."""
     path = CORPUS / "duplicate_keys.fcb"
     reader = FcbReader.open_file(path)
     index = index_for(reader, "grp")
@@ -609,19 +618,52 @@ def test_a_crafted_payload_count_is_rejected_before_allocating() -> None:
     assert is_payload_ref(leaf_offset)
     rel = payload_offset(leaf_offset)
 
-    struct.pack_into("<I", data, index.begin + tree_bytes + rel, 0xFFFFFFFF)
+    struct.pack_into("<I", data, index.begin + tree_bytes + rel, count)
+    return reader, bytes(data)
+
+
+def _query_grp_same(reader: FcbReader, data: bytes) -> list[Any]:
+    return search_stree(
+        MemoryRangeReader(data),
+        reader.header,
+        [
+            AttrCondition(
+                "grp",
+                Operator.EQ,
+                KeyValue.from_string(KeyKind.STRING50, "same"),
+            )
+        ],
+    )
+
+
+def test_a_crafted_payload_count_is_rejected_by_the_sanity_ceiling() -> None:
+    # The brief's hardening case that had no test: a payload entry whose
+    # u32 count is 0xFFFFFFFF asks for 4 + 32 GiB. _Tree.emit's sanity
+    # ceiling (_MAX_PAYLOAD_ENTRY_SIZE, Codex review Task 12) must reject
+    # it BEFORE even checking `payload_size`, since a sparse file could
+    # make a much larger count fit that bound too -- see the test right
+    # below, which pins exactly that. The specific message is asserted
+    # so a bare pytest.raises(FcbError) could not silently start passing
+    # for the wrong reason.
+    reader, data = _crafted_payload_count_fixture(0xFFFFFFFF)
     with pytest.raises(FcbError) as exc:
-        search_stree(
-            MemoryRangeReader(bytes(data)),
-            reader.header,
-            [
-                AttrCondition(
-                    "grp",
-                    Operator.EQ,
-                    KeyValue.from_string(KeyKind.STRING50, "same"),
-                )
-            ],
-        )
+        _query_grp_same(reader, data)
+    assert exc.value.code == ErrorCode.ATTRIBUTE_INDEX_NOT_FOUND
+    assert "exceeding the sanity ceiling" in str(exc.value)
+
+
+def test_a_payload_count_under_the_ceiling_still_checks_payload_size() -> None:
+    # A count comfortably under _MAX_PAYLOAD_ENTRY_SIZE (256 MiB) but
+    # still far larger than this tiny fixture's real payload section
+    # must still be rejected -- by the OTHER guard, "overruns its
+    # section" -- rather than silently reading past it. This is what
+    # the previous (now split) test's message assertion actually pinned
+    # before the ceiling was added; kept as its own case so the ceiling
+    # and the payload_size bound are each independently exercised.
+    count = 1_000_000  # 8,000,004 bytes: under the ceiling, over the file
+    reader, data = _crafted_payload_count_fixture(count)
+    with pytest.raises(FcbError) as exc:
+        _query_grp_same(reader, data)
     assert exc.value.code == ErrorCode.ATTRIBUTE_INDEX_NOT_FOUND
     assert "overruns its section" in str(exc.value)
 
@@ -645,6 +687,73 @@ def test_read_entries_refuses_a_range_outside_the_node_region() -> None:
     assert "outside the" in str(exc.value)
     # The in-range read it brackets still works.
     assert len(tree.read_entries(0, tree.node_count)) == tree.node_count
+
+
+class _MemReader:
+    """Minimal in-memory RangeReader for a hand-built `_Tree`, matching
+    duplicate_keys' MemoryRangeReader but scoped to these two tests."""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def total_size(self) -> int:
+        return len(self._data)
+
+    def read(self, offset: int, length: int) -> bytes:
+        return self._data[offset : offset + length]
+
+
+def _misaligned_two_leaf_tree() -> _Tree:
+    # UINT64, branching_factor=3 (node_size=2), num_unique_items=2:
+    # a root holding one separator (key=U64_MAX sentinel, offset=2) and
+    # two leaves (key=0/offset=100, key=1/offset=200). levels =
+    # [(1,3),(0,1)] -- leaf level occupies flat indices 1 and 2, so its
+    # only valid group starts at 1. The root's offset of 2 is IN that
+    # range but not the group's start -- Codex review (Task 12).
+    buf = struct.pack(
+        "<QQQQQQ",
+        0xFFFFFFFFFFFFFFFF,
+        2,  # root: corrupt child offset (should be 1)
+        0,
+        100,  # leaf key 0
+        1,
+        200,  # leaf key 1
+    )
+    return _Tree(
+        reader=_MemReader(buf),
+        index_begin=0,
+        payload_begin=len(buf),
+        payload_size=0,
+        kind=KeyKind.UINT64,
+        node_size=2,
+        levels=[(1, 3), (0, 1)],
+    )
+
+
+def test_find_exact_rejects_a_child_offset_misaligned_to_its_group() -> None:
+    # Before this guard existed, EQ(0) followed the corrupt child
+    # offset (2) straight to the SECOND leaf, found nothing there, and
+    # returned an empty result -- silently losing the genuine match at
+    # offset 100 instead of raising. A corrupt/hostile index must not
+    # under-report matches without any error.
+    tree = _misaligned_two_leaf_tree()
+    with pytest.raises(FcbError) as exc:
+        _find_exact(tree, KeyValue.from_u64(0))
+    assert exc.value.code == ErrorCode.INDEX_OUT_OF_BOUNDS
+    assert "not aligned" in str(exc.value)
+
+
+def test_find_partition_rejects_a_child_offset_misaligned_to_its_group() -> (
+    None
+):
+    # _find_partition used to apply NEITHER the child-level bounds
+    # check NOR the alignment check at all (unlike _find_exact, which
+    # at least had the bounds check already) -- Codex review (Task 12).
+    tree = _misaligned_two_leaf_tree()
+    with pytest.raises(FcbError) as exc:
+        _find_partition(tree, KeyValue.from_u64(0))
+    assert exc.value.code == ErrorCode.INDEX_OUT_OF_BOUNDS
+    assert "not aligned" in str(exc.value)
 
 
 def test_an_index_blob_reaching_past_the_end_of_the_file_is_rejected() -> None:

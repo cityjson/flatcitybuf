@@ -140,10 +140,15 @@ def test_degenerate_zero_area_extent_does_not_break_the_query() -> None:
 
 
 def test_node_item_decodes_40_little_endian_bytes() -> None:
-    raw = _encode_node(1.0, 1.0, 1.0, 1.0, 42)
+    # Codex review (Task 12): all-1.0 coordinates plus checking only two
+    # of five fields would pass even with fields swapped (e.g. min_y and
+    # max_x transposed). Distinct values and every field, instead.
+    raw = _encode_node(1.0, 2.0, 3.0, 4.0, 42)
     n = NodeItem.decode(raw)
     assert n.min_x == 1.0
-    assert n.max_y == 1.0
+    assert n.min_y == 2.0
+    assert n.max_x == 3.0
+    assert n.max_y == 4.0
     assert n.offset == 42
 
 
@@ -264,6 +269,25 @@ def test_search_rtree_rejects_a_corrupt_child_index_outside_its_level() -> (
     # the only valid leaf indices are 1 and 2. A corrupt/hostile file
     # must not be followed off the end of the tree.
     root = _encode_node(0.0, 0.0, 20.0, 20.0, 5)
+    leaf_a = _encode_node(0.0, 0.0, 1.0, 1.0, 100)
+    leaf_b = _encode_node(10.0, 10.0, 11.0, 11.0, 200)
+    buf = root + leaf_a + leaf_b
+    reader = InMemoryReader(buf)
+    with pytest.raises(FcbError):
+        search_rtree(reader, 0, 2, 2, (0.0, 0.0, 20.0, 20.0))
+
+
+def test_search_rtree_rejects_a_child_index_misaligned_to_its_group() -> None:
+    # Codex review (Task 12): with num_items=2, node_size=2 the leaf
+    # level is node indices [1, 3) and its only group starts at 1, so a
+    # root child offset of 2 -- IN range but not group-aligned -- used
+    # to pass the outside-the-level check above and then get read as
+    # if it were the start of a node_size=2 group: `end = min(2 + 2,
+    # 3) = 3`, so only the leaf at index 2 (offset 200) was visited and
+    # the one at index 1 (offset 100) silently never was, with NO
+    # error raised at all. A corrupt/hostile file must be rejected, not
+    # silently under-report matches.
+    root = _encode_node(0.0, 0.0, 20.0, 20.0, 2)
     leaf_a = _encode_node(0.0, 0.0, 1.0, 1.0, 100)
     leaf_b = _encode_node(10.0, 10.0, 11.0, 11.0, 200)
     buf = root + leaf_a + leaf_b

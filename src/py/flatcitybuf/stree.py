@@ -33,6 +33,21 @@ PAYLOAD_MASK = PAYLOAD_TAG - 1
 # Entry<K> = key then a u64 LE offset (entry.rs:25-52).
 _OFFSET_SIZE = 8
 
+# Codex review (Task 12): _Tree.emit's existing "bound the allocation
+# BEFORE making it" check bounds a payload entry's declared count only
+# against `payload_size` -- itself bounded only by the attribute
+# index's declared `length`, which is in turn bounded only by the
+# RangeReader's reported total_size(). A SPARSE file can report a huge
+# total_size while occupying almost no disk space, so a single crafted
+# 4-byte count (up to u32::MAX) can still force an allocation of nearly
+# `total_size` bytes -- up to ~4 GiB -- from a file that is tiny on
+# disk. This ceiling is deliberately tighter than what the format alone
+# allows, mirroring the "bound before allocating" philosophy of
+# layout.MAX_FEATURE_SIZE (which itself mirrors C++'s kMaxFeatureSize).
+# There is no reference constant to mirror here: neither the Rust nor
+# the C++ reader caps this at all (both share the same exposure).
+_MAX_PAYLOAD_ENTRY_SIZE = 256 * 1024 * 1024
+
 # http_reader/mod.rs:363 -- the attribute phase's combine threshold,
 # reused as the per-query buffering window, matching
 # FcbReader::select_attr (reader.cpp:331).
@@ -285,7 +300,15 @@ class _Tree:
         count = int.from_bytes(head, "little")
         want = 4 + count * _OFFSET_SIZE
         # Bound the allocation BEFORE making it: a crafted count of
-        # 0xFFFFFFFF would otherwise ask for ~32 GiB.
+        # 0xFFFFFFFF would otherwise ask for ~32 GiB. A sane ceiling
+        # independent of the file's own (possibly sparse-inflated)
+        # declared size comes first -- see _MAX_PAYLOAD_ENTRY_SIZE.
+        if want > _MAX_PAYLOAD_ENTRY_SIZE:
+            raise FcbError(
+                ErrorCode.ATTRIBUTE_INDEX_NOT_FOUND,
+                f"payload entry claims {count} offsets, exceeding the "
+                "sanity ceiling",
+            )
         if rel + want > self.payload_size:
             raise FcbError(
                 ErrorCode.ATTRIBUTE_INDEX_NOT_FOUND,
@@ -323,6 +346,53 @@ def _binary_search(items: list[_Entry], key: KeyValue) -> tuple[bool, int]:
     return False, lo
 
 
+def _validated_child(
+    tree: _Tree, child: int, at: int, items: list[_Entry], child_level: int
+) -> int:
+    """Turn a computed child pointer into a validated child node index
+    within `child_level`, raising on any corruption. Shared by
+    _find_exact and _find_partition, whose descent step computes
+    `child`/`node_index` identically and must reject the same hostile
+    shapes:
+
+    1. A sentinel-induced overflow past the child level's end.
+       Separator entries with no right sibling carry K::max_value() as
+       a sentinel, whose offset ALREADY points at the last child
+       group; adding node_size would walk off the end of the level for
+       any query whose key equals the type maximum -- Eq(True) on a
+       bool column is enough. Clamping back to `offset` is a no-op for
+       ordinary keys. The same fix has been applied upstream
+       (stree.cpp:212-222).
+    2. Any offset outside [child_start, child_end) -- a corrupt/hostile
+       file must not be followed off the end of the tree.
+    3. (Codex review, Task 12) An offset that IS inside the child level
+       but is not the FIRST index of a node_size group. Every group a
+       real writer emits starts at child_start + k*node_size; a
+       hostile offset landing mid-group would pass check 2 above and
+       then get read as if it were a group's start -- silently
+       returning the WRONG entries (skipping the true group's first
+       item, spilling into the next group's) rather than raising.
+       Reproduced with UINT64/branching_factor=3/num_unique_items=2: a
+       root offset of 2 instead of the only valid child index, 1 --
+       `find_exact(0)` returned no match at all for a key that is
+       genuinely present, with no error.
+    """
+    child_start, child_end = tree.levels[child_level]
+    if child >= child_end:
+        child = items[at if at < len(items) else len(items) - 1].offset
+    if child < child_start or child >= child_end:
+        raise FcbError(
+            ErrorCode.INDEX_OUT_OF_BOUNDS,
+            "attribute index child outside the child level",
+        )
+    if (child - child_start) % tree.node_size != 0:
+        raise FcbError(
+            ErrorCode.INDEX_OUT_OF_BOUNDS,
+            "attribute index child is not aligned to a node group",
+        )
+    return child
+
+
 def _find_exact(tree: _Tree, key: KeyValue) -> list[SearchResultItem]:
     """Mirrors fcb::find_exact (stree.cpp:184-234, origin
     stree.rs:733-816)."""
@@ -351,22 +421,8 @@ def _find_exact(tree: _Tree, key: KeyValue) -> list[SearchResultItem]:
             else:
                 child = items[at].offset
 
-            # Separator entries with no right sibling carry
-            # K::max_value() as a sentinel, whose offset ALREADY points
-            # at the last child group. Adding node_size would walk off
-            # the end of the level for any query whose key equals the
-            # type maximum -- Eq(True) on a bool column is enough.
-            # Clamping back to `offset` is a no-op for ordinary keys.
-            # The same fix has been applied upstream (stree.cpp:212-222).
             child_level = level - 1
-            child_start, child_end = tree.levels[child_level]
-            if child >= child_end:
-                child = items[at if at < len(items) else len(items) - 1].offset
-            if child < child_start or child >= child_end:
-                raise FcbError(
-                    ErrorCode.INDEX_OUT_OF_BOUNDS,
-                    "attribute index child outside the child level",
-                )
+            child = _validated_child(tree, child, at, items, child_level)
             queue.append((child, child_level))
             continue
 
@@ -385,7 +441,14 @@ def _find_partition(tree: _Tree, key: KeyValue) -> int:
     Identical descent to _find_exact EXCEPT that an exact hit descends
     to `offset` with no + node_size -- that difference is what makes
     this land at the leftmost position rather than skipping past equal
-    keys.
+    keys. Shares _validated_child's corruption checks with _find_exact
+    (Codex review, Task 12): this function used to apply NEITHER the
+    sentinel clamp nor the child-level bounds check at all, relying
+    solely on read_entries' much weaker whole-array bound one level
+    down -- a corrupt offset that stayed under the total node count but
+    did not belong to `child_level` would silently drive every
+    Ge/Le/Gt/Lt/Ne query's leaf-scan window to the wrong place instead
+    of raising.
     """
     node_index = 0
     for level in range(len(tree.levels) - 1, 0, -1):
@@ -394,13 +457,14 @@ def _find_partition(tree: _Tree, key: KeyValue) -> int:
             continue
         found, at = _binary_search(items, key)
         if found:
-            node_index = items[at].offset
+            child = items[at].offset
         elif at == 0:
-            node_index = items[0].offset
+            child = items[0].offset
         elif at >= len(items):
-            node_index = items[-1].offset + tree.node_size
+            child = items[-1].offset + tree.node_size
         else:
-            node_index = items[at].offset
+            child = items[at].offset
+        node_index = _validated_child(tree, child, at, items, level - 1)
     return node_index
 
 
