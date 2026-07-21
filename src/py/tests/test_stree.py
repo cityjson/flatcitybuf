@@ -905,6 +905,19 @@ def _string_candidates(op: Operator, value: str) -> set[int]:
     return got
 
 
+def _long_string_offsets() -> set[int]:
+    # The pair of byte offsets long_strings.fcb's two features live at.
+    # NOT a stable pair of literals: the second feature's offset depends
+    # on the encoded size of the first, which -- per Task 16's finding --
+    # is not guaranteed identical across a corpus regeneration (cjseq's
+    # CityObjects is a HashMap, so CityObject build order, and hence
+    # FlatBuffer layout, varies run to run even for identical content).
+    # Derive it from the decoded truth instead of hardcoding it.
+    reader = FcbReader.open_file(CORPUS / "long_strings.fcb")
+    truth = values_by_offset(reader, "label")
+    return offsets_where(truth, lambda v: v in (LONG_A, LONG_B))
+
+
 def test_the_two_long_labels_share_one_on_disk_key() -> None:
     reader = FcbReader.open_file(CORPUS / "long_strings.fcb")
     truth = values_by_offset(reader, "label")
@@ -917,19 +930,19 @@ def test_the_two_long_labels_share_one_on_disk_key() -> None:
 def test_gt_on_a_string_column_keeps_the_equal_prefix_band() -> None:
     # Strict Gt would drop the shared key entirely and return nothing,
     # losing the "BBB" feature that genuinely IS greater.
-    assert _string_candidates(Operator.GT, LONG_A) == {0, 340}
+    assert _string_candidates(Operator.GT, LONG_A) == _long_string_offsets()
 
 
 def test_lt_on_a_string_column_keeps_the_equal_prefix_band() -> None:
     # Strict Lt would drop the shared key and lose the "AAA" feature.
-    assert _string_candidates(Operator.LT, LONG_B) == {0, 340}
+    assert _string_candidates(Operator.LT, LONG_B) == _long_string_offsets()
 
 
 def test_ne_on_a_string_column_is_a_full_scan() -> None:
     # The numeric lowering (two half-open scans around the key) would
     # exclude the shared key and return nothing, losing "BBB".
-    assert _string_candidates(Operator.NE, LONG_A) == {0, 340}
-    assert _string_candidates(Operator.NE, LONG_B) == {0, 340}
+    assert _string_candidates(Operator.NE, LONG_A) == _long_string_offsets()
+    assert _string_candidates(Operator.NE, LONG_B) == _long_string_offsets()
 
 
 # ------------------------------------------ post-filtering the widening ---
@@ -954,25 +967,35 @@ def _verified(path: Path, column: str, op: Operator, value: str) -> set[int]:
 
 
 def test_select_attr_undoes_the_string_widening() -> None:
-    # C++ reference (select_attr on long_strings.fcb): Eq AAA -> [a@0],
-    # Ne AAA -> [b@340], Gt AAA -> [b@340], Lt BBB -> [a@0], while the
-    # raw index returns both features for every one of them.
+    # C++ reference (select_attr on long_strings.fcb): Eq AAA -> [a],
+    # Ne AAA -> [b], Gt AAA -> [b], Lt BBB -> [a], while the raw index
+    # returns both features for every one of them. `off_a`/`off_b` are
+    # derived from the decoded truth rather than hardcoded (see
+    # `_long_string_offsets`'s docstring for why the physical offsets
+    # are not stable literals).
     path = CORPUS / "long_strings.fcb"
-    assert _verified(path, "label", Operator.EQ, LONG_A) == {0}
-    assert _verified(path, "label", Operator.EQ, LONG_B) == {340}
-    assert _verified(path, "label", Operator.NE, LONG_A) == {340}
-    assert _verified(path, "label", Operator.GT, LONG_A) == {340}
+    reader = FcbReader.open_file(path)
+    truth = values_by_offset(reader, "label")
+    off_a = next(off for off, vals in truth.items() if vals == [LONG_A])
+    off_b = next(off for off, vals in truth.items() if vals == [LONG_B])
+    both = {off_a, off_b}
+
+    assert _verified(path, "label", Operator.EQ, LONG_A) == {off_a}
+    assert _verified(path, "label", Operator.EQ, LONG_B) == {off_b}
+    assert _verified(path, "label", Operator.NE, LONG_A) == {off_b}
+    assert _verified(path, "label", Operator.GT, LONG_A) == {off_b}
     assert _verified(path, "label", Operator.GT, LONG_B) == set()
-    assert _verified(path, "label", Operator.LT, LONG_B) == {0}
+    assert _verified(path, "label", Operator.LT, LONG_B) == {off_a}
     assert _verified(path, "label", Operator.LT, LONG_A) == set()
-    assert _verified(path, "label", Operator.LE, LONG_A) == {0}
-    assert _verified(path, "label", Operator.GE, LONG_A) == {0, 340}
+    assert _verified(path, "label", Operator.LE, LONG_A) == {off_a}
+    assert _verified(path, "label", Operator.GE, LONG_A) == both
 
 
 def test_select_attr_exact_index_only_is_the_raw_candidate_set() -> None:
     # Verification can only remove, never add (test_stree.cpp:216-240).
     path = CORPUS / "long_strings.fcb"
     reader = FcbReader.open_file(path)
+    both = _long_string_offsets()
     for op in (Operator.EQ, Operator.NE, Operator.GT, Operator.LT):
         query = [
             AttrCondition(
@@ -981,7 +1004,7 @@ def test_select_attr_exact_index_only_is_the_raw_candidate_set() -> None:
         ]
         raw = {h.offset for h in reader.select_attr(query, True)}
         verified = {h.offset for h in reader.select_attr(query)}
-        assert raw == {0, 340}
+        assert raw == both
         assert verified <= raw
 
 
@@ -1011,18 +1034,45 @@ def test_select_attr_agrees_with_the_decoded_truth_on_every_operator() -> None:
             assert got == offsets_where(truth, predicate), (op, want)
 
 
-def test_a_feature_without_the_attribute_never_matches_not_even_ne() -> None:
-    # reader.cpp:419-426 -- verification is existential over CityObjects,
-    # and an object that lacks the attribute contributes nothing. So Ne
-    # does NOT return the two geom_temp.fcb features that have no
-    # `species` at all, even though "absent" is arguably != "1640".
+def test_a_feature_with_no_species_at_all_is_never_a_raw_candidate() -> None:
+    # A feature that carries NO `species` value on any of its CityObjects
+    # is arguably "!= 1640", but it does not match Ne -- not because
+    # select_attr's per-object existential post-filter (reader.cpp:
+    # 419-426) removes it (that mechanism is pinned by
+    # test_select_attr_agrees_with_the_decoded_truth_on_every_operator,
+    # which exercises a feature that has SOME objects with the attribute
+    # and some without). It never matches because the `species` B+tree
+    # holds no KEY for it at all, so it is never a CANDIDATE in the
+    # first place: raw index lookup (exact_index_only=True) already
+    # excludes it, before verification ever runs. Assert both the raw
+    # and the verified sets equal the same independently-decoded truth,
+    # so the test would fail if either stage started including it.
+    #
+    # Expected offsets are derived from `truth` at runtime rather than
+    # hardcoded: Task 16 found the corpus's physical byte layout is not
+    # stable across a regeneration (cjseq's CityObjects is a HashMap, so
+    # CityObject build order -- and hence FlatBuffer layout -- varies
+    # run to run for identical content).
     path = CORPUS / "geom_temp.fcb"
     reader = FcbReader.open_file(path)
     truth = values_by_offset(reader, "species")
     without = {off for off, vals in truth.items() if not vals}
     assert len(without) == 2
-    assert _verified(path, "species", Operator.NE, "1640") == {13296, 18504}
-    assert not (_verified(path, "species", Operator.NE, "1640") & without)
+
+    query = [
+        AttrCondition(
+            "species",
+            Operator.NE,
+            KeyValue.from_string(KeyKind.STRING50, "1640"),
+        )
+    ]
+    raw = {h.offset for h in reader.select_attr(query, True)}
+    verified = {h.offset for h in reader.select_attr(query)}
+    expected = offsets_where(truth, lambda v: v != "1640")
+
+    assert raw == expected
+    assert verified == expected
+    assert not (raw & without)
 
 
 def test_select_attr_leaves_a_numeric_column_untouched() -> None:
