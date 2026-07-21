@@ -13,13 +13,47 @@ import { BlobRangeReader } from './io/blob.js'
 import { DEFAULT_FETCH_SIZE, FetchRangeReader, OPEN_PREFETCH_SIZE } from './io/fetch.js'
 import type { FetchRangeReaderOpts } from './io/fetch.js'
 import { BufferedRangeReader, BytesRangeReader } from './io/range-reader.js'
-import type { RangeReader } from './io/range-reader.js'
+import type { RangeReader, ReadOpts } from './io/range-reader.js'
+import { queryToBBox, searchRtree } from './packed-rtree/index.js'
+import type { SearchResultItem, SpatialQuery } from './packed-rtree/index.js'
 
 /** A cursor over features. `featuresCount` is `undefined` when the header
  *  does not know it: the format writes 0 for UNKNOWN, not for empty, so it
  *  must never be reported as a count of zero. */
 export interface FeatureCursor extends AsyncIterable<Feature> {
   readonly featuresCount: number | undefined
+}
+
+/** Comparison operators for an attribute condition.
+ *
+ *  Declared HERE, in the R-tree task, even though nothing consumes them until
+ *  the attribute-index task: `SelectOptions.where` has to reference them, so
+ *  the alternative is a `SelectOptions` whose shape changes later. The
+ *  attribute task imports these rather than redeclaring them. */
+export type Operator = 'Eq' | 'Ne' | 'Gt' | 'Ge' | 'Lt' | 'Le'
+
+/** One attribute predicate. `value` is `unknown` because the admissible type
+ *  depends on the column's declared type, which is only known once the header
+ *  has been read. */
+export interface AttrCondition {
+  field: string
+  operator: Operator
+  value: unknown
+}
+
+/** What to select. Every field is optional; `select()` with no options is
+ *  `selectAll()`.
+ *
+ *  `limit`/`offset` apply AFTER the search, over the sorted result list --
+ *  they page the answer, they do not change it. `featuresCount` on the
+ *  returned cursor therefore reports the TOTAL number of matches (or the
+ *  file's total, for an unfiltered select), regardless of paging. */
+export interface SelectOptions {
+  spatial?: SpatialQuery
+  where?: AttrCondition[]
+  limit?: number
+  offset?: number
+  signal?: AbortSignal
 }
 
 /** Sources that hold an OS resource expose `close`; in-memory ones do not.
@@ -71,6 +105,66 @@ async function* scan(
       `truncated feature section: header declares ${declared} features, found ${produced}`,
     )
   }
+}
+
+/** Reads exactly the features the index pointed at, in the order the search
+ *  returned them (ascending offset, so the feature section is read forwards).
+ *
+ *  `hit.offset` is relative to `featureBegin` -- the leaf meaning of a
+ *  NodeItem's `offset` field. The signal is re-checked between features:
+ *  cancelling a cursor that has already produced its first feature has to
+ *  stop the reads that have not happened yet. */
+async function* readHits(
+  reader: RangeReader,
+  header: HeaderView,
+  hits: readonly SearchResultItem[],
+  opts: ReadOpts | undefined,
+): AsyncGenerator<Feature, void, undefined> {
+  const featureBegin = header.layout.featureBegin
+  for (const hit of hits) {
+    if (opts?.signal?.aborted) {
+      throw new FcbError(ErrorCode.IoError, 'iteration aborted')
+    }
+    const { feature } = await readFeature(
+      reader,
+      featureBegin + hit.offset,
+      header.info.columns,
+      featureBegin,
+    )
+    yield feature
+  }
+}
+
+/** Skips `offset` items then yields at most `limit`. Used only on the
+ *  unfiltered scan; a spatial result set is a materialised array and is paged
+ *  by slicing it, so the skipped features are never read at all. */
+async function* paginate<T>(
+  src: AsyncIterable<T>,
+  offset: number,
+  limit: number | undefined,
+): AsyncGenerator<T, void, undefined> {
+  if (limit === 0) return
+  let seen = 0
+  let produced = 0
+  for await (const value of src) {
+    if (seen++ < offset) continue
+    yield value
+    produced++
+    if (limit !== undefined && produced >= limit) return
+  }
+}
+
+/** `limit`/`offset` must be non-negative integers. Checked before anything
+ *  else so a bad argument costs no I/O. */
+function validatePageArg(value: number | undefined, what: string): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isInteger(value) || value < 0) {
+    throw new FcbError(
+      ErrorCode.InvalidArgument,
+      `invalid ${what}: ${value} (must be a non-negative integer)`,
+    )
+  }
+  return value
 }
 
 export class FcbReader {
@@ -160,6 +254,67 @@ export class FcbReader {
     const gen = scan(this.reader, this.headerView)
     const declared = this.headerView.info.featuresCount
     return {
+      featuresCount: declared === 0 ? undefined : declared,
+      [Symbol.asyncIterator]: () => gen,
+    }
+  }
+
+  /** The general query entry point: a spatial filter, paging, or both.
+   *
+   *  Order of operations, and it matters:
+   *   1. Validate every argument -- `limit`, `offset`, and the query geometry
+   *      -- BEFORE touching the reader, so a caller mistake never costs a
+   *      request.
+   *   2. Run the search. A spatial query descends the packed R-tree with the
+   *      header's OWN `index_node_size`; a hardcoded 16 mis-traverses any file
+   *      written with another node size.
+   *   3. Page the sorted result list. `featuresCount` still reports the total
+   *      match count, not the page size.
+   *
+   *  The `signal` is threaded into the traversal's reads and re-checked
+   *  between features, not merely held here. */
+  async select(opts?: SelectOptions): Promise<FeatureCursor> {
+    if (this.closed) {
+      throw new FcbError(ErrorCode.IoError, 'select on a closed FcbReader')
+    }
+
+    const limit = validatePageArg(opts?.limit, 'limit')
+    const offset = validatePageArg(opts?.offset, 'offset') ?? 0
+
+    if (opts?.where !== undefined && opts.where.length > 0) {
+      throw new FcbError(ErrorCode.QueryExecutionError, 'attribute queries not implemented yet')
+    }
+    // Validates the geometry and rejects `nearest`, before any I/O.
+    if (opts?.spatial !== undefined) queryToBBox(opts.spatial)
+
+    const readOpts: ReadOpts | undefined =
+      opts?.signal === undefined ? undefined : { signal: opts.signal }
+    const info = this.headerView.info
+
+    if (opts?.spatial !== undefined) {
+      if (this.headerView.layout.rtreeSize === 0) {
+        throw new FcbError(ErrorCode.NoIndex, 'file has no spatial index')
+      }
+      const hits = await searchRtree(
+        this.reader,
+        this.headerView.layout.rtreeBegin,
+        info.featuresCount,
+        info.indexNodeSize,
+        opts.spatial,
+        readOpts,
+      )
+      const page = limit === undefined ? hits.slice(offset) : hits.slice(offset, offset + limit)
+      const gen = readHits(this.reader, this.headerView, page, readOpts)
+      return {
+        featuresCount: hits.length,
+        [Symbol.asyncIterator]: () => gen,
+      }
+    }
+
+    const declared = info.featuresCount
+    const gen = paginate(scan(this.reader, this.headerView), offset, limit)
+    return {
+      // 0 means UNKNOWN, never "empty" -- same rule as selectAll.
       featuresCount: declared === 0 ? undefined : declared,
       [Symbol.asyncIterator]: () => gen,
     }

@@ -22,6 +22,19 @@ export { emitInt64, toCityJSONFeature, toCityJSONMetadata } from './cityjson/ind
 export type { Int64Policy } from './cityjson/index.js'
 export type * from './cityjson/types.js'
 
+// Packed R-tree spatial index.
+export {
+  NODE_ITEM_SIZE,
+  containsPoint,
+  decodeNodeItem,
+  generateLevelBounds,
+  intersects,
+  queryToBBox,
+  rtreeNumNodes,
+  searchRtree,
+} from './packed-rtree/index.js'
+export type { BBox, NodeItem, SearchResultItem, SpatialQuery } from './packed-rtree/index.js'
+
 // The reader facade.
 export { FcbReader } from './reader.js'
-export type { FeatureCursor } from './reader.js'
+export type { AttrCondition, FeatureCursor, Operator, SelectOptions } from './reader.js'
