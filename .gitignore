@@ -77,3 +77,6 @@ build/
 
 .claude/settings.local.json
 .claude/worktrees/
+
+# subagent-driven-development scratch (briefs, reports, review packages)
+.superpowers/
