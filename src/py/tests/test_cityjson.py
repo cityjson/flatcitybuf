@@ -266,6 +266,57 @@ def test_u32_max_becomes_none_in_the_flat_semantics_values_shape() -> None:
     ) == [0, None, 2]
 
 
+def test_semantics_values_nest_twice_for_solid_collections() -> None:
+    # NO committed fixture reaches the two-deep branch: `grep -l
+    # 'MultiSolid\|CompositeSolid' conformance/*.expected.jsonl
+    # examples/data/*.jsonl` is empty, so every conformance case
+    # exercises only the flat and one-deep shapes. This is the same
+    # nesting-depth class as upstream findings 7 and 8, both of which
+    # were off-by-one-LEVEL bugs that still produced structurally valid
+    # JSON -- exactly what a shape-blind test misses. Hence a direct
+    # unit test on the decoder.
+    #
+    # Expected value derived from the RUST decoder
+    # (fcb_core/src/reader/geom_decoder.rs:238-336), not from this
+    # implementation: at d=4 it walks `solids` (shells per solid),
+    # recursing at d=3 over that slice of `shells` (surfaces per
+    # shell), which slices the flat values array in order.
+    #   solids [2, 1] -> solid 0 owns shells[0:2], solid 1 owns shells[2:3]
+    #   shells [2, 1, 3] -> values[0:2], values[2:3], values[3:6]
+    solids = [2, 1]
+    shells = [2, 1, 3]
+    values = [0, 1, 2, 0xFFFFFFFF, 1, 2]
+
+    for geom_type in (GeometryType.MultiSolid, GeometryType.CompositeSolid):
+        assert _decode_semantics_values(geom_type, solids, shells, values) == [
+            [[0, 1], [2]],
+            [[None, 1, 2]],
+        ]
+
+    # The neighbouring depths, on the SAME inputs -- an off-by-one level
+    # in either direction is a different shape, not a different value.
+    assert _decode_semantics_values(
+        GeometryType.Solid, solids, shells, values
+    ) == [[0, 1], [2], [None, 1, 2]]
+    assert _decode_semantics_values(
+        GeometryType.MultiSurface, solids, shells, values
+    ) == [0, 1, 2, None, 1, 2]
+
+
+def test_two_deep_semantics_stops_at_the_end_of_a_short_values_array() -> None:
+    # Truncated/hostile input: fewer values than the shell counts claim.
+    # The decoder must run out of values rather than IndexError -- the
+    # `cursor < len(values)` guard -- and must not invent entries.
+    assert _decode_semantics_values(
+        GeometryType.CompositeSolid, [2], [2, 2], [7]
+    ) == [[[7], []]]
+    # Likewise more shells than the solid counts account for: the extra
+    # shell is simply not reachable from any solid.
+    assert _decode_semantics_values(
+        GeometryType.MultiSolid, [1], [1, 1], [7, 8]
+    ) == [[[7]]]
+
+
 # --------------------------------------------- empty_appearance.fcb ---
 
 

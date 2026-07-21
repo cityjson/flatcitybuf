@@ -843,6 +843,7 @@ def _key_from_attr_value(value: object, kind: KeyKind) -> KeyValue | None:
     None means "this value cannot satisfy a condition of that kind", not
     an error: a post-filter that raised on a type mismatch would turn a
     heterogeneous file into an exception instead of an empty result.
+    DATETIME is the one exception -- see below.
     """
     if is_string_kind(kind):
         # DateTime attributes also arrive as text, but their KEY kind is
@@ -850,6 +851,27 @@ def _key_from_attr_value(value: object, kind: KeyKind) -> KeyValue | None:
         if not isinstance(value, str):
             return None
         return KeyValue.from_string(kind, value)
+    if kind is KeyKind.DATETIME:
+        # A DateTime ATTRIBUTE is length-prefixed UTF-8 text in the blob
+        # (attribute.py's _STRING_LIKE_TYPES) while a DateTime KEY is 12
+        # packed bytes of (i64 seconds, u32 nanos) -- lifting one to the
+        # other needs an RFC-3339 parser with exactly the writer's
+        # semantics, which this reader does not have and cannot verify
+        # against any committed fixture.
+        #
+        # Falling through to `return None` would make value_satisfies
+        # answer a confident, silent False for EVERY DateTime condition,
+        # which is a wrong answer dressed as an empty result. Nothing in
+        # this package can reach here today (needs_post_filter is true
+        # only for string kinds, so select_attr never post-filters a
+        # DateTime column), but value_satisfies is public and exported,
+        # so a direct caller gets a diagnosable error instead.
+        raise FcbError(
+            ErrorCode.UNSUPPORTED_COLUMN_TYPE,
+            "post-filtering a DateTime column is not supported: a "
+            "DateTime attribute is stored as text and cannot be "
+            "compared against a packed DateTime key",
+        )
     if kind is KeyKind.BOOL:
         return KeyValue.from_bool(value) if isinstance(value, bool) else None
     # bool IS an int in Python: exclude it explicitly before the numeric
@@ -903,6 +925,11 @@ def value_satisfies(value: object, operator: Operator, want: KeyValue) -> bool:
     Every other kind goes through compare_keys, so float columns keep the
     ordered_float total order (NaN == NaN, NaN above +inf) rather than
     Python's `<`.
+
+    Raises FcbError{UNSUPPORTED_COLUMN_TYPE} for a DATETIME `want`,
+    rather than answering a silent False it cannot justify -- see
+    _key_from_attr_value. A value of the wrong TYPE for the kind is
+    still a plain False.
     """
     actual = _key_from_attr_value(value, want.kind)
     if actual is None:
