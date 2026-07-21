@@ -111,9 +111,44 @@ class FcbReader:
     def open(cls, reader: RangeReader) -> FcbReader:
         return cls(reader, read_header(reader))
 
+    @property
+    def range_reader(self) -> RangeReader:
+        """The underlying RangeReader, as `search_rtree` wants it.
+
+        `search_rtree(reader, rtree_begin, num_items, node_size, bbox)`
+        is a free function over a RangeReader (there is no
+        `select_bbox` on this class -- see README.md), so without this
+        a bbox query on an already-opened file had to reach into
+        `_reader`. Read-only on purpose: an FcbReader's header was
+        parsed from THIS reader and swapping it underneath would
+        invalidate `header.layout`.
+        """
+        return self._reader
+
+    def feature_at(self, item: SearchResultItem | int) -> Feature:
+        """Decode the one feature an index hit points at.
+
+        Both query entry points -- `select_attr` here and
+        `search_rtree` in packed_rtree -- return
+        `SearchResultItem(offset, index)`, i.e. feature-section-relative
+        BYTE OFFSETS rather than materialized features. This is the
+        public way back: pass a hit (or its raw `.offset`) and get the
+        Feature, ready for `to_cityjson_feature`.
+
+        Random access, one feature per call -- for a large result set,
+        the caller reads forward through hits already sorted ascending
+        by offset (both search functions guarantee that order), which
+        is the access pattern the format is laid out for.
+        """
+        offset = item.offset if isinstance(item, SearchResultItem) else item
+        return _read_feature_at(
+            self._reader, self.header.layout.feature_begin, offset
+        )
+
     def select_attr(
         self,
         conditions: Sequence[AttrCondition],
+        *,
         exact_index_only: bool = False,
     ) -> list[SearchResultItem]:
         """Run an attribute query and return the features that REALLY

@@ -1002,7 +1002,9 @@ def test_select_attr_exact_index_only_is_the_raw_candidate_set() -> None:
                 "label", op, KeyValue.from_string(KeyKind.STRING50, LONG_A)
             )
         ]
-        raw = {h.offset for h in reader.select_attr(query, True)}
+        raw = {
+            h.offset for h in reader.select_attr(query, exact_index_only=True)
+        }
         verified = {h.offset for h in reader.select_attr(query)}
         assert raw == both
         assert verified <= raw
@@ -1066,7 +1068,7 @@ def test_a_feature_with_no_species_at_all_is_never_a_raw_candidate() -> None:
             KeyValue.from_string(KeyKind.STRING50, "1640"),
         )
     ]
-    raw = {h.offset for h in reader.select_attr(query, True)}
+    raw = {h.offset for h in reader.select_attr(query, exact_index_only=True)}
     verified = {h.offset for h in reader.select_attr(query)}
     expected = offsets_where(truth, lambda v: v != "1640")
 
@@ -1122,6 +1124,22 @@ def test_value_satisfies_compares_the_raw_bytes_of_the_query_key() -> None:
     assert not value_satisfies(key.original_string, Operator.EQ, key)
     assert value_satisfies("~", Operator.LT, key)  # 0x7e < 0xc3
     assert value_satisfies("ÿ", Operator.GT, key)  # c3 bf > c3
+
+
+def test_value_satisfies_refuses_a_datetime_key_instead_of_saying_no() -> None:
+    # _key_from_attr_value had no DATETIME branch, so every DateTime
+    # condition fell through to `return None` and value_satisfies
+    # answered a silent, confident False -- a wrong answer dressed as an
+    # empty result. Unreachable through select_attr (needs_post_filter
+    # is true only for string kinds) but value_satisfies is public and
+    # in stree.__all__.
+    key = KeyValue.from_datetime(1_700_000_000, 0)
+    with pytest.raises(FcbError) as excinfo:
+        value_satisfies("2023-11-14T22:13:20Z", Operator.EQ, key)
+    assert excinfo.value.code is ErrorCode.UNSUPPORTED_COLUMN_TYPE
+    # Including for operators whose false answer would have looked right.
+    with pytest.raises(FcbError):
+        value_satisfies("2023-11-14T22:13:20Z", Operator.NE, key)
 
 
 def test_value_satisfies_uses_the_ordered_float_total_order() -> None:

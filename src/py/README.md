@@ -10,12 +10,56 @@ extension formerly at `src/rust/fcb_py`, which has been deleted (Task 13).
 
 ## Status
 
-Complete. `FcbReader.open_file(path)` / `.select_all()` / `.select_attr(...)`,
-`to_cityjson_metadata` / `to_cityjson_feature`, `search_rtree` / `search_stree`,
-and `HttpRangeReader` / `FileRangeReader` / `BufferedRangeReader` all exist and
-are covered by 247 tests, including a 10/10 conformance suite comparing this
-reader's output against the Rust reader's on the same bytes
-(`tests/test_conformance.py`).
+Complete. `FcbReader.open_file(path)` / `.select_all()` / `.select_attr(...)` /
+`.feature_at(...)`, `to_cityjson_metadata` / `to_cityjson_feature`,
+`search_rtree` / `search_stree`, and `HttpRangeReader` / `FileRangeReader` /
+`BufferedRangeReader` are all exported from the top-level `flatcitybuf`
+package and covered by the test suite, including a 10/10 conformance suite
+comparing this reader's whole output, line for line, against the Rust
+reader's on the same bytes (`tests/test_conformance.py`).
+
+## Usage
+
+```python
+import flatcitybuf as fcb
+
+reader = fcb.FcbReader.open_file("city.fcb")
+
+# The CityJSONSeq header line.
+print(fcb.to_cityjson_metadata(reader.header))
+
+# Every feature, in stored (Hilbert) order.
+for feature in reader.select_all():
+    cj = fcb.to_cityjson_feature(feature, reader.header)
+
+# Attribute query -> offsets -> features.
+hits = reader.select_attr(
+    [
+        fcb.AttrCondition(
+            "identificatie",
+            fcb.Operator.EQ,
+            fcb.KeyValue.from_string(fcb.KeyKind.STRING50, "NL.IMBAG.Pand.1"),
+        )
+    ]
+)
+for hit in hits:
+    cj = fcb.to_cityjson_feature(reader.feature_at(hit), reader.header)
+
+# Spatial query, over the same opened file.
+hits = fcb.search_rtree(
+    reader.range_reader,
+    reader.header.layout.rtree_begin,
+    reader.header.info.features_count,
+    reader.header.info.index_node_size,
+    (min_x, min_y, max_x, max_y),
+)
+
+# Over HTTP, byte-range by byte-range (synchronously).
+remote = fcb.FcbReader.open(fcb.HttpRangeReader("https://example.com/city.fcb"))
+```
+
+Everything listed in `flatcitybuf.__all__` is public; anything else is
+internal and may change without notice.
 
 ## Breaking changes from the retired PyO3 extension (`src/rust/fcb_py`)
 
@@ -45,7 +89,9 @@ PyO3 bindings:
   `FcbReader.select_attr(...)` both return
   `list[SearchResultItem(offset, index)]` -- feature-section-relative
   offsets, not materialized features. There is currently no public
-  `select_bbox` that both filters and decodes in one call.
+  `select_bbox` that both filters and decodes in one call; decode a hit
+  yourself with `FcbReader.feature_at(hit)`, which is the public inverse of
+  the offsets both query functions return.
 - **No module-level convenience functions.** The old `fcb.open_file(path)` /
   `fcb.query_bbox(path, ...)` free functions returning `list[Feature]` are
   gone; construct an `FcbReader` explicitly.
@@ -61,15 +107,14 @@ PyO3 bindings:
 
 ```bash
 cd src/py
-uv sync --extra dev --extra numpy --extra http
+uv sync --extra dev --extra numpy
 uv run pytest
 uv run ruff check .
 uv run mypy
 ```
 
-`numpy` and `http` are optional at runtime (every code path has a working
-pure-Python/sync fallback when they are absent, and `pytest` passes either
-way), but `mypy --strict` needs the `numpy` extra actually installed to
+`numpy` is optional at runtime (every code path has a working pure-Python
+fallback when it is absent, and `pytest` passes either way), but `mypy --strict` needs the `numpy` extra actually installed to
 type-check the bulk-decode branches in `cityjson.py`/`feature.py` --
 without it, `import numpy` inside those functions cannot be resolved and
 mypy reports `import-not-found` there instead of passing cleanly.
@@ -82,7 +127,11 @@ mypy reports `import-not-found` there instead of passing cleanly.
 Optional extras:
 
 - `numpy` — bulk vertex decoding
-- `http` — async HTTP range reads (via `httpx`)
+
+There is no `http` extra: `HttpRangeReader` reads over HTTP with stdlib
+`urllib.request`, so remote reads need no third-party package at all. (An
+earlier `http = ["httpx>=0.27"]` extra existed for an async reader that was
+deliberately never built; it installed a dependency nothing imported.)
 
 ## Benchmark
 
