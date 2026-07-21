@@ -1,8 +1,5 @@
 use anyhow::Result;
-use cjseq::{
-    CityObjectType, Geometry as CjGeometry, GeometryType as CjGeometryType, SemanticSurfaceType,
-    SemanticsSurface,
-};
+use cjseq::{CityObjectType, Geometry as CjGeometry, SemanticSurfaceType, SemanticsSurface};
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     deserializer,
@@ -65,10 +62,21 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         let output_writer = BufWriter::new(output_file);
 
         let mut attr_schema = AttributeSchema::new();
+        // A semantic surface's extra members (`on_footprint_edge` here) need a
+        // schema of their own; without one the writer has no column to put them
+        // in and they are dropped.
+        let mut semantic_attr_schema = AttributeSchema::new();
         for feature in original_cj_seq.features.iter() {
             for (_, co) in feature.city_objects.iter() {
                 if let Some(attributes) = &co.attributes {
                     attr_schema.add_attributes(attributes);
+                }
+                for geom in co.geometry.iter().flatten() {
+                    if let Some(semantics) = geom.common().and_then(|c| c.semantics.as_ref()) {
+                        for surface in &semantics.surfaces {
+                            add_surface_attributes(&mut semantic_attr_schema, surface);
+                        }
+                    }
                 }
             }
         }
@@ -82,7 +90,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                 geographical_extent: None,
             }),
             Some(attr_schema),
-            None,
+            Some(semantic_attr_schema),
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
@@ -126,6 +134,12 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         // before either, because the CityJSON model itself discarded it at
         // parse time. Now that the model keeps it, the loss is the writer's
         // and is visible here rather than invisible upstream.
+        //
+        // TODO: delete this whole allowance -- both the `is_empty` assert and
+        // the `clear()` -- when the header gains somewhere to put unnamed
+        // metadata members (an attributes blob, as City Objects have). At that
+        // point `assert_eq!(orig_meta, des_meta)` should hold outright, and
+        // this assertion is *expected* to be removed rather than updated.
         let mut orig_meta = orig_meta.clone();
         assert!(
             des_meta.other.is_empty(),
@@ -142,6 +156,22 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         .iter()
         .zip(deserialized_features.iter())
     {
+        // Still not `assert_eq!(orig_feat, des_feat)`. As of this branch exactly
+        // one thing stops it, and it is neither geometry nor semantics: a JSON
+        // `null` attribute value is dropped by the writer. `attribute.rs:111`
+        // skips null values and `attribute.rs:24` refuses to allocate a column
+        // for one, because every `ColumnType` has a fixed width and the format
+        // has no null bit. In `small.city.jsonl` that is `eindgeldigheid`,
+        // `eindregistratie`, `tijdstipeindregistratielv`, `tijdstipinactief`,
+        // `tijdstipinactieflv`, `tijdstipnietbaglv` and `b3_bouwlagen`.
+        //
+        // Everything else round-trips, including the semantic surface
+        // attributes this test used to lose -- see the semantic schema built
+        // above. Fixing the last of it means adding null support to the
+        // attribute encoding, which is a format change (a null bit or a Null
+        // column type) and a C++ port, and is out of scope here.
+        //
+        // FIXME: honour this once null attributes are encodable.
         // assert_eq!(orig_feat, des_feat);
         assert_eq!(orig_feat.thetype, des_feat.thetype);
         assert_eq!(orig_feat.id, des_feat.id);
@@ -236,6 +266,17 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                                     orig_geom.lod()
                                 )
                             });
+
+                        // A geometry -- its type, boundaries, semantics,
+                        // material and texture -- must round-trip exactly. This
+                        // used to be a `println!` of the differences, which is
+                        // how a lost nesting level could go unnoticed for
+                        // months. The per-member reporting below is kept for
+                        // when this fires.
+                        assert_eq!(
+                            orig_geom, des_geom,
+                            "geometry[{i}] must round-trip unchanged"
+                        );
 
                         if orig_geom != des_geom {
                             println!("  geometry[{}] with LOD {:?} differs:", i, orig_geom.lod());
@@ -505,10 +546,21 @@ fn test_extension_serialization_cycle() -> Result<()> {
         let output_writer = BufWriter::new(output_file);
 
         let mut attr_schema = AttributeSchema::new();
+        // A semantic surface's extra members (`on_footprint_edge` here) need a
+        // schema of their own; without one the writer has no column to put them
+        // in and they are dropped.
+        let mut semantic_attr_schema = AttributeSchema::new();
         for feature in original_cj_seq.features.iter() {
             for (_, co) in feature.city_objects.iter() {
                 if let Some(attributes) = &co.attributes {
                     attr_schema.add_attributes(attributes);
+                }
+                for geom in co.geometry.iter().flatten() {
+                    if let Some(semantics) = geom.common().and_then(|c| c.semantics.as_ref()) {
+                        for surface in &semantics.surfaces {
+                            add_surface_attributes(&mut semantic_attr_schema, surface);
+                        }
+                    }
                 }
             }
         }
@@ -522,7 +574,7 @@ fn test_extension_serialization_cycle() -> Result<()> {
                 geographical_extent: None,
             }),
             Some(attr_schema),
-            None,
+            Some(semantic_attr_schema),
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
