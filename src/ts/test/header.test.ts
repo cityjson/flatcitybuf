@@ -50,9 +50,19 @@ describe('readHeader', () => {
     // C++ tracks its presence separately (include/fcb/header.hpp:54). A
     // reader that defaults it to zeros makes a missing transform look like a
     // real one that collapses every coordinate to the origin.
+    //
+    // Pinned from conformance/degenerate_extent.expected.jsonl line 0: this
+    // fixture carries a REAL transform whose translate happens to be zero
+    // (`"transform":{"scale":[0.001,0.001,0.001],"translate":[0.0,0.0,0.0]}`).
+    // Asserting hasTransform === true and translate === [0,0,0] pins exactly
+    // the case a reader that special-cases "all zero" as "absent" would get
+    // wrong. Every fixture in conformance/*.expected.jsonl carries a
+    // transform, so the ABSENT-transform half of this distinction has no
+    // corpus fixture and stays untested here.
     const { info } = await readHeader(open('degenerate_extent.fcb'))
-    expect(info.hasTransform).toBeTypeOf('boolean')
-    if (!info.hasTransform) expect(info.scale).toBeUndefined()
+    expect(info.hasTransform).toBe(true)
+    expect(info.scale).toEqual([0.001, 0.001, 0.001])
+    expect(info.translate).toEqual([0, 0, 0])
   })
 
   it('computes section offsets that fit inside the file', async () => {

@@ -63,7 +63,18 @@ export async function readHeader(reader: RangeReader): Promise<HeaderView> {
   // The buffer handed to FlatBuffers MUST include the 4-byte size prefix:
   // `getSizePrefixedRootAsHeader` skips over it internally when locating the
   // root table, per Task 3's finding pinned in test/generated.test.ts.
-  const raw = await reader.read(MAGIC_SIZE, want)
+  // `reader.read` returns a `subarray` of the reader's own internal buffer,
+  // not a copy (io/range-reader.ts's BufferedRangeReader documents this
+  // contract). `hdr`/`bb` below outlive this function -- they are returned
+  // in `HeaderView.raw` and back every lazily-read FlatBuffers field
+  // (strings, columns, ...) that a caller may touch long after this read.
+  // Today that's safe only because BufferedRangeReader.read happens to
+  // reassign its buffer on a miss rather than mutate it in place -- an
+  // implementation detail, not part of the contract. A reader that reuses a
+  // fixed buffer (e.g. Task 11's HTTP reader) would silently corrupt every
+  // HeaderView already handed out. Copy the bytes so `bb`'s backing store is
+  // ours alone.
+  const raw = (await reader.read(MAGIC_SIZE, want)).slice()
   const bb = new flatbuffers.ByteBuffer(raw)
   const hdr = Header.getSizePrefixedRootAsHeader(bb)
 
