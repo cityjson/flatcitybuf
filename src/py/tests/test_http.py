@@ -176,6 +176,39 @@ def test_a_range_answering_the_wrong_offset_is_rejected(server: str) -> None:
     assert exc_info.value.code is ErrorCode.IO_ERROR
 
 
+def test_a_range_answering_an_over_long_end_is_rejected(server: str) -> None:
+    # A server that matches the requested START but answers with an
+    # END far past it (here: the rest of the whole file) must be
+    # rejected, not trusted: `want = end - start + 1` is derived
+    # straight from the server's Content-Range, so an unvalidated end
+    # turns directly into an unbounded read for what should have been
+    # total_size()'s tiny 1-byte probe (`Range: bytes=0-0`).
+    r = HttpRangeReader(f"{server}/small.fcb?long_end=1")
+    with pytest.raises(FcbError) as exc_info:
+        r.total_size()
+    assert exc_info.value.code is ErrorCode.IO_ERROR
+    # Direct evidence this is the bounded rejection and not the
+    # unbounded-read bug: nothing was ever buffered into
+    # bytes_fetched. Pre-fix, this assertion also fails -- the whole
+    # file ends up counted here instead.
+    assert r.bytes_fetched == 0
+
+
+def test_a_stalled_connection_mid_body_raises_io_error(server: str) -> None:
+    # A server that sends 206 headers and then hangs before writing
+    # any body must not let a raw stdlib exception (e.g. TimeoutError)
+    # escape -- every network failure must surface as
+    # FcbError(IO_ERROR), per the RangeReader contract
+    # (range_reader.py:25). A short client-side timeout keeps this
+    # test itself bounded; the server-side request thread left
+    # blocked is torn down by the `server` fixture's process-kill
+    # teardown, not by anything here.
+    r = HttpRangeReader(f"{server}/small.fcb?stall_body=1", timeout=0.5)
+    with pytest.raises(FcbError) as exc_info:
+        r.total_size()
+    assert exc_info.value.code is ErrorCode.IO_ERROR
+
+
 @pytest.mark.skipif(not DELFT.exists(), reason="delft.fcb fixture missing")
 def test_attribute_query_over_http_matches_the_local_reader(
     server: str,

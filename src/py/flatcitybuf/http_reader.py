@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import re
 import urllib.error
 import urllib.request
@@ -93,11 +94,18 @@ class HttpRangeReader(RangeReader):
     2. total_size() comes from Content-Range on a 206, never from
        Content-Length (which is only the slice length on a partial
        response).
-    3. Every network failure (URLError, HTTPError, timeout, a short
-       body) surfaces as FcbError(IO_ERROR); nothing raw escapes.
+    3. Every network failure (URLError, HTTPError, timeout, a stalled
+       or reset connection mid-body, a short body) surfaces as
+       FcbError(IO_ERROR); nothing raw escapes -- see `_fetch_range`'s
+       two try/except blocks, covering both the `urlopen()` call and
+       the header/body phase that follows it.
     4. `fetch_size` bounds every single physical request/allocation
        this reader makes, so a corrupt or hostile `length` cannot
-       provoke an unbounded fetch -- see `read`.
+       provoke an unbounded fetch -- see `read`. This also depends on
+       `_fetch_range` validating the server's `Content-Range` *end*
+       (not just its start) against what was actually requested: a
+       server is untrusted input, and `want = end - start + 1` must
+       never be taken from it unchecked.
     """
 
     def __init__(
@@ -128,7 +136,18 @@ class HttpRangeReader(RangeReader):
             # check), so a Range-ignoring server is rejected right
             # here rather than only on a later, larger read.
             self._fetch_range(0, 1)
-        assert self._total_size is not None
+        if self._total_size is None:
+            # _fetch_range() above either sets this (206/416) or raises
+            # FcbError -- it cannot return normally leaving this None.
+            # Expressed as a real check (not `assert`) because asserts
+            # are stripped under `python -O`, and this is the one
+            # invariant Critical-1's Content-Range validation exists to
+            # guarantee: without it, a hostile server could leave
+            # `_total_size` unset while still returning a body.
+            raise FcbError(
+                ErrorCode.IO_ERROR,
+                f"failed to determine total size of {self._url}",
+            )
         return self._total_size
 
     def read(self, offset: int, length: int) -> bytes:
@@ -233,6 +252,20 @@ class HttpRangeReader(RangeReader):
                         f"server returned range starting at {start}, "
                         f"expected {offset}",
                     )
+                if end != last:
+                    # The end is server-supplied and otherwise
+                    # untrusted: `want` below is derived straight from
+                    # it, so an unchecked, over-long end turns directly
+                    # into an unbounded read/allocation for what should
+                    # have been a small, `fetch_size`-capped request
+                    # (e.g. total_size()'s 1-byte probe). Reject rather
+                    # than trust it, exactly like the `start` check
+                    # above.
+                    raise FcbError(
+                        ErrorCode.IO_ERROR,
+                        f"server returned range ending at {end}, "
+                        f"expected {last}",
+                    )
                 if self._total_size is None:
                     self._total_size = total
                 elif self._total_size != total:
@@ -271,5 +304,22 @@ class HttpRangeReader(RangeReader):
                 ErrorCode.IO_ERROR,
                 f"unexpected HTTP status {status} for {self._url}",
             )
+        except (OSError, http.client.HTTPException) as exc:
+            # Mirrors the urlopen()-call try/except above, but for
+            # failures that only surface once we start pulling on the
+            # response: a connection that stalls or resets mid-body
+            # (TimeoutError / ConnectionResetError, both OSError
+            # subclasses) or a malformed HTTP/1.1 stream
+            # (http.client.HTTPException and subclasses such as
+            # IncompleteRead -- these do NOT derive from OSError, so
+            # the urlopen()-side `except OSError` above would not have
+            # caught them either). Without this, such a failure here
+            # would raise a bare stdlib exception straight out of
+            # `read`/`total_size`, violating the RangeReader contract
+            # (range_reader.py:25) that no raw exception escapes.
+            raise FcbError(
+                ErrorCode.IO_ERROR,
+                f"HTTP request to {self._url} failed: {exc}",
+            ) from exc
         finally:
             response.close()
