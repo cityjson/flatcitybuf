@@ -1314,4 +1314,91 @@ mod tests {
 
         Ok(())
     }
+
+    /// `metadata.schema.json` types `pointOfContact.address` as a bare object
+    /// with no named members, so BOTH `postcode` (the spec's own examples) and
+    /// `postalCode` (CityJSON 1.x's) are schema-valid spellings and the writer
+    /// accepts either. The header has one fixed slot for them, so the reader
+    /// has to pick one spelling to write back, and it picks `postcode`.
+    ///
+    /// That means a document spelling it `postalCode` round-trips RENAMED --
+    /// a deliberate normalisation, not a loss, and the same shape of choice as
+    /// the texture `image` empty-vs-absent one. Pinned here so that changing
+    /// either half of it is a test failure rather than a silent behaviour
+    /// change for anyone diffing input against output.
+    #[test]
+    fn either_postcode_spelling_is_accepted_and_both_come_back_as_postcode() -> Result<()> {
+        let address_after_round_trip = |address: serde_json::Value| -> Result<cjseq::Address> {
+            let cj: CityJSON = serde_json::from_value(serde_json::json!({
+                "type": "CityJSON",
+                "version": "2.0",
+                "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]},
+                "CityObjects": {},
+                "vertices": [],
+                "metadata": {
+                    "pointOfContact": {
+                        "contactName": "A Person",
+                        "emailAddress": "a@example.org",
+                        "address": address
+                    }
+                }
+            }))?;
+
+            let mut fbb = FlatBufferBuilder::new();
+            let header = to_fcb_header(
+                &mut fbb,
+                &cj,
+                HeaderWriterOptions {
+                    write_index: false,
+                    feature_count: 0,
+                    index_node_size: 16,
+                    attribute_indices: None,
+                    geographical_extent: None,
+                },
+                &AttributeSchema::new(),
+                None,
+                None,
+            )?;
+            fbb.finish(header, None);
+            let buf = fbb.finished_data().to_vec();
+            let header = flatbuffers::root::<crate::fb::Header>(&buf).unwrap();
+            Ok(crate::reader::deserializer::to_cj_address(&header)
+                .expect("the address has a postcode, so it is not empty"))
+        };
+
+        for spelling in ["postcode", "postalCode"] {
+            let address = address_after_round_trip(serde_json::json!({
+                "locality": "Delft",
+                spelling: "2628 CN"
+            }))?;
+            assert_eq!(
+                address.members.get("postcode"),
+                Some(&serde_json::json!("2628 CN")),
+                "`{spelling}` must be accepted and written back as `postcode`"
+            );
+            assert_eq!(
+                address.members.get("postalCode"),
+                None,
+                "the header has one postcode slot; `postalCode` is not also emitted"
+            );
+            //-- the neighbouring member is untouched by the normalisation
+            assert_eq!(
+                address.members.get("locality"),
+                Some(&serde_json::json!("Delft"))
+            );
+        }
+
+        //-- and `postcode` wins when a document carries both, matching the
+        //-- `.or_else()` order in `address_either`
+        let address = address_after_round_trip(serde_json::json!({
+            "postcode": "2628 CN",
+            "postalCode": "1234 AB"
+        }))?;
+        assert_eq!(
+            address.members.get("postcode"),
+            Some(&serde_json::json!("2628 CN"))
+        );
+
+        Ok(())
+    }
 }
