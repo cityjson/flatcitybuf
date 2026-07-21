@@ -415,9 +415,15 @@ pub(super) fn to_fcb_city_feature<'a>(
     semantic_attr_schema: Option<&AttributeSchema>,
 ) -> (flatbuffers::WIPOffset<CityFeature<'a>>, NodeItem) {
     let id = Some(fbb.create_string(id));
-    let city_objects: Vec<_> = city_feature
-        .city_objects
-        .iter()
+    // cjseq stores `city_objects` in a `HashMap`, whose iteration order is
+    // randomly seeded per process. Emitting the objects in that order made the
+    // same input serialise to different bytes on every run; sort by id so the
+    // feature payload is reproducible.
+    let mut object_ids: Vec<&String> = city_feature.city_objects.keys().collect();
+    object_ids.sort_unstable();
+    let city_objects: Vec<_> = object_ids
+        .into_iter()
+        .filter_map(|id| city_feature.city_objects.get(id).map(|co| (id, co)))
         .map(|(id, co)| to_city_object(fbb, id, co, attr_schema, semantic_attr_schema))
         .collect();
     let objects = Some(fbb.create_vector(&city_objects));

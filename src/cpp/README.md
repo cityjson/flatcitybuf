@@ -30,8 +30,9 @@ applications keep their own threading model.
 Output is checked against the Rust reader on the full Delft fixture — all 1115
 features, compared as parsed JSON trees rather than text, since key order and
 float formatting legitimately differ. The conformance corpus in `conformance/`
-at the repository root — shared with the Rust, Python and TypeScript readers —
-covers edge cases the main fixture does not reach: single-feature files,
+at the repository root — its `.expected.jsonl` files are produced by the Rust
+reader, and it is the oracle this reader is checked against; the planned Python
+and TypeScript readers will share it once they exist — covers edge cases the main fixture does not reach: single-feature files,
 prefix-colliding strings, duplicate keys forcing payload entries, zero-area
 extents, and geometry templates.
 

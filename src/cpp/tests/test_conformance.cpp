@@ -85,6 +85,10 @@ TEST_CASE("conformance: degenerate_extent") { check_case("degenerate_extent"); }
 // One feature carrying two values of the same indexed attribute (h = 1 and
 // h = 9 on two BuildingParts), which no other fixture has.
 TEST_CASE("conformance: multi_object_attrs") { check_case("multi_object_attrs"); }
+// features_count = 0 in the header, which means "unknown": the reader must
+// scan to EOF rather than trust the count. Without this case the count-0
+// branch in layout.cpp is never taken by the conformance suite.
+TEST_CASE("conformance: no_count") { check_case("no_count"); }
 // String values that agree in the first 50 bytes -- the width of a B+tree
 // string key -- plus values shorter than 50 bytes, which are zero-padded.
 TEST_CASE("conformance: colliding_strings") { check_case("colliding_strings"); }

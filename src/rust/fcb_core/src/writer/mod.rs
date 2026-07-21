@@ -8,7 +8,7 @@ use header_writer::{HeaderWriter, HeaderWriterOptions};
 use serializer::AttributeIndexInfo;
 
 use crate::error::Result;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 mod attr_index;
@@ -37,8 +37,12 @@ pub struct FcbWriter<'a> {
     feat_nodes: Vec<NodeItem>,
     attr_schema: AttributeSchema,
     semantic_attr_schema: Option<AttributeSchema>,
-    // temporary storage for attribute index entries
-    attribute_index_entries: HashMap<usize, AttributeFeatureOffset>,
+    // Temporary storage for attribute index entries. `BTreeMap`, not
+    // `HashMap`: `build_attribute_index_for_attr` walks it, and for keys that
+    // repeat across features the walk order becomes the payload-list order in
+    // the serialised B+tree. A randomly seeded order there is a different file
+    // on every run.
+    attribute_index_entries: BTreeMap<usize, AttributeFeatureOffset>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -84,7 +88,7 @@ impl<'a> FcbWriter<'a> {
             semantic_attr_schema,
             feat_offsets: Vec::new(),
             feat_nodes: Vec::new(),
-            attribute_index_entries: HashMap::new(),
+            attribute_index_entries: BTreeMap::new(),
         })
     }
 

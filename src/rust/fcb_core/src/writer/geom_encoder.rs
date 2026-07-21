@@ -205,7 +205,14 @@ pub(crate) fn encode_material(
     materials: &HashMap<String, CjMaterialReference>,
 ) -> Vec<MaterialMapping> {
     let mut material_mappings = Vec::new();
-    for (theme, material) in materials {
+    // cjseq hands us a `HashMap`, so fix the theme order: the mappings go out
+    // in iteration order and a randomly seeded one is a different file per run.
+    let mut themes: Vec<&String> = materials.keys().collect();
+    themes.sort_unstable();
+    for (theme, material) in themes
+        .into_iter()
+        .filter_map(|t| materials.get(t).map(|m| (t, m)))
+    {
         if let Some(value) = material.value {
             material_mappings.push(MaterialMapping::Value(MaterialValue {
                 theme: theme.clone(),
@@ -285,7 +292,13 @@ pub(crate) fn encode_texture(
 ) -> Vec<TextureMapping> {
     let mut texture_mappings = Vec::new();
 
-    for (theme, texture) in texture_map {
+    // Same fixed theme order as `encode_material`, and for the same reason.
+    let mut themes: Vec<&String> = texture_map.keys().collect();
+    themes.sort_unstable();
+    for (theme, texture) in themes
+        .into_iter()
+        .filter_map(|t| texture_map.get(t).map(|x| (t, x)))
+    {
         let mut mapping = TextureMapping {
             theme: theme.clone(),
             ..Default::default()

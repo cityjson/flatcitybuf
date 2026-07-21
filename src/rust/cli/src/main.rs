@@ -353,7 +353,15 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         let mut schema = AttributeSchema::new();
         // Limit to max 1000 features for schema building to have faster build time
         for feature in filtered_features.iter().take(1000) {
-            for (_, co) in feature.city_objects.iter() {
+            // Sorted, because `add_attributes` assigns each new attribute the
+            // next free column index -- so a `HashMap`'s random iteration order
+            // would hand the same input different column numbers on every run.
+            let mut ids: Vec<&String> = feature.city_objects.keys().collect();
+            ids.sort_unstable();
+            for co in ids
+                .into_iter()
+                .filter_map(|id| feature.city_objects.get(id))
+            {
                 if let Some(attributes) = &co.attributes {
                     schema.add_attributes(attributes);
                 }
@@ -386,7 +394,13 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
     let semantic_attr_schema = {
         let mut schema = AttributeSchema::new();
         for feature in filtered_features.iter() {
-            for (_, co) in feature.city_objects.iter() {
+            // Sorted for the same reason as the attribute schema above.
+            let mut ids: Vec<&String> = feature.city_objects.keys().collect();
+            ids.sort_unstable();
+            for co in ids
+                .into_iter()
+                .filter_map(|id| feature.city_objects.get(id))
+            {
                 if let Some(geometry) = &co.geometry {
                     for geom in geometry.iter() {
                         if let Some(semantics) = geom.common().and_then(|c| c.semantics.as_ref()) {
@@ -710,7 +724,10 @@ fn deserialize(input: &str, output: &str) -> Result<(), Error> {
     // Write features. The iterator stops at the declared feature count, or at
     // EOF when the header declares 0, which means "unknown". Breaking here on
     // `features_count` instead truncated such a file to a single feature.
-    while let Ok(Some(feat_buf)) = fcb_reader.next() {
+    // `?` on the iterator, not `while let Ok(..)`: swallowing the error made a
+    // mid-file decode failure indistinguishable from a clean end of stream, so
+    // a count-0 file could be truncated to a short, wrong output and still exit 0.
+    while let Some(feat_buf) = fcb_reader.next()? {
         let feature = feat_buf.cur_cj_feature()?;
         writeln!(writer, "{}", serde_json::to_string(&feature)?)?;
     }

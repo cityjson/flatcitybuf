@@ -37,15 +37,24 @@ for src in "${INPUTS[@]}"; do
       deser -i "${OUT}/${name}.fcb" -o "${OUT}/${name}.expected.jsonl")
 done
 
-# Two re-encodings of `small` with non-default writer flags.
 SMALL="${RUST}/fcb_core/tests/data/small.city.jsonl"
 
 # A node size other than the default 16, so a reader that hardcodes 16 fails.
+#
+# The input MUST have more than 8 features for this fixture to bite. The R-tree
+# level bounds are ceil(n / node_size) per level, so for n <= 8 both node sizes
+# collapse to a single-level tree of identical size and a reader that hardcodes
+# 16 traverses the file correctly by accident. `appearance_depths` has 12
+# features: node 16 gives levels [12, 1] = 13 nodes = 520 B, node 8 gives
+# [12, 2, 1] = 15 nodes = 600 B. The 80-byte difference lands a hardcoding
+# reader inside the feature section, where it fails loudly.
+#
 # The node size does not affect the feature order, so this file's contents are
-# small.expected.jsonl and it gets no expected file of its own.
-echo "==> small_node8 (index_node_size = 8)"
+# appearance_depths.expected.jsonl and it gets no expected file of its own.
+NODE8_SRC="${INPUTS_DIR}/appearance_depths.city.jsonl"
+echo "==> appearance_depths_node8 (index_node_size = 8)"
 (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
-    ser -A --index-node-size 8 -i "${SMALL}" -o "${OUT}/small_node8.fcb")
+    ser -A --index-node-size 8 -i "${NODE8_SRC}" -o "${OUT}/appearance_depths_node8.fcb")
 
 # features_count = 0, which means "unknown": the reader must scan to EOF.
 # The R-tree is omitted because its size is derived from the feature count,

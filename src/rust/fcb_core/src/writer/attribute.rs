@@ -3,10 +3,17 @@ use byteorder::{ByteOrder, LittleEndian};
 use chrono::{DateTime, Utc};
 use cjseq::CityJSONFeature;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 // Schema for attributes. The key is the attribute name, the value is a tuple of the column index and the column type.
-pub type AttributeSchema = HashMap<String, (u16, ColumnType)>;
+//
+// This is a `BTreeMap`, not a `HashMap`, on purpose: the schema's iteration
+// order decides the order attribute columns are emitted in and (via `self.len()`
+// at insert time) which column index each attribute is assigned. `HashMap`
+// iteration is randomly seeded per process, which made two runs of the writer
+// over the same input produce different bytes. The conformance corpus is
+// committed as a pinned oracle, so the writer must be byte-reproducible.
+pub type AttributeSchema = BTreeMap<String, (u16, ColumnType)>;
 
 pub trait AttributeSchemaMethods {
     fn add_attributes(&mut self, attrs: &Value);
@@ -218,7 +225,15 @@ pub fn cityfeature_to_index_entries(
     indexing_attr: &[String],
 ) -> Vec<AttributeIndexEntry> {
     let mut index_entries = Vec::new();
-    for object in cityfeature.city_objects.values() {
+    // `city_objects` is a `HashMap` in cjseq, so iterate it in a fixed (id)
+    // order -- the entry order reaches the B+tree payload lists for duplicate
+    // keys, and a random order there is a random output file.
+    let mut object_ids: Vec<_> = cityfeature.city_objects.keys().collect();
+    object_ids.sort_unstable();
+    for object in object_ids
+        .into_iter()
+        .filter_map(|id| cityfeature.city_objects.get(id))
+    {
         if let Some(attr) = &object.attributes {
             let attr_index_entries = attribute_to_index_entries(attr, schema, indexing_attr);
             index_entries.extend(attr_index_entries);
