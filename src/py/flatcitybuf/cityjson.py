@@ -636,6 +636,35 @@ def _poc_address(hdr: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _extensions_to_json(hdr: Any) -> Dict[str, Any]:
+    """The CityJSON `extensions` object, keyed by extension name.
+    Mirrors Rust's to_cj_metadata (deserializer.rs:33-50): entries
+    without a name are skipped entirely, and a missing url/version
+    becomes "" (`unwrap_or_default`) rather than being omitted.
+
+    Returns an empty dict when the header declares no extensions, so
+    the caller can decide whether to emit the key at all -- Rust sets
+    `cj.extensions` only when the map is non-empty.
+    """
+    if hdr is None or hdr.ExtensionsIsNone():
+        return {}
+    out: Dict[str, Any] = {}
+    for j in range(hdr.ExtensionsLength()):
+        ext = hdr.Extensions(j)
+        if ext is None:
+            continue
+        name = ext.Name()
+        if name is None:
+            continue
+        url = ext.Url()
+        version = ext.Version()
+        out[_decode_str(name)] = {
+            "url": _decode_str(url) if url is not None else "",
+            "version": _decode_str(version) if version is not None else "",
+        }
+    return out
+
+
 def _point_of_contact(hdr: Any) -> Optional[Dict[str, Any]]:
     """`Header.poc_*` -> CityJSON `metadata.pointOfContact`. Mirrors
     deserializer.rs's to_cj_point_of_contact: emitted only when
@@ -678,13 +707,18 @@ def _point_of_contact(hdr: Any) -> Optional[Dict[str, Any]]:
 
 def to_cityjson_metadata(header: HeaderView) -> Dict[str, Any]:
     """The CityJSONSeq header line: `type`/`version`/`transform`/
-    `metadata`, plus geometry templates when the header declares both a
-    templates array and a templates-vertices array. Mirrors
-    cityjson.cpp's to_cityjson_metadata (cityjson.cpp:349-406) for
-    everything except `pointOfContact`/`referenceDate` -- see the task
-    report for why those two are read here even though cityjson.cpp
-    does not emit them at all (a real gap found by comparing against
-    delft.fcb through the Rust reader, the true oracle).
+    `metadata`/`extensions`, plus geometry templates when the header
+    declares both a templates array and a templates-vertices array.
+
+    Mirrors Rust's to_cj_metadata (fcb_core/src/reader/deserializer.rs:
+    22-108), the authoritative oracle, and equivalently cityjson.cpp's
+    now-fixed to_cityjson_metadata. In particular `transform`,
+    `metadata` and `metadata.geographicalExtent` are UNCONDITIONAL
+    there -- Rust starts from CityJSON::new() (Transform default scale
+    [1,1,1] / translate [0,0,0]) and always assigns
+    `cj.metadata = Some(CjMetadata { geographical_extent: Some(...)
+    })`, defaulting the extent to six zeros via `unwrap_or_default()`.
+    Every other metadata field is an Option and stays conditional.
 
     A CityJSONSeq header line carries no features of its own, hence the
     empty `CityObjects`/`vertices`.
@@ -709,15 +743,33 @@ def _to_cityjson_metadata_impl(header: HeaderView) -> Dict[str, Any]:
     hdr = header._raw
     cj: Dict[str, Any] = {"type": "CityJSON", "version": info.cityjson_version}
 
-    if info.scale is not None and info.translate is not None:
-        cj["transform"] = {
-            "scale": list(info.scale),
-            "translate": list(info.translate),
-        }
+    # Unconditional: Rust only OVERWRITES CityJSON::new()'s default
+    # Transform when header.transform() is Some, it never omits the
+    # key (deserializer.rs:24-31).
+    has_transform = info.scale is not None and info.translate is not None
+    cj["transform"] = {
+        "scale": (
+            list(info.scale)
+            if has_transform and info.scale is not None
+            else [1.0, 1.0, 1.0]
+        ),
+        "translate": (
+            list(info.translate)
+            if has_transform and info.translate is not None
+            else [0.0, 0.0, 0.0]
+        ),
+    }
 
-    meta: Dict[str, Any] = {}
-    if info.geographical_extent is not None:
-        meta["geographicalExtent"] = list(info.geographical_extent)
+    # Unconditional, likewise, including geographicalExtent, which
+    # falls back to six zeros rather than being omitted
+    # (deserializer.rs:63-90).
+    meta: Dict[str, Any] = {
+        "geographicalExtent": (
+            list(info.geographical_extent)
+            if info.geographical_extent is not None
+            else [0.0] * 6
+        )
+    }
     if info.identifier:
         meta["identifier"] = info.identifier
     if hdr is not None:
@@ -734,11 +786,17 @@ def _to_cityjson_metadata_impl(header: HeaderView) -> Dict[str, Any]:
         )
     if info.title:
         meta["title"] = info.title
-    if meta:
-        cj["metadata"] = meta
+    cj["metadata"] = meta
 
     cj["CityObjects"] = {}
     cj["vertices"] = []
+
+    # `extensions`: Rust emits it whenever the header carries at least
+    # one named Extension (deserializer.rs:33-50), skipping unnamed
+    # entries and defaulting a missing url/version to "".
+    extensions = _extensions_to_json(hdr)
+    if extensions:
+        cj["extensions"] = extensions
 
     # Geometry templates: shapes shared by every GeometryInstance in the
     # file, with their own vertex list. Emitted only when BOTH arrays

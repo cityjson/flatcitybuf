@@ -49,13 +49,15 @@ def test_matches_the_rust_reader(name: str) -> None:
     ]
     assert len(actual) == len(expected)
 
-    # Line 0: the parts a reader must get right. We deliberately do not
-    # reproduce every optional metadata field the Rust writer round
-    # trips (see to_cityjson_metadata's docstring for pointOfContact/
-    # referenceDate, which ARE reproduced and checked elsewhere).
-    for key in ("type", "version", "transform", "geometry-templates"):
-        if key in expected[0]:
-            assert actual[0][key] == expected[0][key]
+    # Line 0 (the header line): compare the WHOLE line, exactly as the
+    # feature lines below are compared. Narrowing this to a handful of
+    # named keys with `if key in expected[0]` is what let a MISSING key
+    # pass unnoticed -- `extensions` was never emitted at all, and
+    # `metadata` was presence-gated where Rust emits it
+    # unconditionally (upstream findings 12 and 13). Do not narrow it
+    # again: if a field genuinely cannot be reproduced, fix the reader
+    # or exclude that one field with a comment naming it.
+    assert actual[0] == expected[0], f"{name} line 0"
 
     # Features: compare the WHOLE line. Comparing selected keys is
     # exactly what hid a missing per-feature `appearance` object during

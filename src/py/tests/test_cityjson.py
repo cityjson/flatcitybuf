@@ -15,7 +15,8 @@ from flatcitybuf.cityjson import to_cityjson_metadata
 from flatcitybuf.errors import ErrorCode, FcbError
 from flatcitybuf.generated.geometry_generated import GeometryType
 from flatcitybuf.generated.header_generated import ColumnType
-from flatcitybuf.header import ColumnInfo
+from flatcitybuf.header import ColumnInfo, FileInfo, HeaderView
+from flatcitybuf.layout import FileLayout
 from flatcitybuf.reader import FcbReader
 
 CORPUS = Path(__file__).resolve().parents[3] / "conformance"
@@ -91,6 +92,42 @@ def test_metadata_from_geom_temp_matches_the_oracle_exactly() -> None:
         if line.get("type") == "CityJSON"
     ]
     assert cj == expected
+
+
+def test_metadata_defaults_when_the_header_declares_nothing() -> None:
+    # Synthetic, because NO corpus case has an absent Transform or an
+    # absent GeographicalExtent -- widening test_conformance.py's line-0
+    # comparison therefore cannot catch a reader that presence-gates
+    # them (upstream findings 13/14). Rust's to_cj_metadata
+    # (deserializer.rs:22-90) starts from CityJSON::new(), whose
+    # Transform defaults to scale [1,1,1] / translate [0,0,0], and
+    # always sets `metadata` with `geographical_extent:
+    # Some(unwrap_or_default())` -- six zeros. Neither key may be
+    # omitted.
+    header = HeaderView(
+        info=FileInfo(cityjson_version="2.0"),
+        layout=FileLayout(
+            header_len=0,
+            rtree_begin=0,
+            rtree_size=0,
+            attr_index_begin=0,
+            attr_index_size=0,
+            feature_begin=0,
+        ),
+        attr_indices=[],
+    )
+    cj = to_cityjson_metadata(header)
+    assert cj == {
+        "type": "CityJSON",
+        "version": "2.0",
+        "transform": {
+            "scale": [1.0, 1.0, 1.0],
+            "translate": [0.0, 0.0, 0.0],
+        },
+        "metadata": {"geographicalExtent": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+        "CityObjects": {},
+        "vertices": [],
+    }
 
 
 # ------------------------------------------------------------ feature ---
