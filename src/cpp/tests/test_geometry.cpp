@@ -94,9 +94,10 @@ TEST_CASE("two solids each keep their own shell list") {
 
 TEST_CASE("a ring claiming more indices than exist throws") {
     // A deliberate divergence, documented in geometry.hpp: the reference
-    // clamps every slice and is memory-safe by construction, whereas reading
-    // past a flatbuffers vector here would be undefined behaviour. Only
-    // reachable on a corrupt file.
+    // clamps and yields a short array; we choose to report the corruption
+    // instead. Clamping would be equally safe here -- the appearance decoders
+    // below do it -- so this is a choice about what a reader should tell its
+    // caller, not a C++ constraint. Only reachable on a corrupt file.
     std::vector<std::uint32_t> strings = {99};
     std::vector<std::uint32_t> idx = {0, 1, 2};
     CHECK_THROWS_AS(decode_boundaries(GeometryKind::MultiLineString, UIntView(), UIntView(),

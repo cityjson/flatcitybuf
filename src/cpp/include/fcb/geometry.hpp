@@ -70,9 +70,16 @@ enum class GeometryKind : std::uint8_t {
 /// which is where all the ambiguity came from.
 ///
 /// Mirrors `decode_points`/`decode_rings`/`decode_surfaces`/`decode_shells`/
-/// `decode_solids` (geom_decoder.rs:106-146), except that a cursor overrun
-/// throws here rather than yielding a truncated array: the reference is
-/// memory-safe by construction and a C++ reader must not read out of bounds.
+/// `decode_solids` (geom_decoder.rs:106-146), except for one DELIBERATE
+/// divergence: a cursor overrun throws here, where the reference clamps and
+/// yields a short array.
+///
+/// This is a choice, not a constraint. Clamping is perfectly safe in C++ --
+/// the three appearance decoders below do exactly that, and do not throw.
+/// We choose to error because count arrays that disagree with the index array
+/// mean the file is corrupt, and reporting corruption is more useful to a
+/// caller than a plausible-looking short geometry. Only reachable on a file
+/// our own writer could not have produced.
 nlohmann::json decode_boundaries(GeometryKind type,
                                  UIntView solids,
                                  UIntView shells,

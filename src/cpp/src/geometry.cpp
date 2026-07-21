@@ -10,15 +10,29 @@ namespace {
 
 // GeometryKind is declared in the public header so callers need not include
 // the generated flatbuffers code; it must stay in lock-step with it.
-static_assert(static_cast<std::uint8_t>(GeometryKind::MultiPoint) ==
-                  static_cast<std::uint8_t>(::GeometryType::MultiPoint),
-              "GeometryKind has drifted from the generated GeometryType");
-static_assert(static_cast<std::uint8_t>(GeometryKind::CompositeSolid) ==
-                  static_cast<std::uint8_t>(::GeometryType::CompositeSolid),
-              "GeometryKind has drifted from the generated GeometryType");
-static_assert(static_cast<std::uint8_t>(GeometryKind::GeometryInstance) ==
-                  static_cast<std::uint8_t>(::GeometryType::GeometryInstance),
-              "GeometryKind has drifted from the generated GeometryType");
+//
+// ALL EIGHT are asserted, not a sample. Spot-checking the ends would let a
+// SWAP through: exchanging Solid(4) and MultiSolid(5) in geometry.fbs keeps
+// the first and last enumerators in place while silently inverting the exact
+// depths this file exists to get right.
+#define FCB_ASSERT_KIND(name)                                             \
+    static_assert(static_cast<std::uint8_t>(GeometryKind::name) ==        \
+                      static_cast<std::uint8_t>(::GeometryType::name),    \
+                  "GeometryKind::" #name " has drifted from the generated GeometryType")
+FCB_ASSERT_KIND(MultiPoint);
+FCB_ASSERT_KIND(MultiLineString);
+FCB_ASSERT_KIND(MultiSurface);
+FCB_ASSERT_KIND(CompositeSurface);
+FCB_ASSERT_KIND(Solid);
+FCB_ASSERT_KIND(MultiSolid);
+FCB_ASSERT_KIND(CompositeSolid);
+FCB_ASSERT_KIND(GeometryInstance);
+#undef FCB_ASSERT_KIND
+// And that there are still exactly eight: a NEW enumerator appended to the
+// .fbs adds a depth this reader has never seen and must be considered here.
+static_assert(static_cast<std::uint8_t>(::GeometryType::MAX) ==
+                  static_cast<std::uint8_t>(GeometryKind::GeometryInstance),
+              "geometry.fbs gained a GeometryType; give it a depth in this file");
 
 #ifdef FCB_WITH_JSON
 

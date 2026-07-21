@@ -300,7 +300,13 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
         as_uint_view(g->boundaries()));
 
     // Semantics: a surface list plus a values array indexing into it.
-    if (g->semantics_objects() != nullptr && g->semantics_objects()->size() > 0) {
+    // ABSENT-VS-EMPTY, fourth site. The reference keys the `semantics` member
+    // off the PRESENCE of `semantics_objects` alone (deserializer.rs:699), so
+    // a present-but-EMPTY surface vector is `"surfaces": []` -- a semantics
+    // member with no surfaces -- and not a missing member. The writer emits
+    // exactly that shape (serializer.rs:946 calls create_vector on a possibly
+    // empty Vec), so a `size() > 0` guard here dropped the whole member.
+    if (g->semantics_objects() != nullptr) {
         auto surfaces = nlohmann::json::array();
         for (const auto* so : *g->semantics_objects()) {
             if (so == nullptr) continue;
