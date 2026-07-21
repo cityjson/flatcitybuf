@@ -43,21 +43,12 @@ static void check_case(const std::string& name) {
 
     REQUIRE(actual.size() == expected.size());
 
-    // Line 0 is the metadata envelope. We deliberately do not reproduce
-    // every optional field the Rust writer round-trips (point-of-contact
-    // and similar), so compare the parts a reader must get right.
-    CHECK(actual[0]["type"] == expected[0]["type"]);
-    CHECK(actual[0]["version"] == expected[0]["version"]);
-    if (expected[0].contains("transform")) {
-        CHECK(actual[0]["transform"] == expected[0]["transform"]);
-    }
-    // Geometry templates live only on line 0; the features reference them by
-    // index, so a mismatch here silently corrupts every GeometryInstance.
-    CHECK(actual[0].contains("geometry-templates") ==
-          expected[0].contains("geometry-templates"));
-    if (expected[0].contains("geometry-templates")) {
-        CHECK(actual[0]["geometry-templates"] == expected[0]["geometry-templates"]);
-    }
+    // Line 0 is the metadata envelope. Once pointOfContact/referenceDate
+    // were wired up (Task 15, defect 2), nothing was left to deliberately
+    // exclude here, so this is a full comparison like the feature lines
+    // below -- narrowing it back down to individual keys is what let the
+    // pointOfContact/referenceDate gap go unnoticed for as long as it did.
+    CHECK(actual[0] == expected[0]);
 
     for (std::size_t i = 1; i < actual.size(); ++i) {
         CAPTURE(i);
@@ -93,6 +84,11 @@ TEST_CASE("conformance: empty_appearance") { check_case("empty_appearance"); }
 // to byte-identical count arrays, so ONLY the geometry type separates them;
 // this case fails for any reader that infers depth from the arrays.
 TEST_CASE("conformance: appearance_depths") { check_case("appearance_depths"); }
+// The only fixture whose expected output contains a semantic surface
+// `"parent"` (defect 1) and a full `pointOfContact`/`referenceDate`
+// metadata line (defect 2). Its absence from this list is why both defects
+// shipped undetected.
+TEST_CASE("conformance: geom_decoder_edges") { check_case("geom_decoder_edges"); }
 
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");

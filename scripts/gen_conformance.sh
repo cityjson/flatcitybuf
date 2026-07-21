@@ -7,10 +7,16 @@
 # the RUST reader and save its output as the expected result. Comparing C++
 # against the Rust reader's view of the same file (rather than against the
 # original JSON) cancels out any shared normalisation and isolates C++ bugs.
+#
+# conformance/*.fcb and *.expected.jsonl are tracked in git, and this script
+# overwrites both. Regeneration is NOT byte-reproducible -- cjseq2 iterates
+# CityObjects from a HashMap with per-process ordering -- so `git diff` after
+# running this will show churn even when nothing semantic changed. Compare
+# the *parsed* JSON before committing a change; don't commit pure noise.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="${REPO_ROOT}/src/cpp/tests/conformance"
+OUT="${REPO_ROOT}/conformance"
 RUST="${REPO_ROOT}/src/rust"
 INPUTS_DIR="${OUT}/inputs"
 

@@ -97,7 +97,7 @@ flatcitybuf/
 
 FlatCityBuf provides bindings for multiple languages:
 
-- **[Python](src/rust/fcb_py/README.md)** – Read and query FlatCityBuf files from Python
+- **[Python](src/py/README.md)** – Pure-Python reader, no compiled dependency (`pip install flatcitybuf`)
 - **[C++](src/cpp/README.md)** – Native C++ bindings via CXX bridge
 - **[WebAssembly](src/rust/wasm/README.md)** – Use FlatCityBuf in the browser or Node.js
 

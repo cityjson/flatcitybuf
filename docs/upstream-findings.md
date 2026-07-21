@@ -84,6 +84,93 @@ reads back as `-56`.
 **C++ divergence:** matches the writer (`u8`), so it decodes files correctly
 and disagrees with the Rust reader for values above 127.
 
+**Scope of this fix:** this item covers only the attribute-*index* decode
+path (`reader/attr_query.rs`, used when building/querying a B+tree index
+over an attribute column). It does not cover the separate feature-*value*
+decode path — see item 2a, which is a distinct, still-open defect in the
+same family.
+
+---
+
+## 2a. `Byte` feature-attribute value decode: still decodes as `i8` — NOT FIXED
+
+**Where:** `reader/deserializer.rs:375-383`, inside `decode_attributes`
+(the function that turns a `CityObject`'s raw attribute bytes into the
+`serde_json::Value` returned for every feature — i.e. the live
+`to_cj_feature` path, not the index/query path item 2 covers):
+
+```rust
+ColumnType::Byte => {
+    map.insert(
+        column.name().to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            bytes[offset] as i8,
+        )),
+    );
+    offset += size_of::<u8>();
+}
+```
+
+**Before/consequence:** the writer stores `Byte` as `u8` (same site as item
+2: `writer/attribute.rs:138-141`, `out[offset] = b as u8;`), so a stored
+`200` is the single byte `0xC8`. `decode_attributes` reads that byte back
+via `bytes[offset] as i8`, so any consumer that reads a feature's
+attributes through `fcb_core` (CLI `deser`, `to_cj_feature`, the Rust
+library's normal read path) sees `-56` for a stored `200` — the exact
+defect item 2 already fixed, but at a different call site that was never
+touched. Item 2's "FIXED" applies only to the index/query path; this
+value-decode path is a **separate, currently-unfixed** site with the same
+bug.
+
+C++ and Python do not reproduce `-56`, but not because they decode `Byte`
+as unsigned at this layer — they refuse to decode it at all. Both
+feature-value decoders (`src/cpp/src/attribute.cpp:145-156`,
+`src/py/flatcitybuf/attribute.py:41-43,123-128`) raise
+`UnsupportedColumnType`/`FcbError(UNSUPPORTED_COLUMN_TYPE)` for
+`Byte`/`UByte`/`Binary` outright, each citing the same justification in
+its own comment: *"the Rust reader hits `unreachable!()` on them
+(deserializer.rs:372), so no file in the wild has ever had them read
+back."* That justification is itself stale — item 3 above fixed exactly
+that `unreachable!()`, and Rust's `decode_attributes` has decoded these
+three types (not panicked on them) since. So today: a `Byte` feature
+attribute is read (wrongly, as negative) by Rust, and rejected outright by
+both C++ and Python, which is a live three-way disagreement beyond the
+Rust-only sign bug this item is otherwise about. Fixing either side —
+Rust's sign, or C++/Python's blanket rejection — is out of scope here;
+recorded so whoever picks either up has both halves of the picture.
+
+**Reproduce:** no existing conformance fixture exercises this, because the
+writer's schema inference (`writer/attribute.rs::guess_type`) never
+produces `ColumnType::Byte` from parsed CityJSON — every plain JSON integer
+is guessed as `Long`/`ULong`, and there is no CLI flag or config to force a
+column to `Byte`. A `Byte` column can currently only arise from a caller
+that constructs an `AttributeSchema` by hand (bypassing `guess_type`), so
+there is no fixture on disk and none of `scripts/gen_conformance.sh`'s
+inputs (including `inferable_types.city.jsonl`) can be used as-is to
+reproduce this through the CLI.
+
+The following **was run** against this tree's `fcb_core` as an external
+crate (constructing the `Header`/`CityFeature` FlatBuffers by hand, since
+`guess_type` and the writer's `encode_attributes_with_schema` are
+`pub(crate)`/`pub(super)` and cannot build a `Byte` column from outside the
+crate) — this is an observed result, not a hypothetical one:
+
+```rust
+// Header: one column, `b`, ColumnType::Byte.
+// Attributes buffer for one CityObject: [u16 LE col_index = 0][u8 value = 200],
+// i.e. exactly what writer/attribute.rs would emit for {"b": 200} against
+// a Byte-typed column.
+let decoded = decode_attributes(&header_buf.columns().unwrap(), attributes);
+println!("{}", decoded);
+```
+```
+stored Byte value: 200
+decode_attributes() result: {"b":-56}
+```
+
+**Not fixed:** out of scope for this task (documentation only); recorded
+here, with the exact citation, for whoever picks up the Rust-side fix.
+
 ---
 
 ## 3. `Byte`/`UByte`/`Binary` attributes cannot be read back at all — FIXED
@@ -95,6 +182,15 @@ containing such an attribute is unreadable by the implementation that wrote it.
 
 **C++ divergence:** decodes all three. Their widths are unambiguous (1, 1, and
 `u32` length + bytes), so there is no reason to refuse them.
+
+> **NOTE — this C++ divergence is stale; see item 2a.** Current
+> `src/cpp/src/attribute.cpp` and `src/py/flatcitybuf/attribute.py` both
+> *reject* `Byte`/`UByte`/`Binary` with `UnsupportedColumnType`, each still
+> citing the `unreachable!()` this item records as fixed. The source comments
+> at `src/cpp/src/attribute.cpp` and `src/py/flatcitybuf/attribute.py` carry
+> the same stale justification, as does `src/cpp/src/key.cpp`'s mirror-image
+> claim about `reader/attr_query.rs:118`. A future pass should reconcile all
+> four together.
 
 ---
 
@@ -284,3 +380,650 @@ with the two fixes above, the two decoders must change together — a depth rule
 that holds in one reader and not the other is a file that round-trips through
 `fcb_core` and not through the C++ reader, which is the harder bug of the two
 to find.
+
+---
+
+# Defects found while porting the native Python reader
+
+The plan (`docs/superpowers/plans/2026-07-20-native-python-core.md`) built a
+third, independent, pure-Python reader over `fcb_core` (Rust, the oracle) as
+ground truth and the C++ reader as the direct porting reference. Comparing
+all three over the same bytes — Rust's own CLI output, the C++ conformance
+suite, and Python's — surfaced eight further C++-reader defects (§9-16, all
+now **FIXED** on this branch as Task 15), one still-open Rust-reader defect
+(§17), one FlatBuffers-codegen tooling defect (§18), a class of known,
+disclosed limitations left in place (§19), the deliberate behavioural
+divergences the new Python reader keeps against C++/Rust (§20), and one
+defect in the plan document itself (§21).
+
+Every citation below was re-checked against the source as it stands after
+the Task 15 fixes landed (commits `86f0645`, `086acd7`, `0036ab9`); §9-16's
+"before" quotes describe pre-fix behaviour that no longer exists in the tree.
+Reproductions for §9-16 were re-run live for this write-up (not merely
+copied from the implementer's report): `fcb_read_local`'s output on
+`conformance/geom_decoder_edges.fcb` was parsed and compared for structural
+equality against `conformance/geom_decoder_edges.expected.jsonl` (the Rust
+oracle's output for the same file) — `EQUAL`; and
+`./build-native/tests/fcb_tests -tc="querying a Json/Binary column is
+rejected as unsupported"` was re-run — `1 | 1 passed`. The full suite is
+127 test cases / 15915 assertions, all passing, confirmed by running
+`./build-native/tests/fcb_tests` directly against the current tree.
+
+## 9. `SemanticObject::parent` never emitted — FIXED
+
+**Where:** `src/cpp/src/cityjson.cpp`'s semantics-surface builder inside
+`geometry_to_json` (the `parent` check now sits at line 301, just after the
+surface's `type` is set). Rust's `decode_semantics_surfaces` populates it
+unconditionally (`src/rust/fcb_core/src/reader/geom_decoder.rs:217`,
+`parent: s.parent(),`); the field is `parent:uint = null` in the schema
+(`src/fbs/geometry.fbs:90`), and `cjseq2`'s `SemanticsSurface` struct
+serializes it with `skip_serializing_if = "Option::is_none"`.
+
+**Before:** the builder read `type`, `attributes`, and `children` off each
+`SemanticObject` but never called `so->parent()` at all.
+
+**Consequence for a consumer:** a `Door`/`Window` surface's back-pointer to
+its enclosing `WallSurface` silently vanished. `children` survived (it comes
+from the *parent* surface), so the tree looked navigable top-down but a
+child-to-parent lookup silently returned nothing — no error, just a missing
+key.
+
+**Missed by the C++ suite because:** `conformance/geom_decoder_edges.fcb` is
+the only fixture whose oracle output contains a semantic-surface `"parent"`
+key, and it was not in `test_conformance.cpp`'s case list (now added at
+line 86, with a comment explaining exactly this).
+
+**Fix:** `if (const auto p = so->parent()) s["parent"] = *p;` — checked
+against the FlatBuffers `Optional<uint32_t>` itself, not truthiness, since
+`parent: 0` is a real, non-absent value a `if (so->parent())`-on-a-plain-int
+reading would have swallowed just as easily as omitting it entirely.
+
+**Reproduce (re-run for this write-up):**
+```
+$ ./src/cpp/build-native/fcb_read_local conformance/geom_decoder_edges.fcb \
+    > /tmp/out.jsonl
+$ python3 -c "
+import json
+lines = [json.loads(l) for l in open('/tmp/out.jsonl')]
+for l in lines[1:]:
+    for oid, obj in l['CityObjects'].items():
+        for g in obj.get('geometry', []):
+            if g.get('semantics'): print(oid, g['semantics'])
+"
+semantics_parent {'surfaces': [{'children': [1], 'type': 'WallSurface'}, {'parent': 0, 'type': 'Door'}], 'values': [0, 1]}
+```
+`{'parent': 0, ...}` is present and equals the Rust oracle
+(`conformance/geom_decoder_edges.expected.jsonl`) exactly.
+
+## 10. Header `pointOfContact`/`referenceDate` never emitted — FIXED
+
+**Where:** `to_cityjson_metadata` in `src/cpp/src/cityjson.cpp` (now lines
+447-524-ish); support added in `src/cpp/include/fcb/header.hpp` (`FileInfo`
+gained `reference_date` at line 62, `poc_email` at line 71, plus ten more
+`poc_*`/`poc_address_*` fields) and `src/cpp/src/header.cpp`'s
+`fill_metadata` (line 80; populates `reference_date` at line 113,
+`poc_email`/`has_poc_email` at lines 123-125). Rust builds both
+unconditionally from the header in `to_cj_metadata`
+(`src/rust/fcb_core/src/reader/deserializer.rs:77-90`), reading
+`Header.reference_date` (`src/fbs/header.fbs:143`) and
+`Header.poc_contact_name` (`src/fbs/header.fbs:151`, the field whose
+presence alone gates the whole `pointOfContact` object on the Rust side) —
+both stored natively in the FlatBuffer, nothing derived.
+
+**Before:** `to_cityjson_metadata` built only `geographicalExtent`,
+`referenceSystem`, `identifier`, `title` — it never read any `poc_*` field
+or `reference_date` at all. This had been acknowledged in a C++ test
+comment but never actually tested.
+
+**Consequence for a consumer:** every dataset's contact/provenance metadata
+(who to contact about the data, and as-of what date) silently disappeared
+on the C++ path, even though the source file carried it.
+
+**Fix + reproduce (re-run for this write-up):**
+```
+$ ./src/cpp/build-native/fcb_read_local conformance/geom_decoder_edges.fcb \
+    | head -1 > /tmp/line0.json
+$ python3 -c "
+import json
+a = json.load(open('/tmp/line0.json'))
+b = json.loads(open('conformance/geom_decoder_edges.expected.jsonl').readline())
+print('EQUAL' if a == b else 'DIFFERENT')
+"
+EQUAL
+```
+The metadata line now carries the full `pointOfContact` (`contactName`,
+`contactType`, `role`, `phone`, `emailAddress`, `website`, a nested
+`address`) and `referenceDate`, structurally identical to the Rust reader's
+output for the same file.
+
+**Evidence is narrower than it looks — flagged explicitly:** `examples/data/delft.fcb`
+alone cannot exercise this defect or #9: it has zero `"parent"` occurrences
+across 1115 features and no `referenceDate` in its metadata. Only the
+purpose-built `conformance/geom_decoder_edges.fcb` fixture (added alongside
+the Python geometry/CityJSON task) carries a `parent`-bearing semantic
+surface and a full `pointOfContact`/`referenceDate`. `delft.fcb` does confirm
+a *partial* form of this defect on real-world data (see its own
+`pointOfContact` without an `address`, checked below), but not the address
+sub-object or `referenceDate`.
+
+## 11. `select_attr` never type-checks Json/Binary columns — FIXED
+
+**Where:** `FcbReader::select_attr`, `src/cpp/src/reader.cpp:327-459`; the
+new guard sits at lines 360-367, immediately after column resolution and
+before the "is it indexed" lookup. `key_kind_for_column`
+(`src/cpp/src/key.cpp:326-352`) maps `ColumnType::Json` (line 348) and
+`ColumnType::Binary` (line 349) to `KeyKind::String100` — a real, working
+key kind — so without the new guard `select_attr` would happily execute a
+query against a Json/Binary column's index (were one ever built for it) and
+return truncated-blob-prefix candidates as if they meant something. Rust's
+`attr_query.rs` has no dedicated arm for either type in its two
+column-type matches (`src/rust/fcb_core/src/reader/attr_query.rs:38-139` and
+`:158-279`); both fall through to the catch-all
+`_ => return Err(Error::UnsupportedColumnType(...))` at lines 139 and 279,
+i.e. Rust rejects the query outright.
+
+**Consequence for a consumer:** C++ would answer a Json/Binary attribute
+query — silently wrong, since a Json/Binary index key is only the first 100
+bytes of a serialized blob and says nothing about the decoded value. In
+practice this was unreachable through the writer alone (it never builds an
+index over a Json/Binary column, `-A` included), which is exactly why the
+regression test below has to hand-construct a `HeaderView` carrying one.
+
+**Fix:** reject `ColumnType::Json`/`ColumnType::Binary` unconditionally,
+before the index-lookup — so rejection does not depend on whether this
+particular writer happened to index the column. Mirrors Python's
+`stree.py::_resolve` (its own comment calls this "DIVERGENCE 2" — see §20
+below), which does the identical check for the identical reason.
+
+**Reproduce (re-run for this write-up):**
+```
+$ cd src/cpp && ./build-native/tests/fcb_tests \
+    -tc="querying a Json/Binary column is rejected as unsupported"
+[doctest] test cases: 1 | 1 passed | 0 failed | 126 skipped
+[doctest] assertions: 2 | 2 passed | 0 failed |
+```
+Test uses `conformance/inferable_types.fcb`'s `a_json` column (confirmed
+*not* indexed by the writer), so it specifically pins "reject regardless of
+indexed-ness." Before the fix this threw `AttributeIndexNotFound` (code 4)
+instead of `UnsupportedColumnType` (code 7) — verified TDD-style by the
+implementer (guard reverted, single case rerun, confirmed the `4 != 7`
+mismatch, guard restored).
+
+## 12. Top-level `extensions` never emitted — FIXED
+
+**Where:** `to_cityjson_metadata`, `src/cpp/src/cityjson.cpp`; new
+`extensions_to_json(const ::Header*)` helper at lines 413-433, wired in at
+line 502. Mirrors Rust's extensions block in `to_cj_metadata`
+(`src/rust/fcb_core/src/reader/deserializer.rs:33-49`): builds a
+name→`{url, version}` map, skips entries with no name (verified by reading
+the Rust source directly, lines 33-49 above), and omits the whole
+`extensions` key when the map ends up empty — not merely when the header's
+`extensions` vector is empty or absent (`if !extensions_map.is_empty()`,
+deserializer.rs line 48).
+
+**Consequence for a consumer:** a dataset using a CityJSON Extension (the
+fixture `noise_extension.fcb` uses one) lost the `extensions` block
+entirely — a consumer had no way to resolve the extension's schema URL or
+version, even though every extended attribute (`+noise-buildingLNightMax`
+etc.) was still present and decodable.
+
+**Found by:** widening `test_conformance.cpp`'s line-0 metadata check from
+four hand-picked keys to a full-object compare (`CHECK(actual[0] ==
+expected[0])`, now at line 51) — `noise_extension.fcb`'s Rust-oracle output
+carries `"extensions":{"Noise":{"url":"...","version":"1.1"}}` and C++
+emitted nothing until this fix.
+
+## 13. `metadata`/`metadata.geographicalExtent` presence-gated, unconditional in Rust — FIXED
+
+**Where:** `to_cityjson_metadata`, `src/cpp/src/cityjson.cpp:465-491`. Rust's
+`to_cj_metadata` (`deserializer.rs:81-90`) always sets
+`cj.metadata = Some(CjMetadata { geographical_extent: Some(...), ... })`,
+where the extent itself is `header.geographical_extent().map(...)
+.unwrap_or_default()` — i.e. Rust *always* emits a `metadata` object with at
+least a (possibly all-zero) `geographicalExtent`, never omits either key.
+
+**Before:** C++ emitted `metadata` only when at least one sub-field was
+non-empty, and omitted `geographicalExtent` specifically when the header
+carried no `GeographicalExtent` struct.
+
+**Consequence for a consumer:** a file with no extent metadata at all (e.g.
+`noise_extension.fcb`, whose source JSONL has no `"metadata"` key) got a
+CityJSON envelope missing `metadata`/`geographicalExtent` entirely instead
+of the spec-conformant `[0,0,0,0,0,0]` default Rust emits — a schema
+consumer expecting `metadata.geographicalExtent` to always exist would
+break specifically on C++ output.
+
+**Fix:** `cj["metadata"]` and `meta["geographicalExtent"]` are now always
+set (the latter defaulting to `std::array<double, 6>{}` when
+`info.has_extent` is false); every other metadata field stays conditional,
+matching the `Option`s on `CjMetadata`.
+
+## 14. `transform` conditional, but unconditional in Rust (defaults `[1,1,1]`/`[0,0,0]`) — FIXED
+
+**Where:** `to_cityjson_metadata`, `src/cpp/src/cityjson.cpp:454-463`. Rust's
+`to_cj_metadata` starts from `CityJSON::new()`
+(`deserializer.rs:23`), whose `Transform::new()` defaults to
+`scale: [1.0, 1.0, 1.0]`, `translate: [0., 0., 0.]` (verified directly
+against the `cjseq2` registry source, `lib.rs:1057-1064`, pinned at
+version 0.1.1 in `Cargo.lock`), and only overwrites it when
+`header.transform()` is `Some` (`deserializer.rs:25-31`) — `CjTransform` is
+a plain, non-`Option` field, so the key is **never** omitted from Rust's
+output.
+
+**Before:** C++ set `cj["transform"]` only when `info.has_transform`,
+omitting the key entirely for a header with no `Transform` struct.
+
+**Consequence for a consumer:** a file written without an explicit
+`Transform` (identity scale/translate) lost the `transform` key altogether
+on the C++ path, instead of getting the spec-implied identity default a
+consumer might rely on being present.
+
+**Fix:** `transform` is now unconditional, defaulting to
+`{"scale":[1,1,1],"translate":[0,0,0]}` when `has_transform` is false.
+Test: `test_cityjson.cpp`'s `"transform is emitted even when the header
+carries none"` (line 92), which calls `to_cityjson_metadata(HeaderView{})` —
+a default, byte-less header — and asserts the exact defaults; TDD-verified
+failing pre-fix (`REQUIRE(cj.contains("transform"))` false) and passing
+after.
+
+## 15. `pointOfContact.emailAddress` treated as optional; required in Rust — FIXED
+
+**Where:** `point_of_contact_to_json`, `src/cpp/src/cityjson.cpp:394-411`.
+`poc_contact_name` and `poc_email` are independently optional FlatBuffer
+fields (`src/fbs/header.fbs:151,155`), so a header can legally carry a
+contact name with no email. Rust's `to_cj_point_of_contact`
+(`deserializer.rs:168-177`) treats `email_address` as a hard requirement:
+`.ok_or(Error::MissingRequiredField("email_address".to_string()))?`, and
+that `?` propagates out of the *entire* `to_cj_metadata` call
+(`deserializer.rs:79`, `to_cj_point_of_contact(header)?`) — confirmed
+against `cjseq2`'s `PointOfContact` struct, where `email_address` is a
+plain `String` (no `skip_serializing_if`), unlike `contact_type`, `role`,
+`phone`, `website`, `address`, which are all `Option<T>`.
+
+**Before:** C++ emitted `emailAddress` conditionally, the same as the other
+optional fields, so a header with a contact name and no email produced an
+*incomplete* `pointOfContact` object instead of Rust's hard failure.
+
+**Consequence if not fixed:** C++ and Rust would disagree on whether such a
+file is even readable at the metadata level — C++ silently degrades where
+Rust aborts the whole header decode.
+
+**Fix:** `if (!info.has_poc_email) throw Error(ErrorCode::MissingRequiredField,
+"email_address");`, then `emailAddress` emission becomes unconditional past
+that check. Test: `"pointOfContact without emailAddress fails like Rust's
+required field"` (`test_cityjson.cpp:106`) — a synthetic minimal `.fcb`
+(hand-built via `CreateHeaderDirect`, since no committed fixture has a
+contact name without an email) confirming the throw; TDD-verified against
+the pre-fix code (the throw did not happen, test failed as predicted).
+
+## 16. `poc_email` absent-vs-present-but-empty conflated — FIXED
+
+**Where:** the fix for §15 above initially gated on
+`info.poc_email.empty()` — but `FileInfo::poc_email` is a plain
+`std::string` (`src/cpp/src/header.cpp:123-124`,
+`if (hdr->poc_email() != nullptr) info.poc_email = hdr->poc_email()->str();`),
+which cannot distinguish "field absent" from "field present with an
+explicit empty string": both collapse to `""`. Rust's
+`header.poc_email()` returns `Option<&str>`, and a present-but-empty
+FlatBuffer string is `Some("")` — which satisfies `.ok_or(...)` and
+produces `email_address: ""` with **no error**
+(`deserializer.rs:175-177`). Only a genuinely absent field (`None`)
+triggers the error.
+
+**Consequence if left as introduced by §15's first pass:** a legitimate
+header with `poc_contact_name` set and `poc_email` explicitly set to the
+empty string would incorrectly throw `MissingRequiredField`, where Rust
+succeeds with `emailAddress: ""` — the fix for §15 would have been *more*
+eager than Rust, rejecting files Rust accepts.
+
+**Fix:** added `bool has_poc_email = false;` to `FileInfo`
+(`src/cpp/include/fcb/header.hpp:82`), set alongside `poc_email` in
+`fill_metadata` (`src/cpp/src/header.cpp:123-125`); the gate in
+`point_of_contact_to_json` changed from `info.poc_email.empty()` to
+`!info.has_poc_email`. Test:
+`"pointOfContact with a present-but-empty emailAddress does not throw"`
+(`test_cityjson.cpp:130`) — TDD-verified failing before this second pass
+(`ERROR: test case THREW exception: email_address`) and passing after.
+
+**Checked for the same escalation pattern elsewhere:** every other
+`FileInfo` string field (`identifier`, `title`, `crs`, the other `poc_*`)
+has the identical absent-vs-empty conflation but feeds no `throw` — see §19
+below, left as a disclosed, lower-severity limitation rather than fixed
+here.
+
+---
+
+## 17. Rust reader: `attr_query.rs` has no `ColumnType::Long` arm — NOT FIXED
+
+**Confirmed directly from source, both sides, for this write-up:**
+
+- Writer: `src/rust/fcb_core/src/writer/attr_index.rs:112` —
+  `ColumnType::Long => build_index_generic::<i64, _>(...)` — the writer
+  builds a real B+tree index over `i64` values for a `Long` column, no
+  different in kind from `Int`/`ULong`/etc.
+- Reader: `src/rust/fcb_core/src/reader/attr_query.rs` has two matches on
+  `col.type_()` (`grep -n "ColumnType::" attr_query.rs`, lines 38-131 and
+  158-270): both list arms for `Int`, `Float`, `Double`, `String`, `Bool`,
+  `DateTime`, `Short`, `UShort`, `UInt`, `ULong`, `Byte`, `UByte` — **no
+  `Long` arm in either** — falling through to the shared catch-all
+  `_ => return Err(Error::UnsupportedColumnType(col.name().to_string()))`
+  at lines 139 and 279.
+
+So a `Long` column, indexed correctly by the writer, cannot be queried by
+`fcb_core`'s own reader — a genuine Rust-side gap, not merely a C++/Python
+port artifact. C++'s `key_kind_for_column`
+(`src/cpp/src/key.cpp:342`, `case ::ColumnType::Long: return
+KeyKind::Int64;`) maps it to a fully-supported `KeyKind`, so **C++ answers a
+`Long`-column query that Rust itself refuses.**
+
+**Consequence for a consumer:** a Rust `fcb_core` caller building an
+attribute query against an indexed `i64` column gets
+`Error::UnsupportedColumnType` for data the writer happily indexed and that
+both C++ and (per the plan's divergence policy) Python answer correctly.
+
+**Not fixed:** out of scope for this task (documentation only); recorded
+here, with the exact citations, for whoever picks up the Rust-side fix. This
+is distinct from the plan's four *deliberate* Rust/C++/Python divergences
+(§20) — nothing chose this behaviour, it is a straightforward missing match
+arm.
+
+## 18. Tooling: `flatc --gen-onefile` emits no cross-schema-file imports — FIXED (generation-time workaround)
+
+**Where:** `flatc`'s Python codegen, one file per top-level `.fbs`, invoked
+by `scripts/gen_python_fbs.sh`. A table in one file referencing a type
+`include`d from another (`feature.fbs`'s `CityObject.columns: [Column]`,
+where `Column` is defined in `header_generated.py`) emits an **unqualified**
+`Column()` constructor call in the generated accessor body, with no import
+statement. Python resolves that name against the *defining* module's
+globals at call time, which does not have it — so calling
+`CityObject.Columns(j)`, `CityObject.Geometry(j)`, and
+`CityFeature.Appearance()` all raised `NameError: name 'Column' is not
+defined` (or the equivalent for `Geometry`/`Appearance`) at runtime.
+
+**Why C++ doesn't have this problem:** C++'s generated headers `#include`
+each other transitively, so a cross-file reference just resolves through
+the preprocessor. There is no C++ analogue to port a fix from — this is a
+Python-codegen-specific defect in the upstream FlatBuffers compiler's
+`--gen-onefile` mode, not a port artifact.
+
+**Fix:** `scripts/gen_python_fbs.sh`'s `__init__.py`-generation step appends
+a `setattr` backfill loop after the existing re-export lines, setting every
+re-exported class as an attribute on every generated submodule that doesn't
+already define it under that name (`hasattr`-guarded, so a no-op where the
+name is defined locally). Generation-time, not a hand-edit of committed
+generated code; regenerating twice produces byte-identical output, and only
+`generated/__init__.py` changes — the four `*_generated.py` files are
+untouched.
+
+**Reproduce:** before the fix, `python3 -c "..."` calling
+`obj.Geometry(0)` on a real fixture raised
+`NameError: name 'Geometry' is not defined` inside
+`feature_generated.py`'s `Geometry` accessor. This was load-bearing for the
+Python port's own Task 7/8 work (`decode_attributes`/`to_cityjson_feature`
+cannot resolve per-object schema or geometry without it).
+
+## 19. Known limitations left in place — NOT FIXED, disclosed
+
+- **C++ `FileInfo` conflates absent and empty-string for `identifier`,
+  `title`, `crs`, and every `poc_*`/`poc_address_*` field except
+  `poc_email`** (which §16 above gave its own presence flag because it
+  alone escalates to a thrown error). These fields are plain
+  `std::string` members in `src/cpp/include/fcb/header.hpp`, populated in
+  `src/cpp/src/header.cpp`'s `fill_metadata`, and read via truthiness
+  (`if (!info.identifier.empty()) ...`) in `to_cityjson_metadata`. **What a
+  consumer sees:** a header field genuinely set to `""` is silently
+  indistinguishable from one that was never set — the JSON key is omitted
+  either way. No fixture in the repo exercises a legitimately-empty string
+  for any of these fields, so the gap is theoretical rather than observed,
+  but it is a real latent divergence from Rust's `Option<&str>` semantics,
+  the same class of bug §16 fixed for `poc_email` specifically because that
+  one field's conflation could also raise a wrong exception.
+- **`std::from_chars` rejects a leading `+` on the address thoroughfare
+  number, where Rust's `i64::from_str` accepts it.** Confirmed by
+  inspection of `point_of_contact_address_to_json`
+  (`src/cpp/src/cityjson.cpp:352-369`), which parses
+  `info.poc_address_thoroughfare_number` via `std::from_chars`. This is a
+  narrow, disclosed gap (noted in the Task 15 report as "did not chase the
+  `+42` edge case") rather than a re-derived-from-scratch finding here: no
+  fixture in the repo carries a `+`-prefixed thoroughfare number, so the
+  consequence — a legitimately `+`-prefixed number causing the whole
+  `address` sub-object (not the whole `pointOfContact`, per §10's "an
+  unparseable number omits just the address" rule) to be silently omitted —
+  is unexercised in practice.
+
+---
+
+## 20. Deliberate divergences in the new Python reader
+
+These are not defects: each is a considered choice, recorded here so all
+three implementations' behaviour on the same input is on record in one
+place. Source: `src/py/flatcitybuf/{keys,stree,range_reader,reader,http_reader}.py`.
+
+**The four pre-decided divergences** (named in the plan, implemented and
+documented at both the point of use and in `search_stree`'s public
+docstring, `src/py/flatcitybuf/stree.py:732+`):
+
+1. **`Byte` index keys decode as `u8`, matching the writer** — and, as of
+   this branch, matching Rust's own index reader too. The writer stores
+   `Byte` as `u8` and builds `MemoryIndex<u8>` (`writer/attribute.rs:209`,
+   `writer/attr_index.rs:240`); Python's key encoding (`keys.py`,
+   `column_type_to_key_kind`) and C++'s (`key.cpp:328-335`) both map `Byte`
+   to an unsigned key for exactly this reason. **Correction:** earlier text
+   here claimed this still disagreed with "Rust's own reader"
+   (`reader/attr_query.rs:118`) and called it "the same defect... recorded
+   as item 2" — that was wrong on two counts. First, line 118 there is the
+   *comment* documenting that fix, not the bug; the actual decode (line
+   123) is `MemoryIndex::<u8>`, i.e. already `u8`. Second, item 2 is marked
+   FIXED precisely because that index-path mismatch was resolved — so
+   Python's index-key choice and Rust's current index reader now agree,
+   and there is no live divergence at this layer to record.
+
+   A live divergence in the same family does still exist, but one layer
+   up, in feature-attribute *value* decoding rather than index-key
+   encoding: Rust's `decode_attributes` (`reader/deserializer.rs:375`,
+   distinct code path from `attr_query.rs`, itself never fixed) still
+   returns `-56` for a stored `200` when reading a feature's attributes —
+   see item 2a at the top of this document, which also covers Python's
+   own behaviour at that layer (Python's `attribute.py` does not reproduce
+   `-56` either, but only because it rejects `Byte` there outright, for an
+   unrelated reason).
+2. **Json/Binary index queries are rejected** —
+   `stree.py::_resolve` (`src/py/flatcitybuf/stree.py:663`, its own comment
+   labels this "DIVERGENCE 2"), checked before the "is it indexed" lookup,
+   for the identical reason as §11's C++ fix above (and implemented in
+   Python *first* — Task 10 predates Task 15). Consequence: **Python
+   rejects a Json/Binary attribute query that C++, before Task 15, would
+   have silently answered** — that gap is now closed on the C++ side too
+   (§11), so as of this branch all three implementations agree on this
+   point; it is recorded here because it was, for most of the branch's
+   life, a genuine three-way disagreement, not merely a Python quirk.
+3. **Float `key_max()` is `+inf`**, so a NaN-keyed feature is invisible to
+   any range query (`Ge`/`Le`/etc.) even though it exists in the file.
+4. **`DateTime` `key_min()` is epoch 0 (1970-01-01T00:00:00Z)**, so a
+   pre-1970 feature is invisible to `Le`/`Lt`/`Ne` range queries.
+
+**Further Python-specific divergences, each with no C++ analogue** (from
+`src/py/flatcitybuf/range_reader.py`, `http_reader.py`, `stree.py`):
+
+5. **`FileRangeReader.read` raises `FcbError(INDEX_OUT_OF_BOUNDS)` for
+   `offset > total_size()`**, where C++'s `range_reader.cpp:30` treats
+   `offset >= total_size()` as "return empty" uniformly. Python matches
+   C++ exactly at `offset == total_size()` (returns `b""`) but diverges
+   strictly past it — because `_build_tree` in `stree.py` needs an explicit
+   bounds check where C++ gets the same protection for free from its
+   `RangeReader` wrapper (`range_reader.hpp:56-59`).
+6. **A Range-ignoring HTTP `200` response is rejected outright**, where
+   C++'s `CurlRangeReader` slices the full body itself and proceeds
+   (`src/py/flatcitybuf/http_reader.py:88-91`, docstring). Brief-mandated;
+   the tradeoff is a hard failure against a non-conformant server instead
+   of quietly reading (and re-fetching) more data than requested.
+7. **No `asyncio`/persistent-connection/streaming API exists at all** — the
+   Rust crate's async reader was retired in Task 13 alongside the PyO3
+   wheel it lived in (`src/rust/fcb_py/src/async_reader.rs`, deleted), and
+   the pure-Python reader never had one to begin with. This is the one
+   capability genuinely lost by moving off PyO3, not merely a stylistic
+   choice, per the Task 13 report.
+8. **`_int_key`'s explicit out-of-range rejection** (`keys.py`): Python
+   integers are unbounded, so a caller can hand in e.g. `2**70` for a
+   `u64` key; C++ would silently truncate via `static_cast`. Python raises
+   instead — a strictness with no C++ counterpart to diverge from, since
+   the hazard doesn't exist in a fixed-width-integer language the same way.
+9. **String keys are `bytes`, not `str`**, and the float/NaN comparator
+   (`_cmp_ordered_float`) is *mandatory* in Python where it is merely
+   stylistic in C++ — `nan != nan` and Python's `sorted()` is not a total
+   order under NaN, so `compare_keys` must be used everywhere a `<`/`==`
+   would otherwise silently corrupt tree-ordering invariants. (Detailed in
+   the Task 10 report §13; not a behavioural difference in output, just a
+   correctness requirement unique to the host language.)
+
+**Two more, found comparing all three implementations during the Python
+port, but *not* Python-specific — Python inherited both from C++, which
+means fixing Python alone would create a new Python-vs-C++ split rather
+than closing one.** Documentation only; no reader code changed for
+either.
+
+10. **`referenceSystem` URL construction disagrees with Rust on
+    version/authority/code_string, identically in Python and C++.** Rust
+    builds the URL from `rs.authority().unwrap_or_default()`,
+    `rs.version()` (an `int` per `src/fbs/header.fbs:44`) and `rs.code()`
+    (`src/rust/fcb_core/src/reader/deserializer.rs:53-59`), feeding them to
+    `ReferenceSystem::to_url`, which formats
+    `"{base}/{authority}/{version}/{code}"` (`cjseq2` 0.1.1
+    `lib.rs:1128-1133`); this only runs at all when
+    `header.reference_system()` is `Some` (`Metadata::reference_system` is
+    `Option<ReferenceSystem>` with `skip_serializing_if =
+    "Option::is_none"`, `lib.rs:1197-1198`), so an absent
+    `ReferenceSystem` table correctly omits the key.
+
+    Python instead derives the whole thing from `FileInfo.crs`, built in
+    `src/py/flatcitybuf/header.py:206-215`: authority defaults to the
+    literal string `"EPSG"` when `rs.Authority()` is absent (not Rust's
+    `unwrap_or_default()`, which is an empty string); the numeric `Code()`
+    is preferred whenever non-zero, falling back to `CodeString()` only
+    when `Code() == 0`; and `info.crs` is left unset (dropping
+    `referenceSystem` entirely) when both `Code() == 0` and
+    `CodeString()` is absent. `src/py/flatcitybuf/cityjson.py:782-785`
+    then reconstructs the URL by splitting `info.crs` on `:` and
+    hardcoding the version segment to the literal `/0/`, regardless of
+    the header's actual `Version()`. `src/cpp/src/cityjson.cpp:479-484`
+    builds the identical `.../{authority}/0/{code}` string from the
+    identical `FileInfo.crs` split — this is not a Python-only shortcut,
+    C++ made the same choice.
+
+    Concretely: (a) any header with `version != 0` gives `/0/` in both
+    Python and C++ against `/{version}/` in Rust; (b) a `ReferenceSystem`
+    table present with `code == 0` and no `code_string` makes Rust emit
+    `.../EPSG/0/0` while Python/C++ omit `referenceSystem` outright — the
+    same presence-vs-value gating class as §13; (c) a `code_string`-only
+    CRS is emitted by Python/C++ and dropped by Rust.
+
+    Matching Rust exactly is not obviously the right fix, and is worth
+    saying honestly: it would mean reproducing what
+    `unwrap_or_default()` does for a genuinely absent authority — a URL
+    like `.../def/crs//0/0` — which reads as a Rust defect (an
+    unhelpful literal empty path segment) rather than a contract worth
+    porting faithfully.
+
+    No test catches any of this because `small.fcb` — the only corpus
+    case with a `referenceSystem` at all — happens to carry `EPSG:7415`
+    with `version == 0` and a non-zero `code`, the one configuration
+    where Python/C++'s reconstruction and Rust's direct field read agree
+    by accident (both produce
+    `https://www.opengis.net/def/crs/EPSG/0/7415`). A non-zero version, a
+    `code_string`-only CRS, `code == 0`, and an absent authority are all
+    untested in **all three** implementations. Recommend a follow-up
+    upstream finding covering Rust, C++ and Python together, rather than
+    a unilateral Python fix.
+
+11. **`identifier`/`title` are gated on non-emptiness, not presence,
+    identically in Python and C++.** Rust's `to_cj_metadata` reads
+    `header.identifier().map(|i| i.to_string())` and
+    `header.title().map(|t| t.to_string())`
+    (`src/rust/fcb_core/src/reader/deserializer.rs:85,89`) — both fields
+    are `Option<String>` on `cjseq2`'s `Metadata`
+    (`lib.rs:1188-1189,1200-1201`) with `skip_serializing_if =
+    "Option::is_none"`, so a **present-but-empty** FlatBuffers string
+    (`Header.identifier()`/`Header.title()` returning `Some("")`)
+    serializes as `"title": ""` — omitted only when the field is
+    genuinely absent (`None`).
+
+    Python gates on truthiness instead of presence:
+    `src/py/flatcitybuf/cityjson.py:773` (`if info.identifier:`) and
+    `:787` (`if info.title:`) both drop the key for an empty string, the
+    same as a `None`/absent one. `src/cpp/src/cityjson.cpp:485,490`
+    (`if (!info.identifier.empty()) ...`, `if (!info.title.empty())
+    ...`) makes the identical choice — this is the same gating class
+    §13 already documents for C++'s `metadata`/`geographicalExtent`, just
+    on two more fields, and it is not C++-only.
+
+    Worth noting precisely where the information is actually lost in
+    Python, since it is not only the truthiness check:
+    `src/py/flatcitybuf/header.py:225-231` already reads
+    `Identifier()`/`Title()` guarded on `is not None` (so the read itself
+    is presence-aware), but `FileInfo.identifier`/`.title`
+    (`header.py:105-106`) default to `str = ""` rather than
+    `Optional[str] = None` — so the dataclass field cannot represent
+    "absent" separately from "present and empty" either. A fix at
+    `cityjson.py:773,787` alone (swapping the truthiness check for `is
+    not None`) is not sufficient by itself; `FileInfo`'s default would
+    also need widening to `Optional[str] = None` for the distinction to
+    survive end to end. The follow-up should treat both files together,
+    not just the gate.
+
+    Concrete consequence: a source CityJSONSeq with
+    `"metadata": {"title": ""}` round-trips through Rust with the header
+    line carrying `"title": ""`, while Python's and C++'s header lines
+    omit the key entirely — a consumer testing `"title" in metadata`
+    gets a different answer per implementation. Not corpus-reachable (no
+    fixture has an explicitly-empty `identifier`/`title`), so the
+    whole-line conformance compares that caught §12/§13 (a full-object
+    `assert actual[0] == expected[0]` on each fixture's header line, in
+    both the C++ and Python suites) cannot catch this either — no fixture
+    exercises the input in the first place. Recommend the same follow-up
+    as #10: one upstream finding covering all three implementations, not
+    a unilateral Python change.
+
+---
+
+## 21. Plan-document defect: `rtree_index_size(1, 16)` — the plan asserts 40; the correct value is 80
+
+**Where:** `docs/superpowers/plans/2026-07-20-native-python-core.md:340`,
+inside `test_rtree_index_size_matches_the_reference_formula`:
+`assert rtree_index_size(1, 16) == 40`.
+
+**This is wrong.** Tracing the reference loop for `num_items=1,
+node_size=16`: `num_nodes = 1` (the leaf level); the loop runs **at least
+once regardless of the input** (`n = ceil_div(1, 16) = 1; num_nodes = 1 + 1
+= 2;` then `n == 1` breaks) — giving `num_nodes = 2`, i.e.
+`2 * 40 = 80`, not `40`. Confirmed directly against the Rust source,
+`src/rust/fcb_core/src/packed_rtree/mod.rs:879-898`
+(`PackedRTree::index_size`, a `loop { ... if n == 1 { break; } }` — a
+do-while shape that always executes its body once, even starting from
+`n = num_items = 1`), and against
+`src/cpp/tests/test_layout.cpp:38`, which already asserted
+`CHECK(rtree_index_size(1, 16) == 80)` before the Python task ever ran —
+i.e. the C++ port had this right, and the plan document (written after the
+C++ port) introduced the transcription error independently. The intuition
+the plan's `== 40` seems to assume — a single item collapsing leaf and root
+into one node — is not how this format works: even one leaf item gets a
+one-node root summarizing it, which is exactly the behaviour the same test
+body's `rtree_index_size(16, 16) == (16 + 1) * 40` and
+`rtree_index_size(17, 16) == (17 + 2 + 1) * 40` assertions already rely on
+one line below.
+
+**Fix:** the Python implementer corrected the assertion to `== 80` in
+`src/py/tests/test_layout.py` (not the plan document itself — out of scope
+for that task), with a comment pointing back to this reasoning. **The plan
+document itself was left unedited**, per this write-up task's brief
+("do not change any code" — the plan is process documentation, not source,
+but this task's own scope is `docs/upstream-findings.md` only); recording
+the defect here is the intended fix for the process, so nobody re-derives
+it from scratch reading the plan a second time.
+
+**Reproduce:**
+```
+$ cd src/py && uv run pytest tests/test_layout.py::test_rtree_index_size_matches_the_reference_formula -q
+1 passed in 0.01s
+```
+(asserts `rtree_index_size(1, 16) == 80`, matching both the Rust source and
+the pre-existing C++ test.)
