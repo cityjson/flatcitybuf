@@ -1,4 +1,6 @@
-# FlatCityBuf — guidance for Claude
+# FlatCityBuf — guidance for coding agents
+
+`AGENTS.md` is a symlink to this file, so both paths serve the same guidance.
 
 FlatCityBuf is a cloud-optimized binary format for 3D city models: CityJSON's
 semantics in FlatBuffers, with a packed Hilbert R-tree for spatial queries, a
