@@ -257,9 +257,9 @@ pub(crate) fn to_cj_co_type(
         CityObjectType::TunnelFurniture => CjCityObjectType::TunnelFurniture,
         CityObjectType::WaterBody => CjCityObjectType::WaterBody,
         // ExtensionObject, and any tag a newer writer may add.
-        _ => CjCityObjectType::Extension(
-            extension_type.unwrap_or("+UnknownCityObject").to_string(),
-        ),
+        _ => {
+            CjCityObjectType::Extension(extension_type.unwrap_or("+UnknownCityObject").to_string())
+        }
     }
 }
 
@@ -392,9 +392,7 @@ pub fn decode_attributes(
             ColumnType::Byte => {
                 map.insert(
                     column.name().to_string(),
-                    serde_json::Value::Number(serde_json::Number::from(
-                        bytes[offset] as i8,
-                    )),
+                    serde_json::Value::Number(serde_json::Number::from(bytes[offset] as i8)),
                 );
                 offset += size_of::<u8>();
             }
@@ -432,7 +430,11 @@ pub fn decode_attributes(
 
 /// Adds `key` only when the value is present, so an absent member stays absent
 /// rather than coming back as `null`.
-fn insert_opt<T: serde::Serialize>(obj: &mut serde_json::Map<String, Value>, key: &str, v: Option<T>) {
+fn insert_opt<T: serde::Serialize>(
+    obj: &mut serde_json::Map<String, Value>,
+    key: &str,
+    v: Option<T>,
+) {
     if let Some(v) = v {
         obj.insert(key.to_string(), json!(v));
     }
@@ -508,8 +510,7 @@ pub fn to_cj_feature(
                         .collect()
                 });
 
-                let mut cjco =
-                    CjCityObject::new(to_cj_co_type(co.type_(), co.extension_type()));
+                let mut cjco = CjCityObject::new(to_cj_co_type(co.type_(), co.extension_type()));
                 cjco.geographical_extent = geographical_extent;
                 cjco.attributes = attributes;
                 cjco.geometry = final_geometries;
@@ -583,20 +584,20 @@ pub fn to_cj_feature(
                         &mut obj,
                         "wrapMode",
                         t.wrap_mode().map(|w| match w {
-                            WrapMode::Wrap => "Wrap",
-                            WrapMode::Mirror => "Mirror",
-                            WrapMode::Clamp => "Clamp",
-                            WrapMode::Border => "Border",
-                            _ => "None",
+                            WrapMode::Wrap => "wrap",
+                            WrapMode::Mirror => "mirror",
+                            WrapMode::Clamp => "clamp",
+                            WrapMode::Border => "border",
+                            _ => "none",
                         }),
                     );
                     insert_opt(
                         &mut obj,
                         "textureType",
                         t.texture_type().map(|t| match t {
-                            TextureType::Specific => "Specific",
-                            TextureType::Typical => "Typical",
-                            _ => "Unknown",
+                            TextureType::Specific => "specific",
+                            TextureType::Typical => "typical",
+                            _ => "unknown",
                         }),
                     );
                     insert_opt(&mut obj, "borderColor", to_color(t.border_color()));

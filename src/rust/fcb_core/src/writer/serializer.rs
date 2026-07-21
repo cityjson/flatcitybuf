@@ -488,20 +488,13 @@ fn json_f64(v: &Value, key: &str) -> Option<f64> {
     v.get(key).and_then(|v| v.as_f64())
 }
 
-/// A CityJSON colour: an array of exactly N numbers in `[0, 1]`. A wrong
-/// length is not a colour, so it is dropped rather than padded.
-fn json_color<const N: usize>(v: &Value, key: &str) -> Option<[f64; N]> {
+/// A CityJSON colour: an array of numbers in `[0, 1]`, of a length the schema
+/// fixes per member -- 3 for a material colour, 3 *or* 4 for `borderColor`. A
+/// wrong length is not a colour, so it is dropped rather than padded.
+fn json_color(v: &Value, key: &str, lengths: &[usize]) -> Option<Vec<f64>> {
     let array = v.get(key)?.as_array()?;
     let values: Vec<f64> = array.iter().filter_map(|c| c.as_f64()).collect();
-    values.try_into().ok()
-}
-
-fn json_color3(v: &Value, key: &str) -> Option<[f64; 3]> {
-    json_color::<3>(v, key)
-}
-
-fn json_color4(v: &Value, key: &str) -> Option<[f64; 4]> {
-    json_color::<4>(v, key)
+    lengths.contains(&values.len()).then_some(values)
 }
 
 pub(super) fn to_appearance<'a>(
@@ -517,9 +510,12 @@ pub(super) fn to_appearance<'a>(
             .iter()
             .map(|m| {
                 let name = fbb.create_string(json_str(m, "name").unwrap_or_default());
-                let diffuse_color = json_color3(m, "diffuseColor").map(|c| fbb.create_vector(&c));
-                let emissive_color = json_color3(m, "emissiveColor").map(|c| fbb.create_vector(&c));
-                let specular_color = json_color3(m, "specularColor").map(|c| fbb.create_vector(&c));
+                let diffuse_color =
+                    json_color(m, "diffuseColor", &[3]).map(|c| fbb.create_vector(&c));
+                let emissive_color =
+                    json_color(m, "emissiveColor", &[3]).map(|c| fbb.create_vector(&c));
+                let specular_color =
+                    json_color(m, "specularColor", &[3]).map(|c| fbb.create_vector(&c));
                 Material::create(
                     fbb,
                     &MaterialArgs {
@@ -543,21 +539,23 @@ pub(super) fn to_appearance<'a>(
             .iter()
             .map(|t| {
                 let image = fbb.create_string(json_str(t, "image").unwrap_or_default());
-                let border_color = json_color4(t, "borderColor").map(|c| fbb.create_vector(&c));
+                let border_color =
+                    json_color(t, "borderColor", &[3, 4]).map(|c| fbb.create_vector(&c));
                 let texture_format = match json_str(t, "type") {
                     Some("JPG") => TextureFormat::JPG,
                     _ => TextureFormat::PNG,
                 };
+                // `appearance.schema.json` spells both of these lowercase.
                 let wrap_mode = json_str(t, "wrapMode").map(|w| match w {
-                    "Wrap" => WrapMode::Wrap,
-                    "Mirror" => WrapMode::Mirror,
-                    "Clamp" => WrapMode::Clamp,
-                    "Border" => WrapMode::Border,
+                    "wrap" => WrapMode::Wrap,
+                    "mirror" => WrapMode::Mirror,
+                    "clamp" => WrapMode::Clamp,
+                    "border" => WrapMode::Border,
                     _ => WrapMode::None,
                 });
                 let texture_type = json_str(t, "textureType").map(|t| match t {
-                    "Specific" => TextureType::Specific,
-                    "Typical" => TextureType::Typical,
+                    "specific" => TextureType::Specific,
+                    "typical" => TextureType::Typical,
                     _ => TextureType::Unknown,
                 });
                 Texture::create(
@@ -823,21 +821,41 @@ impl From<&CjSemanticSurfaceType> for FcbSemanticSurfaceType {
             CjSemanticSurfaceType::RoofSurface => Self::known(SemanticSurfaceType::RoofSurface),
             CjSemanticSurfaceType::GroundSurface => Self::known(SemanticSurfaceType::GroundSurface),
             CjSemanticSurfaceType::WallSurface => Self::known(SemanticSurfaceType::WallSurface),
-            CjSemanticSurfaceType::ClosureSurface => Self::known(SemanticSurfaceType::ClosureSurface),
-            CjSemanticSurfaceType::OuterCeilingSurface => Self::known(SemanticSurfaceType::OuterCeilingSurface),
-            CjSemanticSurfaceType::OuterFloorSurface => Self::known(SemanticSurfaceType::OuterFloorSurface),
+            CjSemanticSurfaceType::ClosureSurface => {
+                Self::known(SemanticSurfaceType::ClosureSurface)
+            }
+            CjSemanticSurfaceType::OuterCeilingSurface => {
+                Self::known(SemanticSurfaceType::OuterCeilingSurface)
+            }
+            CjSemanticSurfaceType::OuterFloorSurface => {
+                Self::known(SemanticSurfaceType::OuterFloorSurface)
+            }
             CjSemanticSurfaceType::Window => Self::known(SemanticSurfaceType::Window),
             CjSemanticSurfaceType::Door => Self::known(SemanticSurfaceType::Door),
-            CjSemanticSurfaceType::InteriorWallSurface => Self::known(SemanticSurfaceType::InteriorWallSurface),
-            CjSemanticSurfaceType::CeilingSurface => Self::known(SemanticSurfaceType::CeilingSurface),
+            CjSemanticSurfaceType::InteriorWallSurface => {
+                Self::known(SemanticSurfaceType::InteriorWallSurface)
+            }
+            CjSemanticSurfaceType::CeilingSurface => {
+                Self::known(SemanticSurfaceType::CeilingSurface)
+            }
             CjSemanticSurfaceType::FloorSurface => Self::known(SemanticSurfaceType::FloorSurface),
             CjSemanticSurfaceType::WaterSurface => Self::known(SemanticSurfaceType::WaterSurface),
-            CjSemanticSurfaceType::WaterGroundSurface => Self::known(SemanticSurfaceType::WaterGroundSurface),
-            CjSemanticSurfaceType::WaterClosureSurface => Self::known(SemanticSurfaceType::WaterClosureSurface),
+            CjSemanticSurfaceType::WaterGroundSurface => {
+                Self::known(SemanticSurfaceType::WaterGroundSurface)
+            }
+            CjSemanticSurfaceType::WaterClosureSurface => {
+                Self::known(SemanticSurfaceType::WaterClosureSurface)
+            }
             CjSemanticSurfaceType::TrafficArea => Self::known(SemanticSurfaceType::TrafficArea),
-            CjSemanticSurfaceType::AuxiliaryTrafficArea => Self::known(SemanticSurfaceType::AuxiliaryTrafficArea),
-            CjSemanticSurfaceType::TransportationMarking => Self::known(SemanticSurfaceType::TransportationMarking),
-            CjSemanticSurfaceType::TransportationHole => Self::known(SemanticSurfaceType::TransportationHole),
+            CjSemanticSurfaceType::AuxiliaryTrafficArea => {
+                Self::known(SemanticSurfaceType::AuxiliaryTrafficArea)
+            }
+            CjSemanticSurfaceType::TransportationMarking => {
+                Self::known(SemanticSurfaceType::TransportationMarking)
+            }
+            CjSemanticSurfaceType::TransportationHole => {
+                Self::known(SemanticSurfaceType::TransportationHole)
+            }
             CjSemanticSurfaceType::Extension(ref name) => FcbSemanticSurfaceType {
                 type_: SemanticSurfaceType::ExtraSemanticSurface,
                 extension_type: Some(name.clone()),
@@ -1038,7 +1056,10 @@ pub(super) fn to_geometry_instance<'a>(
         transformation_matrix: m,
     } = geometry
     else {
-        panic!("to_geometry_instance was given a {:?}", geometry.geometry_type());
+        panic!(
+            "to_geometry_instance was given a {:?}",
+            geometry.geometry_type()
+        );
         //TODO: don't use panic, instead, return Result type
     };
 

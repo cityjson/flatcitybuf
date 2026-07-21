@@ -1,5 +1,5 @@
-use fcb_core::obj;
 use cjseq::{CityJSON, CityJSONFeature};
+use fcb_core::obj;
 use log::{debug, error};
 use serde_wasm_bindgen::from_value;
 use serde_wasm_bindgen::to_value;

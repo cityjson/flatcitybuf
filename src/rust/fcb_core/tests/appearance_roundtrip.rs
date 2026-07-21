@@ -29,9 +29,7 @@
 //! instead.
 
 use anyhow::Result;
-use cjseq::{
-    CityJSONFeature, Geometry as CjGeometry, MaterialReference, TextureReference,
-};
+use cjseq::{CityJSONFeature, Geometry as CjGeometry, MaterialReference, TextureReference};
 use fcb_core::{
     attribute::AttributeSchema, deserializer, header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
@@ -192,8 +190,10 @@ fn roundtrip_geometry(
 /// Asserts that a geometry round-trips whole — type, lod, boundaries,
 /// semantics, material and texture — by comparing the serialized CityJSON,
 /// which is the only comparison that would catch a depth change.
-fn assert_roundtrips(geometry: Value, vertex_count: usize) -> Result<(Vec<MaterialDump>, Vec<TextureDump>)>
-{
+fn assert_roundtrips(
+    geometry: Value,
+    vertex_count: usize,
+) -> Result<(Vec<MaterialDump>, Vec<TextureDump>)> {
     let (orig, decoded, materials, textures) = roundtrip_geometry(geometry.clone(), vertex_count)?;
     assert_eq!(
         serde_json::to_value(&decoded)?,
@@ -574,5 +574,127 @@ fn an_untextured_ring_roundtrips_as_a_null_leaf() -> Result<()> {
         "texture": {"winter": {"values": [[[[0, 6, 7, 8]], [[null]]]]}}
     });
     assert_roundtrips(geometry, 6)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// the appearance palette itself
+// ---------------------------------------------------------------------------
+
+/// The `appearance` member -- the materials and textures the mappings above
+/// index into. `appearance.schema.json` names every member of each and spells
+/// `wrapMode` and `textureType` in lower case, and it permits a `borderColor`
+/// of three components as well as four.
+///
+/// Nothing in the Rust suite covered this: a mis-spelled `wrapMode` was caught
+/// only by the C++ conformance corpus, which `cargo test` does not run.
+#[test]
+fn the_appearance_palette_roundtrips() -> Result<()> {
+    let appearance = json!({
+        "materials": [{
+            "name": "roofandground",
+            "ambientIntensity": 0.4,
+            "diffuseColor": [0.9, 0.1, 0.75],
+            "emissiveColor": [0.9, 0.1, 0.75],
+            "specularColor": [0.9, 0.1, 0.75],
+            "shininess": 0.2,
+            "transparency": 0.5,
+            "isSmooth": false
+        }],
+        "textures": [
+            {
+                "type": "PNG",
+                "image": "myfacade.png",
+                "wrapMode": "wrap",
+                "textureType": "unknown",
+                "borderColor": [0.0, 0.1, 0.2, 1.0]
+            },
+            {
+                "type": "JPG",
+                "image": "myroof.jpg",
+                "wrapMode": "mirror",
+                "textureType": "specific",
+                // Three components is as legal as four.
+                "borderColor": [0.0, 0.1, 0.2]
+            }
+        ],
+        "vertices-texture": [[0.0, 0.5], [1.0, 0.0]],
+        "default-theme-texture": "winter",
+        "default-theme-material": "irradiation"
+    });
+
+    let cj_line = json!({
+        "type": "CityJSON",
+        "version": "2.0",
+        "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]},
+        "CityObjects": {},
+        "vertices": []
+    });
+    let feature_line = json!({
+        "type": "CityJSONFeature",
+        "id": "feat-1",
+        "CityObjects": {
+            "co-1": {
+                "type": "Building",
+                "geometry": [{
+                    "type": "MultiSurface",
+                    "lod": "1",
+                    "boundaries": [[[0, 1, 2]]]
+                }]
+            }
+        },
+        "vertices": [[0, 0, 0], [1, 0, 0], [1, 1, 0]],
+        "appearance": appearance
+    });
+    let input = format!("{cj_line}\n{feature_line}\n");
+
+    let seq = match read_cityjson_from_reader(
+        BufReader::new(Cursor::new(input.into_bytes())),
+        CJTypeKind::Seq,
+    )? {
+        CJType::Seq(seq) => seq,
+        _ => panic!("expected CityJSONSeq"),
+    };
+    let orig_appearance = seq.features[0]
+        .appearance
+        .clone()
+        .expect("the input feature has an appearance");
+    assert_eq!(
+        serde_json::to_value(&orig_appearance)?,
+        appearance,
+        "the parsed input must be the JSON the test wrote"
+    );
+
+    let mut fcb_buf: Vec<u8> = Vec::new();
+    {
+        let mut fcb = FcbWriter::new(
+            seq.cj.clone(),
+            Some(HeaderWriterOptions {
+                write_index: false,
+                feature_count: seq.features.len() as u64,
+                index_node_size: 16,
+                attribute_indices: None,
+                geographical_extent: None,
+            }),
+            Some(AttributeSchema::new()),
+            None,
+        )?;
+        for feature in seq.features.iter() {
+            fcb.add_feature(feature)?;
+        }
+        fcb.write(&mut fcb_buf)?;
+    }
+
+    let mut reader = FcbReader::open(Cursor::new(fcb_buf))?.select_all()?;
+    let _ = deserializer::to_cj_metadata(&reader.header())?;
+    let decoded: CityJSONFeature = reader
+        .next()?
+        .expect("one feature must round-trip")
+        .cur_cj_feature()?;
+
+    assert_eq!(
+        serde_json::to_value(decoded.appearance.expect("decoded appearance"))?,
+        appearance
+    );
     Ok(())
 }

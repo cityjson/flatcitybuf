@@ -26,7 +26,7 @@
 
 use cjseq::{
     GeometryType as CjGeometryType, MaterialReference as CjMaterialReference,
-    MaterialValues as CjMaterialValues, Ring, Semantics, SemanticSurfaceType, SemanticsSurface,
+    MaterialValues as CjMaterialValues, Ring, SemanticSurfaceType, Semantics, SemanticsSurface,
     SemanticsValues, Shell, Surface, TextureReference as CjTextureReference,
     TextureValues as CjTextureValues, TexturedRing, TexturedShell, TexturedSurface,
 };
@@ -209,9 +209,9 @@ pub(crate) fn to_cj_surface_type(
         FbSurfaceType::TransportationMarking => SemanticSurfaceType::TransportationMarking,
         FbSurfaceType::TransportationHole => SemanticSurfaceType::TransportationHole,
         // ExtraSemanticSurface, and any tag a newer writer may add.
-        _ => SemanticSurfaceType::Extension(
-            extension_type.unwrap_or("+GenericSurface").to_string(),
-        ),
+        _ => {
+            SemanticSurfaceType::Extension(extension_type.unwrap_or("+GenericSurface").to_string())
+        }
     }
 }
 
@@ -266,8 +266,7 @@ pub(crate) fn decode_semantics(
                         Some(
                             (0..shell_count)
                                 .map(|_| {
-                                    let n =
-                                        shells.get(shell_cursor).copied().unwrap_or(0) as usize;
+                                    let n = shells.get(shell_cursor).copied().unwrap_or(0) as usize;
                                     shell_cursor += 1;
                                     Some(take_shell(n, &semantics_values))
                                 })
@@ -511,9 +510,11 @@ pub(crate) fn decode_textures(
 
         let values = match geometry_type {
             // Per surface, per ring.
-            GeometryType::MultiSurface | GeometryType::CompositeSurface => CjTextureValues::Surface(
-                (0..surfaces.len()).map(|_| cursor.take_surface()).collect(),
-            ),
+            GeometryType::MultiSurface | GeometryType::CompositeSurface => {
+                CjTextureValues::Surface(
+                    (0..surfaces.len()).map(|_| cursor.take_surface()).collect(),
+                )
+            }
             // ... per shell.
             GeometryType::Solid => {
                 CjTextureValues::Shell((0..shells.len()).map(|_| cursor.take_shell()).collect())
@@ -806,12 +807,7 @@ mod tests {
 
         // Solid: one array per shell.
         assert_eq!(
-            decode_material_values(
-                GeometryType::Solid,
-                &[2],
-                &[3, 3],
-                &[0, 1, NULL, 2, 3, 4]
-            ),
+            decode_material_values(GeometryType::Solid, &[2], &[3, 3], &[0, 1, NULL, 2, 3, 4]),
             json!([[0, 1, null], [2, 3, 4]])
         );
 
@@ -856,11 +852,7 @@ mod tests {
                 &[4, 4, 4],
                 &[0, 10, 20, 30, 1, 11, 21, NULL, 2, 12, NULL, 32]
             ),
-            json!([
-                [[0, 10, 20, 30]],
-                [[1, 11, 21, null]],
-                [[2, 12, null, 32]]
-            ])
+            json!([[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]])
         );
 
         // Solid: ... per shell.
@@ -871,10 +863,7 @@ mod tests {
                 &[3, 2],
                 &[1, 1, 1, 1, 1],
                 &[4, 4, 4, 4, 4],
-                &[
-                    0, 10, 20, 30, 1, 11, 21, NULL, 2, 12, NULL, 32, 3, 13, 23, 33, 4, 14, 24,
-                    NULL
-                ]
+                &[0, 10, 20, 30, 1, 11, 21, NULL, 2, 12, NULL, 32, 3, 13, 23, 33, 4, 14, 24, NULL]
             ),
             json!([
                 [[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]],
@@ -908,9 +897,13 @@ mod tests {
     /// one-solid `MultiSolid` emit identical texture arrays.
     #[test]
     fn identical_texture_arrays_decode_to_different_depths_per_type() {
-        let args = (&[1u32][..], &[1u32][..], &[1u32][..], &[3u32][..], &[
-            0u32, 10, 20,
-        ][..]);
+        let args = (
+            &[1u32][..],
+            &[1u32][..],
+            &[1u32][..],
+            &[3u32][..],
+            &[0u32, 10, 20][..],
+        );
         assert_eq!(
             decode_texture_values(GeometryType::Solid, args.0, args.1, args.2, args.3, args.4),
             json!([[[[0, 10, 20]]]])

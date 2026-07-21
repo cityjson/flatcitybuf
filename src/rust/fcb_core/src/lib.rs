@@ -25,7 +25,6 @@
 //! FlatGeobuf portions remain under their original BSD 2-Clause License.
 
 mod cj_utils;
-pub mod obj;
 mod cjerror;
 mod const_vars;
 pub mod error;
@@ -33,6 +32,7 @@ pub mod fb;
 #[allow(dead_code, unused_imports, clippy::all, warnings)]
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub mod http_reader;
+pub mod obj;
 
 pub mod packed_rtree;
 mod reader;

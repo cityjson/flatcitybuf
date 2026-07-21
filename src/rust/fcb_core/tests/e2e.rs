@@ -334,9 +334,7 @@ fn test_geometry_template_cycle() -> Result<()> {
         // Add attributes from header templates if they exist
         if let Some(gt) = &original_cj_seq.cj.geometry_templates {
             for template_geom in &gt.templates {
-                if let Some(semantics) =
-                    template_geom.common().and_then(|c| c.semantics.as_ref())
-                {
+                if let Some(semantics) = template_geom.common().and_then(|c| c.semantics.as_ref()) {
                     for surface in &semantics.surfaces {
                         add_surface_attributes(&mut attr_schema, surface);
                     }

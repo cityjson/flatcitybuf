@@ -58,8 +58,9 @@ pub fn to_obj<W: Write>(city_json: &CityJSON, writer: &mut W) -> IoResult<()> {
 /// the variant, so no runtime inspection of the boundaries is needed.
 fn rings(geometry: &Geometry) -> Box<dyn Iterator<Item = &Ring> + '_> {
     match geometry {
-        Geometry::MultiPoint { boundaries, .. }
-        | Geometry::GeometryInstance { boundaries, .. } => Box::new(std::iter::once(boundaries)),
+        Geometry::MultiPoint { boundaries, .. } | Geometry::GeometryInstance { boundaries, .. } => {
+            Box::new(std::iter::once(boundaries))
+        }
         Geometry::MultiLineString { boundaries, .. } => Box::new(boundaries.iter()),
         Geometry::MultiSurface { boundaries, .. }
         | Geometry::CompositeSurface { boundaries, .. } => Box::new(boundaries.iter().flatten()),

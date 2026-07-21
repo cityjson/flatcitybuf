@@ -100,7 +100,9 @@ pub(crate) fn encode(geometry: &CjGeometry) -> EncodedGeometry {
         .and_then(|c| c.semantics.as_ref())
         .map(|s| encode_semantics(s, &boundaries));
     let textures = common.and_then(|c| c.texture.as_ref()).map(encode_texture);
-    let materials = common.and_then(|c| c.material.as_ref()).map(encode_material);
+    let materials = common
+        .and_then(|c| c.material.as_ref())
+        .map(encode_material);
 
     EncodedGeometry {
         boundaries,
