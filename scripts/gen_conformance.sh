@@ -7,6 +7,16 @@
 # the RUST reader and save its output as the expected result. Comparing C++
 # against the Rust reader's view of the same file (rather than against the
 # original JSON) cancels out any shared normalisation and isolates C++ bugs.
+#
+# Determinism guarantee: `.fcb` bytes are pinned exactly -- the writer is
+# byte-reproducible run to run. `.expected.jsonl` is pinned only up to JSON
+# equality: the reader emits `CityObjects` and appearance theme maps from
+# `HashMap`s whose iteration order varies per process, so two honest runs of
+# `deser` over the same `.fcb` can differ byte-for-byte while meaning the same
+# thing. This script writes each `.expected.jsonl` to a scratch path first and
+# only replaces the committed file if the new content is not JSON-equal to
+# what is already there, so re-running this script produces no diff unless
+# something actually changed.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,6 +25,49 @@ RUST="${REPO_ROOT}/src/rust"
 INPUTS_DIR="${OUT}/inputs"
 
 mkdir -p "${OUT}"
+
+# Compare two JSON Lines files for semantic equality: same number of lines,
+# and each line's parsed JSON tree equal, regardless of key order. Used below
+# to keep .expected.jsonl idempotent across reruns -- see the determinism
+# guarantee in the header comment.
+json_lines_equal() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+
+def load(path):
+    with open(path) as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+try:
+    a = load(sys.argv[1])
+    b = load(sys.argv[2])
+except (OSError, json.JSONDecodeError):
+    sys.exit(1)
+
+sys.exit(0 if a == b else 1)
+PY
+}
+
+# Read `fcb_path` back with the Rust reader and write the result to
+# `expected_path`, but only touch `expected_path` if the freshly generated
+# content is not JSON-equal to what is already committed there.
+deser_idempotent() {
+  local fcb_path="$1"
+  local expected_path="$2"
+  local scratch="${expected_path}.new"
+
+  (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
+      deser -i "${fcb_path}" -o "${scratch}")
+
+  if [[ -f "${expected_path}" ]] && json_lines_equal "${expected_path}" "${scratch}"; then
+    rm -f "${scratch}"
+  else
+    mv "${scratch}" "${expected_path}"
+  fi
+}
 
 # Existing fixtures plus any hand-authored edge cases in inputs/.
 INPUTS=(
@@ -33,8 +86,7 @@ for src in "${INPUTS[@]}"; do
   echo "==> ${name}"
   (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
       ser -A -i "${src}" -o "${OUT}/${name}.fcb")
-  (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
-      deser -i "${OUT}/${name}.fcb" -o "${OUT}/${name}.expected.jsonl")
+  deser_idempotent "${OUT}/${name}.fcb" "${OUT}/${name}.expected.jsonl"
 done
 
 SMALL="${RUST}/fcb_core/tests/data/small.city.jsonl"
@@ -64,7 +116,6 @@ echo "==> appearance_depths_node8 (index_node_size = 8)"
 echo "==> no_count (features_count = 0)"
 (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
     ser -A --no-feature-count --no-spatial-index -i "${SMALL}" -o "${OUT}/no_count.fcb")
-(cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
-    deser -i "${OUT}/no_count.fcb" -o "${OUT}/no_count.expected.jsonl")
+deser_idempotent "${OUT}/no_count.fcb" "${OUT}/no_count.expected.jsonl"
 
 echo "Class A corpus written to ${OUT}"

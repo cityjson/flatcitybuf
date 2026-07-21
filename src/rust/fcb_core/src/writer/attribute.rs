@@ -7,12 +7,15 @@ use std::collections::BTreeMap;
 
 // Schema for attributes. The key is the attribute name, the value is a tuple of the column index and the column type.
 //
-// This is a `BTreeMap`, not a `HashMap`, on purpose: the schema's iteration
-// order decides the order attribute columns are emitted in and (via `self.len()`
-// at insert time) which column index each attribute is assigned. `HashMap`
-// iteration is randomly seeded per process, which made two runs of the writer
-// over the same input produce different bytes. The conformance corpus is
-// committed as a pinned oracle, so the writer must be byte-reproducible.
+// This is a `BTreeMap`, not a `HashMap`, on purpose. It is not load-bearing
+// for column order or column index: both `to_columns` (serializer.rs) and
+// `encode_attributes_with_schema` (below) collect the schema into a `Vec` and
+// `sort_by_key` on the stored column index before emitting anything, and the
+// column index assigned at insert time comes from `self.len()`, a count that
+// is independent of iteration order. The `BTreeMap` is defensive: it keeps
+// callers that build a schema by iterating it directly (rather than going
+// through the sorted accessors) from reintroducing `HashMap`'s randomly
+// seeded per-process order and making the writer non-reproducible.
 pub type AttributeSchema = BTreeMap<String, (u16, ColumnType)>;
 
 pub trait AttributeSchemaMethods {

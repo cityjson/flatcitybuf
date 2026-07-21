@@ -37,7 +37,15 @@ fn write_file() -> Result<(), Box<dyn Error>> {
         });
         let mut attr_schema = AttributeSchema::new();
         for feature in features.iter() {
-            for (_, co) in feature.city_objects.iter() {
+            // Sorted, because `add_attributes` assigns each new attribute the
+            // next free column index -- so a `HashMap`'s random iteration order
+            // would hand the same input different column numbers on every run.
+            let mut ids: Vec<&String> = feature.city_objects.keys().collect();
+            ids.sort_unstable();
+            for co in ids
+                .into_iter()
+                .filter_map(|id| feature.city_objects.get(id))
+            {
                 if let Some(attributes) = &co.attributes {
                     attr_schema.add_attributes(attributes);
                 }

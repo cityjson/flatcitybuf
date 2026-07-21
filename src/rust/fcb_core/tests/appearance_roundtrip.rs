@@ -31,7 +31,9 @@
 use anyhow::Result;
 use cjseq::{CityJSONFeature, Geometry as CjGeometry, MaterialReference, TextureReference};
 use fcb_core::{
-    attribute::AttributeSchema, deserializer, header_writer::HeaderWriterOptions,
+    attribute::{AttributeSchema, AttributeSchemaMethods},
+    deserializer,
+    header_writer::HeaderWriterOptions,
     read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
 use pretty_assertions::assert_eq;
@@ -574,6 +576,123 @@ fn an_untextured_ring_roundtrips_as_a_null_leaf() -> Result<()> {
         "texture": {"winter": {"values": [[[[0, 6, 7, 8]], [[null]]]]}}
     });
     assert_roundtrips(geometry, 6)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// determinism
+// ---------------------------------------------------------------------------
+
+/// The writer must be byte-reproducible: several sites that used to iterate a
+/// `HashMap` -- the attribute schema, `CityObjects` within a feature, and the
+/// material/texture theme maps -- were changed to a `BTreeMap`, or a `Vec`
+/// sorted at the point of use, specifically so that encoding the same input
+/// twice produces the same bytes. The conformance corpus in `conformance/` is
+/// committed as a pinned oracle, so a regression here would turn every
+/// regeneration into a spurious diff rather than a build failure.
+///
+/// Encodes a feature with three `CityObjects` (so both `CityObjects`
+/// iteration order and the attribute schema's column-index assignment are
+/// exercised) and two appearance themes on one geometry (so the
+/// material/texture theme ordering is exercised too), through the real
+/// `FcbWriter`, in two independent runs, and asserts the two encodings are
+/// byte-identical.
+#[test]
+fn the_writer_is_byte_reproducible_across_runs() -> Result<()> {
+    let cj_line = json!({
+        "type": "CityJSON",
+        "version": "2.0",
+        "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]},
+        "CityObjects": {},
+        "vertices": []
+    });
+    let feature_line = json!({
+        "type": "CityJSONFeature",
+        "id": "feat-1",
+        "CityObjects": {
+            "co-alpha": {
+                "type": "Building",
+                "attributes": {"height": 3.0, "name": "alpha"},
+                "geometry": [{
+                    "type": "MultiSurface",
+                    "lod": "1",
+                    "boundaries": [[[0, 1, 2]]],
+                    "material": {"winter": {"values": [0]}, "summer": {"values": [1]}},
+                    "texture": {"winter": {"values": [[[0, 0, 1, 2]]]}}
+                }]
+            },
+            "co-bravo": {
+                "type": "Building",
+                "attributes": {"height": 5.0, "code": "bravo"},
+                "geometry": [{
+                    "type": "MultiSurface",
+                    "lod": "1",
+                    "boundaries": [[[0, 1, 2]]]
+                }]
+            },
+            "co-charlie": {
+                "type": "BuildingPart",
+                "attributes": {"height": 1.0, "code": "charlie"},
+                "parents": ["co-alpha"]
+            }
+        },
+        "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]]
+    });
+    let input = format!("{cj_line}\n{feature_line}\n");
+
+    // Mirrors how a real caller (the CLI) builds the schema: sorted by
+    // CityObject id before iterating, for the same reason `FcbWriter` itself
+    // sorts internally -- see `src/rust/cli/src/main.rs` and
+    // `src/rust/fcb_core/src/bin/write.rs`.
+    let encode_once = || -> Result<Vec<u8>> {
+        let seq = match read_cityjson_from_reader(
+            BufReader::new(Cursor::new(input.clone().into_bytes())),
+            CJTypeKind::Seq,
+        )? {
+            CJType::Seq(seq) => seq,
+            _ => panic!("expected CityJSONSeq"),
+        };
+
+        let mut attr_schema = AttributeSchema::new();
+        for feature in seq.features.iter() {
+            let mut ids: Vec<&String> = feature.city_objects.keys().collect();
+            ids.sort_unstable();
+            for co in ids
+                .into_iter()
+                .filter_map(|id| feature.city_objects.get(id))
+            {
+                if let Some(attributes) = &co.attributes {
+                    attr_schema.add_attributes(attributes);
+                }
+            }
+        }
+
+        let mut fcb_buf: Vec<u8> = Vec::new();
+        let mut fcb = FcbWriter::new(
+            seq.cj.clone(),
+            Some(HeaderWriterOptions {
+                write_index: false,
+                feature_count: seq.features.len() as u64,
+                index_node_size: 16,
+                attribute_indices: None,
+                geographical_extent: None,
+            }),
+            Some(attr_schema),
+            None,
+        )?;
+        for feature in seq.features.iter() {
+            fcb.add_feature(feature)?;
+        }
+        fcb.write(&mut fcb_buf)?;
+        Ok(fcb_buf)
+    };
+
+    let first = encode_once()?;
+    let second = encode_once()?;
+    assert_eq!(
+        first, second,
+        "encoding the same input twice must produce byte-identical output"
+    );
     Ok(())
 }
 
