@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { FcbReader } from '../src/reader.js'
-import { BufferedRangeReader } from '../src/io/range-reader.js'
+import { BufferedRangeReader, BytesRangeReader } from '../src/io/range-reader.js'
+import type { RangeReader, ReadOpts } from '../src/io/range-reader.js'
 import { rtreeIndexSize } from '../src/layout.js'
 import {
   NODE_ITEM_SIZE, containsPoint, decodeNodeItem, generateLevelBounds, intersects, rtreeNumNodes,
@@ -243,6 +244,20 @@ describe('bbox search', () => {
     await expect(r.select({ spatial: { kind: 'point', value: [NaN, 0] } }))
       .rejects.toThrow(/invalid/i)
   })
+
+  it('rejects a bad query before any I/O -- pinned by a request-counting reader, not just code order', async () => {
+    // Minor 5: `select`'s docstring claims validation runs BEFORE the index
+    // check and before any `read`, but until now that was only argued from
+    // the order the source lines appear in -- every existing rejection test
+    // uses `fromBytes`, which cannot tell "zero reads" apart from "reads that
+    // happened to be harmless". A CountingReader can.
+    const inner = new CountingReader(bytes('small.fcb'))
+    const r = await FcbReader.fromReader(inner)
+    inner.reads.length = 0 // discard the header's own reads
+    await expect(r.select({ spatial: { kind: 'bbox', value: [10, 10, 0, 0] } }))
+      .rejects.toThrow(/invalid/i)
+    expect(inner.reads.length).toBe(0)
+  })
 })
 
 describe('not yet implemented', () => {
@@ -269,6 +284,89 @@ describe('cancellation', () => {
       spatial: { kind: 'bbox', value: [e[0], e[1], e[3], e[4]] },
       signal: ac.signal,
     })).rejects.toThrow(/abort/i)
+  })
+
+  it('cancels the UNFILTERED select() path too, not only the spatial one', async () => {
+    // Important 1: `select({ limit, signal })` with no `spatial` used to
+    // build `paginate(scan(...))` with no ReadOpts at all, so the signal was
+    // silently inert on this path -- no error, no warning, just ignored.
+    //
+    // Discriminating test, not just "something rejected": abort AFTER the
+    // first feature has already been produced, so a passing assertion proves
+    // the signal reached `scan`'s own per-feature reads (via `readFeature`),
+    // not merely an already-aborted check made once up front. And assert the
+    // scan did NOT run to completion -- fewer ids were collected than a
+    // plain, unaborted `selectAll()` produces -- so a build that swallows the
+    // abort and finishes the scan anyway is caught, not just any rejection.
+    const r = await FcbReader.fromBytes(bytes('small.fcb'))
+    const all = await ids(await r.selectAll())
+    expect(all.length).toBeGreaterThan(1) // otherwise "mid-scan" is vacuous
+
+    const ac = new AbortController()
+    const collected: string[] = []
+    const cursor = await r.select({ signal: ac.signal })
+    await expect((async () => {
+      for await (const f of cursor) {
+        collected.push(f.id)
+        if (collected.length === 1) ac.abort()
+      }
+    })()).rejects.toThrow(/abort/i)
+    expect(collected.length).toBeLessThan(all.length)
+  })
+
+  it('cancels a spatial hit MID-FEATURE, between its own prefix and body reads', async () => {
+    // Important 2: `readHits` re-checks `opts?.signal?.aborted` BETWEEN
+    // features, but each hit's own `readFeature` call makes TWO reads (a
+    // 4-byte size-prefix read, then a `4 + len` body read) and neither used
+    // to carry the signal at all. A between-features check cannot catch an
+    // abort that fires inside those two reads -- exactly where the in-flight
+    // HTTP fetches are.
+    //
+    // Discriminating test: a spy reader fires the abort right after the
+    // FIRST hit's prefix read succeeds, before its body read starts. That
+    // pins the fault to the SECOND read of the SAME feature, which a
+    // "checks only between features" implementation cannot see coming. If
+    // the signal is not threaded into readFeature, the body read proceeds
+    // regardless and the query completes normally.
+    const data = bytes('appearance_depths_node8.fcb')
+    const probe = await FcbReader.fromReader(new BytesRangeReader(data))
+    const e = probe.header.info.geographicalExtent!
+    const whole: SpatialQuery = { kind: 'bbox', value: [e[0]!, e[1]!, e[3]!, e[4]!] }
+
+    // Learn the first hit's absolute offset from an ordinary, unaborted run,
+    // rather than hand-deriving it.
+    let firstAbsOffset = -1
+    for await (const f of await probe.select({ spatial: whole })) {
+      firstAbsOffset = probe.header.layout.featureBegin + f.byteOffset
+      break
+    }
+    expect(firstAbsOffset).toBeGreaterThanOrEqual(0)
+
+    const ac = new AbortController()
+    let sawPrefixRead = false
+    class SpyReader implements RangeReader {
+      constructor(private readonly inner: RangeReader) {}
+      size(): number {
+        return this.inner.size()
+      }
+      async read(offset: number, length: number, opts?: ReadOpts): Promise<Uint8Array> {
+        const out = await this.inner.read(offset, length, opts)
+        if (offset === firstAbsOffset && length === 4 && !sawPrefixRead) {
+          sawPrefixRead = true
+          ac.abort()
+        }
+        return out
+      }
+    }
+
+    const r = await FcbReader.fromReader(new SpyReader(new BytesRangeReader(data)))
+    const collected: string[] = []
+    const cursor = await r.select({ spatial: whole, signal: ac.signal })
+    await expect((async () => {
+      for await (const f of cursor) collected.push(f.id)
+    })()).rejects.toThrow(/abort/i)
+    expect(sawPrefixRead).toBe(true)
+    expect(collected.length).toBe(0)
   })
 })
 
@@ -330,7 +428,11 @@ describe('request pattern', () => {
     // appearance_depths_node8.fcb: 12 items at node size 8 -> level bounds
     // [12, 2, 1], 15 nodes. A range-driven descent reads the root range, the
     // level-1 range, then one range per intersecting level-1 node: 4 reads for
-    // a whole-extent query. A per-node traversal would read 15.
+    // a whole-extent query. A per-node traversal (one read per single node,
+    // no batching) would issue 16 reads, not 15: the +1 leaf-fetch rule
+    // re-reads node index 11 as both the last node of the first leaf range's
+    // over-fetch and the first node of the second leaf range, so the 15
+    // distinct nodes cost 16 reads, measured.
     const inner = new CountingReader(bytes('appearance_depths_node8.fcb'))
     const r = await FcbReader.fromReader(inner)
     const e = r.header.info.geographicalExtent!

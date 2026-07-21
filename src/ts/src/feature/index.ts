@@ -13,7 +13,7 @@ import { toCityJSONFeature } from '../cityjson/index.js'
 import type { Int64Policy } from '../cityjson/index.js'
 import type { CityJSONFeature } from '../cityjson/types.js'
 import type { ColumnInfo, HeaderView } from '../header/index.js'
-import type { RangeReader } from '../io/range-reader.js'
+import type { RangeReader, ReadOpts } from '../io/range-reader.js'
 import { MAX_FEATURE_SIZE } from '../layout.js'
 import { readU32 } from '../le.js'
 import { decodeAttributes } from './attribute.js'
@@ -243,6 +243,12 @@ export class Feature {
  *  says the same thing from the caller's side; see it for what to do about
  *  the HTTP case.
  *
+ *  `opts` is forwarded to BOTH `reader.read` calls, unchanged, so a caller's
+ *  `AbortSignal` reaches the actual in-flight read rather than stopping at
+ *  some facade above it -- an already-aborted signal is caught by the reader
+ *  at the START of either read (`checkAborted`), including between the
+ *  prefix read and the body read.
+ *
  *  The copy is load-bearing twice over:
  *   1. Durability. `RangeReader.read` may return a view into a buffer the
  *      reader reuses or overwrites on its next call (BufferedRangeReader
@@ -258,13 +264,14 @@ export async function readFeature(
   at: number,
   headerColumns: readonly ColumnInfo[],
   featureBegin: number,
+  opts?: ReadOpts,
 ): Promise<{ feature: Feature; next: number }> {
   const total = reader.size()
   if (at + FEATURE_SIZE_PREFIX > total) {
     throw new FcbError(ErrorCode.IoError, `feature offset ${at} past end of resource`)
   }
 
-  const prefix = await reader.read(at, FEATURE_SIZE_PREFIX)
+  const prefix = await reader.read(at, FEATURE_SIZE_PREFIX, opts)
   const len = readU32(new DataView(prefix.buffer, prefix.byteOffset, prefix.byteLength), 0)
   if (len === 0 || len > MAX_FEATURE_SIZE) {
     throw new FcbError(ErrorCode.InvalidFlatbuffer, `implausible feature size: ${len}`)
@@ -280,7 +287,7 @@ export async function readFeature(
 
   // `.slice()` on a Uint8Array allocates a fresh ArrayBuffer of exactly this
   // length and copies into it at index 0 -- both properties are required.
-  const bytes = (await reader.read(at, want)).slice()
+  const bytes = (await reader.read(at, want, opts)).slice()
   return {
     feature: new Feature(bytes, headerColumns, at - featureBegin),
     next: at + want,

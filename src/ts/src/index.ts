@@ -22,17 +22,19 @@ export { emitInt64, toCityJSONFeature, toCityJSONMetadata } from './cityjson/ind
 export type { Int64Policy } from './cityjson/index.js'
 export type * from './cityjson/types.js'
 
-// Packed R-tree spatial index.
-export {
-  NODE_ITEM_SIZE,
-  containsPoint,
-  decodeNodeItem,
-  generateLevelBounds,
-  intersects,
-  queryToBBox,
-  rtreeNumNodes,
-  searchRtree,
-} from './packed-rtree/index.js'
+// Packed R-tree spatial index. `queryToBBox`, `generateLevelBounds`,
+// `rtreeNumNodes`, `decodeNodeItem`, `containsPoint` and `NODE_ITEM_SIZE` are
+// traversal internals, not public API -- Task 12's brief never asked for
+// them, and once published they are hard to withdraw. Tests reach them via
+// the deep import `../src/packed-rtree/index.js` instead. `intersects` and
+// `searchRtree` stay: `searchRtree` is the actual spatial-query entry point
+// (a caller who wants raw hits without the `FcbReader` facade needs it), and
+// `intersects` is the bbox predicate a caller would otherwise have to
+// reimplement to post-filter or reason about `SearchResultItem`s. `BBox`,
+// `NodeItem`, `SearchResultItem` and `SpatialQuery` stay because they are the
+// types `SelectOptions.spatial` and `searchRtree`'s own signature are spelled
+// in -- a consumer cannot name a query or a hit without them.
+export { intersects, searchRtree } from './packed-rtree/index.js'
 export type { BBox, NodeItem, SearchResultItem, SpatialQuery } from './packed-rtree/index.js'
 
 // The reader facade.

@@ -81,10 +81,16 @@ function asCloseable(reader: RangeReader): Closeable | undefined {
  *  UNKNOWN (conformance/no_count.fcb declares 0 and holds three features).
  *  A declared non-zero count is still used, but only as a lower bound to
  *  catch a truncated file -- reaching EOF early is a cut-off file, not a
- *  clean end of iteration (reader.cpp:168-179). */
+ *  clean end of iteration (reader.cpp:168-179).
+ *
+ *  `opts` is forwarded to every `readFeature` call, so an `AbortSignal`
+ *  reaches the actual in-flight reads: the next iteration's `readFeature`
+ *  rejects via `checkAborted` as soon as the signal fires, rather than the
+ *  scan running to completion regardless. */
 async function* scan(
   reader: RangeReader,
   header: HeaderView,
+  opts?: ReadOpts,
 ): AsyncGenerator<Feature, void, undefined> {
   const total = reader.size()
   const declared = header.info.featuresCount
@@ -93,7 +99,13 @@ async function* scan(
   let produced = 0
 
   while (at + FEATURE_SIZE_PREFIX <= total) {
-    const { feature, next } = await readFeature(reader, at, columns, header.layout.featureBegin)
+    const { feature, next } = await readFeature(
+      reader,
+      at,
+      columns,
+      header.layout.featureBegin,
+      opts,
+    )
     at = next
     produced++
     yield feature
@@ -130,6 +142,7 @@ async function* readHits(
       featureBegin + hit.offset,
       header.info.columns,
       featureBegin,
+      opts,
     )
     yield feature
   }
@@ -246,12 +259,17 @@ export class FcbReader {
   /** Every feature in the file, in stored order. Async because later
    *  selection modes (spatial, attribute) must read an index before they can
    *  produce their first feature; `selectAll` has nothing to read, so it
-   *  resolves immediately, but the signature is shared. */
-  async selectAll(): Promise<FeatureCursor> {
+   *  resolves immediately, but the signature is shared.
+   *
+   *  Takes `ReadOpts` directly (rather than a `SelectOptions`-shaped object)
+   *  because it has nothing else to validate -- no spatial query, no paging
+   *  -- so the only thing worth threading is the signal, straight into
+   *  `scan`'s reads. */
+  async selectAll(opts?: ReadOpts): Promise<FeatureCursor> {
     if (this.closed) {
       throw new FcbError(ErrorCode.IoError, 'selectAll on a closed FcbReader')
     }
-    const gen = scan(this.reader, this.headerView)
+    const gen = scan(this.reader, this.headerView, opts)
     const declared = this.headerView.info.featuresCount
     return {
       featuresCount: declared === 0 ? undefined : declared,
@@ -271,8 +289,12 @@ export class FcbReader {
    *   3. Page the sorted result list. `featuresCount` still reports the total
    *      match count, not the page size.
    *
-   *  The `signal` is threaded into the traversal's reads and re-checked
-   *  between features, not merely held here. */
+   *  The `signal` is threaded into the actual reads on BOTH paths, not merely
+   *  held here: into the R-tree traversal and each hit's feature read when
+   *  `spatial` is given, and into `scan`'s per-feature reads (re-checked
+   *  between features) when it is not. A signal that only lived on this
+   *  facade would cancel nothing -- the reads are where the in-flight work
+   *  is. */
   async select(opts?: SelectOptions): Promise<FeatureCursor> {
     if (this.closed) {
       throw new FcbError(ErrorCode.IoError, 'select on a closed FcbReader')
@@ -312,7 +334,7 @@ export class FcbReader {
     }
 
     const declared = info.featuresCount
-    const gen = paginate(scan(this.reader, this.headerView), offset, limit)
+    const gen = paginate(scan(this.reader, this.headerView, readOpts), offset, limit)
     return {
       // 0 means UNKNOWN, never "empty" -- same rule as selectAll.
       featuresCount: declared === 0 ? undefined : declared,

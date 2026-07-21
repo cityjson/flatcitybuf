@@ -37,8 +37,9 @@ export interface BBox {
   maxY: number
 }
 
-/** Decodes the node at `index` within a block whose first byte is node
- *  `blockStart`. Goes through `le.ts` -- a raw DataView getter defaults to
+/** Decodes the node at `slot` within a `block` that was fetched starting at
+ *  some node boundary (`slot` is relative to that boundary, not an absolute
+ *  node index). Goes through `le.ts` -- a raw DataView getter defaults to
  *  BIG-endian, and a byteswapped f64 bbox is still a finite f64, so the
  *  mistake would not surface as an error. */
 export function decodeNodeItem(block: Uint8Array, slot: number): NodeItem {
