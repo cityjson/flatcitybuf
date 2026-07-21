@@ -50,11 +50,6 @@ flatcitybuf/
 │   │   │   │   └── writer/        # FlatBuffers writing & serialization
 │   │   │   └── Cargo.toml
 │   │   │
-│   │   ├── 📁 fcb_py/              # Python bindings (PyO3)
-│   │   │   ├── src/
-│   │   │   │   └── lib.rs         # FFI bridge to Python
-│   │   │   └── Cargo.toml
-│   │   │
 │   │   ├── 📁 fcb_cpp/             # C++ bindings (cxx bridge)
 │   │   │   ├── src/
 │   │   │   │   └── lib.rs         # FFI bridge to C++
@@ -71,6 +66,11 @@ flatcitybuf/
 │   │   │   └── Cargo.toml
 │   │   │
 │   │   └── 📁 data/                # Test data and fixtures
+│   │
+│   ├── 📁 py/                       # flatcitybuf -- pure-Python reader (py3-none-any)
+│   │   ├── flatcitybuf/            # Package source (no compiled dependency)
+│   │   ├── tests/                  # pytest suite
+│   │   └── pyproject.toml          # Single source of package name/version
 │   │
 │   ├── 📁 cpp/                      # C++ library bindings
 │   │   ├── 📁 include/             # Public C++ headers
@@ -116,16 +116,20 @@ The Rust workspace is organized as a multi-crate project with the following memb
 |-------|---------|-------------------|
 | **fcb_core** | Core library with read/write/indexing capabilities | Pure Rust |
 | **cli** | Command-line interface (`fcb` command) | - |
-| **fcb_py** | Python bindings via PyO3 | Python |
 | **fcb_cpp** | C++ bindings via cxx bridge | C++ |
 | **wasm** | WebAssembly bindings via wasm-bindgen | JavaScript/TypeScript |
 | **fcb_api** | REST API server using axum | HTTP API |
+
+Python is NOT a Rust workspace member: `src/py/` is a from-scratch, pure-Python
+reader with no compiled dependency (see below).
 
 ### Language Bindings
 
 FlatCityBuf provides native bindings for multiple languages:
 
-1. **Python** (`src/rust/fcb_py/`) → Published to PyPI as `flatcitybuf`
+1. **Python** (`src/py/`) → Published to PyPI as `flatcitybuf`, a pure-Python
+   `py3-none-any` wheel (no Rust toolchain required to build or install; the
+   PyO3 extension formerly at `src/rust/fcb_py` was retired in favor of this)
 2. **C++** (`src/cpp/`) → Standalone C++ library with CMake build
 3. **JavaScript/TypeScript** (`src/ts/`) → Published to npm as `@cityjson/flatcitybuf`
 
@@ -154,7 +158,10 @@ Each crate follows standard Rust conventions:
 
 ### Cross-Language Bridge
 
-Language bindings use appropriate FFI technologies:
-- **Python**: PyO3 with async runtime support
+Language bindings use appropriate FFI technologies, except Python, which is a
+from-scratch reimplementation with no FFI at all:
+- **Python**: no FFI -- `src/py/` is a standalone, pure-Python reader that
+  parses the FlatCityBuf format directly (flatbuffers runtime only; numpy and
+  httpx are optional extras)
 - **C++**: cxx bridge for automatic Rust/C++ interoperability
 - **WASM**: wasm-bindgen for browser compatibility

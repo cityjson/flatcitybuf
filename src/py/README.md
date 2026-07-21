@@ -6,13 +6,56 @@ full CityJSON compatibility.
 
 This package has no compiled dependency: it builds a `py3-none-any` wheel and
 runs on plain CPython, no Rust toolchain required. It replaces the PyO3
-extension at `src/rust/fcb_py`.
+extension formerly at `src/rust/fcb_py`, which has been deleted (Task 13).
 
 ## Status
 
-Under construction. Only the error taxonomy (`flatcitybuf.errors`) exists so
-far; layout parsing, feature iteration, and spatial/attribute queries land in
-later tasks.
+Complete. `FcbReader.open_file(path)` / `.select_all()` / `.select_attr(...)`,
+`to_cityjson_metadata` / `to_cityjson_feature`, `search_rtree` / `search_stree`,
+and `HttpRangeReader` / `FileRangeReader` / `BufferedRangeReader` all exist and
+are covered by 247 tests, including a 10/10 conformance suite comparing this
+reader's output against the Rust reader's on the same bytes
+(`tests/test_conformance.py`).
+
+## Breaking changes from the retired PyO3 extension (`src/rust/fcb_py`)
+
+The Python import name is still `flatcitybuf`, but the API underneath is a
+new, from-scratch design, not a drop-in replacement. If you used the old
+PyO3 bindings:
+
+- **No async API.** The old `AsyncReader` / `AsyncFeatureIterator`
+  (`await reader.open()`, `await async_iter.next()`, persistent HTTP
+  connections, async streaming) do not exist here and were deliberately not
+  built. `HttpRangeReader` reads over HTTP too, but synchronously (blocking
+  `urllib.request`, one or more Range GETs per `read()` call) -- there is no
+  `asyncio` story. This is a real capability regression, not an oversight.
+- **`Reader(path)` → `FcbReader.open_file(path)`.** A classmethod, not a
+  constructor; `Reader.info()` → the `.header` attribute (a `HeaderView`),
+  and `Reader.cityjson_header()` → the module-level `to_cityjson_metadata(header)`.
+- **`AttrFilter(field, Operator.Eq, value)` → `AttrCondition(column, Operator.EQ, value)`.**
+  The operator enum is spelled in upper case (`EQ`/`NE`/`GT`/`GE`/`LT`/`LE`,
+  not `Eq`/`Ne`/...), and `value` must be a typed `KeyValue`
+  (`KeyValue.from_u64(...)`, `.from_string(...)`, etc.) rather than a raw
+  Python `int`/`str`.
+- **`BBox(min_x=..., ...)` → a plain `(min_x, min_y, max_x, max_y)` tuple**,
+  passed positionally to `search_rtree`.
+- **Spatial and attribute queries no longer hand back decoded features.**
+  `Reader.query_bbox(...)` / `Reader.query_attr([...])` used to return
+  `Iterator[Feature]` directly. The new `search_rtree(...)` /
+  `FcbReader.select_attr(...)` both return
+  `list[SearchResultItem(offset, index)]` -- feature-section-relative
+  offsets, not materialized features. There is currently no public
+  `select_bbox` that both filters and decodes in one call.
+- **No module-level convenience functions.** The old `fcb.open_file(path)` /
+  `fcb.query_bbox(path, ...)` free functions returning `list[Feature]` are
+  gone; construct an `FcbReader` explicitly.
+- **Feature/CityObject/Geometry are no longer PyO3 classes with attribute
+  access.** `to_cityjson_feature(feature, header)` returns a plain CityJSON
+  dict (matching the CityJSON spec's own shape) rather than instances of a
+  `Feature`/`CityObject`/`Geometry` class hierarchy.
+- **Installation is simpler, not harder.** `pip install flatcitybuf` now
+  installs one universal `py3-none-any` wheel; there is no Rust toolchain,
+  `maturin`, or per-platform wheel to worry about.
 
 ## Development
 
