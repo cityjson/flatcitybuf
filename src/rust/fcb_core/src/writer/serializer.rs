@@ -484,6 +484,26 @@ fn json_str<'v>(v: &'v Value, key: &str) -> Option<&'v str> {
     v.get(key).and_then(|v| v.as_str())
 }
 
+/// Maps a CityJSON enumeration string onto its FlatBuffers tag.
+///
+/// Every one of these tables needs a fallback, and a silent fallback over a
+/// *string* turns a mis-spelling into a valid-looking default rather than an
+/// error: that is exactly how a texture written `"wrapMode": "wrap"` came back
+/// as `"None"` and survived until the C++ conformance corpus caught it. The
+/// permitted spellings are fixed by `appearance.schema.json`, so an
+/// unrecognised one is a bug either here or in the input, and says so.
+fn cj_enum<T: Copy>(member: &str, value: &str, table: &[(&str, T)], default: T) -> T {
+    if let Some((_, tag)) = table.iter().find(|(name, _)| *name == value) {
+        return *tag;
+    }
+    debug_assert!(
+        false,
+        "unknown CityJSON `{member}` value {value:?}; the permitted spellings are fixed by the schema"
+    );
+    tracing::warn!("unknown CityJSON `{member}` value {value:?}, falling back to the default");
+    default
+}
+
 fn json_f64(v: &Value, key: &str) -> Option<f64> {
     v.get(key).and_then(|v| v.as_f64())
 }
@@ -541,22 +561,41 @@ pub(super) fn to_appearance<'a>(
                 let image = fbb.create_string(json_str(t, "image").unwrap_or_default());
                 let border_color =
                     json_color(t, "borderColor", &[3, 4]).map(|c| fbb.create_vector(&c));
-                let texture_format = match json_str(t, "type") {
-                    Some("JPG") => TextureFormat::JPG,
-                    _ => TextureFormat::PNG,
-                };
-                // `appearance.schema.json` spells both of these lowercase.
-                let wrap_mode = json_str(t, "wrapMode").map(|w| match w {
-                    "wrap" => WrapMode::Wrap,
-                    "mirror" => WrapMode::Mirror,
-                    "clamp" => WrapMode::Clamp,
-                    "border" => WrapMode::Border,
-                    _ => WrapMode::None,
+                // `appearance.schema.json` spells `wrapMode` and `textureType`
+                // lower case, and `type` upper.
+                let texture_format = json_str(t, "type").map_or(TextureFormat::PNG, |f| {
+                    cj_enum(
+                        "type",
+                        f,
+                        &[("PNG", TextureFormat::PNG), ("JPG", TextureFormat::JPG)],
+                        TextureFormat::PNG,
+                    )
                 });
-                let texture_type = json_str(t, "textureType").map(|t| match t {
-                    "specific" => TextureType::Specific,
-                    "typical" => TextureType::Typical,
-                    _ => TextureType::Unknown,
+                let wrap_mode = json_str(t, "wrapMode").map(|w| {
+                    cj_enum(
+                        "wrapMode",
+                        w,
+                        &[
+                            ("none", WrapMode::None),
+                            ("wrap", WrapMode::Wrap),
+                            ("mirror", WrapMode::Mirror),
+                            ("clamp", WrapMode::Clamp),
+                            ("border", WrapMode::Border),
+                        ],
+                        WrapMode::None,
+                    )
+                });
+                let texture_type = json_str(t, "textureType").map(|t| {
+                    cj_enum(
+                        "textureType",
+                        t,
+                        &[
+                            ("unknown", TextureType::Unknown),
+                            ("specific", TextureType::Specific),
+                            ("typical", TextureType::Typical),
+                        ],
+                        TextureType::Unknown,
+                    )
                 });
                 Texture::create(
                     fbb,

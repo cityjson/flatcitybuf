@@ -444,6 +444,24 @@ fn to_color(color: Option<flatbuffers::Vector<'_, f64>>) -> Option<Vec<f64>> {
     color.map(|c| c.iter().collect())
 }
 
+/// Maps a FlatBuffers enumeration tag back onto its CityJSON spelling.
+///
+/// The mirror of `serializer::cj_enum`, and loud for the same reason: the `_`
+/// arm these tables need would otherwise turn an unknown tag -- one written by
+/// a newer writer, or a table that has drifted from the `.fbs` -- into a
+/// valid-looking default, which is how the `wrapMode` spelling bug survived.
+fn fb_enum<T: PartialEq>(member: &str, tag: T, table: &[(T, &'static str)]) -> &'static str {
+    if let Some((_, name)) = table.iter().find(|(t, _)| *t == tag) {
+        return name;
+    }
+    debug_assert!(
+        false,
+        "unknown FlatCityBuf `{member}` tag; the table has drifted from the schema"
+    );
+    tracing::warn!("unknown FlatCityBuf `{member}` tag, falling back to the default");
+    table[0].1
+}
+
 pub fn to_cj_feature(
     feature: CityFeature,
     root_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
@@ -574,30 +592,43 @@ pub fn to_cj_feature(
                     let mut obj = serde_json::Map::new();
                     obj.insert(
                         "type".to_string(),
-                        json!(match t.type_() {
-                            TextureFormat::JPG => "JPG",
-                            _ => "PNG",
-                        }),
+                        json!(fb_enum(
+                            "type",
+                            t.type_(),
+                            &[(TextureFormat::PNG, "PNG"), (TextureFormat::JPG, "JPG")]
+                        )),
                     );
                     obj.insert("image".to_string(), json!(t.image()));
                     insert_opt(
                         &mut obj,
                         "wrapMode",
-                        t.wrap_mode().map(|w| match w {
-                            WrapMode::Wrap => "wrap",
-                            WrapMode::Mirror => "mirror",
-                            WrapMode::Clamp => "clamp",
-                            WrapMode::Border => "border",
-                            _ => "none",
+                        t.wrap_mode().map(|w| {
+                            fb_enum(
+                                "wrapMode",
+                                w,
+                                &[
+                                    (WrapMode::None, "none"),
+                                    (WrapMode::Wrap, "wrap"),
+                                    (WrapMode::Mirror, "mirror"),
+                                    (WrapMode::Clamp, "clamp"),
+                                    (WrapMode::Border, "border"),
+                                ],
+                            )
                         }),
                     );
                     insert_opt(
                         &mut obj,
                         "textureType",
-                        t.texture_type().map(|t| match t {
-                            TextureType::Specific => "specific",
-                            TextureType::Typical => "typical",
-                            _ => "unknown",
+                        t.texture_type().map(|t| {
+                            fb_enum(
+                                "textureType",
+                                t,
+                                &[
+                                    (TextureType::Unknown, "unknown"),
+                                    (TextureType::Specific, "specific"),
+                                    (TextureType::Typical, "typical"),
+                                ],
+                            )
                         }),
                     );
                     insert_opt(&mut obj, "borderColor", to_color(t.border_color()));
