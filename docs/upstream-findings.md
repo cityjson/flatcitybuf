@@ -239,17 +239,41 @@ two decoders must change together. No conformance fixture changed, because
 tests over the reference's own output could not have caught this, and only a
 round trip through the writer did.
 
-### Two related quirks that are NOT reachable — documented, not fixed
+### The whole class is gone: depth now comes from the geometry type
 
-- `decode_textures` skips its shell branch when `shells.len() > 1`, losing
-  the shell grouping. The encoder pushes a `shells` entry only for a depth-3
-  node, and two such nodes require a depth-4 parent that always pushes a
-  `solids` entry, so `shells.len() > 1` with empty `solids` cannot be
-  written by us.
-- The MultiLineString branch iterates `surfaces[0]` rather than
-  `strings.len()`, which would drop surplus strings. The encoder always
-  emits `surfaces == [strings.len()]` for that shape.
+Both fixes above were still guesses — better guesses, but guesses. Two further
+quirks of the same shape were documented here as unreachable-from-our-writer:
+`decode_textures` skipping its shell branch when `shells.len() > 1`, and the
+MultiLineString branch iterating `surfaces[0]` rather than `strings.len()`.
 
-Both are reachable only from hand-built or third-party files. Deciding the
-nesting from the enclosing `Geometry`'s type, rather than from which count
-arrays are populated, would remove this whole class of ambiguity.
+The decoders no longer infer anything. `decode_materials` and `decode_textures`
+take the `GeometryType` — which was always there, in the enclosing `Geometry`
+table — and select the depth from it alone. Every `solids.len() == 1`,
+`shells.len() == 1` and `strings.len() > 1` guard is deleted, and so are the
+two quirks, which no longer have a branch to be reachable into.
+
+That the guessing could not have been made correct is now proved by test rather
+than argued: a `Solid` and a one-solid `MultiSolid` are shown to flatten to
+byte-identical arrays, as are `MultiSurface`/`CompositeSurface` and
+`MultiSolid`/`CompositeSolid`. Against the previous decoder, six geometry ×
+appearance combinations came back wrong — the four where a one-solid
+`MultiSolid` or `CompositeSolid` decoded as a `Solid`, plus a dropped `null`
+solid and a dropped explicit `"values": null`.
+
+The depths, from `geomprimitives.schema.json`:
+
+| type                               | boundaries | semantics.values | material.values | texture.values |
+|------------------------------------|-----------:|-----------------:|----------------:|---------------:|
+| `MultiPoint`                       |          1 |                1 |     *forbidden* |    *forbidden* |
+| `MultiLineString`                  |          2 |                1 |     *forbidden* |    *forbidden* |
+| `MultiSurface`, `CompositeSurface` |          3 |                1 |               1 |              3 |
+| `Solid`                            |          4 |                2 |               2 |              4 |
+| `MultiSolid`, `CompositeSolid`     |          5 |                3 |               3 |              5 |
+
+`MultiPoint` and `MultiLineString` are typed with no `material` and no
+`texture` member and with `additionalProperties: false`, so appearance on one
+of them is not valid CityJSON — which is why the second bug above, a textured
+single-string `MultiLineString`, describes an input that should never have been
+accepted in the first place.
+
+The C++ reader still infers, and this change has not yet been mirrored there.
