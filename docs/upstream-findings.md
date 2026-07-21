@@ -84,6 +84,93 @@ reads back as `-56`.
 **C++ divergence:** matches the writer (`u8`), so it decodes files correctly
 and disagrees with the Rust reader for values above 127.
 
+**Scope of this fix:** this item covers only the attribute-*index* decode
+path (`reader/attr_query.rs`, used when building/querying a B+tree index
+over an attribute column). It does not cover the separate feature-*value*
+decode path — see item 2a, which is a distinct, still-open defect in the
+same family.
+
+---
+
+## 2a. `Byte` feature-attribute value decode: still decodes as `i8` — NOT FIXED
+
+**Where:** `reader/deserializer.rs:375-383`, inside `decode_attributes`
+(the function that turns a `CityObject`'s raw attribute bytes into the
+`serde_json::Value` returned for every feature — i.e. the live
+`to_cj_feature` path, not the index/query path item 2 covers):
+
+```rust
+ColumnType::Byte => {
+    map.insert(
+        column.name().to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            bytes[offset] as i8,
+        )),
+    );
+    offset += size_of::<u8>();
+}
+```
+
+**Before/consequence:** the writer stores `Byte` as `u8` (same site as item
+2: `writer/attribute.rs:138-141`, `out[offset] = b as u8;`), so a stored
+`200` is the single byte `0xC8`. `decode_attributes` reads that byte back
+via `bytes[offset] as i8`, so any consumer that reads a feature's
+attributes through `fcb_core` (CLI `deser`, `to_cj_feature`, the Rust
+library's normal read path) sees `-56` for a stored `200` — the exact
+defect item 2 already fixed, but at a different call site that was never
+touched. Item 2's "FIXED" applies only to the index/query path; this
+value-decode path is a **separate, currently-unfixed** site with the same
+bug.
+
+C++ and Python do not reproduce `-56`, but not because they decode `Byte`
+as unsigned at this layer — they refuse to decode it at all. Both
+feature-value decoders (`src/cpp/src/attribute.cpp:145-156`,
+`src/py/flatcitybuf/attribute.py:41-43,123-128`) raise
+`UnsupportedColumnType`/`FcbError(UNSUPPORTED_COLUMN_TYPE)` for
+`Byte`/`UByte`/`Binary` outright, each citing the same justification in
+its own comment: *"the Rust reader hits `unreachable!()` on them
+(deserializer.rs:372), so no file in the wild has ever had them read
+back."* That justification is itself stale — item 3 above fixed exactly
+that `unreachable!()`, and Rust's `decode_attributes` has decoded these
+three types (not panicked on them) since. So today: a `Byte` feature
+attribute is read (wrongly, as negative) by Rust, and rejected outright by
+both C++ and Python, which is a live three-way disagreement beyond the
+Rust-only sign bug this item is otherwise about. Fixing either side —
+Rust's sign, or C++/Python's blanket rejection — is out of scope here;
+recorded so whoever picks either up has both halves of the picture.
+
+**Reproduce:** no existing conformance fixture exercises this, because the
+writer's schema inference (`writer/attribute.rs::guess_type`) never
+produces `ColumnType::Byte` from parsed CityJSON — every plain JSON integer
+is guessed as `Long`/`ULong`, and there is no CLI flag or config to force a
+column to `Byte`. A `Byte` column can currently only arise from a caller
+that constructs an `AttributeSchema` by hand (bypassing `guess_type`), so
+there is no fixture on disk and none of `scripts/gen_conformance.sh`'s
+inputs (including `inferable_types.city.jsonl`) can be used as-is to
+reproduce this through the CLI.
+
+The following **was run** against this tree's `fcb_core` as an external
+crate (constructing the `Header`/`CityFeature` FlatBuffers by hand, since
+`guess_type` and the writer's `encode_attributes_with_schema` are
+`pub(crate)`/`pub(super)` and cannot build a `Byte` column from outside the
+crate) — this is an observed result, not a hypothetical one:
+
+```rust
+// Header: one column, `b`, ColumnType::Byte.
+// Attributes buffer for one CityObject: [u16 LE col_index = 0][u8 value = 200],
+// i.e. exactly what writer/attribute.rs would emit for {"b": 200} against
+// a Byte-typed column.
+let decoded = decode_attributes(&header_buf.columns().unwrap(), attributes);
+println!("{}", decoded);
+```
+```
+stored Byte value: 200
+decode_attributes() result: {"b":-56}
+```
+
+**Not fixed:** out of scope for this task (documentation only); recorded
+here, with the exact citation, for whoever picks up the Rust-side fix.
+
 ---
 
 ## 3. `Byte`/`UByte`/`Binary` attributes cannot be read back at all — FIXED
@@ -676,14 +763,30 @@ place. Source: `src/py/flatcitybuf/{keys,stree,range_reader,reader,http_reader}.
 documented at both the point of use and in `search_stree`'s public
 docstring, `src/py/flatcitybuf/stree.py:732+`):
 
-1. **`Byte` decodes as `u8`, matching the writer, not Rust's own reader.**
-   The writer stores `Byte` as `u8` and builds `MemoryIndex<u8>`
-   (`writer/attribute.rs:209`, `writer/attr_index.rs:240`); only Rust's own
-   reader decodes it as `i8` (`reader/attr_query.rs:118`), so a stored `200`
-   reads back as `-56` there. Python (and C++, `key.cpp:328-335`) match the
-   writer and therefore decode files correctly, at the cost of disagreeing
-   with the Rust *reader* specifically for values above 127. This is the
-   same defect already recorded as item 2 at the top of this document.
+1. **`Byte` index keys decode as `u8`, matching the writer** — and, as of
+   this branch, matching Rust's own index reader too. The writer stores
+   `Byte` as `u8` and builds `MemoryIndex<u8>` (`writer/attribute.rs:209`,
+   `writer/attr_index.rs:240`); Python's key encoding (`keys.py`,
+   `column_type_to_key_kind`) and C++'s (`key.cpp:328-335`) both map `Byte`
+   to an unsigned key for exactly this reason. **Correction:** earlier text
+   here claimed this still disagreed with "Rust's own reader"
+   (`reader/attr_query.rs:118`) and called it "the same defect... recorded
+   as item 2" — that was wrong on two counts. First, line 118 there is the
+   *comment* documenting that fix, not the bug; the actual decode (line
+   123) is `MemoryIndex::<u8>`, i.e. already `u8`. Second, item 2 is marked
+   FIXED precisely because that index-path mismatch was resolved — so
+   Python's index-key choice and Rust's current index reader now agree,
+   and there is no live divergence at this layer to record.
+
+   A live divergence in the same family does still exist, but one layer
+   up, in feature-attribute *value* decoding rather than index-key
+   encoding: Rust's `decode_attributes` (`reader/deserializer.rs:375`,
+   distinct code path from `attr_query.rs`, itself never fixed) still
+   returns `-56` for a stored `200` when reading a feature's attributes —
+   see item 2a at the top of this document, which also covers Python's
+   own behaviour at that layer (Python's `attribute.py` does not reproduce
+   `-56` either, but only because it rejects `Byte` there outright, for an
+   unrelated reason).
 2. **Json/Binary index queries are rejected** —
    `stree.py::_resolve` (`src/py/flatcitybuf/stree.py:663`, its own comment
    labels this "DIVERGENCE 2"), checked before the "is it indexed" lookup,
