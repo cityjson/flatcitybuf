@@ -51,69 +51,75 @@ const char* const kSemanticSurfaceTypeNames[] = {
     "ExtraSemanticSurface",
 };
 
-/// u32::MAX marks "no semantic surface for this boundary" and becomes JSON
-/// null (geom_decoder.rs:284).
-nlohmann::json semantic_index_to_json(std::uint32_t v) {
-    if (v == UINT32_MAX) return nullptr;
-    return v;
+GeometryKind kind_of(const ::Geometry* g) {
+    return static_cast<GeometryKind>(static_cast<std::uint8_t>(g->type()));
 }
 
-/// Nesting depth of `semantics.values`, chosen by geometry type
-/// (geom_decoder.rs:348-353): solids nest twice, Solid once, surfaces not
-/// at all. The values array is sliced by the shell/solid counts.
-nlohmann::json decode_semantics_values(const ::Geometry* g, UIntView values) {
-    const auto type = g->type();
-    const bool two_deep = (type == ::GeometryType::MultiSolid ||
-                           type == ::GeometryType::CompositeSolid);
-    const bool one_deep = (type == ::GeometryType::Solid);
-
-    if (!two_deep && !one_deep) {
-        auto flat = nlohmann::json::array();
-        for (std::size_t i = 0; i < values.size(); ++i) {
-            flat.push_back(semantic_index_to_json(values[i]));
-        }
-        return flat;
-    }
-
-    auto shells = as_uint_view(g->shells());
-    std::size_t cursor = 0;
-    auto per_shell = nlohmann::json::array();
-    for (std::size_t i = 0; i < shells.size(); ++i) {
-        const std::uint32_t n = shells[i];
-        auto grp = nlohmann::json::array();
-        for (std::uint32_t k = 0; k < n && cursor < values.size(); ++k) {
-            grp.push_back(semantic_index_to_json(values[cursor++]));
-        }
-        per_shell.push_back(std::move(grp));
-    }
-
-    if (one_deep) return per_shell;
-
-    // MultiSolid/CompositeSolid add one more level, grouped by solid.
-    auto solids = as_uint_view(g->solids());
-    std::size_t shell_cursor = 0;
-    auto per_solid = nlohmann::json::array();
-    for (std::size_t i = 0; i < solids.size(); ++i) {
-        auto grp = nlohmann::json::array();
-        for (std::uint32_t k = 0; k < solids[i] && shell_cursor < per_shell.size(); ++k) {
-            grp.push_back(per_shell[shell_cursor++]);
-        }
-        per_solid.push_back(std::move(grp));
-    }
-    return per_solid;
-}
-
-/// A [double] colour vector as a JSON array, or null when absent.
-///
-/// The reference asserts the length (3 for materials, 4 for border
-/// colours) and PANICS otherwise. A reader must not abort on a malformed
-/// file, so a wrong length is emitted as-is and left for the consumer --
-/// the array is what the file says it is either way.
+/// A material colour: `appearance.schema.json` fixes `diffuseColor`,
+/// `emissiveColor` and `specularColor` at exactly three numbers, which
+/// `cjseq::Color` spells as `[f64; 3]`. A stored vector of any other length is
+/// not a colour and is dropped rather than padded or truncated
+/// (deserializer.rs::to_color). The reader used to emit whatever length was
+/// stored, which the Rust reader no longer does.
 nlohmann::json color_to_json(const flatbuffers::Vector<double>* c) {
-    if (c == nullptr) return nullptr;
+    if (c == nullptr || c->size() != 3) return nullptr;
     auto out = nlohmann::json::array();
     for (double v : *c) out.push_back(v);
     return out;
+}
+
+/// A texture's `borderColor`, the one CityJSON colour that is not fixed at
+/// three numbers: `"minItems": 3, "maxItems": 4`. Any other length is dropped
+/// (deserializer.rs::to_border_color).
+nlohmann::json border_color_to_json(const flatbuffers::Vector<double>* c) {
+    if (c == nullptr || (c->size() != 3 && c->size() != 4)) return nullptr;
+    auto out = nlohmann::json::array();
+    for (double v : *c) out.push_back(v);
+    return out;
+}
+
+/// An unrecognised FlatBuffers enumeration tag is an error, never a default.
+///
+/// The reference used to fall back to the first table entry, which is exactly
+/// how a texture written `"wrapMode": "wrap"` came back as `"none"` -- a bug
+/// only the C++ conformance corpus caught. `deserializer.rs` now returns
+/// `Error::UnknownEnumTag`; this is its equivalent. A tag we do not know means
+/// the file was written by a newer writer or is corrupt, and the caller is
+/// told so rather than handed a valid-looking lie.
+[[noreturn]] void unknown_enum_tag(const char* member, int tag) {
+    throw Error(ErrorCode::InvalidFlatbuffer,
+                std::string("unknown ") + member + " tag " + std::to_string(tag));
+}
+
+/// CityJSON's three appearance enumerations use three different casings:
+/// `type` is UPPER, `wrapMode` and `textureType` are lower. Verified against
+/// `appearance.schema.json`, not from memory.
+const char* texture_format_name(::TextureFormat f) {
+    switch (f) {
+        case ::TextureFormat::PNG: return "PNG";
+        case ::TextureFormat::JPG: return "JPG";
+    }
+    unknown_enum_tag("type", static_cast<int>(f));
+}
+
+const char* wrap_mode_name(::WrapMode w) {
+    switch (w) {
+        case ::WrapMode::None: return "none";
+        case ::WrapMode::Wrap: return "wrap";
+        case ::WrapMode::Mirror: return "mirror";
+        case ::WrapMode::Clamp: return "clamp";
+        case ::WrapMode::Border: return "border";
+    }
+    unknown_enum_tag("wrapMode", static_cast<int>(w));
+}
+
+const char* texture_type_name(::TextureType t) {
+    switch (t) {
+        case ::TextureType::Unknown: return "unknown";
+        case ::TextureType::Specific: return "specific";
+        case ::TextureType::Typical: return "typical";
+    }
+    unknown_enum_tag("textureType", static_cast<int>(t));
 }
 
 /// The `appearance` object a CityJSONFeature carries: the materials and
@@ -147,30 +153,22 @@ nlohmann::json appearance_to_json(const ::Appearance* a) {
         for (const auto* t : *a->textures()) {
             if (t == nullptr) continue;
             nlohmann::json j = nlohmann::json::object();
-            // CityJSON spells the format upper case and the two enums
-            // below lower case; the reference falls back to the first
-            // enumerator for an unknown value rather than failing.
-            j["type"] = (t->type() == ::TextureFormat::JPG) ? "JPG" : "PNG";
-            j["image"] = (t->image() != nullptr) ? t->image()->str() : "";
-            if (const auto w = t->wrap_mode()) {
-                switch (*w) {
-                    case ::WrapMode::Wrap: j["wrapMode"] = "wrap"; break;
-                    case ::WrapMode::Mirror: j["wrapMode"] = "mirror"; break;
-                    case ::WrapMode::Clamp: j["wrapMode"] = "clamp"; break;
-                    case ::WrapMode::Border: j["wrapMode"] = "border"; break;
-                    case ::WrapMode::None:
-                    default: j["wrapMode"] = "none"; break;
-                }
+            j["type"] = texture_format_name(t->type());
+            // `image` is mandatory in header.fbs but optional in CityJSON, so
+            // the writer stores "" both for an absent `image` and for a
+            // schema-valid `"image": ""`. The two are indistinguishable on the
+            // wire and one of them must be lost; decoding "" back to ABSENT is
+            // a deliberate choice mirrored from deserializer.rs, not something
+            // derivable from the schema. Emitting `"image": ""` here instead
+            // is what this reader used to do, and it diverged.
+            if (t->image() != nullptr && t->image()->size() > 0) {
+                j["image"] = t->image()->str();
             }
-            if (const auto tt = t->texture_type()) {
-                switch (*tt) {
-                    case ::TextureType::Specific: j["textureType"] = "specific"; break;
-                    case ::TextureType::Typical: j["textureType"] = "typical"; break;
-                    case ::TextureType::Unknown:
-                    default: j["textureType"] = "unknown"; break;
-                }
+            if (const auto w = t->wrap_mode()) j["wrapMode"] = wrap_mode_name(*w);
+            if (const auto tt = t->texture_type()) j["textureType"] = texture_type_name(*tt);
+            if (auto c = border_color_to_json(t->border_color()); !c.is_null()) {
+                j["borderColor"] = c;
             }
-            if (auto c = color_to_json(t->border_color()); !c.is_null()) j["borderColor"] = c;
             textures.push_back(std::move(j));
         }
         out["textures"] = std::move(textures);
@@ -202,42 +200,62 @@ nlohmann::json appearance_to_json(const ::Appearance* a) {
 }
 
 /// `material`: theme -> either a single shared-material index or a nested
-/// values array. A mapping with neither a value nor a vertices array is
-/// skipped, so a geometry whose every mapping is skipped still emits an
-/// empty object; the key itself is omitted only when the mapping vector is
-/// absent or empty, which the caller checks (geom_decoder.rs:419).
+/// values array. The key itself is omitted only when the mapping vector is
+/// absent or empty, which the caller checks (geom_decoder.rs:343).
+///
+/// ABSENT-VS-EMPTY, first of three places. A mapping with NO `vertices`
+/// vector at all is `"values": null` -- a member that is present with a null
+/// value, which the schema requires and permits. A mapping whose `vertices`
+/// is present but empty is `"values": []`. Collapsing the two onto "skip the
+/// theme" is what dropped an explicit null.
 nlohmann::json materials_to_json(const flatbuffers::Vector<
-                                 flatbuffers::Offset<::MaterialMapping>>* mappings) {
+                                 flatbuffers::Offset<::MaterialMapping>>* mappings,
+                                 GeometryKind type) {
     nlohmann::json out = nlohmann::json::object();
     for (const auto* m : *mappings) {
         if (m == nullptr) continue;
         const std::string theme = (m->theme() != nullptr) ? m->theme()->str() : "theme";
+        // A `value` colours the whole object and has no depth at all.
         if (const auto v = m->value()) {
             out[theme] = {{"value", *v}};
             continue;
         }
-        if (m->vertices() == nullptr) continue;
-        out[theme] = {{"values", decode_material_values(as_uint_view(m->solids()),
+        if (m->vertices() == nullptr) {
+            out[theme] = {{"values", nullptr}};
+            continue;
+        }
+        out[theme] = {{"values", decode_material_values(type,
+                                                        as_uint_view(m->solids()),
                                                         as_uint_view(m->shells()),
                                                         as_uint_view(m->vertices()))}};
     }
     return out;
 }
 
-/// `texture`: theme -> nested values array. Mappings without vertices are
-/// skipped; see materials_to_json for why the object can end up empty.
+/// `texture`: theme -> nested values array.
+///
+/// ABSENT-VS-EMPTY, second of three. The per-theme texture object carries no
+/// `required` keyword, so a theme with no `values` member at all is valid
+/// CityJSON and is written with no `vertices` vector; it decodes to an empty
+/// object, NOT to a missing theme and NOT to `"values": []`. A present but
+/// empty `vertices` is `"values": []` (geom_decoder.rs:483).
 nlohmann::json textures_to_json(const flatbuffers::Vector<
-                                flatbuffers::Offset<::TextureMapping>>* mappings) {
+                                flatbuffers::Offset<::TextureMapping>>* mappings,
+                                GeometryKind type) {
     nlohmann::json out = nlohmann::json::object();
     for (const auto* m : *mappings) {
         if (m == nullptr) continue;
-        auto vertices = as_uint_view(m->vertices());
-        if (vertices.empty()) continue;
         const std::string theme = (m->theme() != nullptr) ? m->theme()->str() : "theme";
-        out[theme] = {{"values", decode_texture_values(as_uint_view(m->solids()),
+        if (m->vertices() == nullptr) {
+            out[theme] = nlohmann::json::object();
+            continue;
+        }
+        out[theme] = {{"values", decode_texture_values(type,
+                                                       as_uint_view(m->solids()),
                                                        as_uint_view(m->shells()),
                                                        as_uint_view(m->surfaces()),
-                                                       as_uint_view(m->strings()), vertices)}};
+                                                       as_uint_view(m->strings()),
+                                                       as_uint_view(m->vertices()))}};
     }
     return out;
 }
@@ -277,7 +295,7 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
     if (g->lod() != nullptr) out["lod"] = g->lod()->str();
 
     out["boundaries"] = decode_boundaries(
-        as_uint_view(g->solids()), as_uint_view(g->shells()),
+        kind_of(g), as_uint_view(g->solids()), as_uint_view(g->shells()),
         as_uint_view(g->surfaces()), as_uint_view(g->strings()),
         as_uint_view(g->boundaries()));
 
@@ -312,7 +330,17 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
 
         nlohmann::json sem = nlohmann::json::object();
         sem["surfaces"] = std::move(surfaces);
-        sem["values"] = decode_semantics_values(g, as_uint_view(g->semantics()));
+        // ABSENT-VS-EMPTY, third of three. The SURFACES decide whether there
+        // is a `semantics` member at all; the values vector being absent is
+        // `"values": null` -- a member with a null value, not a missing
+        // member and not an empty array (deserializer.rs:700).
+        if (g->semantics() == nullptr) {
+            sem["values"] = nullptr;
+        } else {
+            sem["values"] = decode_semantics_values(kind_of(g), as_uint_view(g->solids()),
+                                                    as_uint_view(g->shells()),
+                                                    as_uint_view(g->semantics()));
+        }
         out["semantics"] = std::move(sem);
     }
 
@@ -322,13 +350,14 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
     // either, and CityJSONSeq consumers read it from the source file.
     //
     // An EMPTY mapping vector omits the key entirely: the reference returns
-    // None for an empty slice (geom_decoder.rs:419, :598) and serde drops
-    // the field. Only a vector whose mappings were all skipped yields `{}`.
+    // None for an empty slice (geom_decoder.rs:343, :472) and serde drops the
+    // field. Every mapping in a NON-empty vector now yields a theme -- an
+    // absent `vertices` is a null or absent `values`, not a theme to skip.
     if (g->material() != nullptr && g->material()->size() > 0) {
-        out["material"] = materials_to_json(g->material());
+        out["material"] = materials_to_json(g->material(), kind_of(g));
     }
     if (g->texture() != nullptr && g->texture()->size() > 0) {
-        out["texture"] = textures_to_json(g->texture());
+        out["texture"] = textures_to_json(g->texture(), kind_of(g));
     }
 
     return out;

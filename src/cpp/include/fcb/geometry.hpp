@@ -15,52 +15,119 @@ namespace fcb {
 
 using UIntView = span<const std::uint32_t>;
 
+/// The FlatBuffers `GeometryType` enumerators, mirrored here so a caller can
+/// name a geometry type without pulling in the generated headers. The values
+/// are the declaration order in `src/fbs/geometry.fbs` and are checked against
+/// the generated enum with a static_assert in geometry.cpp.
+enum class GeometryKind : std::uint8_t {
+    MultiPoint = 0,
+    MultiLineString = 1,
+    MultiSurface = 2,
+    CompositeSurface = 3,
+    Solid = 4,
+    MultiSolid = 5,
+    CompositeSolid = 6,
+    GeometryInstance = 7,
+};
+
 #ifdef FCB_WITH_JSON
 
-/// Rebuild CityJSON's nested `boundaries` from the five flattened arrays.
+// ---------------------------------------------------------------------------
+// NESTING DEPTH COMES FROM THE GEOMETRY TYPE, NEVER FROM THE ARRAYS.
+//
+// The format stores a dimensional hierarchy as parallel count arrays:
+// `solids[i]` = shells in solid i, `shells[i]` = surfaces in shell i,
+// `surfaces[i]` = rings in surface i, `strings[i]` = vertex indices in ring i,
+// and `indices` is the flat vertex-index list. Those arrays are AMBIGUOUS: a
+// `Solid` with one shell and a `MultiSolid` with one solid flatten to
+// byte-identical arrays, so no test over them can tell the two apart. Only
+// `Geometry.type()` can, and every decoder below takes it.
+//
+// The depths, from `geomprimitives.schema.json` and CityJSON 2.0 §6 --
+// identical to the table at the top of geom_decoder.rs:
+//
+//   type                               boundaries  semantics  material  texture
+//   MultiPoint                                  1          1  forbidden forbidden
+//   MultiLineString                             2          1  forbidden forbidden
+//   MultiSurface, CompositeSurface              3          1          1        3
+//   Solid                                       4          2          2        4
+//   MultiSolid, CompositeSolid                  5          3          3        5
+//
+// An earlier version of this file dispatched on the outermost populated array
+// and collapsed a single-element level into that element. That inference cost
+// a nesting level on every one-solid MultiSolid and CompositeSolid, in both
+// `material.values` and `texture.values`; see tests/conformance/inputs/
+// appearance_depths.city.jsonl, which fails for any reader that infers.
+// ---------------------------------------------------------------------------
+
+/// Rebuild CityJSON's nested `boundaries` from the five flattened arrays, at
+/// the depth `type` implies.
 ///
-/// The format stores a dimensional hierarchy as parallel count arrays:
-/// `solids[i]` = shells in solid i, `shells[i]` = surfaces in shell i,
-/// `surfaces[i]` = rings in surface i, `strings[i]` = vertex indices in
-/// ring i, and `indices` is the flat vertex-index list. Which arrays are
-/// populated determines the nesting depth, so the decoder dispatches on the
-/// outermost non-empty array rather than on the geometry type.
+/// The encoder always writes one redundant count level above the geometry's
+/// own depth (a `MultiSurface` carries a one-entry `shells`, a `Solid` a
+/// one-entry `solids`), except for the 5-deep types. This reader ignores that
+/// top count entirely; the old cascading reader used it as its depth signal,
+/// which is where all the ambiguity came from.
 ///
-/// Mirrors geom_decoder.rs:30-160, including its collapse rule: when a level
-/// yields exactly one element, that element replaces the array rather than
-/// being wrapped in it. Dropping that rule produces boundaries one level too
-/// deep, which still looks structurally plausible.
-///
-/// Throws on any cursor overrun rather than reading out of bounds.
-nlohmann::json decode_boundaries(UIntView solids,
+/// Mirrors `decode_points`/`decode_rings`/`decode_surfaces`/`decode_shells`/
+/// `decode_solids` (geom_decoder.rs:106-146), except that a cursor overrun
+/// throws here rather than yielding a truncated array: the reference is
+/// memory-safe by construction and a C++ reader must not read out of bounds.
+nlohmann::json decode_boundaries(GeometryKind type,
+                                 UIntView solids,
                                  UIntView shells,
                                  UIntView surfaces,
                                  UIntView strings,
                                  UIntView indices);
 
+/// Rebuild `semantics.<...>.values` from the flat run of semantic indices.
+///
+/// `semantics.values` is one level shallower than the boundaries. A semantics
+/// mapping carries no count arrays of its own, so the group sizes come from
+/// the *boundary* `solids`/`shells`.
+///
+/// `UINT32_MAX` is `null` at the leaf. There is no wire encoding for a `null`
+/// shell or solid in semantics; the encoder expands one to a `null` per
+/// surface. Mirrors `decode_semantics` (geom_decoder.rs:226).
+nlohmann::json decode_semantics_values(GeometryKind type,
+                                       UIntView solids,
+                                       UIntView shells,
+                                       UIntView values);
+
 /// Rebuild a `material.<theme>.values` array from a MaterialMapping.
 ///
-/// Material indices sit one level shallower than boundaries: one index per
+/// Material indices sit two levels shallower than boundaries: one index per
 /// SURFACE, not per ring. So there is no `surfaces`/`strings` argument --
 /// `shells[i]` is the number of material indices in shell i.
 ///
-/// Mirrors decode_materials (geom_decoder.rs:416). Unlike decode_boundaries
-/// this NEVER throws: the reference stops walking when a count array runs
-/// out and emits the short result, and that truncation is observable in the
-/// output we must match.
-nlohmann::json decode_material_values(UIntView solids, UIntView shells, UIntView vertices);
+/// `material.values` is nullable at EVERY level (verified against
+/// `geomprimitives.schema.json`), so a `UINT32_MAX` entry in `shells` or
+/// `solids` is a whole `null` shell or solid and comes back as JSON null,
+/// never as an empty array.
+///
+/// Mirrors `decode_materials` (geom_decoder.rs:339). Unlike decode_boundaries
+/// this NEVER throws: the reference reads a missing count as zero and clamps
+/// every slice to the vertex array, so a mapping that over-claims yields
+/// short or empty entries rather than an error.
+nlohmann::json decode_material_values(GeometryKind type,
+                                      UIntView solids,
+                                      UIntView shells,
+                                      UIntView vertices);
 
 /// Rebuild a `texture.<theme>.values` array from a TextureMapping.
 ///
-/// Texture values nest exactly like boundaries -- solid, shell, surface,
-/// ring -- except the innermost list is (texture index, then one UV-vertex
-/// index per ring vertex) rather than vertex indices.
+/// Texture values nest exactly as deeply as the boundaries -- solid, shell,
+/// surface, ring -- except the innermost list is `[texture index, then one
+/// UV-vertex index per ring vertex]` rather than vertex indices.
 ///
-/// Mirrors decode_textures (geom_decoder.rs:595), including its branch
-/// order: which of the count arrays are populated selects the nesting, and
-/// several branches special-case a length of one. Only the OUTERMOST level
-/// collapses, and only in the solids branch. Also never throws; see above.
-nlohmann::json decode_texture_values(UIntView solids,
+/// Unlike a material, `texture.values` is nullable ONLY at the leaf: the
+/// schema types every intermediate level as a plain `"array"`. So nothing
+/// here decodes an intermediate `null`.
+///
+/// Mirrors `decode_textures` (geom_decoder.rs:468). Also never throws; see
+/// above.
+nlohmann::json decode_texture_values(GeometryKind type,
+                                     UIntView solids,
                                      UIntView shells,
                                      UIntView surfaces,
                                      UIntView strings,

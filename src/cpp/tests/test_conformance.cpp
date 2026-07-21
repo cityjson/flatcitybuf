@@ -88,6 +88,11 @@ TEST_CASE("conformance: inferable_types") { check_case("inferable_types"); }
 // appearance at all rather than an empty object. Emitting `"material": {}`
 // here instead fails this case.
 TEST_CASE("conformance: empty_appearance") { check_case("empty_appearance"); }
+// Every geometry type at its schema depth, plus the nullable and
+// absent-vs-empty cases. A one-solid MultiSolid and a one-shell Solid flatten
+// to byte-identical count arrays, so ONLY the geometry type separates them;
+// this case fails for any reader that infers depth from the arrays.
+TEST_CASE("conformance: appearance_depths") { check_case("appearance_depths"); }
 
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");
