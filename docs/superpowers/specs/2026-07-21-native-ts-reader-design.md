@@ -704,12 +704,14 @@ Notes:
 - **Deletion is last**, mirroring Task 13 of the Python plan — the wasm build keeps
   working for consumers until the replacement passes conformance and the demo runs in a
   real browser. Retirement is a repo-wide sweep, not a directory delete: the Rust
-  workspace members and wasm-only dependencies, `justfile` recipes,
-  `scripts/build_wasm.sh`, the checked-in `src/ts/fcb_wasm*` artifacts, `package.json`
-  `files`/`exports`/`main`/`types`, `publish-npm.yml`, `examples/`, `README.md`,
-  `CONTRIBUTING.md` and `.llm/docs/projectStructure.md`. Acceptance is a clean
-  `cargo build --workspace`, a clean package build and pack, and the demo running against
-  the published artifact.
+  workspace member and its `--exclude fcb_wasm` guards throughout the `justfile`,
+  `scripts/build_wasm.sh`, `package.json` `files`/`exports`/`main`/`types`, `.gitignore`,
+  `publish-npm.yml`, `ci.yml`, `examples/`, `README.md`, `CONTRIBUTING.md` and
+  `.llm/docs/projectStructure.md`. Note `src/ts/` tracks only `.gitignore` and
+  `package.json` — the `.wasm`/`.js`/`.d.ts` artifacts are gitignored and built at
+  publish time, so there are no checked-in binaries to remove. Acceptance is a clean
+  `cargo build --workspace`, a clean package build and `npm pack`, and the demo running
+  in a real browser.
 
 ## Dependencies and risks
 
