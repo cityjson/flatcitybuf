@@ -8,6 +8,7 @@
 #include "detail/feature_access.hpp"
 
 #include <fcb/generated/feature_generated.h>
+#include <fcb/generated/header_generated.h>
 
 #include <algorithm>
 #include <cstring>
@@ -344,6 +345,27 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
             throw Error(ErrorCode::AttributeIndexNotFound,
                         "no such column: " + cond.field);
         }
+
+        // Json/Binary keys are the first 100 bytes of a serialized blob:
+        // an index hit says nothing about the actual (undecoded) value, so
+        // answering the query would be dishonest. Checked before the
+        // "is it indexed" lookup below, so the rejection does not depend on
+        // whether this particular writer happened to index the column.
+        // This is one of the four deliberate Rust/C++/Python divergences
+        // from the plan's writer defaults; matches
+        // fcb_core/src/reader/attr_query.rs's catch-all
+        // `Err(Error::UnsupportedColumnType(...))` for any column type its
+        // index builder does not special-case (Json and Binary fall through
+        // to it), and stree.py's `_resolve` (DIVERGENCE 2).
+        if (col->type == static_cast<std::uint8_t>(::ColumnType::Json) ||
+            col->type == static_cast<std::uint8_t>(::ColumnType::Binary)) {
+            throw Error(ErrorCode::UnsupportedColumnType,
+                        "column " + cond.field +
+                            " is Json/Binary: its index is a fixed-width key "
+                            "over a blob, so hits are meaningless without "
+                            "post-verification");
+        }
+
         const AttrIndexInfo* idx = nullptr;
         for (const auto& a : header_.attr_indices()) {
             if (a.column_index == col->index) { idx = &a; break; }

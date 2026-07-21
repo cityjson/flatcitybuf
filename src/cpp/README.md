@@ -22,7 +22,7 @@ applications keep their own threading model.
 | `include/fcb/` | public headers |
 | `include/fcb/generated/` | committed flatc output (consumers never need flatc) |
 | `src/` | implementation; `src/detail/` is internal |
-| `tests/` | doctest suite, conformance corpus, range-capable HTTP test server |
+| `tests/` | doctest suite, range-capable HTTP test server (conformance corpus lives at `/conformance` in the repo root) |
 | `examples/` | `read_local.cpp`, `read_http.cpp` |
 
 ## Verification

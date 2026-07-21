@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["cli", "fcb_core", "wasm", "fcb_api", "fcb_py"]
+members = ["cli", "fcb_core", "wasm", "fcb_api"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -43,8 +43,6 @@ dhat = "0.3.3"
 prettytable = "0.10.0"
 libc = "0.2.172"
 regex = "1.11.0"
-pyo3 = { version = "0.21", features = ["extension-module"] }
-pyo3-async-runtimes = { version = "0.21", features = ["tokio-runtime"] }
 bson = "2.13.0"
 serde_cbor = "0.10"
 proj = "0.31"

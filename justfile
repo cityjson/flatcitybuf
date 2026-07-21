@@ -16,11 +16,11 @@ pre-commit: check-common check-wasm check-py pre-commit-cpp
 # Common workspace checks (Rust workspace format, clippy, test, build)
 check-common:
     cd src/rust && cargo fmt
-    cd src/rust && cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm --exclude fcb_py
+    cd src/rust && cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm
     cd src/rust && cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
-    cd src/rust && cargo nextest run --all-features --workspace --exclude fcb_wasm --exclude fcb_py
-    cd src/rust && cargo check --all-features --workspace --exclude fcb_wasm --exclude fcb_py
-    cd src/rust && cargo build --workspace --all-features --exclude fcb_wasm --exclude fcb_py
+    cd src/rust && cargo nextest run --all-features --workspace --exclude fcb_wasm
+    cd src/rust && cargo check --all-features --workspace --exclude fcb_wasm
+    cd src/rust && cargo build --workspace --all-features --exclude fcb_wasm
 
 # Run WASM-specific checks
 check-wasm:
@@ -28,13 +28,23 @@ check-wasm:
     cd src/rust && cargo check -p fcb_wasm --target wasm32-unknown-unknown
     cd src/rust && cargo build -p fcb_wasm --target wasm32-unknown-unknown
 
-# Run Python-specific checks
+# Run Python-specific checks (pure-Python package at src/py; the PyO3
+# extension this used to build was retired in Task 13)
 check-py:
-    cd src/rust/fcb_py && uv sync --extra dev
-    cd src/rust/fcb_py && uv run maturin develop
-    cd src/rust/fcb_py && uv run ruff check --fix .
-    cd src/rust/fcb_py && uv run ruff format .
-    cd src/rust/fcb_py && uv run pytest tests/
+    cd src/py && uv sync --extra dev
+    cd src/py && uv run ruff check --fix .
+    cd src/py && uv run ruff format .
+    cd src/py && uv run mypy
+    cd src/py && uv run pytest
+
+# Run tests for the pure-Python package (src/py)
+py-test:
+    cd src/py && uv run --extra dev pytest
+
+# Run linter for the pure-Python package (src/py)
+py-lint:
+    cd src/py && uv run --extra dev ruff check .
+    cd src/py && uv run --extra dev ruff format --check .
 
 # Run C++ checks (native implementation)
 pre-commit-cpp: check-cpp
@@ -49,7 +59,12 @@ check-cpp:
 gen-cpp-fbs:
     ./scripts/gen_cpp_flatbuffers.sh
 
-# Regenerate the C++ conformance corpus (needs the Rust CLI)
+# Regenerate the C++ conformance corpus (needs the Rust CLI).
+# conformance/*.fcb and *.expected.jsonl are tracked, and regeneration is NOT
+# byte-reproducible (cjseq2 iterates CityObjects from a HashMap with
+# per-process ordering) -- so this always dirties the working tree, even when
+# nothing semantic changed. Diff the *parsed* JSON, not the raw bytes, before
+# committing; don't commit pure churn.
 gen-conformance:
     ./scripts/gen_conformance.sh
 
@@ -70,7 +85,7 @@ gen-all:
     @echo "All scripts executed."
 
 # Build entire workspace (Rust + C++ + Python)
-build-all: gen-all build check-cpp build-py
+build-all: gen-all build check-cpp
 
 # ============================================================================
 # Rust Commands
@@ -144,41 +159,6 @@ devcon-build:
 # Clean and rebuild C++ bindings
 clean-cpp:
     cd src/cpp && rm -rf build build-native build-curl build-asan
-
-# ============================================================================
-# Python Commands
-# ============================================================================
-
-# Sync Python dependencies
-py-sync:
-    cd src/rust/fcb_py && uv sync --extra dev
-
-# Run Python development
-py-dev:
-    cd src/rust/fcb_py && uv run maturin develop
-
-# Run Python linter
-py-lint:
-    cd src/rust/fcb_py && uv run ruff check --fix .
-
-# Format Python code
-py-fmt:
-    cd src/rust/fcb_py && uv run ruff format .
-
-# Run Python tests
-py-test:
-    cd src/rust/fcb_py && uv run pytest tests/
-
-# Clean Python build artifacts
-py-clean:
-    cd src/rust/fcb_py && cargo clean
-
-# Install Python package in development mode
-py-develop:
-    cd src/rust/fcb_py && maturin develop
-
-build-py:
-    cd src/rust/fcb_py && maturin build --release
 
 # ============================================================================
 # WASM Commands

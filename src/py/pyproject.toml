@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flatcitybuf"
+version = "0.3.0"
+description = "Pure-Python reader for FlatCityBuf, a cloud-optimized binary format for 3D city models"
+requires-python = ">=3.9"
+dependencies = ["flatbuffers>=24.3.25"]
+
+[project.optional-dependencies]
+numpy = ["numpy>=1.21"]
+# No pytest-asyncio: there is no async API and no `async def` test in the
+# suite (`grep -rn asyncio flatcitybuf tests` is empty) -- it was, like the
+# removed `http = ["httpx>=0.27"]` extra, left over from an async reader
+# that was deliberately never built.
+dev = ["pytest>=8", "ruff>=0.12", "mypy>=1.11"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["flatcitybuf"]
+
+[tool.pytest.ini_options]
+markers = [
+    "benchmark: measures wall-clock time (test_benchmark.py); slow and timing-sensitive, so excluded from the default run -- pass `-m benchmark` explicitly to run it.",
+]
+# `not benchmark` by default so a plain `pytest` stays fast; an explicit
+# `-m benchmark` on the command line overrides this (pytest keeps only
+# the LAST -m expression when several are given, and command-line args
+# are appended after addopts).
+addopts = "-m 'not benchmark'"
+
+[tool.mypy]
+strict = true
+files = ["flatcitybuf", "tests"]
+
+# flatc-generated code is machine output: it never satisfies mypy strict
+# (untyped defs, untyped calls, etc). `exclude` alone would not be enough,
+# because excluded modules are still analyzed when a typed module imports
+# from them; `ignore_errors` on the module itself silences that while still
+# letting hand-written modules import names from it normally.
+[[tool.mypy.overrides]]
+module = "flatcitybuf.generated.*"
+ignore_errors = true
+
+# numpy is a genuine optional extra (never imported at module scope --
+# see flatcitybuf/cityjson.py's/feature.py's `_import_numpy`) so mypy
+# must be able to check this project whether or not it happens to be
+# installed in the environment running mypy. Without this override,
+# `import numpy` inside `_import_numpy` is an import-not-found error in
+# an environment that only installed the `dev` extra (as CI's
+# pure-Python job does) -- see tests/test_benchmark.py's own
+# `import numpy` under the same constraint.
+[[tool.mypy.overrides]]
+module = "numpy"
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 79
+target-version = "py39"
+# Machine-generated FlatBuffers bindings; not subject to our lint rules.
+extend-exclude = ["flatcitybuf/generated"]
+
+[tool.ruff.lint]
+# Default select (E4, E7, E9, F) doesn't include E501 (line-too-long), so
+# line-length above would otherwise be enforced by nothing.
+extend-select = ["E501"]

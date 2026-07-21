@@ -12,6 +12,7 @@
 #include <fcb/generated/header_generated.h>
 
 #include <array>
+#include <charconv>
 #include <cstring>
 #include <string>
 
@@ -293,6 +294,11 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
             s["type"] = (so->extension_type() != nullptr)
                             ? so->extension_type()->str()
                             : (t < kCount ? kSemanticSurfaceTypeNames[t] : "ExtraSemanticSurface");
+            // `parent:uint = null` in the schema -- absent and zero are both
+            // real states, so this must check the Optional rather than
+            // testing for non-zero. Links a Door/Window surface back to its
+            // WallSurface (geom_decoder.rs:217).
+            if (const auto p = so->parent()) s["parent"] = *p;
             // Semantic surfaces carry their own attributes, decoded against
             // Header.semantic_columns -- a schema separate from the feature
             // attribute columns. Merged inline, as the reference does.
@@ -334,6 +340,98 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
     return out;
 }
 
+/// The `address` sub-object of `pointOfContact`, or null.
+///
+/// Mirrors `to_cj_address` (deserializer.rs:172-182): emitted only when
+/// ALL FIVE fields are present -- including a thoroughfare number that
+/// parses as a whole integer -- because the Rust side chains `?`/`and_then`
+/// across every field and yields None the moment any one is missing or
+/// unparseable. A reader must not abort on a malformed number here, so an
+/// unparseable one is treated the same as absent: the address is omitted,
+/// not the whole metadata line.
+nlohmann::json point_of_contact_address_to_json(const FileInfo& info) {
+    if (info.poc_address_thoroughfare_name.empty() || info.poc_address_locality.empty() ||
+        info.poc_address_postcode.empty() || info.poc_address_country.empty()) {
+        return nullptr;
+    }
+    const auto& s = info.poc_address_thoroughfare_number;
+    long long n = 0;
+    const auto res = std::from_chars(s.data(), s.data() + s.size(), n);
+    if (res.ec != std::errc() || res.ptr != s.data() + s.size()) return nullptr;
+
+    nlohmann::json addr = nlohmann::json::object();
+    addr["thoroughfareNumber"] = n;
+    addr["thoroughfareName"] = info.poc_address_thoroughfare_name;
+    addr["locality"] = info.poc_address_locality;
+    addr["postalCode"] = info.poc_address_postcode;
+    addr["country"] = info.poc_address_country;
+    return addr;
+}
+
+/// `pointOfContact`, or null when absent.
+///
+/// Mirrors `to_cj_point_of_contact` (deserializer.rs:77-78, :166-182):
+/// presence hinges on `poc_contact_name` alone, matching the Rust reader's
+/// `match header.poc_contact_name() { Some(_) => ..., None => None }`.
+///
+/// `emailAddress` is NOT like the other optional fields below: cjseq2's
+/// `PointOfContact::email_address` is a required `String` (no
+/// `skip_serializing_if`), and `to_cj_point_of_contact` (deserializer.rs:
+/// 175-177) does `.ok_or(Error::MissingRequiredField("email_address"))?`,
+/// which propagates out of the whole `to_cj_metadata` call. So a header with
+/// `poc_contact_name` set but `poc_email` absent is not "pointOfContact minus
+/// emailAddress" on the Rust side -- it is a hard failure for the entire
+/// metadata line. C++ must match that rather than silently emitting an
+/// incomplete object.
+///
+/// The gate below is on `info.has_poc_email`, NOT `info.poc_email.empty()`.
+/// Rust's check is `header.poc_email().ok_or(...)`  a present-but-empty
+/// flatbuffer string is `Some("")`, which satisfies `ok_or` and yields
+/// `email_address: ""`; only a genuinely absent field is `None` and throws.
+/// `poc_email.empty()` cannot make that distinction on its own, since both
+/// "absent" and "present but empty" flatten to the same empty
+/// `std::string`, so a separate presence flag is required here.
+nlohmann::json point_of_contact_to_json(const FileInfo& info) {
+    if (info.poc_contact_name.empty()) return nullptr;
+    if (!info.has_poc_email) {
+        throw Error(ErrorCode::MissingRequiredField, "email_address");
+    }
+
+    nlohmann::json poc = nlohmann::json::object();
+    poc["contactName"] = info.poc_contact_name;
+    if (!info.poc_contact_type.empty()) poc["contactType"] = info.poc_contact_type;
+    if (!info.poc_role.empty()) poc["role"] = info.poc_role;
+    if (!info.poc_phone.empty()) poc["phone"] = info.poc_phone;
+    poc["emailAddress"] = info.poc_email;
+    if (!info.poc_website.empty()) poc["website"] = info.poc_website;
+    if (auto addr = point_of_contact_address_to_json(info); !addr.is_null()) {
+        poc["address"] = std::move(addr);
+    }
+    return poc;
+}
+
+/// The header line's top-level `extensions`: name -> {url, version}.
+///
+/// Mirrors `to_cj_metadata`'s extensions block (deserializer.rs:33-49): an
+/// entry without a name is skipped (a HashMap key cannot be absent), later
+/// entries win on a duplicate name (HashMap::insert semantics), and the key
+/// itself is omitted when the header carries no extensions vector or every
+/// entry lacked a name -- not merely when the vector is empty, matching
+/// `if !extensions_map.is_empty()`.
+nlohmann::json extensions_to_json(const ::Header* hdr) {
+    if (hdr == nullptr || hdr->extensions() == nullptr) return nullptr;
+
+    nlohmann::json out = nlohmann::json::object();
+    for (const auto* e : *hdr->extensions()) {
+        if (e == nullptr || e->name() == nullptr) continue;
+        nlohmann::json entry = nlohmann::json::object();
+        entry["url"] = (e->url() != nullptr) ? e->url()->str() : "";
+        entry["version"] = (e->version() != nullptr) ? e->version()->str() : "";
+        out[e->name()->str()] = std::move(entry);
+    }
+    return out.empty() ? nlohmann::json(nullptr) : out;
+}
+
 }  // namespace
 
 std::string city_object_type_name(std::uint8_t type) {
@@ -353,12 +451,31 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
     cj["type"] = "CityJSON";
     cj["version"] = info.cityjson_version;
 
-    if (info.has_transform) {
-        cj["transform"] = {{"scale", info.scale}, {"translate", info.translate}};
-    }
+    // `transform` is unconditional on the Rust side: `to_cj_metadata` starts
+    // from `CityJSON::new()`, whose `Transform::new()` defaults to
+    // scale [1,1,1] / translate [0,0,0] (cjseq2 lib.rs:1057-1064), and only
+    // overwrites it when `header.transform()` is `Some` (deserializer.rs:
+    // 24-31). Rust never omits the key, so this must not gate on
+    // `has_transform` either -- same "unconditional, not conditional" class
+    // as `metadata`/`geographicalExtent`/`extensions` above.
+    cj["transform"] = {
+        {"scale", info.has_transform ? info.scale : std::array<double, 3>{1.0, 1.0, 1.0}},
+        {"translate", info.has_transform ? info.translate : std::array<double, 3>{0.0, 0.0, 0.0}}};
 
+    // `metadata` and `metadata.geographicalExtent` are UNCONDITIONAL on the
+    // Rust side (deserializer.rs:81-90): `cj.metadata` is always
+    // `Some(CjMetadata { geographical_extent: Some(...), ... })`, defaulting
+    // the extent to six zeros via `.unwrap_or_default()` when the header
+    // carries none, rather than omitting the field. Confirmed empirically
+    // on noise_extension.fcb, whose header has no GeographicalExtent at all
+    // yet whose Rust-reader output still carries
+    // `"metadata":{"geographicalExtent":[0,0,0,0,0,0]}` -- a gap the
+    // previously-narrowed metadata comparison in test_conformance.cpp
+    // masked. Every other field stays conditional, matching the `Option`s
+    // in CjMetadata.
     nlohmann::json meta = nlohmann::json::object();
-    if (info.has_extent) meta["geographicalExtent"] = info.geographical_extent;
+    meta["geographicalExtent"] =
+        info.has_extent ? info.geographical_extent : std::array<double, 6>{};
     if (!info.crs.empty()) {
         meta["referenceSystem"] =
             "https://www.opengis.net/def/crs/" +
@@ -366,8 +483,12 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
             info.crs.substr(info.crs.find(':') + 1);
     }
     if (!info.identifier.empty()) meta["identifier"] = info.identifier;
+    if (auto poc = point_of_contact_to_json(info); !poc.is_null()) {
+        meta["pointOfContact"] = std::move(poc);
+    }
+    if (!info.reference_date.empty()) meta["referenceDate"] = info.reference_date;
     if (!info.title.empty()) meta["title"] = info.title;
-    if (!meta.empty()) cj["metadata"] = std::move(meta);
+    cj["metadata"] = std::move(meta);
 
     // A CityJSONSeq header line carries no features of its own.
     cj["CityObjects"] = nlohmann::json::object();
@@ -378,6 +499,10 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
     // present -- a template without vertices indexes nothing
     // (deserializer.rs:92).
     const ::Header* hdr = detail::HeaderAccess::get(header);
+    if (auto ext = extensions_to_json(hdr); !ext.is_null()) {
+        cj["extensions"] = std::move(ext);
+    }
+
     if (hdr != nullptr && hdr->templates() != nullptr &&
         hdr->templates_vertices() != nullptr) {
         auto templates = nlohmann::json::array();

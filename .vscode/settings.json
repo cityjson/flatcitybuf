@@ -11,12 +11,12 @@
     "source.fixAll": "explicit",
   },
   "rust-analyzer.checkOnSave": true,
-  "python.defaultInterpreterPath": "${workspaceFolder}/src/rust/fcb_py/.venv/bin/python",
+  "python.defaultInterpreterPath": "${workspaceFolder}/src/py/.venv/bin/python",
   "python.analysis.extraPaths": [
-    "${workspaceFolder}/src/rust/fcb_py/python"
+    "${workspaceFolder}/src/py"
   ],
   "cursorpyright.analysis.extraPaths": [
-    "${workspaceFolder}/src/rust/fcb_py/python"
+    "${workspaceFolder}/src/py"
   ],
   "cmake.sourceDirectory": "${workspaceFolder}/src/cpp"
 }
