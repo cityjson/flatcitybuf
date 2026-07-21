@@ -7,7 +7,12 @@ import { ErrorCode, FcbError } from '../errors.js'
 import { CityFeature } from '../generated/city-feature.js'
 import { CityObject } from '../generated/city-object.js'
 import { CityObjectType } from '../generated/city-object-type.js'
-import type { ColumnInfo } from '../header/index.js'
+// Runtime import of cityjson/ from here, type-only the other way round: the
+// emitter takes `Feature` as a TYPE, so there is no runtime import cycle.
+import { toCityJSONFeature } from '../cityjson/index.js'
+import type { Int64Policy } from '../cityjson/index.js'
+import type { CityJSONFeature } from '../cityjson/types.js'
+import type { ColumnInfo, HeaderView } from '../header/index.js'
 import type { RangeReader } from '../io/range-reader.js'
 import { MAX_FEATURE_SIZE } from '../layout.js'
 import { readU32 } from '../le.js'
@@ -67,6 +72,17 @@ export class CityObjectView {
     this.type = raw.extensionType()
       ?? (CityObjectType[raw.type()] as string | undefined)
       ?? UNKNOWN_CITY_OBJECT
+  }
+
+  /** The parsed FlatBuffers table behind this view.
+   *
+   *  For callers that need a field this view does not surface -- the CityJSON
+   *  emitter reads `geometry`, `geometry_instances`, `children`,
+   *  `children_roles`, `parents` and `geographical_extent` off it. Deliberately
+   *  a method rather than a public field, so it reads as "reach through to the
+   *  raw table" at every call site. */
+  rawObject(): CityObject {
+    return this.raw
   }
 
   /** Whether this object DECLARES an attributes vector. Distinct from that
@@ -143,6 +159,19 @@ export class Feature {
     // the generated getter is typed string|null; mirror header.cpp's policy
     // of defaulting to "" rather than throwing.
     this.id = this.raw.id() ?? ''
+  }
+
+  /** The parsed FlatBuffers table behind this feature -- for the fields this
+   *  handle does not surface, chiefly the per-feature `appearance`. */
+  rawFeature(): CityFeature {
+    return this.raw
+  }
+
+  /** This feature as one CityJSONSeq line. A convenience over
+   *  `toCityJSONFeature(feature, header)`; the emission itself lives in
+   *  cityjson/, which is where the CityJSON document model lives. */
+  toCityJSON(header: HeaderView, opts?: Int64Policy): CityJSONFeature {
+    return toCityJSONFeature(this, header, opts)
   }
 
   /** Built once and cached: the views are immutable and callers commonly

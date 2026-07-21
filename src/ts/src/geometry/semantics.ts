@@ -164,7 +164,7 @@ const SEMANTIC_OBJECT_CHILDREN_SLOT = 8
  *     member and not `[]`, which is what a present-but-empty vector gives. */
 export function decodeSemantics(
   geometry: Geometry,
-  semanticColumns: readonly ColumnInfo[],
+  semanticColumns: readonly ColumnInfo[] | null,
 ): { surfaces: SemanticSurface[]; values: SemanticsValue[] | null } | null {
   if (!fieldPresent(geometry, GEOMETRY_SEMANTICS_OBJECTS_SLOT)) return null
 
@@ -183,10 +183,20 @@ export function decodeSemantics(
     // Semantic surfaces carry their own attributes, decoded against
     // Header.semantic_columns -- a schema separate from the feature attribute
     // columns. Merged inline, as the reference does.
-    const attributes = so.attributesArray()
-    if (attributes !== null) {
-      for (const [k, v] of Object.entries(decodeAttributes(attributes, semanticColumns))) {
-        surface[k] = v
+    //
+    // `null` (no such schema declared) is NOT `[]` (a declared, empty one):
+    // the reference DROPS a surface's attributes when the schema is `None`
+    // (`semantic_attr_schema.as_ref().and_then(...)`, geom_decoder.rs:162-164)
+    // rather than failing on the first index it cannot resolve, while a
+    // declared schema that does not cover an index is corruption and throws.
+    // Passing `[]` for an undeclared schema would turn the first case into
+    // the second.
+    if (semanticColumns !== null) {
+      const attributes = so.attributesArray()
+      if (attributes !== null) {
+        for (const [k, v] of Object.entries(decodeAttributes(attributes, semanticColumns))) {
+          surface[k] = v
+        }
       }
     }
 

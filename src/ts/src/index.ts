@@ -15,6 +15,11 @@ export type { AttrIndexInfo, ColumnInfo, FileInfo, HeaderView } from './header/i
 export { CityObjectView, Feature, decodeAttributes } from './feature/index.js'
 export type { AttrValue, JsonValue } from './feature/index.js'
 
+// CityJSON emission.
+export { emitInt64, toCityJSONFeature, toCityJSONMetadata } from './cityjson/index.js'
+export type { Int64Policy } from './cityjson/index.js'
+export type * from './cityjson/types.js'
+
 // The reader facade.
 export { FcbReader } from './reader.js'
 export type { FeatureCursor } from './reader.js'

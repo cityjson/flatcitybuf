@@ -1,6 +1,9 @@
 /** The reader facade -- ports `fcb::FcbReader` and `fcb::FeatureIterator`
  *  (src/cpp/src/reader.cpp), themselves a port of `fcb_core::FcbReader`
  *  (src/rust/fcb_core/src/reader/mod.rs). */
+import { toCityJSONFeature, toCityJSONMetadata } from './cityjson/index.js'
+import type { Int64Policy } from './cityjson/index.js'
+import type { CityJSON, CityJSONFeature } from './cityjson/types.js'
 import { ErrorCode, FcbError } from './errors.js'
 import { FEATURE_SIZE_PREFIX, readFeature } from './feature/index.js'
 import type { Feature } from './feature/index.js'
@@ -129,6 +132,20 @@ export class FcbReader {
     return {
       featuresCount: declared === 0 ? undefined : declared,
       [Symbol.asyncIterator]: () => gen,
+    }
+  }
+
+  /** The whole file as a CityJSONSeq stream: the metadata line first, then
+   *  one line per feature, in stored order.
+   *
+   *  An async generator rather than an array, for the same reason `selectAll`
+   *  is a cursor: a city model does not have to fit in memory, and a caller
+   *  writing `.jsonl` wants to emit each line as it arrives. Callers who do
+   *  want it all can `Array.fromAsync`. */
+  async *cityjson(opts?: Int64Policy): AsyncGenerator<CityJSON | CityJSONFeature, void, undefined> {
+    yield toCityJSONMetadata(this.headerView, opts)
+    for await (const feature of await this.selectAll()) {
+      yield toCityJSONFeature(feature, this.headerView, opts)
     }
   }
 
