@@ -67,6 +67,13 @@ src/rust/fcb_core/tests/data/*.json
 *.fcb
 
 !examples/**/*.fcb
+
+# The conformance corpus is the shared oracle for the Rust, C++ and Python
+# readers, and CI has no Rust toolchain to regenerate it. Track it so a clean
+# checkout can run the suites. Regeneration is NOT byte-reproducible -- cjseq2
+# iterates CityObjects from a HashMap -- so these bytes also pin one known-good
+# set rather than letting every regeneration churn the corpus.
+!conformance/*.fcb
 .cursor/mcp.json
 
 *.plist
