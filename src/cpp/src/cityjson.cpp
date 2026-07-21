@@ -19,8 +19,36 @@ namespace fcb {
 
 namespace {
 
+// ---------------------------------------------------------------------------
+// UNKNOWN-TAG POLICY
+//
+// Three enumerators reach this file with no CityJSON name of their own:
+// CityObjectType::ExtensionObject, SemanticSurfaceType::ExtraSemanticSurface,
+// and any GeometryType a newer encoder might add. One policy per tag, and each
+// matches the Rust reader exactly (deserializer.rs::to_cj_co_type,
+// geom_decoder.rs::to_cj_surface_type, geom_decoder.rs::GeometryType::to_cj).
+//
+// A City Object type and a semantic surface type each have a CityJSON
+// extension escape hatch (spec sections 8 and 3.3): any name starting with '+'
+// is legal. So an unnameable tag is spelled "+UnknownCityObject" /
+// "+GenericSurface" -- a placeholder, but a SCHEMA-VALID one. These names
+// deliberately do NOT appear in the tables below: "ExtensionObject" and
+// "ExtraSemanticSurface" are FlatBuffers enumerator names, not CityJSON type
+// names, they carry no '+', and emitting either produces a document an
+// official validator rejects. That is as much a defect as rejecting a valid
+// one.
+//
+// A geometry type has no such escape hatch -- CityJSON section 3 enumerates
+// exactly eight `type` values and admits no others -- so there is no valid
+// string to fall back to and geometry_type_name() throws instead. See
+// geometry.cpp.
+//
+// The appearance enums (wrapMode, textureType) throw as well, on both sides.
+// ---------------------------------------------------------------------------
+
 /// Names must match CityJSON exactly; the enum order comes from
-/// feature.fbs's CityObjectType declaration.
+/// feature.fbs's CityObjectType declaration. ExtensionObject, the last
+/// enumerator, is deliberately absent: see the policy note above.
 const char* const kCityObjectTypeNames[] = {
     "Bridge", "BridgePart", "BridgeInstallation", "BridgeConstructiveElement",
     "BridgeRoom", "BridgeFurniture",
@@ -33,8 +61,10 @@ const char* const kCityObjectTypeNames[] = {
     "Tunnel", "TunnelPart", "TunnelInstallation", "TunnelConstructiveElement",
     "TunnelHollowSpace", "TunnelFurniture",
     "WaterBody",
-    "ExtensionObject",
 };
+
+/// The CityJSON spelling of a City Object tag this reader cannot name.
+constexpr const char* kUnknownCityObjectName = "+UnknownCityObject";
 
 UIntView as_uint_view(const flatbuffers::Vector<std::uint32_t>* v) {
     if (v == nullptr) return {};
@@ -48,8 +78,10 @@ const char* const kSemanticSurfaceTypeNames[] = {
     "WaterSurface", "WaterGroundSurface", "WaterClosureSurface",
     "TrafficArea", "AuxiliaryTrafficArea", "TransportationMarking",
     "TransportationHole",
-    "ExtraSemanticSurface",
 };
+
+/// The CityJSON spelling of a semantic surface tag this reader cannot name.
+constexpr const char* kGenericSurfaceName = "+GenericSurface";
 
 GeometryKind kind_of(const ::Geometry* g) {
     return static_cast<GeometryKind>(static_cast<std::uint8_t>(g->type()));
@@ -311,12 +343,10 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
         for (const auto* so : *g->semantics_objects()) {
             if (so == nullptr) continue;
             nlohmann::json s = nlohmann::json::object();
-            const auto t = static_cast<std::size_t>(so->type());
-            constexpr std::size_t kCount = sizeof(kSemanticSurfaceTypeNames) /
-                                           sizeof(kSemanticSurfaceTypeNames[0]);
             s["type"] = (so->extension_type() != nullptr)
                             ? so->extension_type()->str()
-                            : (t < kCount ? kSemanticSurfaceTypeNames[t] : "ExtraSemanticSurface");
+                            : semantic_surface_type_name(
+                                  static_cast<std::uint8_t>(so->type()));
             // Semantic surfaces carry their own attributes, decoded against
             // Header.semantic_columns -- a schema separate from the feature
             // attribute columns. Merged inline, as the reference does.
@@ -374,11 +404,26 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
 std::string city_object_type_name(std::uint8_t type) {
     constexpr std::size_t kCount =
         sizeof(kCityObjectTypeNames) / sizeof(kCityObjectTypeNames[0]);
-    if (type >= kCount) {
-        throw Error(ErrorCode::InvalidFlatbuffer,
-                    "unknown city object type " + std::to_string(type));
-    }
+    // UNKNOWN-TAG POLICY. ExtensionObject (the enumerator just past the table)
+    // and any tag a newer encoder may add come back as "+UnknownCityObject".
+    // This used to throw, which meant a file whose ExtensionObject had lost
+    // its `extension_type` string was unreadable here while the Rust reader
+    // read it happily. It is only ever reached when `extension_type` is
+    // absent -- when it is present, its verbatim string wins.
+    if (type >= kCount) return kUnknownCityObjectName;
     return kCityObjectTypeNames[type];
+}
+
+std::string semantic_surface_type_name(std::uint8_t type) {
+    constexpr std::size_t kCount =
+        sizeof(kSemanticSurfaceTypeNames) / sizeof(kSemanticSurfaceTypeNames[0]);
+    // UNKNOWN-TAG POLICY, as for city_object_type_name above.
+    // ExtraSemanticSurface, the enumerator just past the table, and anything a
+    // newer encoder adds come back as "+GenericSurface" -- the same string the
+    // Rust reader emits (geom_decoder.rs::to_cj_surface_type). Only reached
+    // when the surface's `extension_type` string is absent.
+    if (type >= kCount) return kGenericSurfaceName;
+    return kSemanticSurfaceTypeNames[type];
 }
 
 nlohmann::json to_cityjson_metadata(const HeaderView& header) {

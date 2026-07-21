@@ -1260,7 +1260,13 @@ mod tests {
                     .iter()
                     .find(|g| g.lod() == fb_geometry.lod())
                     .unwrap();
-                assert_eq!(cj_geometry.geometry_type(), fb_geometry.type_().to_cj());
+                assert_eq!(
+                    cj_geometry.geometry_type(),
+                    fb_geometry
+                        .type_()
+                        .to_cj()
+                        .expect("a written geometry has a known type")
+                );
             }
 
             if let Some(parents) = cjco.parents.as_ref() {

@@ -112,8 +112,49 @@ TEST_CASE("geometry boundaries reach vertex indices at some depth") {
     CHECK(checked);
 }
 
-TEST_CASE("city object type names cover the enum and reject nonsense") {
+TEST_CASE("city object type names cover the enum") {
     CHECK(city_object_type_name(6) == "Building");
     CHECK(city_object_type_name(7) == "BuildingPart");
-    CHECK_THROWS_AS(city_object_type_name(200), Error);
+    CHECK(city_object_type_name(32) == "WaterBody");
+}
+
+// UNKNOWN-TAG POLICY. Tag 33 is CityObjectType::ExtensionObject, reached only
+// when the object's `extension_type` string is absent; anything above it is a
+// tag a newer encoder added. Both used to throw here, and both used to be
+// spelled "ExtensionObject" by the table -- a string that is not a CityJSON
+// City Object type and carries no '+', so a document containing it fails
+// validation. Emitting a schema-invalid document is as much a defect as
+// rejecting a valid one, so the reader now emits the same '+'-prefixed
+// placeholder the Rust reader does (deserializer.rs::to_cj_co_type).
+TEST_CASE("an unnameable city object tag becomes a schema-valid Extension name") {
+    for (std::uint8_t tag : {std::uint8_t{33}, std::uint8_t{34}, std::uint8_t{200}}) {
+        const auto name = city_object_type_name(tag);
+        CHECK(name == "+UnknownCityObject");
+        // the property that matters: an Extension type must start with '+'
+        REQUIRE(!name.empty());
+        CHECK(name[0] == '+');
+    }
+    // and it is never the FlatBuffers enumerator name
+    CHECK(city_object_type_name(33) != "ExtensionObject");
+}
+
+TEST_CASE("semantic surface type names cover the enum") {
+    CHECK(semantic_surface_type_name(0) == "RoofSurface");
+    CHECK(semantic_surface_type_name(6) == "Window");
+    CHECK(semantic_surface_type_name(17) == "TransportationHole");
+}
+
+// UNKNOWN-TAG POLICY, the semantic-surface half. Tag 18 is
+// SemanticSurfaceType::ExtraSemanticSurface. CityJSON section 3.3 says
+// "it is possible to define and use other semantics, but these have to start
+// with a '+'", so the placeholder must carry one; "ExtraSemanticSurface",
+// which this used to emit, does not and is not a CityJSON surface type.
+TEST_CASE("an unnameable semantic surface tag becomes a schema-valid Extension name") {
+    for (std::uint8_t tag : {std::uint8_t{18}, std::uint8_t{19}, std::uint8_t{200}}) {
+        const auto name = semantic_surface_type_name(tag);
+        CHECK(name == "+GenericSurface");
+        REQUIRE(!name.empty());
+        CHECK(name[0] == '+');
+    }
+    CHECK(semantic_surface_type_name(18) != "ExtraSemanticSurface");
 }

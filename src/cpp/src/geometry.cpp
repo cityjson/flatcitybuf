@@ -203,8 +203,15 @@ nlohmann::json decode_boundaries(GeometryKind type,
         case GeometryKind::GeometryInstance:
         default:
             // One shell per `shells` entry; `solids` is the redundant one.
-            // A Solid is also what the reference falls back to for a tag it
-            // does not know (deserializer.rs:780), so the two agree.
+            //
+            // UNKNOWN-TAG POLICY. The `default:` here is a C++ formality, not
+            // a fallback with a meaning: an unknown geometry tag never reaches
+            // this function, because geometry_to_json() calls
+            // geometry_type_name() first and that throws (see below, and the
+            // policy note at the top of cityjson.cpp). Treating an unknown tag
+            // as a Solid would read its boundaries at the wrong depth and hand
+            // the caller a plausible-looking lie; the reference errors for the
+            // same reason (geom_decoder.rs::GeometryType::to_cj).
             for (std::size_t i = 0; i < shells.size(); ++i) {
                 out.push_back(take_shell(shells, surfaces, strings, indices, c));
             }
@@ -376,6 +383,13 @@ std::string geometry_type_name(std::uint8_t type) {
         case ::GeometryType::CompositeSolid: return "CompositeSolid";
         case ::GeometryType::GeometryInstance: return "GeometryInstance";
     }
+    // UNKNOWN-TAG POLICY. Unlike a City Object type or a semantic surface
+    // type, a geometry type has no CityJSON extension escape hatch: the spec
+    // (section 3) enumerates exactly these eight `type` values and admits no
+    // others, so there is no '+'-prefixed name a reader could legally emit
+    // here. Erroring is the only option that neither mislabels the geometry
+    // nor writes a document a validator rejects. The Rust reader now does the
+    // same (geom_decoder.rs::GeometryType::to_cj, Error::UnknownEnumTag).
     throw Error(ErrorCode::InvalidFlatbuffer,
                 "unknown geometry type " + std::to_string(type));
 }

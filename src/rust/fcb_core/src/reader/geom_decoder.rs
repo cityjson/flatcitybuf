@@ -31,6 +31,7 @@ use cjseq::{
     TextureValues as CjTextureValues, TexturedRing, TexturedShell, TexturedSurface,
 };
 
+use crate::error::Error;
 use crate::fb::{
     Column, GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType as FbSurfaceType,
     TextureMapping,
@@ -185,6 +186,16 @@ pub(crate) fn decode_semantics_surfaces(
 ///
 /// `ExtraSemanticSurface` carries its CityJSON name in `extension_type`, which
 /// the spec requires to start with `+`.
+///
+/// UNKNOWN-TAG POLICY, second of three sites (see [`GeometryType::to_cj`]).
+/// Unlike a geometry type, a semantic surface type DOES have an extension
+/// escape hatch -- CityJSON § 3.3 says "it is possible to define and use other
+/// semantics, but these have to start with a `+`" -- so a tag with no usable
+/// `extension_type` still has a schema-valid spelling available, and this
+/// emits one rather than erroring. `"+GenericSurface"` and not
+/// `"ExtraSemanticSurface"`: the latter is the FlatBuffers enumerator name,
+/// is not a CityJSON surface type, and carries no `+`, so a document
+/// containing it fails validation. The C++ reader emits the same string.
 pub(crate) fn to_cj_surface_type(
     surface_type: FbSurfaceType,
     extension_type: Option<&str>,
@@ -297,9 +308,26 @@ pub(crate) fn decode_semantics(
     }
 }
 
+/// UNKNOWN-TAG POLICY, first of three sites. See `to_cj_surface_type` and
+/// `deserializer::to_cj_co_type` for the other two.
+///
+/// A geometry type is the one of the three that has NO extension escape
+/// hatch: CityJSON § 3 enumerates exactly eight `type` values and
+/// `geomprimitives.schema.json` admits no others, so unlike a City Object or
+/// a semantic surface there is no `"+Something"` a reader could legally emit
+/// for a tag it does not recognise. That leaves two options, and only two:
+/// mislabel the geometry as one of the eight, or refuse the file.
+///
+/// This errors. A tag outside the eight means the file was written by a newer
+/// or a broken encoder, and calling such a geometry a `Solid` -- which is
+/// what this used to do -- decodes its boundaries at the wrong depth and hands
+/// the caller a plausible-looking lie. That is the same reasoning behind
+/// [`crate::error::Error::UnknownEnumTag`] for `wrapMode` and `textureType`,
+/// and the C++ reader's `geometry_type_name` has always thrown here; the two
+/// readers now agree.
 impl GeometryType {
-    pub fn to_string(self) -> &'static str {
-        match self {
+    pub fn to_str(self) -> Result<&'static str, Error> {
+        Ok(match self {
             Self::MultiPoint => "MultiPoint",
             Self::MultiLineString => "MultiLineString",
             Self::MultiSurface => "MultiSurface",
@@ -308,12 +336,12 @@ impl GeometryType {
             Self::MultiSolid => "MultiSolid",
             Self::CompositeSolid => "CompositeSolid",
             Self::GeometryInstance => "GeometryInstance",
-            _ => "Solid",
-        }
+            other => return Err(Error::UnknownEnumTag("GeometryType", format!("{other:?}"))),
+        })
     }
 
-    pub fn to_cj(self) -> CjGeometryType {
-        match self {
+    pub fn to_cj(self) -> Result<CjGeometryType, Error> {
+        Ok(match self {
             Self::MultiPoint => CjGeometryType::MultiPoint,
             Self::MultiLineString => CjGeometryType::MultiLineString,
             Self::MultiSurface => CjGeometryType::MultiSurface,
@@ -322,8 +350,8 @@ impl GeometryType {
             Self::MultiSolid => CjGeometryType::MultiSolid,
             Self::CompositeSolid => CjGeometryType::CompositeSolid,
             Self::GeometryInstance => CjGeometryType::GeometryInstance,
-            _ => CjGeometryType::Solid,
-        }
+            other => return Err(Error::UnknownEnumTag("GeometryType", format!("{other:?}"))),
+        })
     }
 }
 
@@ -929,5 +957,78 @@ mod tests {
             ),
             json!([[[[[0, 10, 20]]]]])
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // UNKNOWN-TAG POLICY. One policy per tag, and the C++ reader agrees on
+    // all three (src/cpp/src/cityjson.cpp, src/cpp/src/geometry.cpp; pinned
+    // by test_cityjson.cpp and test_geometry.cpp).
+    // ---------------------------------------------------------------------
+
+    /// A geometry type has NO '+'-prefixed extension form -- CityJSON section 3
+    /// enumerates exactly eight `type` values -- so there is no schema-valid
+    /// string to fall back to and an unknown tag is an error. It used to
+    /// become a `Solid`, which reads the boundaries at the wrong depth and
+    /// hands the caller a plausible-looking lie.
+    #[test]
+    fn an_unknown_geometry_tag_is_an_error_and_never_a_solid() {
+        // every one of the eight still resolves
+        for (tag, name) in [
+            (GeometryType::MultiPoint, "MultiPoint"),
+            (GeometryType::MultiLineString, "MultiLineString"),
+            (GeometryType::MultiSurface, "MultiSurface"),
+            (GeometryType::CompositeSurface, "CompositeSurface"),
+            (GeometryType::Solid, "Solid"),
+            (GeometryType::MultiSolid, "MultiSolid"),
+            (GeometryType::CompositeSolid, "CompositeSolid"),
+            (GeometryType::GeometryInstance, "GeometryInstance"),
+        ] {
+            assert_eq!(tag.to_str().unwrap(), name);
+            assert!(tag.to_cj().is_ok());
+        }
+
+        // a tag past the eight is rejected, not silently renamed
+        let unknown = GeometryType(GeometryType::ENUM_MAX + 1);
+        assert!(
+            matches!(
+                unknown.to_str(),
+                Err(Error::UnknownEnumTag("GeometryType", _))
+            ),
+            "an unknown geometry tag must be reported, not spelled `Solid`"
+        );
+        assert!(matches!(
+            unknown.to_cj(),
+            Err(Error::UnknownEnumTag("GeometryType", _))
+        ));
+    }
+
+    /// A semantic surface type DOES have an extension form (section 3.3: "it
+    /// is possible to define and use other semantics, but these have to start
+    /// with a `+`"), so an unnameable tag gets a schema-valid placeholder
+    /// rather than an error. Never `"ExtraSemanticSurface"`: that is the
+    /// FlatBuffers enumerator name, is not a CityJSON surface type, and
+    /// carries no `+`.
+    #[test]
+    fn an_unnameable_semantic_surface_tag_becomes_a_plus_prefixed_extension() {
+        // the extension_type string wins whenever it is there
+        assert_eq!(
+            to_cj_surface_type(FbSurfaceType::ExtraSemanticSurface, Some("+ThermalSurface")),
+            SemanticSurfaceType::Extension("+ThermalSurface".to_string())
+        );
+
+        for tag in [
+            FbSurfaceType::ExtraSemanticSurface,
+            FbSurfaceType(FbSurfaceType::ENUM_MAX + 1),
+        ] {
+            let SemanticSurfaceType::Extension(name) = to_cj_surface_type(tag, None) else {
+                panic!("an unnameable surface tag must become an Extension");
+            };
+            assert_eq!(name, "+GenericSurface");
+            assert!(
+                name.starts_with('+'),
+                "{name} must be a valid Extension name"
+            );
+            assert_ne!(name, "ExtraSemanticSurface");
+        }
     }
 }

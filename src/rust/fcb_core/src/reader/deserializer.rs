@@ -219,6 +219,16 @@ pub(crate) fn to_cj_address(header: &Header) -> Option<CjAddress> {
 ///
 /// `ExtensionObject` carries its CityJSON name in `extension_type`, which the
 /// spec requires to start with `+`.
+///
+/// UNKNOWN-TAG POLICY, third of three sites (see
+/// [`crate::reader::geom_decoder::GeometryType::to_cj`]). Like a semantic
+/// surface and unlike a geometry, a City Object type has an extension escape
+/// hatch (§ 8 Extensions), so an `ExtensionObject` whose `extension_type`
+/// string is missing still has a schema-valid spelling available and gets one
+/// rather than an error. `"+UnknownCityObject"` and not `"ExtensionObject"`:
+/// the latter is the FlatBuffers enumerator name, is not a CityJSON City
+/// Object type, and carries no `+`, so a document containing it fails
+/// validation. The C++ reader emits the same string.
 pub(crate) fn to_cj_co_type(
     co_type: CityObjectType,
     extension_type: Option<&str>,
@@ -648,7 +658,7 @@ pub fn to_cj_feature(
             cj_appearance.vertices_texture = Some(
                 vertices_texture
                     .iter()
-                    .map(|v| vec![v.u(), v.v()])
+                    .map(|v| [v.u(), v.v()])
                     .collect::<Vec<_>>(),
             );
         }
@@ -764,13 +774,18 @@ pub(crate) fn decode_geometry(
             boundaries: decode_solids(&solids, &shells, &surfaces, &strings, &indices),
             common,
         },
-        // `Solid`, and any tag a newer writer may add: a Solid is the shape
-        // the writer falls back to as well, so the two agree.
-        _ => CjGeometry::Solid {
+        GeometryType::Solid => CjGeometry::Solid {
             lod,
             boundaries: decode_shells(&shells, &surfaces, &strings, &indices),
             common,
         },
+        // UNKNOWN-TAG POLICY. A `GeometryInstance` never reaches here -- it is
+        // dispatched to `decode_geometry_instance` -- so anything left is a
+        // tag outside the eight CityJSON names, and there is no `+`-prefixed
+        // spelling the schema would accept for it (§ 3). Decoding it as a
+        // Solid, which this used to do, silently reads the boundaries at the
+        // wrong depth. See `GeometryType::to_cj` for the full argument.
+        other => return Err(Error::UnknownEnumTag("GeometryType", format!("{other:?}"))),
     })
 }
 

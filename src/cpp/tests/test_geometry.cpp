@@ -344,5 +344,13 @@ TEST_CASE("geometry type names match CityJSON spelling") {
     CHECK(geometry_type_name(2) == "MultiSurface");
     CHECK(geometry_type_name(4) == "Solid");
     CHECK(geometry_type_name(6) == "CompositeSolid");
+
+    // UNKNOWN-TAG POLICY. A geometry type is the one of the three unnameable
+    // tags with no '+'-prefixed extension form available (CityJSON section 3
+    // enumerates exactly eight), so an unknown tag is an error rather than a
+    // placeholder name -- and specifically NOT a silent fallback to "Solid",
+    // which would read the boundaries at the wrong depth. The Rust reader
+    // returns Error::UnknownEnumTag for the same tag.
+    CHECK_THROWS_AS(geometry_type_name(8), Error);
     CHECK_THROWS_AS(geometry_type_name(99), Error);
 }

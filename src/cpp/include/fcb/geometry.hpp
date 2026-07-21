@@ -80,6 +80,11 @@ enum class GeometryKind : std::uint8_t {
 /// mean the file is corrupt, and reporting corruption is more useful to a
 /// caller than a plausible-looking short geometry. Only reachable on a file
 /// our own writer could not have produced.
+///
+/// The same reasoning settles an unknown `type`: it never reaches this
+/// function, because `geometry_type_name` rejects it first. The `default:`
+/// arm in the switch is a C++ formality with no fallback semantics -- see the
+/// policy note at the top of cityjson.cpp.
 nlohmann::json decode_boundaries(GeometryKind type,
                                  UIntView solids,
                                  UIntView shells,
@@ -143,6 +148,14 @@ nlohmann::json decode_texture_values(GeometryKind type,
 #endif  // FCB_WITH_JSON
 
 /// CityJSON name for a GeometryType enumerator, e.g. "MultiSurface".
+///
+/// Throws on a tag outside the eight the spec defines. CityJSON offers no
+/// '+'-prefixed extension mechanism for geometry types (unlike City Object
+/// types and semantic surface types, which get "+UnknownCityObject" and
+/// "+GenericSurface" respectively), so there is no schema-valid string to
+/// return and no honest alternative to an error. Mirrors
+/// `GeometryType::to_cj` (geom_decoder.rs); see the policy note at the top of
+/// cityjson.cpp.
 std::string geometry_type_name(std::uint8_t type);
 
 }  // namespace fcb
