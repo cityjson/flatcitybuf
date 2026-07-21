@@ -10,11 +10,14 @@ use crate::{
 };
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
-    Address as CjAddress, Appearance as CjAppearance, CityJSON, CityJSONFeature,
-    CityObject as CjCityObject, CityObjectType as CjCityObjectType, Geometry as CjGeometry,
-    GeometryCommon as CjGeometryCommon, GeometryTemplates as CjGeometryTemplates,
+    Address as CjAddress, Appearance as CjAppearance, BorderColor as CjBorderColor, CityJSON,
+    CityJSONFeature, CityObject as CjCityObject, CityObjectType as CjCityObjectType,
+    Color as CjColor, Geometry as CjGeometry, GeometryCommon as CjGeometryCommon,
+    GeometryTemplates as CjGeometryTemplates, MaterialObject as CjMaterialObject,
     Metadata as CjMetadata, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, Transform as CjTransform,
+    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics,
+    TextureFormat as CjTextureFormat, TextureObject as CjTextureObject,
+    TextureType as CjTextureType, Transform as CjTransform, WrapMode as CjWrapMode,
 };
 use serde_json::{json, Value};
 
@@ -428,38 +431,66 @@ pub fn decode_attributes(
     serde_json::Value::Object(map)
 }
 
-/// Adds `key` only when the value is present, so an absent member stays absent
-/// rather than coming back as `null`.
-fn insert_opt<T: serde::Serialize>(
-    obj: &mut serde_json::Map<String, Value>,
-    key: &str,
-    v: Option<T>,
-) {
-    if let Some(v) = v {
-        obj.insert(key.to_string(), json!(v));
+/// A material colour: `appearance.schema.json` fixes `diffuseColor`,
+/// `emissiveColor` and `specularColor` at exactly three numbers, which
+/// `cjseq::Color` spells as `[f64; 3]`. A stored vector of any other length is
+/// not a colour and is dropped rather than padded or truncated.
+fn to_color(color: Option<flatbuffers::Vector<'_, f64>>) -> Option<CjColor> {
+    let values: Vec<f64> = color?.iter().collect();
+    values.try_into().ok()
+}
+
+/// A texture's `borderColor`, which the schema allows to be three *or* four
+/// numbers (`"minItems": 3, "maxItems": 4`) -- the one CityJSON colour that is
+/// not fixed at three.
+fn to_border_color(color: Option<flatbuffers::Vector<'_, f64>>) -> Option<CjBorderColor> {
+    let values: Vec<f64> = color?.iter().collect();
+    match values.len() {
+        3 => values.try_into().ok().map(CjBorderColor::Rgb),
+        4 => values.try_into().ok().map(CjBorderColor::Rgba),
+        _ => None,
     }
 }
 
-fn to_color(color: Option<flatbuffers::Vector<'_, f64>>) -> Option<Vec<f64>> {
-    color.map(|c| c.iter().collect())
-}
-
-/// Maps a FlatBuffers enumeration tag back onto its CityJSON spelling.
+/// The CityJSON `wrapMode` for a FlatCityBuf tag.
 ///
-/// The mirror of `serializer::cj_enum`, and loud for the same reason: the `_`
-/// arm these tables need would otherwise turn an unknown tag -- one written by
-/// a newer writer, or a table that has drifted from the `.fbs` -- into a
-/// valid-looking default, which is how the `wrapMode` spelling bug survived.
-fn fb_enum<T: PartialEq>(member: &str, tag: T, table: &[(T, &'static str)]) -> &'static str {
-    if let Some((_, name)) = table.iter().find(|(t, _)| *t == tag) {
-        return name;
-    }
-    debug_assert!(
-        false,
-        "unknown FlatCityBuf `{member}` tag; the table has drifted from the schema"
-    );
-    tracing::warn!("unknown FlatCityBuf `{member}` tag, falling back to the default");
-    table[0].1
+/// The inverse of `serializer::fb_wrap_mode`. A FlatBuffers enumeration is
+/// generated as a newtype over `u8`, not as a Rust `enum`, so this direction
+/// cannot be made exhaustive by the compiler the way its mirror is. The `_`
+/// arm therefore *errors*: it does not fall back to a default, which is how a
+/// texture written `"wrapMode": "wrap"` used to come back as `"None"`. An
+/// unrecognised tag means the file was written by a newer writer or is
+/// corrupt, and the caller is told so.
+fn cj_wrap_mode(tag: WrapMode) -> Result<CjWrapMode, Error> {
+    Ok(match tag {
+        WrapMode::None => CjWrapMode::None,
+        WrapMode::Wrap => CjWrapMode::Wrap,
+        WrapMode::Mirror => CjWrapMode::Mirror,
+        WrapMode::Clamp => CjWrapMode::Clamp,
+        WrapMode::Border => CjWrapMode::Border,
+        _ => return Err(Error::UnknownEnumTag("wrapMode", format!("{tag:?}"))),
+    })
+}
+
+/// The CityJSON `textureType` for a FlatCityBuf tag. Errors on an unknown tag,
+/// as above.
+fn cj_texture_type(tag: TextureType) -> Result<CjTextureType, Error> {
+    Ok(match tag {
+        TextureType::Unknown => CjTextureType::Unknown,
+        TextureType::Specific => CjTextureType::Specific,
+        TextureType::Typical => CjTextureType::Typical,
+        _ => return Err(Error::UnknownEnumTag("textureType", format!("{tag:?}"))),
+    })
+}
+
+/// The CityJSON texture `type` for a FlatCityBuf tag. Errors on an unknown
+/// tag, as above.
+fn cj_texture_format(tag: TextureFormat) -> Result<CjTextureFormat, Error> {
+    Ok(match tag {
+        TextureFormat::PNG => CjTextureFormat::PNG,
+        TextureFormat::JPG => CjTextureFormat::JPG,
+        _ => return Err(Error::UnknownEnumTag("type", format!("{tag:?}"))),
+    })
 }
 
 pub fn to_cj_feature(
@@ -561,23 +592,21 @@ pub fn to_cj_feature(
             default_theme_material: None,
         };
 
-        // Decode materials. A CityJSON material is a free-form object; only
-        // the members the writer actually stored are put back, so an absent
-        // one stays absent rather than reappearing as `null`.
+        // Decode materials. `name` is the schema's one required member; every
+        // other one is optional, and an absent one stays absent rather than
+        // reappearing as `null`.
         if let Some(materials) = appearance.materials() {
             let cj_materials = materials
                 .iter()
-                .map(|m| {
-                    let mut obj = serde_json::Map::new();
-                    obj.insert("name".to_string(), json!(m.name()));
-                    insert_opt(&mut obj, "ambientIntensity", m.ambient_intensity());
-                    insert_opt(&mut obj, "diffuseColor", to_color(m.diffuse_color()));
-                    insert_opt(&mut obj, "emissiveColor", to_color(m.emissive_color()));
-                    insert_opt(&mut obj, "specularColor", to_color(m.specular_color()));
-                    insert_opt(&mut obj, "shininess", m.shininess());
-                    insert_opt(&mut obj, "transparency", m.transparency());
-                    insert_opt(&mut obj, "isSmooth", m.is_smooth());
-                    Value::Object(obj)
+                .map(|m| CjMaterialObject {
+                    name: m.name().to_string(),
+                    ambient_intensity: m.ambient_intensity(),
+                    diffuse_color: to_color(m.diffuse_color()),
+                    emissive_color: to_color(m.emissive_color()),
+                    specular_color: to_color(m.specular_color()),
+                    shininess: m.shininess(),
+                    transparency: m.transparency(),
+                    is_smooth: m.is_smooth(),
                 })
                 .collect();
 
@@ -589,52 +618,20 @@ pub fn to_cj_feature(
             let cj_textures = textures
                 .iter()
                 .map(|t| {
-                    let mut obj = serde_json::Map::new();
-                    obj.insert(
-                        "type".to_string(),
-                        json!(fb_enum(
-                            "type",
-                            t.type_(),
-                            &[(TextureFormat::PNG, "PNG"), (TextureFormat::JPG, "JPG")]
-                        )),
-                    );
-                    obj.insert("image".to_string(), json!(t.image()));
-                    insert_opt(
-                        &mut obj,
-                        "wrapMode",
-                        t.wrap_mode().map(|w| {
-                            fb_enum(
-                                "wrapMode",
-                                w,
-                                &[
-                                    (WrapMode::None, "none"),
-                                    (WrapMode::Wrap, "wrap"),
-                                    (WrapMode::Mirror, "mirror"),
-                                    (WrapMode::Clamp, "clamp"),
-                                    (WrapMode::Border, "border"),
-                                ],
-                            )
-                        }),
-                    );
-                    insert_opt(
-                        &mut obj,
-                        "textureType",
-                        t.texture_type().map(|t| {
-                            fb_enum(
-                                "textureType",
-                                t,
-                                &[
-                                    (TextureType::Unknown, "unknown"),
-                                    (TextureType::Specific, "specific"),
-                                    (TextureType::Typical, "typical"),
-                                ],
-                            )
-                        }),
-                    );
-                    insert_opt(&mut obj, "borderColor", to_color(t.border_color()));
-                    Value::Object(obj)
+                    Ok(CjTextureObject {
+                        thetype: Some(cj_texture_format(t.type_())?),
+                        // `image` is mandatory in the `.fbs` but optional in
+                        // CityJSON, so the empty string the writer stores for
+                        // an absent one decodes back to absent.
+                        image: Some(t.image())
+                            .filter(|i| !i.is_empty())
+                            .map(str::to_string),
+                        wrap_mode: t.wrap_mode().map(cj_wrap_mode).transpose()?,
+                        texture_type: t.texture_type().map(cj_texture_type).transpose()?,
+                        border_color: to_border_color(t.border_color()),
+                    })
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, Error>>()?;
 
             cj_appearance.textures = Some(cj_textures);
         }

@@ -782,3 +782,170 @@ fn an_empty_semantics_values_stays_empty() -> Result<()> {
     );
     Ok(())
 }
+
+//-----------------------------------------------------------------------
+//-- the document-level appearance *library*
+//-----------------------------------------------------------------------
+
+/// Encodes a feature carrying a whole `appearance` library with the real
+/// writer, decodes it with the real reader, and returns the decoded
+/// `appearance` as CityJSON.
+///
+/// Unlike `roundtrip_geometry` above, which exercises the per-geometry
+/// material/texture *references*, this exercises the palette those references
+/// point into: `materials`, `textures`, `vertices-texture` and the two
+/// default themes.
+fn roundtrip_appearance(appearance: Value) -> Result<Value> {
+    let cj_line = json!({
+        "type": "CityJSON",
+        "version": "2.0",
+        "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]},
+        "CityObjects": {},
+        "vertices": []
+    });
+    let feature_line = json!({
+        "type": "CityJSONFeature",
+        "id": "feat-1",
+        "CityObjects": {
+            "co-1": {
+                "type": "Building",
+                "geometry": [{
+                    "type": "MultiSurface",
+                    "lod": "1",
+                    "boundaries": [[[0, 1, 2]]],
+                    "texture": {"winter": {"values": [[[0, 0, 1, 2]]]}},
+                    "material": {"winter": {"values": [0]}}
+                }]
+            }
+        },
+        "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        "appearance": appearance
+    });
+    let input = format!("{cj_line}\n{feature_line}\n");
+
+    let seq = match read_cityjson_from_reader(
+        BufReader::new(Cursor::new(input.into_bytes())),
+        CJTypeKind::Seq,
+    )? {
+        CJType::Seq(seq) => seq,
+        _ => panic!("expected CityJSONSeq"),
+    };
+
+    let mut fcb_buf: Vec<u8> = Vec::new();
+    {
+        let mut fcb = FcbWriter::new(
+            seq.cj.clone(),
+            Some(HeaderWriterOptions {
+                write_index: false,
+                feature_count: seq.features.len() as u64,
+                index_node_size: 16,
+                attribute_indices: None,
+                geographical_extent: None,
+            }),
+            Some(AttributeSchema::new()),
+            None,
+        )?;
+        for feature in seq.features.iter() {
+            fcb.add_feature(feature)?;
+        }
+        fcb.write(&mut fcb_buf)?;
+    }
+
+    let mut reader = FcbReader::open(Cursor::new(fcb_buf))?.select_all()?;
+    let feat_buf = reader.next()?.expect("one feature must round-trip");
+    let decoded = feat_buf.cur_cj_feature()?;
+    Ok(serde_json::to_value(
+        decoded
+            .appearance
+            .as_ref()
+            .expect("the decoded feature must carry an appearance"),
+    )?)
+}
+
+/// **The regression test for the bug this whole change exists to fix.**
+///
+/// A texture written `"wrapMode": "wrap"` came back out of FlatCityBuf as
+/// `"None"`: the writer's string `match` expected a different spelling, and
+/// its `_` arm turned the miss into the `WrapMode::None` default. It was
+/// caught only by the C++ conformance corpus.
+///
+/// Every one of `appearance.schema.json`'s five spellings is checked, not just
+/// `wrap`, so a table that silently collapses two of them fails here too.
+#[test]
+fn every_wrap_mode_survives_an_fcb_round_trip() -> Result<()> {
+    for mode in ["none", "wrap", "mirror", "clamp", "border"] {
+        let decoded = roundtrip_appearance(json!({
+            "textures": [{"type": "JPG", "image": "a.jpg", "wrapMode": mode}],
+            "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        }))?;
+        assert_eq!(
+            decoded["textures"][0]["wrapMode"],
+            json!(mode),
+            "wrapMode {mode:?} did not survive the round trip: {decoded}"
+        );
+    }
+    Ok(())
+}
+
+/// The same, for the other two enumerations a string `match` used to decide.
+/// Note the case difference the schema imposes: `textureType` is lower case,
+/// `type` upper.
+#[test]
+fn every_texture_type_and_format_survives_an_fcb_round_trip() -> Result<()> {
+    for t in ["unknown", "specific", "typical"] {
+        let decoded = roundtrip_appearance(json!({
+            "textures": [{"image": "a.jpg", "textureType": t}],
+            "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        }))?;
+        assert_eq!(decoded["textures"][0]["textureType"], json!(t));
+    }
+    for f in ["PNG", "JPG"] {
+        let decoded = roundtrip_appearance(json!({
+            "textures": [{"type": f, "image": "a.jpg"}],
+            "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        }))?;
+        assert_eq!(decoded["textures"][0]["type"], json!(f));
+    }
+    Ok(())
+}
+
+/// A texture object carrying every member the schema names, and a material
+/// object carrying every member of its own, both round-tripped whole.
+///
+/// `borderColor` is checked at both cardinalities the schema permits
+/// (`"minItems": 3, "maxItems": 4`), because a four-number border colour
+/// truncated to three is precisely the kind of loss the old
+/// `Vec<f64>`-and-hope encoding could not rule out.
+#[test]
+fn a_full_appearance_library_survives_an_fcb_round_trip() -> Result<()> {
+    for border in [json!([0.0, 0.0, 0.0]), json!([0.0, 0.0, 0.0, 1.0])] {
+        let appearance = json!({
+            "materials": [{
+                "name": "roof",
+                "ambientIntensity": 0.4,
+                "diffuseColor": [0.5, 0.4, 0.3],
+                "emissiveColor": [0.0, 0.0, 0.0],
+                "specularColor": [1.0, 1.0, 1.0],
+                "shininess": 0.2,
+                "transparency": 0.0,
+                "isSmooth": false
+            }],
+            "textures": [{
+                "type": "JPG",
+                "image": "appearances/wood.jpg",
+                "wrapMode": "mirror",
+                "textureType": "specific",
+                "borderColor": border
+            }],
+            "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            "default-theme-texture": "winter",
+            "default-theme-material": "winter"
+        });
+        let decoded = roundtrip_appearance(appearance.clone())?;
+        assert_eq!(
+            decoded, appearance,
+            "the appearance library must round-trip whole"
+        );
+    }
+    Ok(())
+}

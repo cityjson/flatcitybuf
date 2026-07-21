@@ -50,6 +50,14 @@ pub enum Error {
     #[error("Invalid attribute value: {msg}")]
     InvalidAttributeValue { msg: String },
 
+    /// A stored FlatBuffers enumeration tag with no CityJSON spelling. The
+    /// permitted values are fixed by `appearance.schema.json`, so an
+    /// unrecognised tag means the file was written by a newer writer or is
+    /// corrupt. Reported rather than defaulted: a silent default is exactly
+    /// how a texture written `"wrapMode": "wrap"` came back as `"None"`.
+    #[error("Unknown FlatCityBuf `{0}` tag {1}")]
+    UnknownEnumTag(&'static str, String),
+
     // Index and query errors
     #[error("Failed to create index: {0}")]
     IndexCreationError(String),

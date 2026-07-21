@@ -16,10 +16,12 @@ use crate::{
     TransformationMatrix,
 };
 use cjseq::{
-    Appearance as CjAppearance, CityJSON, CityJSONFeature, CityObject as CjCityObject,
-    CityObjectType as CjCityObjectType, Geometry as CjGeometry, GeometryType as CjGeometryType,
-    PointOfContact as CjPointOfContact, ReferenceSystem as CjReferenceSystem,
-    SemanticSurfaceType as CjSemanticSurfaceType, Transform as CjTransform,
+    Appearance as CjAppearance, BorderColor as CjBorderColor, CityJSON, CityJSONFeature,
+    CityObject as CjCityObject, CityObjectType as CjCityObjectType, Geometry as CjGeometry,
+    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
+    ReferenceSystem as CjReferenceSystem, SemanticSurfaceType as CjSemanticSurfaceType,
+    TextureFormat as CjTextureFormat, TextureType as CjTextureType, Transform as CjTransform,
+    WrapMode as CjWrapMode,
 };
 
 use crate::packed_rtree::NodeItem;
@@ -480,41 +482,46 @@ pub(super) fn to_fcb_city_feature<'a>(
     )
 }
 
-fn json_str<'v>(v: &'v Value, key: &str) -> Option<&'v str> {
-    v.get(key).and_then(|v| v.as_str())
-}
-
-/// Maps a CityJSON enumeration string onto its FlatBuffers tag.
+/// The FlatCityBuf tag for a CityJSON `wrapMode`.
 ///
-/// Every one of these tables needs a fallback, and a silent fallback over a
-/// *string* turns a mis-spelling into a valid-looking default rather than an
-/// error: that is exactly how a texture written `"wrapMode": "wrap"` came back
-/// as `"None"` and survived until the C++ conformance corpus caught it. The
-/// permitted spellings are fixed by `appearance.schema.json`, so an
-/// unrecognised one is a bug either here or in the input, and says so.
-fn cj_enum<T: Copy>(member: &str, value: &str, table: &[(&str, T)], default: T) -> T {
-    if let Some((_, tag)) = table.iter().find(|(name, _)| *name == value) {
-        return *tag;
+/// Exhaustive by construction: there is no `_` arm, so a spelling added to
+/// `cjseq::WrapMode` -- which mirrors `appearance.schema.json`'s five --
+/// stops this crate from compiling until it is mapped here. This replaces a
+/// table lookup keyed on a *string*, whose fallback turned a mis-spelling into
+/// a valid-looking default: that is how a texture written
+/// `"wrapMode": "wrap"` came back as `"None"` and survived until the C++
+/// conformance corpus caught it.
+pub(crate) fn fb_wrap_mode(w: CjWrapMode) -> WrapMode {
+    match w {
+        CjWrapMode::None => WrapMode::None,
+        CjWrapMode::Wrap => WrapMode::Wrap,
+        CjWrapMode::Mirror => WrapMode::Mirror,
+        CjWrapMode::Clamp => WrapMode::Clamp,
+        CjWrapMode::Border => WrapMode::Border,
     }
-    debug_assert!(
-        false,
-        "unknown CityJSON `{member}` value {value:?}; the permitted spellings are fixed by the schema"
-    );
-    tracing::warn!("unknown CityJSON `{member}` value {value:?}, falling back to the default");
-    default
 }
 
-fn json_f64(v: &Value, key: &str) -> Option<f64> {
-    v.get(key).and_then(|v| v.as_f64())
+/// The FlatCityBuf tag for a CityJSON `textureType`. Exhaustive, as above.
+pub(crate) fn fb_texture_type(t: CjTextureType) -> TextureType {
+    match t {
+        CjTextureType::Unknown => TextureType::Unknown,
+        CjTextureType::Specific => TextureType::Specific,
+        CjTextureType::Typical => TextureType::Typical,
+    }
 }
 
-/// A CityJSON colour: an array of numbers in `[0, 1]`, of a length the schema
-/// fixes per member -- 3 for a material colour, 3 *or* 4 for `borderColor`. A
-/// wrong length is not a colour, so it is dropped rather than padded.
-fn json_color(v: &Value, key: &str, lengths: &[usize]) -> Option<Vec<f64>> {
-    let array = v.get(key)?.as_array()?;
-    let values: Vec<f64> = array.iter().filter_map(|c| c.as_f64()).collect();
-    lengths.contains(&values.len()).then_some(values)
+/// The FlatCityBuf tag for a CityJSON texture `type`. Exhaustive, as above.
+///
+/// `type` is optional in `appearance.schema.json` (the `Texture` object has no
+/// `required` keyword at all) but mandatory in `header.fbs`, whose default is
+/// `PNG`. An absent `type` therefore comes back as `"PNG"`; that lossiness
+/// predates this change and is fixed only by changing the schema, which would
+/// break the C++ reader.
+pub(crate) fn fb_texture_format(f: Option<CjTextureFormat>) -> TextureFormat {
+    match f {
+        Some(CjTextureFormat::PNG) | None => TextureFormat::PNG,
+        Some(CjTextureFormat::JPG) => TextureFormat::JPG,
+    }
 }
 
 pub(super) fn to_appearance<'a>(
@@ -523,30 +530,28 @@ pub(super) fn to_appearance<'a>(
 ) -> flatbuffers::WIPOffset<Appearance<'a>> {
     // Handle appearance if present
 
-    // `appearance.materials` and `appearance.textures` are arrays of free-form
-    // objects in CityJSON; each named member is read out by name.
+    // `appearance.materials` and `appearance.textures` are typed by cjseq
+    // straight from `appearance.schema.json`, so every member here is read off
+    // a field rather than looked up by name in a `serde_json::Value`.
     let materials = appearance.materials.as_ref().map(|materials| {
         let material_offsets: Vec<_> = materials
             .iter()
             .map(|m| {
-                let name = fbb.create_string(json_str(m, "name").unwrap_or_default());
-                let diffuse_color =
-                    json_color(m, "diffuseColor", &[3]).map(|c| fbb.create_vector(&c));
-                let emissive_color =
-                    json_color(m, "emissiveColor", &[3]).map(|c| fbb.create_vector(&c));
-                let specular_color =
-                    json_color(m, "specularColor", &[3]).map(|c| fbb.create_vector(&c));
+                let name = fbb.create_string(&m.name);
+                let diffuse_color = m.diffuse_color.map(|c| fbb.create_vector(&c));
+                let emissive_color = m.emissive_color.map(|c| fbb.create_vector(&c));
+                let specular_color = m.specular_color.map(|c| fbb.create_vector(&c));
                 Material::create(
                     fbb,
                     &MaterialArgs {
                         name: Some(name),
-                        ambient_intensity: json_f64(m, "ambientIntensity"),
+                        ambient_intensity: m.ambient_intensity,
                         diffuse_color,
                         emissive_color,
                         specular_color,
-                        shininess: json_f64(m, "shininess"),
-                        transparency: json_f64(m, "transparency"),
-                        is_smooth: m.get("isSmooth").and_then(|v| v.as_bool()),
+                        shininess: m.shininess,
+                        transparency: m.transparency,
+                        is_smooth: m.is_smooth,
                     },
                 )
             })
@@ -558,52 +563,20 @@ pub(super) fn to_appearance<'a>(
         let texture_offsets: Vec<_> = textures
             .iter()
             .map(|t| {
-                let image = fbb.create_string(json_str(t, "image").unwrap_or_default());
-                let border_color =
-                    json_color(t, "borderColor", &[3, 4]).map(|c| fbb.create_vector(&c));
-                // `appearance.schema.json` spells `wrapMode` and `textureType`
-                // lower case, and `type` upper.
-                let texture_format = json_str(t, "type").map_or(TextureFormat::PNG, |f| {
-                    cj_enum(
-                        "type",
-                        f,
-                        &[("PNG", TextureFormat::PNG), ("JPG", TextureFormat::JPG)],
-                        TextureFormat::PNG,
-                    )
-                });
-                let wrap_mode = json_str(t, "wrapMode").map(|w| {
-                    cj_enum(
-                        "wrapMode",
-                        w,
-                        &[
-                            ("none", WrapMode::None),
-                            ("wrap", WrapMode::Wrap),
-                            ("mirror", WrapMode::Mirror),
-                            ("clamp", WrapMode::Clamp),
-                            ("border", WrapMode::Border),
-                        ],
-                        WrapMode::None,
-                    )
-                });
-                let texture_type = json_str(t, "textureType").map(|t| {
-                    cj_enum(
-                        "textureType",
-                        t,
-                        &[
-                            ("unknown", TextureType::Unknown),
-                            ("specific", TextureType::Specific),
-                            ("typical", TextureType::Typical),
-                        ],
-                        TextureType::Unknown,
-                    )
+                // `image` is optional in CityJSON but mandatory in the `.fbs`,
+                // so an absent one is written as the empty string.
+                let image = fbb.create_string(t.image.as_deref().unwrap_or_default());
+                let border_color = t.border_color.as_ref().map(|c| match c {
+                    CjBorderColor::Rgb(c) => fbb.create_vector(c),
+                    CjBorderColor::Rgba(c) => fbb.create_vector(c),
                 });
                 Texture::create(
                     fbb,
                     &TextureArgs {
-                        type_: texture_format,
+                        type_: fb_texture_format(t.thetype),
                         image: Some(image),
-                        wrap_mode,
-                        texture_type,
+                        wrap_mode: t.wrap_mode.map(fb_wrap_mode),
+                        texture_type: t.texture_type.map(fb_texture_type),
                         border_color,
                     },
                 )
