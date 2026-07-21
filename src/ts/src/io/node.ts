@@ -6,6 +6,7 @@
  *  (see package.json `exports`), never through the package root. */
 import { type FileHandle, open as openFile } from 'node:fs/promises'
 import { ErrorCode, FcbError } from '../errors.js'
+import { FcbReader } from '../reader.js'
 import { checkAborted, type RangeReader, type ReadOpts, validateArgs, validateBounds } from './range-reader.js'
 
 export class FileRangeReader implements RangeReader {
@@ -86,4 +87,11 @@ export class FileRangeReader implements RangeReader {
     }
     return buf
   }
+}
+
+/** Opens a local `.fcb` file for reading. The file handle stays open for the
+ *  reader's lifetime -- later queries seek back into the indices -- so the
+ *  caller owns closing it, via `FcbReader.close()` or `await using`. */
+export async function fromFile(path: string): Promise<FcbReader> {
+  return FcbReader.fromReader(await FileRangeReader.open(path))
 }
