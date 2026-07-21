@@ -9,9 +9,9 @@ from typing import Any
 from flatcitybuf.errors import ErrorCode, FcbError
 from flatcitybuf.range_reader import RangeReader
 
-# http_reader/mod.rs:42, cited in the Format Reference's "HTTP
-# constants" table (docs/superpowers/plans/2026-07-19-native-cpp-core.md,
-# line 161) as DEFAULT_HTTP_FETCH_SIZE. The Rust source comments it
+# http_reader/mod.rs:42, cited in the format spec's "HTTP
+# constants" table (.llm/docs/specification.md:339)
+# as DEFAULT_HTTP_FETCH_SIZE. The Rust source comments it
 # "the largest request we'll speculatively make" -- a CAP, not a
 # minimum floor. That is exactly how it is used here: `read()` never
 # issues a single physical HTTP request larger than `fetch_size`,

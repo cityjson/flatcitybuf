@@ -22,8 +22,9 @@ from flatcitybuf.keys import (
 # and the same orderings, and src/cpp/src/key.cpp cites the originating
 # Rust line for each rule. Nothing here is hand-derived from the spec.
 #
-# Shorthands matching the plan's Task 10 snippet
-# (docs/superpowers/plans/2026-07-20-native-python-core.md:512-523).
+# Shorthands matching the native Python port's original key-tests plan
+# (now retired; see git history under docs/superpowers/plans/, line
+# 512-523 of the retired file).
 F64 = KeyValue.from_f64
 F32 = KeyValue.from_f32
 
@@ -36,8 +37,8 @@ def Str(s: str) -> KeyValue:
 
 
 def test_serialized_sizes_match_the_rust_key_encoders() -> None:
-    # Format Reference -> "Attribute B+tree" -> Key encodings table
-    # (plan 2026-07-19-native-cpp-core.md:155-163); test_keys.cpp:11-27.
+    # Format spec -> "attribute indexing" -> "key encodings" table
+    # (.llm/docs/specification.md:211-229); test_keys.cpp:11-27.
     assert key_serialized_size(KeyKind.INT8) == 1
     assert key_serialized_size(KeyKind.UINT8) == 1
     assert key_serialized_size(KeyKind.BOOL) == 1

@@ -33,12 +33,12 @@ that leverage.
 
 ## Reference material — read before writing any code
 
-1. **`docs/superpowers/plans/2026-07-19-native-cpp-core.md` lines 37-170** — the
-   "Format Reference": every constant, formula and byte offset, each cited to the Rust
-   source line that proves it. File layout, feature framing, packed R-tree, attribute
-   B+tree, all seven key encodings, operator lowering, HTTP constants, and the
-   per-object attribute schema rule. **Cite it from tests instead of re-deriving
-   anything.** This document does not duplicate it.
+1. **`.llm/docs/specification.md`** — the byte-level "format reference" (merged in
+   from the retired native C++ plan): every constant, formula and byte offset, each
+   cited to the Rust source line that proves it. File layout, feature framing, packed
+   R-tree, attribute B+tree, all seven key encodings, operator lowering, HTTP
+   constants, and the per-object attribute schema rule. **Cite it from tests instead
+   of re-deriving anything.** This document does not duplicate it.
 2. **Same document, "Known divergences from the Rust reader"** — four deliberate
    choices (`Byte` decodes as `u8`; `Json`/`Binary` index queries rejected; float
    `max_value()` is `+inf` so NaN-keyed features are invisible to range queries;
@@ -62,8 +62,9 @@ that leverage.
    - **#7 and #8:** appearance indices must serialize as `1`/`null`, never `[1]`/`[]`,
      and two appearance shapes used to lose a nesting level. The corpus encodes the
      correct answers.
-4. **`docs/superpowers/plans/2026-07-20-native-python-core.md`** — the closest prior
-   port in spirit. Its task-by-task structure is the model for this plan.
+4. **The native Python port** — the closest prior port in spirit (plan retired after
+   shipping; see git history under `docs/superpowers/plans/`). Its task-by-task
+   structure is the model for this plan.
 
 ### The single most important lesson from the C++ port
 

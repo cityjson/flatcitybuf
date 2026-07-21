@@ -8,8 +8,8 @@ from enum import Enum
 from flatcitybuf.errors import ErrorCode, FcbError
 from flatcitybuf.generated.header_generated import ColumnType
 
-# Format Reference -> "Attribute B+tree" -> Key encodings
-# (docs/superpowers/plans/2026-07-19-native-cpp-core.md:155-165), whose
+# Format spec -> "attribute indexing" -> "key encodings"
+# (.llm/docs/specification.md:211-229), whose
 # every row is cited to a line of the Rust origin
 # (src/rust/fcb_core/src/static_btree/key.rs). Ported from the
 # conformant C++ port at src/cpp/src/key.cpp; that file's comments carry

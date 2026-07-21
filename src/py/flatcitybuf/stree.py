@@ -731,9 +731,9 @@ def search_stree(
 
     FOUR DELIBERATE DIVERGENCES from Rust's reader are reproduced here,
     so that the Rust, C++ and Python readers agree. Each is a decision,
-    not an oversight; do not "fix" one without reading the "Known
+    not an oversight; do not "fix" one without reading the "known
     divergences from the Rust reader" section of
-    docs/superpowers/plans/2026-07-19-native-cpp-core.md.
+    .llm/docs/specification.md.
 
     1. Byte columns decode as u8, not i8. The writer stores Byte as u8
        (writer/attribute.rs:209) and indexes it as MemoryIndex<u8>

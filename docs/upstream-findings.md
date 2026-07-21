@@ -385,7 +385,8 @@ to find.
 
 # Defects found while porting the native Python reader
 
-The plan (`docs/superpowers/plans/2026-07-20-native-python-core.md`) built a
+The native Python implementation plan (retired after shipping; see git
+history under `docs/superpowers/plans/`) built a
 third, independent, pure-Python reader over `fcb_core` (Rust, the oracle) as
 ground truth and the C++ reader as the direct porting reference. Comparing
 all three over the same bytes — Rust's own CLI output, the C++ conformance
@@ -987,9 +988,14 @@ either.
 
 ## 21. Plan-document defect: `rtree_index_size(1, 16)` — the plan asserts 40; the correct value is 80
 
-**Where:** `docs/superpowers/plans/2026-07-20-native-python-core.md:340`,
+**Where:** the native Python implementation plan's own test snippet (plan
+retired after shipping; see git history under `docs/superpowers/plans/`, line
+340 of the retired file),
 inside `test_rtree_index_size_matches_the_reference_formula`:
-`assert rtree_index_size(1, 16) == 40`.
+`assert rtree_index_size(1, 16) == 40`. The shipped implementation and its
+formula are correct (`.llm/docs/specification.md:131` gives
+`rtree_index_size`) — only the plan's illustrative test snippet had the
+wrong worked example.
 
 **This is wrong.** Tracing the reference loop for `num_items=1,
 node_size=16`: `num_nodes = 1` (the leaf level); the loop runs **at least
