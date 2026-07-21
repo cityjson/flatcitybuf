@@ -404,7 +404,7 @@ Two later tasks need cases no current fixture exercises. Both must be **generate
 
 Two more, both re-encodings of `small`'s input with different writer flags, needed because otherwise the corresponding code paths are untestable:
 
-- `small_node8.fcb` — written with a **non-default `index_node_size` of 8**. Without it, a reader that hardcodes 16 (which both the wasm binding and `fcb_core`'s HTTP reader do — Task 18) passes the entire suite.
+- `appearance_depths_node8.fcb` — written with a **non-default `index_node_size` of 8**. Without it, a reader that hardcodes 16 (which both the wasm binding and `fcb_core`'s HTTP reader do — Task 18) passes the entire suite. It must be generated from an input with **≥ 9 features** — `appearance_depths` has 12 — because at 3 features (`small`) both node sizes yield the identical level bounds `[3, 1]`, so the fixture would be inert. At 12 features: node 16 → `[12, 1]` = 13 nodes / 520 B, node 8 → `[12, 2, 1]` = 15 nodes / 600 B.
 - `no_count.fcb` — written with `features_count` left at **0**, which means *unknown*. Without it, "0 means scan to EOF" cannot be asserted on anything.
 
 If the Rust CLI has no flag for either, add one, or write the two files with a small Rust test harness that drives the writer directly. Extend `scripts/gen_conformance.sh` so both are reproducible.
@@ -415,7 +415,7 @@ git add conformance/inputs/multi_object_attrs.city.jsonl \
         conformance/inputs/colliding_strings.city.jsonl \
         conformance/multi_object_attrs.expected.jsonl \
         conformance/colliding_strings.expected.jsonl \
-        conformance/small_node8.fcb conformance/no_count.fcb
+        conformance/appearance_depths_node8.fcb conformance/no_count.fcb
 ```
 
 Then add both names to the C++ conformance case list so the existing readers gain the same coverage, rebuild, and confirm they pass there too. **If C++ fails one of them, that is a real defect in C++ and it is a finding** — do not adjust the fixture to make it pass.
@@ -1798,8 +1798,11 @@ describe('bbox search', () => {
     // Both the wasm binding and fcb_core's HTTP reader hardcode 16 here and
     // silently mis-traverse such files -- upstream finding, Task 18. Without
     // this fixture a hardcoded 16 passes the entire suite.
-    // Generate it in Task 2: the same input as small, written with --node-size 8.
-    const r = await FcbReader.fromBytes(bytes('small_node8.fcb'))
+    // Generated in Task 2 from appearance_depths (12 features) with
+    // --index-node-size 8. It must NOT be built from small: at 3 features
+    // both node sizes give the identical level bounds [3, 1], so the fixture
+    // would pass for a hardcoded-16 reader too.
+    const r = await FcbReader.fromBytes(bytes('appearance_depths_node8.fcb'))
     expect(r.header.info.indexNodeSize).toBe(8)
     const e = r.header.info.geographicalExtent!
     const all = await ids(await r.selectAll())
