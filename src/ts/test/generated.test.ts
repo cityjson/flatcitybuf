@@ -13,8 +13,11 @@ const CORPUS = resolve(import.meta.dirname, '../../../conformance')
 
 describe('generated bindings', () => {
   it('actually exports the Header CLASS, not a re-export of itself', () => {
-    // With default flatc flags this is a circular re-export and Header is
-    // undefined at runtime while still type-checking. See gen_ts_fbs.sh.
+    // With default flatc flags, header.ts becomes a circular self-re-export.
+    // Importing it fails at module resolution (`SyntaxError: Detected cycle`)
+    // under Node ESM, and at compile time (`TS2303: Circular definition`) under
+    // `tsc` with `strict: true`. This test's value is importing Header at all;
+    // the typeof check is a belt-and-braces assertion. See gen_ts_fbs.sh.
     expect(typeof Header).toBe('function')
     expect(typeof Header.getRootAsHeader).toBe('function')
     expect(typeof CityFeature).toBe('function')

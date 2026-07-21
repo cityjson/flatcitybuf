@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Regenerate the committed TypeScript FlatBuffers bindings from src/fbs/*.fbs.
 #
-# The flag set is load-bearing and was verified empirically:
-#   --ts-omit-entrypoint  without it, the per-namespace re-export file
-#                         collides with header.ts and `class Header` is
-#                         silently NOT emitted (a circular self-export wins).
+# The flag set is load-bearing; both flags have been verified to fail:
+#   --ts-omit-entrypoint  without it, header.ts becomes a circular
+#                         self-re-export; importing fails with SyntaxError
+#                         (Node ESM) or TS2303 (tsc with strict: true).
 #   --gen-all             without it, header.ts imports ./extension.js,
-#                         which is never generated, and nothing compiles.
+#                         which is never generated, and compilation fails.
 # Neither failure is reported by flatc. See test/generated.test.ts.
 #
 # Generated with: flatc 25.9.23 / flatbuffers npm ^25.9.23
