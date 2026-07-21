@@ -114,4 +114,47 @@ describe('FcbReader.fromUrl', () => {
     await FcbReader.fromUrl(`${base}/small.fcb`, { fetch: counting })
     expect(calls).toBe(1)
   })
+
+  // The test above only proves the OPEN is cheap -- it would pass identically
+  // if `fromUrl` never wrapped its source in a `BufferedRangeReader` at all,
+  // because every read `readHeader` issues already lands inside
+  // `FetchRangeReader`'s own one-time `open()` prefetch (io/fetch.ts's
+  // `prefetch`, exactly `OPEN_PREFETCH_SIZE` = 12944 bytes). What the wrap
+  // actually buys is cheap READS: without it, `readFeature`
+  // (src/feature/index.ts) issues two `read()` calls per feature -- a 4-byte
+  // size prefix, then a `4 + len` body read that re-reads those same 4 bytes
+  // -- and each one that misses the prefetch window becomes its own HTTP
+  // request. This test scans the whole file and counts requests, so a
+  // regression that drops the wrap (or breaks `setMinRequestSize`) shows up
+  // here even though the open test above stays green.
+  it('scans the whole file with a BOUNDED number of requests, not two per feature', async () => {
+    // small.fcb is 20358 bytes; `readHeader` puts featureBegin at 7054, well
+    // inside the 12944-byte open prefetch, so parsing the header costs zero
+    // extra requests (confirmed by the test above). The scan then walks 3
+    // features forward from byte 7054 entirely inside that same buffered
+    // window -- until one feature's read finally crosses byte 12944. That
+    // MISS triggers exactly one more inner read, sized to at least
+    // `minRequestSize` (reset to `DEFAULT_FETCH_SIZE`, 1 MB, once the header
+    // is parsed) but capped at `size() - offset`; since everything left in
+    // the 20358-byte file is well under 1 MB, that single over-fetch swallows
+    // the rest of the file in one request. So a full scan costs exactly 2
+    // physical requests: the `open()` prefetch, and that one overflow fetch
+    // (measured directly: `bytes=0-12943` then `bytes=10966-20357`).
+    //
+    // Without the `BufferedRangeReader` wrap, the same scan costs 4 requests
+    // over this file (measured by deliberately removing the wrap from
+    // `fromUrl`): the open prefetch still absorbs the header's own reads
+    // (`FetchRangeReader`'s prefetch cache does that on its own), but each of
+    // the two `read()` calls per feature that falls outside the prefetch
+    // window becomes its own physical request instead of sharing one
+    // over-fetch. `toBe(2)`, not a loose upper bound, is what actually fails
+    // if the wrap regresses.
+    let calls = 0
+    const counting: typeof fetch = (...args) => { calls++; return fetch(...args) }
+    const r = await FcbReader.fromUrl(`${base}/small.fcb`, { fetch: counting })
+    const ids: string[] = []
+    for await (const f of await r.selectAll()) ids.push(f.id)
+    expect(ids.length).toBe(3)
+    expect(calls).toBe(2)
+  })
 })

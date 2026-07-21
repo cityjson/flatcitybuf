@@ -225,9 +225,12 @@ export class FetchRangeReader implements RangeReader {
     if (!Number.isInteger(fetchSize) || fetchSize <= 0) {
       throw new FcbError(ErrorCode.InvalidArgument, `fetchSize must be a positive integer, got ${fetchSize}`)
     }
-    if (opts?.signal?.aborted) {
-      throw new FcbError(ErrorCode.IoError, 'open aborted before it started')
-    }
+    // `FetchRangeReaderOpts` is structurally assignable to `ReadOpts` (both
+    // carry an optional `signal`), so the same already-aborted pre-flight
+    // check `read()` uses below is reused here rather than re-implemented --
+    // one fewer copy of a check whose only job is to fail fast before any
+    // I/O starts.
+    checkAborted(opts)
     const { bytes, total } = await fetchRange(url, fetchImpl, 0, OPEN_PREFETCH_SIZE, opts?.signal)
     return new FetchRangeReader(url, fetchImpl, opts?.signal, fetchSize, total, bytes)
   }
