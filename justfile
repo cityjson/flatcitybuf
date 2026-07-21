@@ -59,7 +59,12 @@ check-cpp:
 gen-cpp-fbs:
     ./scripts/gen_cpp_flatbuffers.sh
 
-# Regenerate the C++ conformance corpus (needs the Rust CLI)
+# Regenerate the C++ conformance corpus (needs the Rust CLI).
+# conformance/*.fcb and *.expected.jsonl are tracked, and regeneration is NOT
+# byte-reproducible (cjseq2 iterates CityObjects from a HashMap with
+# per-process ordering) -- so this always dirties the working tree, even when
+# nothing semantic changed. Diff the *parsed* JSON, not the raw bytes, before
+# committing; don't commit pure churn.
 gen-conformance:
     ./scripts/gen_conformance.sh
 

@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "src/py/**"
+      - "conformance/**"
       - ".github/workflows/ci-python.yml"
 
   pull_request:
     branches: [main]
     paths:
       - "src/py/**"
+      - "conformance/**"
       - ".github/workflows/ci-python.yml"
 
 concurrency:

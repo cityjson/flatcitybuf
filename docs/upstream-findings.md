@@ -845,6 +845,113 @@ docstring, `src/py/flatcitybuf/stree.py:732+`):
    the Task 10 report §13; not a behavioural difference in output, just a
    correctness requirement unique to the host language.)
 
+**Two more, found comparing all three implementations during the Python
+port, but *not* Python-specific — Python inherited both from C++, which
+means fixing Python alone would create a new Python-vs-C++ split rather
+than closing one.** Documentation only; no reader code changed for
+either.
+
+10. **`referenceSystem` URL construction disagrees with Rust on
+    version/authority/code_string, identically in Python and C++.** Rust
+    builds the URL from `rs.authority().unwrap_or_default()`,
+    `rs.version()` (an `int` per `src/fbs/header.fbs:44`) and `rs.code()`
+    (`src/rust/fcb_core/src/reader/deserializer.rs:53-59`), feeding them to
+    `ReferenceSystem::to_url`, which formats
+    `"{base}/{authority}/{version}/{code}"` (`cjseq2` 0.1.1
+    `lib.rs:1128-1133`); this only runs at all when
+    `header.reference_system()` is `Some` (`Metadata::reference_system` is
+    `Option<ReferenceSystem>` with `skip_serializing_if =
+    "Option::is_none"`, `lib.rs:1197-1198`), so an absent
+    `ReferenceSystem` table correctly omits the key.
+
+    Python instead derives the whole thing from `FileInfo.crs`, built in
+    `src/py/flatcitybuf/header.py:206-215`: authority defaults to the
+    literal string `"EPSG"` when `rs.Authority()` is absent (not Rust's
+    `unwrap_or_default()`, which is an empty string); the numeric `Code()`
+    is preferred whenever non-zero, falling back to `CodeString()` only
+    when `Code() == 0`; and `info.crs` is left unset (dropping
+    `referenceSystem` entirely) when both `Code() == 0` and
+    `CodeString()` is absent. `src/py/flatcitybuf/cityjson.py:782-785`
+    then reconstructs the URL by splitting `info.crs` on `:` and
+    hardcoding the version segment to the literal `/0/`, regardless of
+    the header's actual `Version()`. `src/cpp/src/cityjson.cpp:479-484`
+    builds the identical `.../{authority}/0/{code}` string from the
+    identical `FileInfo.crs` split — this is not a Python-only shortcut,
+    C++ made the same choice.
+
+    Concretely: (a) any header with `version != 0` gives `/0/` in both
+    Python and C++ against `/{version}/` in Rust; (b) a `ReferenceSystem`
+    table present with `code == 0` and no `code_string` makes Rust emit
+    `.../EPSG/0/0` while Python/C++ omit `referenceSystem` outright — the
+    same presence-vs-value gating class as §13; (c) a `code_string`-only
+    CRS is emitted by Python/C++ and dropped by Rust.
+
+    Matching Rust exactly is not obviously the right fix, and is worth
+    saying honestly: it would mean reproducing what
+    `unwrap_or_default()` does for a genuinely absent authority — a URL
+    like `.../def/crs//0/0` — which reads as a Rust defect (an
+    unhelpful literal empty path segment) rather than a contract worth
+    porting faithfully.
+
+    No test catches any of this because `small.fcb` — the only corpus
+    case with a `referenceSystem` at all — happens to carry `EPSG:7415`
+    with `version == 0` and a non-zero `code`, the one configuration
+    where Python/C++'s reconstruction and Rust's direct field read agree
+    by accident (both produce
+    `https://www.opengis.net/def/crs/EPSG/0/7415`). A non-zero version, a
+    `code_string`-only CRS, `code == 0`, and an absent authority are all
+    untested in **all three** implementations. Recommend a follow-up
+    upstream finding covering Rust, C++ and Python together, rather than
+    a unilateral Python fix.
+
+11. **`identifier`/`title` are gated on non-emptiness, not presence,
+    identically in Python and C++.** Rust's `to_cj_metadata` reads
+    `header.identifier().map(|i| i.to_string())` and
+    `header.title().map(|t| t.to_string())`
+    (`src/rust/fcb_core/src/reader/deserializer.rs:85,89`) — both fields
+    are `Option<String>` on `cjseq2`'s `Metadata`
+    (`lib.rs:1188-1189,1200-1201`) with `skip_serializing_if =
+    "Option::is_none"`, so a **present-but-empty** FlatBuffers string
+    (`Header.identifier()`/`Header.title()` returning `Some("")`)
+    serializes as `"title": ""` — omitted only when the field is
+    genuinely absent (`None`).
+
+    Python gates on truthiness instead of presence:
+    `src/py/flatcitybuf/cityjson.py:773` (`if info.identifier:`) and
+    `:787` (`if info.title:`) both drop the key for an empty string, the
+    same as a `None`/absent one. `src/cpp/src/cityjson.cpp:485,490`
+    (`if (!info.identifier.empty()) ...`, `if (!info.title.empty())
+    ...`) makes the identical choice — this is the same gating class
+    §13 already documents for C++'s `metadata`/`geographicalExtent`, just
+    on two more fields, and it is not C++-only.
+
+    Worth noting precisely where the information is actually lost in
+    Python, since it is not only the truthiness check:
+    `src/py/flatcitybuf/header.py:225-231` already reads
+    `Identifier()`/`Title()` guarded on `is not None` (so the read itself
+    is presence-aware), but `FileInfo.identifier`/`.title`
+    (`header.py:105-106`) default to `str = ""` rather than
+    `Optional[str] = None` — so the dataclass field cannot represent
+    "absent" separately from "present and empty" either. A fix at
+    `cityjson.py:773,787` alone (swapping the truthiness check for `is
+    not None`) is not sufficient by itself; `FileInfo`'s default would
+    also need widening to `Optional[str] = None` for the distinction to
+    survive end to end. The follow-up should treat both files together,
+    not just the gate.
+
+    Concrete consequence: a source CityJSONSeq with
+    `"metadata": {"title": ""}` round-trips through Rust with the header
+    line carrying `"title": ""`, while Python's and C++'s header lines
+    omit the key entirely — a consumer testing `"title" in metadata`
+    gets a different answer per implementation. Not corpus-reachable (no
+    fixture has an explicitly-empty `identifier`/`title`), so the
+    whole-line conformance compares that caught §12/§13 (a full-object
+    `assert actual[0] == expected[0]` on each fixture's header line, in
+    both the C++ and Python suites) cannot catch this either — no fixture
+    exercises the input in the first place. Recommend the same follow-up
+    as #10: one upstream finding covering all three implementations, not
+    a unilateral Python change.
+
 ---
 
 ## 21. Plan-document defect: `rtree_index_size(1, 16)` — the plan asserts 40; the correct value is 80
