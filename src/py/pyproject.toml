@@ -40,6 +40,18 @@ files = ["flatcitybuf", "tests"]
 module = "flatcitybuf.generated.*"
 ignore_errors = true
 
+# numpy is a genuine optional extra (never imported at module scope --
+# see flatcitybuf/cityjson.py's/feature.py's `_import_numpy`) so mypy
+# must be able to check this project whether or not it happens to be
+# installed in the environment running mypy. Without this override,
+# `import numpy` inside `_import_numpy` is an import-not-found error in
+# an environment that only installed the `dev` extra (as CI's
+# pure-Python job does) -- see tests/test_benchmark.py's own
+# `import numpy` under the same constraint.
+[[tool.mypy.overrides]]
+module = "numpy"
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 79
 target-version = "py39"

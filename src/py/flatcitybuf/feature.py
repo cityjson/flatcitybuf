@@ -36,6 +36,26 @@ def _decode_str(b: bytes) -> str:
     return b.decode("utf-8", errors="replace")
 
 
+def _import_numpy() -> Any:
+    """Optional numpy import behind a stable `Any`-typed helper.
+
+    `try: import numpy as np / except ImportError: np = None` needs a
+    `# type: ignore[assignment]` when numpy resolves (assigning a typed
+    module to `None`) and mypy flags that very comment as an
+    unused-ignore when numpy is absent -- no single environment
+    satisfies both, yet this package must pass mypy strict either way
+    (numpy is a genuine optional extra; see pyproject.toml). Funnelling
+    the import through a function with a declared `Any` return avoids
+    the conflict: the call site's assignment is `Any`, never a typed
+    module vs. `None`, in either environment.
+    """
+    try:
+        import numpy
+    except ImportError:
+        return None
+    return numpy
+
+
 def _read_attribute_bytes(obj: Any) -> bytes:
     """Raw bytes of CityObject.attributes.
 
@@ -242,10 +262,7 @@ class Feature:
             length = self._raw.VerticesLength()
             if length == 0:
                 return []
-            try:
-                import numpy as np
-            except ImportError:
-                np = None  # type: ignore[assignment]
+            np = _import_numpy()
             if np is not None:
                 bulk = _vertices_via_numpy(np, self._raw, length)
                 if bulk is not None:

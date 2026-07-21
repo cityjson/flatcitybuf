@@ -51,6 +51,20 @@ def reraise_as_invalid_flatbuffer(message: str) -> Iterator[None]:
     FcbError itself passes through unchanged: it is already the
     library's own error, not a symptom of a missing Verifier, and
     wrapping it again would lose the original code/message.
+
+    Deliberate tradeoff: catching bare `Exception` also swallows
+    genuine programming bugs under this block (a failed `assert`, a
+    `TypeError` from unrelated future code) and relabels them
+    `FcbError(INVALID_FLATBUFFER)` instead of letting them surface as
+    themselves. Narrowing the `except` to the specific exception types
+    the flatbuffers runtime and our own decoders are known to raise
+    (IndexError, struct.error, AttributeError, ValueError,
+    UnicodeDecodeError, ...) was considered, but this wraps calls into
+    generated, un-verified accessors across several modules -- an
+    incomplete list would silently let some malformed-file crash modes
+    leak past the public surface again, which is the exact bug this
+    context manager exists to close. Kept broad on purpose; revisit if
+    the narrower list is ever enumerated with confidence.
     """
     try:
         yield
