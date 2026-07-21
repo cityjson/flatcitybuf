@@ -110,6 +110,33 @@ void fill_metadata(const ::Header* hdr, FileInfo& info) {
     if (hdr->version() != nullptr) info.cityjson_version = hdr->version()->str();
     if (hdr->identifier() != nullptr) info.identifier = hdr->identifier()->str();
     if (hdr->title() != nullptr) info.title = hdr->title()->str();
+    if (hdr->reference_date() != nullptr) info.reference_date = hdr->reference_date()->str();
+
+    if (hdr->poc_contact_name() != nullptr) {
+        info.poc_contact_name = hdr->poc_contact_name()->str();
+    }
+    if (hdr->poc_contact_type() != nullptr) {
+        info.poc_contact_type = hdr->poc_contact_type()->str();
+    }
+    if (hdr->poc_role() != nullptr) info.poc_role = hdr->poc_role()->str();
+    if (hdr->poc_phone() != nullptr) info.poc_phone = hdr->poc_phone()->str();
+    if (hdr->poc_email() != nullptr) info.poc_email = hdr->poc_email()->str();
+    if (hdr->poc_website() != nullptr) info.poc_website = hdr->poc_website()->str();
+    if (hdr->poc_address_thoroughfare_number() != nullptr) {
+        info.poc_address_thoroughfare_number = hdr->poc_address_thoroughfare_number()->str();
+    }
+    if (hdr->poc_address_thoroughfare_name() != nullptr) {
+        info.poc_address_thoroughfare_name = hdr->poc_address_thoroughfare_name()->str();
+    }
+    if (hdr->poc_address_locality() != nullptr) {
+        info.poc_address_locality = hdr->poc_address_locality()->str();
+    }
+    if (hdr->poc_address_postcode() != nullptr) {
+        info.poc_address_postcode = hdr->poc_address_postcode()->str();
+    }
+    if (hdr->poc_address_country() != nullptr) {
+        info.poc_address_country = hdr->poc_address_country()->str();
+    }
 }
 
 /// Sum the attribute index lengths and record each index's absolute start.
