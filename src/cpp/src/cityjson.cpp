@@ -373,15 +373,28 @@ nlohmann::json point_of_contact_address_to_json(const FileInfo& info) {
 /// Mirrors `to_cj_point_of_contact` (deserializer.rs:77-78, :166-182):
 /// presence hinges on `poc_contact_name` alone, matching the Rust reader's
 /// `match header.poc_contact_name() { Some(_) => ..., None => None }`.
+///
+/// `emailAddress` is NOT like the other optional fields below: cjseq2's
+/// `PointOfContact::email_address` is a required `String` (no
+/// `skip_serializing_if`), and `to_cj_point_of_contact` (deserializer.rs:
+/// 175-177) does `.ok_or(Error::MissingRequiredField("email_address"))?`,
+/// which propagates out of the whole `to_cj_metadata` call. So a header with
+/// `poc_contact_name` set but `poc_email` absent is not "pointOfContact minus
+/// emailAddress" on the Rust side -- it is a hard failure for the entire
+/// metadata line. C++ must match that rather than silently emitting an
+/// incomplete object.
 nlohmann::json point_of_contact_to_json(const FileInfo& info) {
     if (info.poc_contact_name.empty()) return nullptr;
+    if (info.poc_email.empty()) {
+        throw Error(ErrorCode::MissingRequiredField, "email_address");
+    }
 
     nlohmann::json poc = nlohmann::json::object();
     poc["contactName"] = info.poc_contact_name;
     if (!info.poc_contact_type.empty()) poc["contactType"] = info.poc_contact_type;
     if (!info.poc_role.empty()) poc["role"] = info.poc_role;
     if (!info.poc_phone.empty()) poc["phone"] = info.poc_phone;
-    if (!info.poc_email.empty()) poc["emailAddress"] = info.poc_email;
+    poc["emailAddress"] = info.poc_email;
     if (!info.poc_website.empty()) poc["website"] = info.poc_website;
     if (auto addr = point_of_contact_address_to_json(info); !addr.is_null()) {
         poc["address"] = std::move(addr);
@@ -430,9 +443,16 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
     cj["type"] = "CityJSON";
     cj["version"] = info.cityjson_version;
 
-    if (info.has_transform) {
-        cj["transform"] = {{"scale", info.scale}, {"translate", info.translate}};
-    }
+    // `transform` is unconditional on the Rust side: `to_cj_metadata` starts
+    // from `CityJSON::new()`, whose `Transform::new()` defaults to
+    // scale [1,1,1] / translate [0,0,0] (cjseq2 lib.rs:1057-1064), and only
+    // overwrites it when `header.transform()` is `Some` (deserializer.rs:
+    // 24-31). Rust never omits the key, so this must not gate on
+    // `has_transform` either -- same "unconditional, not conditional" class
+    // as `metadata`/`geographicalExtent`/`extensions` above.
+    cj["transform"] = {
+        {"scale", info.has_transform ? info.scale : std::array<double, 3>{1.0, 1.0, 1.0}},
+        {"translate", info.has_transform ? info.translate : std::array<double, 3>{0.0, 0.0, 0.0}}};
 
     // `metadata` and `metadata.geographicalExtent` are UNCONDITIONAL on the
     // Rust side (deserializer.rs:81-90): `cj.metadata` is always
