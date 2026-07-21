@@ -1,6 +1,6 @@
 /** The single I/O abstraction the whole reader sits on. Every source --
- *  `fetch`, `Blob`, `node:fs`, or a test double -- implements this and
- *  nothing downstream needs to know which.
+ *  `fetch`, `Blob`, the Node filesystem, or a test double -- implements this
+ *  and nothing downstream needs to know which.
  *
  *  Mirrors fcb::RangeReader (src/cpp/include/fcb/range_reader.hpp) with two
  *  deliberate differences: `read` is async here (there is no way to make an
@@ -38,10 +38,10 @@ export interface RangeReader {
 
 /** Shared by every RangeReader implementation so the argument contract is
  *  enforced once instead of re-implemented per backend (Task 7's Blob and
- *  node:fs sources, Task 11's HTTP source). Checks shape only -- it does not
- *  need `size()`, so it runs before any I/O regardless of how expensive a
- *  given source's size lookup is. */
-function validateArgs(offset: number, length: number): void {
+ *  Node filesystem sources, Task 11's HTTP source). Checks shape only -- it
+ *  does not need `size()`, so it runs before any I/O regardless of how
+ *  expensive a given source's size lookup is. */
+export function validateArgs(offset: number, length: number): void {
   if (!Number.isInteger(offset) || offset < 0) {
     throw new FcbError(ErrorCode.InvalidArgument, `read offset must be a non-negative integer, got ${offset}`)
   }
@@ -54,7 +54,7 @@ function validateArgs(offset: number, length: number): void {
  *  "a caller argument failed validation before any I/O" (ErrorCode.
  *  InvalidArgument): size() never awaits, so the caller could have checked
  *  this itself before calling read(). */
-function validateBounds(offset: number, length: number, size: number): void {
+export function validateBounds(offset: number, length: number, size: number): void {
   if (offset + length > size) {
     throw new FcbError(
       ErrorCode.InvalidArgument,
@@ -63,7 +63,7 @@ function validateBounds(offset: number, length: number, size: number): void {
   }
 }
 
-function checkAborted(opts: ReadOpts | undefined): void {
+export function checkAborted(opts: ReadOpts | undefined): void {
   if (opts?.signal?.aborted) {
     throw new FcbError(ErrorCode.IoError, 'read aborted before it started')
   }
