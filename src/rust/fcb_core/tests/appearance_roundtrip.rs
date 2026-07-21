@@ -949,3 +949,56 @@ fn a_full_appearance_library_survives_an_fcb_round_trip() -> Result<()> {
     }
     Ok(())
 }
+
+/// `image` is optional in `appearance.schema.json` (the `Texture` object has
+/// no `required` keyword) but **mandatory** in `header.fbs`, so the writer has
+/// to store something for a texture that has none, and it stores `""`.
+///
+/// That makes an absent `image` and a schema-valid `"image": ""`
+/// indistinguishable on the wire: the format cannot represent both, and
+/// whichever one the reader picks, the other is lost. This is a *choice*, not
+/// a derivation -- the reader decodes `""` back to an absent `image`, so the
+/// lossy direction is now `"" -> absent` where it used to be `absent -> ""`.
+/// Both outputs are schema-valid; absent is the better default because a
+/// texture with no image is the commoner of the two, and because emitting
+/// `"image": ""` invents a member the input did not have.
+///
+/// Pinned here because the C++ reader must mirror the same choice, and a
+/// divergence would otherwise be silent on the Rust side.
+#[test]
+fn an_absent_texture_image_does_not_come_back_as_an_empty_string() -> Result<()> {
+    let decoded = roundtrip_appearance(json!({
+        "textures": [{"type": "PNG", "wrapMode": "clamp"}],
+        "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+    }))?;
+    assert_eq!(
+        decoded["textures"][0].get("image"),
+        None,
+        "a texture written without an `image` must not gain one: {decoded}"
+    );
+    //-- the members either side of it are untouched
+    assert_eq!(decoded["textures"][0]["wrapMode"], json!("clamp"));
+
+    //-- and the documented consequence: an explicitly empty `image` is
+    //-- indistinguishable from an absent one on the wire, so it decodes to
+    //-- absent as well. Asserted rather than left to chance, because it is the
+    //-- side of the trade that loses information.
+    let decoded = roundtrip_appearance(json!({
+        "textures": [{"type": "PNG", "image": ""}],
+        "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+    }))?;
+    assert_eq!(
+        decoded["textures"][0].get("image"),
+        None,
+        "`\"image\": \"\"` and an absent `image` share one wire representation, \
+         and both decode to absent: {decoded}"
+    );
+
+    //-- the control: a non-empty `image` is untouched by any of this
+    let decoded = roundtrip_appearance(json!({
+        "textures": [{"type": "PNG", "image": "a.jpg"}],
+        "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+    }))?;
+    assert_eq!(decoded["textures"][0]["image"], json!("a.jpg"));
+    Ok(())
+}

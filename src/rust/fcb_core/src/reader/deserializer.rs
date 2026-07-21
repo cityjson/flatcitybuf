@@ -621,8 +621,15 @@ pub fn to_cj_feature(
                     Ok(CjTextureObject {
                         thetype: Some(cj_texture_format(t.type_())?),
                         // `image` is mandatory in the `.fbs` but optional in
-                        // CityJSON, so the empty string the writer stores for
-                        // an absent one decodes back to absent.
+                        // CityJSON, so the writer stores `""` both for an
+                        // absent `image` and for a schema-valid `"image": ""`.
+                        // The two are indistinguishable on the wire and one of
+                        // them must be lost; decoding `""` back to *absent* is
+                        // a deliberate choice, not a derivation. It inverts
+                        // which side loses: `absent -> ""` before, `"" ->
+                        // absent` now. Both outputs are schema-valid, and not
+                        // inventing a member the input lacked is the better
+                        // default. The C++ reader must mirror this choice.
                         image: Some(t.image())
                             .filter(|i| !i.is_empty())
                             .map(str::to_string),
