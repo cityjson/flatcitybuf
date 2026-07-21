@@ -3,12 +3,13 @@ use crate::types::{
 };
 use cjseq::CityJSONFeature;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
 
 /// Convert a CityJSONFeature from cjseq to Python Feature
 pub fn cityjson_feature_to_python(py: Python, cj_feature: &CityJSONFeature) -> PyResult<Feature> {
     let id = cj_feature.id.clone();
-    let feature_type = cj_feature.thetype.clone();
+    // The CityJSON type members are enums now; Python wants their spelling.
+    let feature_type = json_name(serde_json::to_value(&cj_feature.thetype));
 
     // Convert vertices from Vec<Vec<i64>> to Vec<Vertex>
     let vertices: Vec<Vertex> = cj_feature
@@ -54,7 +55,7 @@ pub fn cityfeature_to_python(
 
 /// Convert a CityJSON CityObject to Python CityObject
 fn cityjson_cityobject_to_python(py: Python, city_obj: &cjseq::CityObject) -> PyResult<CityObject> {
-    let obj_type = city_obj.thetype.clone();
+    let obj_type = json_name(serde_json::to_value(&city_obj.thetype));
 
     // Convert geometries
     let mut geometries = Vec::new();
@@ -87,13 +88,14 @@ fn cityjson_cityobject_to_python(py: Python, city_obj: &cjseq::CityObject) -> Py
 
 /// Convert a CityJSON Geometry to Python Geometry
 fn cityjson_geometry_to_python(py: Python, geom: &cjseq::Geometry) -> PyResult<Geometry> {
-    let geom_type = format!("{:?}", geom.thetype);
+    let geom_type = json_name(serde_json::to_value(geom.geometry_type()));
 
-    // Convert boundaries based on geometry type
-    let boundaries = convert_boundaries_to_python(py, &geom.boundaries)?;
+    // The nesting depth of `boundaries` is part of the geometry's type, so it
+    // is serialized rather than walked: `serde` already knows the depth.
+    let boundaries = convert_boundaries_to_python(py, geom)?;
 
     // Convert semantics if available
-    let semantics = if let Some(sem) = &geom.semantics {
+    let semantics = if let Some(sem) = geom.common().and_then(|c| c.semantics.as_ref()) {
         let sem_dict = PyDict::new(py);
         // Convert semantics structure to Python dict
         if let Ok(sem_value) = serde_json::to_value(sem) {
@@ -198,22 +200,29 @@ pub fn is_url(path: &str) -> bool {
     path.starts_with("http://") || path.starts_with("https://")
 }
 
-/// Helper function to convert nested boundaries to Python arrays
-fn convert_boundaries_to_python(py: Python, boundaries: &cjseq::Boundaries) -> PyResult<PyObject> {
-    match boundaries {
-        cjseq::Boundaries::Indices(indices) => {
-            // Convert Vec<u32> to Python list
-            let py_list = PyList::new(py, indices);
-            Ok(py_list.to_object(py))
-        }
-        cjseq::Boundaries::Nested(nested_boundaries) => {
-            // Convert Vec<Boundaries> to nested Python list
-            let py_list = PyList::empty(py);
-            for nested in nested_boundaries {
-                let nested_py = convert_boundaries_to_python(py, nested)?;
-                py_list.append(nested_py)?;
-            }
-            Ok(py_list.to_object(py))
-        }
+/// The CityJSON spelling of a type tag. Each is an enum that serializes to its
+/// bare name (or, for an Extension, to its `+`-prefixed name verbatim), so the
+/// serialization is the name -- unlike `{:?}`, which would print
+/// `Known(Building)`.
+fn json_name(value: serde_json::Result<serde_json::Value>) -> String {
+    match value {
+        Ok(serde_json::Value::String(s)) => s,
+        other => format!("{other:?}"),
     }
+}
+
+/// Converts a geometry's `boundaries` to nested Python lists.
+///
+/// The depth is part of the geometry's type, so this serializes the geometry
+/// and reads `boundaries` back out rather than walking an untyped tree and
+/// inferring the depth from what it finds.
+fn convert_boundaries_to_python(py: Python, geom: &cjseq::Geometry) -> PyResult<PyObject> {
+    let value = serde_json::to_value(geom).map_err(|e| {
+        PyErr::new::<crate::error::FcbError, _>(format!("Failed to serialize geometry: {e}"))
+    })?;
+    let boundaries = value
+        .get("boundaries")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(Vec::new()));
+    value_to_python(py, &boundaries)
 }

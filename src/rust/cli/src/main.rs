@@ -378,10 +378,18 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
             for (_, co) in feature.city_objects.iter() {
                 if let Some(geometry) = &co.geometry {
                     for geom in geometry.iter() {
-                        if let Some(semantics) = geom.semantics.as_ref() {
+                        if let Some(semantics) =
+                            geom.common().and_then(|c| c.semantics.as_ref())
+                        {
                             for sem_obj in semantics.surfaces.iter() {
-                                if let Some(other) = &sem_obj.other {
-                                    schema.add_attributes(other);
+                                // A semantic surface's `other` holds the
+                                // members the schema does not name; they
+                                // become attribute columns.
+                                if !sem_obj.other.is_empty() {
+                                    let other = serde_json::Value::Object(
+                                        sem_obj.other.clone().into_iter().collect(),
+                                    );
+                                    schema.add_attributes(&other);
                                 }
                             }
                         }

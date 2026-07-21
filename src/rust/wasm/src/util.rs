@@ -1,4 +1,4 @@
-use cjseq::conv::obj;
+use fcb_core::obj;
 use cjseq::{CityJSON, CityJSONFeature};
 use log::{debug, error};
 use serde_wasm_bindgen::from_value;
