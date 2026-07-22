@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["cli", "fcb_core", "fcb_api", "fcb_py"]
+members = ["cli", "fcb_core", "fcb_api"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -9,7 +9,7 @@ bytemuck = "1.15.0"
 async-trait = { version = "0.1.85", default-features = true }
 flatbuffers = "25.9.23"
 byteorder = "1.5.0"
-cjseq = { package = "cjseq2", path = "../../../cjseq" }
+cjseq = { package = "cjseq2", version = "0.2.0-alpha.1" }
 tempfile = "3.14.0"
 serde_json = "1.0.133"
 serde = "1.0.200"
@@ -43,8 +43,6 @@ dhat = "0.3.3"
 prettytable = "0.10.0"
 libc = "0.2.172"
 regex = "1.11.0"
-pyo3 = { version = "0.21", features = ["extension-module"] }
-pyo3-async-runtimes = { version = "0.21", features = ["tokio-runtime"] }
 bson = "2.13.0"
 serde_cbor = "0.10"
 proj = "0.31"

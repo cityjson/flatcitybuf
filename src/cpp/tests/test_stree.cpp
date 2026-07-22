@@ -213,6 +213,35 @@ TEST_CASE("querying an unindexed or unknown column throws") {
     CHECK_THROWS_AS(r.select_attr(empty), Error);
 }
 
+// Regression for defect 3 (Task 15): select_attr answered index queries on
+// Json/Binary columns with no type check at all. A Json/Binary column's key
+// is the first 100 bytes of a serialized blob, so an index hit says nothing
+// about the real value -- Rust rejects it (attr_query.rs's catch-all
+// `Err(Error::UnsupportedColumnType(...))`) and so does the Python reader
+// (stree.py's `_resolve`, DIVERGENCE 2). `a_json` in inferable_types.fcb is
+// never indexed (the writer itself will not build an index over it), which
+// is exactly why this needs its own check rather than piggybacking on the
+// "not indexed" error: the rejection must fire regardless of whether this
+// particular writer happened to index the column.
+TEST_CASE("querying a Json/Binary column is rejected as unsupported") {
+    FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/inferable_types.fcb");
+
+    bool found_json_column = false;
+    for (const auto& c : r.header().info().columns) {
+        if (c.name == "a_json") found_json_column = true;
+    }
+    REQUIRE(found_json_column);
+
+    AttrQuery q = {
+        {"a_json", Operator::Eq, KeyValue::from_string(KeyKind::String100, "x")}};
+    try {
+        r.select_attr(q);
+        FAIL("expected select_attr to throw for a Json column");
+    } catch (const Error& e) {
+        CHECK(e.code() == ErrorCode::UnsupportedColumnType);
+    }
+}
+
 TEST_CASE("exact_index_only returns a superset of the verified result") {
     // For string columns the index yields candidates; verification can only
     // remove, never add.

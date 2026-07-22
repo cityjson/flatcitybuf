@@ -1,5 +1,11 @@
 # Rust Coding Guidelines for Library Development
 
+The Rust workspace is `fcb_core` (the library), `cli` (`fcb`), `fcb_api` (axum
+server) and `wasm`. `fcb_core` is **the authoritative oracle** for the format —
+the C++, Python and TypeScript readers are validated against its output, so a
+behaviour change here ripples into three other implementations and the
+conformance corpus. See the root `CLAUDE.md`.
+
 ## General Principles
 
 - Write **idiomatic Rust** code that is clear, efficient, and maintainable.
@@ -47,7 +53,7 @@
 
 - Follow **Rust’s API guidelines** for public interfaces.
 - Use **builder patterns** for complex configurations.
-- Try to proper trait definition and implementation to invert dependencies and testability.
+- Define and implement traits to invert dependencies and improve testability.
 - reexport public types and functions from the root crate.
 
 ---
@@ -57,21 +63,28 @@
 - Write **unit tests** with `#[cfg(test)]`.
 - Use **integration tests** for public APIs in the `tests/` directory.
 - Mock external dependencies where necessary.
-- Use `tokio::test` for as
-  mentation
+- Use `#[tokio::test]` for async tests.
+- `cargo nextest run` is the runner used by `just check-common`.
+
+---
+
+## Documentation
+
 - Write **Rustdoc** comments for public functions and structs.
-- Include examples in preview document
+- Include runnable examples; they are compiled as doctests.
 
 ---
 
 ## Dependency Management
 
-- Use `cargo-audit` to che**minimal and up-to-date**.
-- Add crates to workspace's `Cargo.toml` file. Don't add them to individual crates' `Cargo.toml` files.
+- Use `cargo-audit` to check for known vulnerabilities. Keep dependencies
+  **minimal and up-to-date**.
+- Add crates to the workspace `Cargo.toml`. Don't add them to individual
+  crates' `Cargo.toml` files — reference them with `{ workspace = true }`.
 
 ---
 
 ## Logging and Debugging
 
 - Use `tracing` for structured logging.
-- Enable debug assertions wit_assert!()`.
+- Enable debug assertions with `debug_assert!()`.

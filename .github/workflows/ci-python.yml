@@ -4,241 +4,76 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/rust/fcb_py/**"
+      - "src/py/**"
+      - "conformance/**"
       - ".github/workflows/ci-python.yml"
 
   pull_request:
     branches: [main]
     paths:
-      - "src/rust/fcb_py/**"
+      - "src/py/**"
+      - "conformance/**"
       - ".github/workflows/ci-python.yml"
-
-env:
-  CARGO_TERM_COLOR: always
-  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
-  RUST_BACKTRACE: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # First, check if Rust code compiles
-  check-rust:
-    name: Check Rust Compilation
+  # Pure-Python package at src/py: no compiled dependency, no Rust toolchain.
+  test-py-native:
+    name: Test pure-Python package (src/py)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/rust
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src/rust
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      # - name: Run clippy
-      #   run: cargo clippy --all-targets --all-features
-
-      - name: Check compilation
-        run: |
-          cd fcb_py
-          cargo check --release --features pyo3/extension-module
-
-      - name: Build with verbose output (if check fails)
-        if: failure()
-        run: |
-          cd fcb_py
-          cargo build --release --features pyo3/extension-module --verbose 2>&1 | tee build.log
-          echo "=== Last 100 lines of errors ==="
-          tail -100 build.log
-
-  test:
-    name: Test Python Package
-    needs: check-rust # Only run if Rust compilation succeeds
-    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false # Continue testing other combinations if one fails
+      fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
-        exclude:
-          # Skip some combinations to reduce CI time
-          - os: macos-latest
-            python-version: "3.8"
-          - os: macos-latest
-            python-version: "3.9"
-          - os: windows-latest
-            python-version: "3.8"
-          - os: windows-latest
-            python-version: "3.9"
-          - os: windows-latest
-            python-version: "3.10"
-          - os: macos-latest
-            python-version: "3.11"
-          - os: windows-latest
-            python-version: "3.11"
-
+        python-version: ["3.9", "3.12"]
     defaults:
       run:
-        working-directory: src/rust
+        working-directory: src/py
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src/rust
-          shared-key: "fcb-python-ci-${{ matrix.os }}-${{ matrix.python-version }}"
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Install dev dependencies and build
-        run: |
-          cd fcb_py
-          uv sync --extra dev
-          uv run maturin develop --release
+      # numpy is a genuine optional extra (never imported at module
+      # scope -- see flatcitybuf/cityjson.py's/feature.py's
+      # `_import_numpy`), and both the "numpy absent" and "numpy
+      # installed" code paths must actually be verified in CI, not just
+      # whichever one happens to be installed. `uv sync --extra dev`
+      # here matches it exactly, so the first pass below is genuinely
+      # numpy-less: the pure-Python fallback runs, and the
+      # numpy-parity tests (test_cityjson.py) skip cleanly via
+      # `pytest.importorskip("numpy")`.
+      - name: Install dev dependencies (no numpy)
+        run: uv sync --extra dev
 
-      - name: Run linting
+      - name: Run tests (no numpy)
+        run: uv run pytest -v
+
+      - name: Run linter
         run: |
-          cd fcb_py
           uv run ruff check .
           uv run ruff format --check .
 
-      - name: Run tests
-        run: |
-          cd fcb_py
-          uv run pytest tests/ -v --tb=short
+      - name: Run mypy (no numpy)
+        run: uv run mypy
 
-  build-wheels:
-    name: Build wheels
-    needs: check-rust # Only build wheels if Rust compilation succeeds
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+      # Second pass: numpy installed, so the bulk-decode path actually
+      # runs (rather than skipping) and the numpy-parity tests assert
+      # the two paths agree.
+      - name: Install numpy extra
+        run: uv sync --extra dev --extra numpy
 
-    defaults:
-      run:
-        working-directory: src/rust/fcb_py
+      - name: Run tests (with numpy)
+        run: uv run pytest -v
 
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          args: --release --out dist --find-interpreter
-          sccache: "true"
-          manylinux: auto
-          working-directory: src/rust/fcb_py
-
-      - name: Check wheel contents
-        shell: bash
-        run: |
-          pip install wheel
-          wheel unpack dist/*.whl || true
-          ls -la dist/
-
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.os }}-${{ github.run_number }}
-          path: src/rust/fcb_py/dist
-
-  build-sdist:
-    name: Build source distribution
-    needs: check-rust
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/rust/fcb_py
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build sdist
-        uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: --out dist
-          working-directory: src/rust/fcb_py
-
-      - name: Upload sdist
-        uses: actions/upload-artifact@v4
-        with:
-          name: sdist-${{ github.run_number }}
-          path: src/rust/fcb_py/dist
-
-  # Optional: Test the built wheels
-  test-wheels:
-    name: Test built wheels
-    needs: [build-wheels]
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Download wheels
-        uses: actions/download-artifact@v4
-        with:
-          pattern: wheels-*
-          merge-multiple: true
-          path: dist
-
-      - name: Test wheel installation
-        run: |
-          pip install dist/*linux*.whl
-          python -c "import flatcitybuf; print(flatcitybuf.__version__)"
+      - name: Run mypy (with numpy)
+        run: uv run mypy

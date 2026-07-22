@@ -20,8 +20,8 @@ could not run or inspect, it is marked UNVERIFIED.
 ## SECTION 1 — JS/TS-specific gotchas that will bite
 
 These have no C++ or Python analogue; nothing in the existing ports warns about them.
-Style follows the Python plan's "Python-specific gotchas that will bite"
-(`docs/superpowers/plans/2026-07-20-native-python-core.md:39-54`).
+Style follows the same "gotchas that will bite" call-out used in the (now retired)
+native Python port plan.
 
 1. **`flatc --ts` silently deletes `class Header`, and includes are not generated.
    The required invocation is `flatc --ts --ts-omit-entrypoint --gen-all`.**
@@ -39,7 +39,8 @@ Style follows the Python plan's "Python-specific gotchas that will bite"
    `scripts/gen_python_fbs.sh` from the Python plan, Task 3).
 
 2. **There is no FlatBuffers verifier in JavaScript — the "always run the Verifier"
-   rule (C++ plan, global constraint at `2026-07-19-native-cpp-core.md:27`) is
+   rule (a C++-port global constraint: always run the FlatBuffers Verifier before
+   accessing any root) is
    impossible to follow.** `grep -ri verif` over `flatbuffers@25.9.23`'s entire `mjs/`
    tree returns nothing; the runtime ships only `ByteBuffer`, `Builder`, and
    flexbuffers. Rust calls `size_prefixed_root_as_header` (which verifies); Python's
@@ -48,8 +49,8 @@ Style follows the Python plan's "Python-specific gotchas that will bite"
    offset arithmetic in `byte-buffer.js` (`readInt32` at mjs/byte-buffer.js:57-62 is
    plain element access and `|`), so a hostile or truncated buffer produces silent
    garbage or bizarre secondary exceptions, never a clean error. Consequences: (a) all
-   section-bound and length-prefix validation from the C++ plan's "All input is
-   untrusted" constraint (`2026-07-19-native-cpp-core.md:28`) becomes the *only* line
+   section-bound and length-prefix validation from the C++ plan's "all input is
+   untrusted, all size arithmetic is checked" constraint becomes the *only* line
    of defense and must be done before any generated accessor runs; (b) enforce
    `kMaxFeatureSize` before allocating; (c) validate that the 4-byte feature prefix and
    the header size land inside `total_size` before constructing a `ByteBuffer`.
@@ -197,7 +198,7 @@ Style follows the Python plan's "Python-specific gotchas that will bite"
 10. **`DataView` getters default to BIG-endian when the flag is omitted.** Verified:
     `dv.getUint32(0)` returned `0x04030201` where `dv.getUint32(0, true)` returned
     `0x01020304`. Every hand-serialized structure in this format is LE (format
-    reference; global constraint `2026-07-19-native-cpp-core.md:24`), so a single
+    reference `.llm/docs/specification.md:108`), so a single
     forgotten `, true` yields plausible-looking garbage (a byteswapped f64 bbox is
     still a finite f64). This is the inverse of the Python situation (`struct` needed
     an explicit `<` too, gotcha in plan §Global Constraints) but far quieter than
@@ -264,8 +265,9 @@ mechanically:
   buffered fetch so only ~1 physical request per MB.
 - *Everything after bytes arrive is synchronous*: FlatBuffers accessors, attribute
   decode, CityJSON emission. The async boundary is exactly the `RangeReader` seam,
-  which is the same sans-IO cut the C++ plan made for batching
-  (`2026-07-19-native-cpp-core.md:7`).
+  which is the same sans-IO cut the C++ plan made for batching (a sans-IO core where
+  parsing and traversal operate only on buffers handed in by a synchronous,
+  user-implementable range-read interface).
 
 Public iteration should be an async iterator (`for await (const f of reader.selectAll())`).
 One re-entrancy hazard with no sync analogue: two overlapping `next()` calls on the
@@ -304,19 +306,20 @@ pattern.
 
 ### 2.3 One async interface, or a sync fast path?
 
-Recommended interface (matching the C++ sans-IO shape, `2026-07-19-native-cpp-core.md:7`,
+Recommended interface (matching the C++ sans-IO shape — a synchronous,
+user-implementable range-read interface with no async runtime in the core —
 and the Python protocol, plan Task 5):
 
 - `read(offset: number, length: number, opts?: {signal?: AbortSignal}): Promise<Uint8Array>`
 - `size(): number` — **resolved once at `open()`, then synchronous.** Rust requires
-  total size only for the last feature (format reference "Features", note at
-  `2026-07-20-native-python-core.md:369`); HTTP learns it from `Content-Range` on the
+  total size only for the last feature (format reference "features", note at
+  `.llm/docs/specification.md:117`); HTTP learns it from `Content-Range` on the
   first 206, files from `stat`, Blobs have `.size` synchronously. Making `size()` a
   per-call promise buys nothing and infects every bounds check.
 - Optionally `readBatch(ranges): Promise<Uint8Array[]>` with a default one-by-one
   implementation, so a future multipart-range or parallel-fetch adapter can slot in —
-  this is exactly C++'s "batching, not asynchrony" primitive
-  (`2026-07-19-native-cpp-core.md:21`) reinterpreted for a world that has both.
+  this is exactly C++'s "batching, not asynchrony" primitive (the concurrency
+  primitive is batching, not asynchrony) reinterpreted for a world that has both.
 
 **Recommendation: no sync fast path.** Reasoning: (a) `Blob`/`File` reads are
 irreducibly async (`blob.arrayBuffer()` returns a promise), so a sync path covers only
@@ -477,15 +480,16 @@ cut point.
 
 **Most likely to slip:**
 
-1. **B+tree attribute queries** — the Python plan already flags this as the hardest
-   task with a designed fallback (`2026-07-20-native-python-core.md:613`); TS adds the
+1. **B+tree attribute queries** — the (now retired) Python port plan already flagged
+   this as the hardest task with a designed fallback; TS adds the
    BigInt tag handling (Section 1 #3), BigInt key comparators for Long/ULong, and
    byte-wise string comparison (Section 1 #7) on top. Same mitigation applies
    unchanged: it must be the last *core* feature so its slip cuts nothing else.
 2. **HTTP batching parity** — the batching rules live in traversal code, not in the
    buffer (Section 2.2), and the only way to test them is a counting/mocking
-   `RangeReader` asserting request logs (the C++ plan's `fake_range_reader.hpp`
-   pattern, file table at `2026-07-19-native-cpp-core.md:203`). Writing those
+   `RangeReader` asserting request logs (the C++ port's
+   `src/cpp/tests/fake_range_reader.hpp`
+   pattern). Writing those
    assertions is fiddly and tends to get skipped under pressure — then the reader is
    *correct but 50× chattier* and nobody notices until it is on a real CDN. Make the
    request-log assertions part of the R-tree/B+tree HTTP tasks' definition of done,
@@ -495,8 +499,8 @@ cut point.
    `Query` variant, additive, behind the same search entry point.
 4. **Vitest browser mode + range test server** — browser-mode is the newest tool in
    the stack (Vitest 5 beta) and needs a range-capable server with CORS headers
-   (extend `src/cpp/tests/range_server.py`, which the Python plan already reuses,
-   `2026-07-20-native-python-core.md:535` — it needs `Access-Control-Expose-Headers:
+   (extend `src/cpp/tests/range_server.py`, which the (now retired) Python port plan
+   already reuses — it needs `Access-Control-Expose-Headers:
    Content-Range` added for browser use; UNVERIFIED whether it sets CORS headers
    today). Do not let any *core* task depend on browser mode: everything must pass in
    Node first; browser runs are an additive CI job.
@@ -550,5 +554,4 @@ cut point.
 
 The load-bearing property: after tasks 9, 10, 11, and 14 there is a releasable
 artifact each time, and the two highest-risk tasks (14, 15) are last and severable —
-the same shape that let the Python plan absorb its B+tree risk
-(`2026-07-20-native-python-core.md:613`).
+the same shape that let the (now retired) Python port plan absorb its B+tree risk.

@@ -12,6 +12,11 @@ fallback paths are exercised:
     ?ignore_range=1     answer 200 with the entire body despite a Range header
     ?bad_range=1        answer 206 with a malformed Content-Range
     ?wrong_offset=1     answer 206 with a range the client did not ask for
+    ?long_end=1         answer 206 with an end far past what was requested
+                        (start still matches -- only the end is wrong)
+    ?stall_body=1       send 206 headers, then hang forever without ever
+                        writing the body (simulates a stalled connection;
+                        the client's own timeout must be what fires)
     ?no_etag=1          omit the ETag/Last-Modified validators
     ?no_cors_expose=1   send Access-Control-Allow-Origin but NOT
                         Access-Control-Expose-Headers, so a cross-origin
@@ -34,6 +39,7 @@ it without guessing.
 import os
 import re
 import sys
+import time
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -129,6 +135,8 @@ class RangeHandler(BaseHTTPRequestHandler):
         end = min(end, size - 1)
         if "wrong_offset" in opts and start + 8 <= end:
             start += 8  # answer a range the client did not request
+        if "long_end" in opts and end < size - 1:
+            end = size - 1  # answer with far more than was requested
 
         with open(path, "rb") as f:
             f.seek(start)
@@ -141,6 +149,16 @@ class RangeHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self._send_common(opts, len(body))
         self.end_headers()
+        if "stall_body" in opts:
+            # Headers are already flushed; never write the body and
+            # never close the connection. The client's own read
+            # timeout is what must fire here -- nothing on this side
+            # ever unblocks it. The request-handling thread sits here
+            # until the whole server process is killed at test
+            # teardown (see test_http.py's `server` fixture), which
+            # does not wait on this thread.
+            time.sleep(3600)
+            return
         self.wfile.write(body)
 
 

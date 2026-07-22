@@ -32,6 +32,7 @@ const CASES = [
   'degenerate_extent',
   'duplicate_keys',
   'empty_appearance',
+  'geom_decoder_edges',
   'geom_temp',
   'inferable_types',
   'long_strings',

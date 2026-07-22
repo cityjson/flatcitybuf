@@ -18,7 +18,7 @@
 
 This is the **fourth** implementation of this reader. Rust (`src/rust/fcb_core`) is the origin; C++ (`src/cpp`) was ported from it in July 2026 and is fully conformant; the pure-Python port (`src/py`, branch `native-py`) is through its Task 11.
 
-1. **The format is documented to ground truth.** `docs/superpowers/plans/2026-07-19-native-cpp-core.md` lines 37-170 hold a "Format Reference" with every constant, formula and byte offset **cited to the Rust source line that proves it**. **Read that section before writing any code, and cite it from your tests instead of re-deriving anything.** This plan does not duplicate it.
+1. **The format is documented to ground truth.** `.llm/docs/specification.md` holds a byte-level "format reference" (merged in from the retired native C++ plan) with every constant, formula and byte offset **cited to the Rust source line that proves it**. **Read it before writing any code, and cite it from your tests instead of re-deriving anything.** This plan does not duplicate it.
 2. **One row of that Format Reference is a trap.** Its "operator lowering" row faithfully documents Rust's lowering — and Rust's lowering is a known-live defect. See Task 14.
 3. **The deliberate divergences are already decided** (same document, "Known divergences from the Rust reader"): `Byte` decodes as `u8`, `Json`/`Binary` index queries are rejected, float `max_value()` is `+inf`, `DateTime` `min_value()` is epoch 0. TypeScript makes the same four choices.
 4. **Eight upstream defects are written up** in `docs/upstream-findings.md`. #5 (operator lowering), #7 and #8 (appearance) matter most here.
@@ -1333,7 +1333,7 @@ describe('decodeAttributes', () => {
 
 - [ ] **Step 3: Implement.** Order: `attribute.ts` (pure, no I/O), then `feature/index.ts` (framing + `Feature`), then `reader.ts` (`FcbReader.fromBytes`/`fromBlob`/`fromReader`, `selectAll`, the cursor).
 
-Framing, precisely: read the 4-byte LE prefix; validate `0 < len <= MAX_FEATURE_SIZE` and `offset + 4 + len <= size()`; then copy **all `4 + len` bytes — prefix included** — into a fresh `Uint8Array` and hand that to `CityFeature.getSizePrefixedRootAsCityFeature`. A size-prefixed accessor reads the prefix itself; handing it a body-only buffer misparses. The reference does exactly this (`src/cpp/src/reader.cpp:182`, `:196`) and the Format Reference says the prefix is included (`2026-07-19-native-cpp-core.md:68`).
+Framing, precisely: read the 4-byte LE prefix; validate `0 < len <= MAX_FEATURE_SIZE` and `offset + 4 + len <= size()`; then copy **all `4 + len` bytes — prefix included** — into a fresh `Uint8Array` and hand that to `CityFeature.getSizePrefixedRootAsCityFeature`. A size-prefixed accessor reads the prefix itself; handing it a body-only buffer misparses. The reference does exactly this (`src/cpp/src/reader.cpp:182`, `:196`) and the format reference says the prefix is included (`.llm/docs/specification.md:112`).
 
 The copy is what makes the handle durable and every generated `*Array()` accessor safe (hazard 9): a fresh buffer starts at offset 0, so FlatBuffers' internal alignment holds.
 
