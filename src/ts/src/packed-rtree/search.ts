@@ -95,9 +95,14 @@ function finite(...vs: number[]): boolean {
  *  `Query::PointIntersects` arm does (packed_rtree/mod.rs:531-560). */
 export function queryToBBox(query: SpatialQuery): BBox {
   if (query.kind === 'nearest') {
+    // A nearest query does not lower to a rectangle -- it is a ranked walk,
+    // not an intersection -- so it never travels this path: `select()` routes
+    // it to `searchNearest` and `nearest.ts`'s `validateNearestPoint` guards
+    // its argument. This branch is a defensive invariant: `searchRtree` (which
+    // is the only caller of `queryToBBox`) does not implement nearest.
     throw new FcbError(
       ErrorCode.QueryExecutionError,
-      'nearest queries not implemented yet',
+      'nearest is not a bbox query; searchNearest handles it',
     )
   }
   if (query.kind === 'point') {

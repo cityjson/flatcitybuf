@@ -76,3 +76,40 @@ export function intersects(n: NodeItem, q: BBox): boolean {
 export function containsPoint(n: NodeItem, x: number, y: number): boolean {
   return x >= n.minX && x <= n.maxX && y >= n.minY && y <= n.maxY
 }
+
+/** Squared Euclidean distance from `(x, y)` to this node's bbox CENTROID
+ *  (`NodeItem::centroid_distance_squared`, packed_rtree/mod.rs:143-150).
+ *
+ *  This is the FINAL score a nearest-centroid search assigns to a LEAF: the
+ *  answer is the feature whose stored bbox centre is closest. It is NOT a
+ *  lower bound on anything -- a centroid can be far from the query even when
+ *  the box's nearest edge is close -- which is exactly why internal nodes are
+ *  ordered by `minDistanceSquared` and only leaves use this. Squared, so no
+ *  `sqrt` is ever taken; comparisons of squared distances order identically. */
+export function centroidDistanceSquared(n: NodeItem, x: number, y: number): number {
+  const cx = (n.minX + n.maxX) / 2
+  const cy = (n.minY + n.maxY) / 2
+  const dx = x - cx
+  const dy = y - cy
+  return dx * dx + dy * dy
+}
+
+/** Squared Euclidean distance from `(x, y)` to the NEAREST point of this
+ *  node's bbox, or 0 when the point is inside it
+ *  (`NodeItem::min_distance_squared`, packed_rtree/mod.rs:152-167).
+ *
+ *  This is the admissible LOWER BOUND that makes best-first search exact for
+ *  the nearest-centroid problem: a child's box is contained in its parent's,
+ *  and a leaf's centroid lies inside its own box, so a parent's min-distance
+ *  can never exceed the centroid distance of any leaf beneath it. Ordering and
+ *  pruning internal nodes by this value therefore never discards the true
+ *  nearest centroid. Squared throughout -- no `sqrt`. */
+export function minDistanceSquared(n: NodeItem, x: number, y: number): number {
+  if (containsPoint(n, x, y)) return 0
+  // Closest point on the box to (x, y): clamp each coordinate to the box.
+  const closestX = Math.min(Math.max(x, n.minX), n.maxX)
+  const closestY = Math.min(Math.max(y, n.minY), n.maxY)
+  const dx = x - closestX
+  const dy = y - closestY
+  return dx * dx + dy * dy
+}

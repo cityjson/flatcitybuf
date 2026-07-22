@@ -260,18 +260,6 @@ describe('bbox search', () => {
   })
 })
 
-describe('not yet implemented', () => {
-  // The attribute-query rejection that used to live here is gone: Task 14
-  // implemented `where`, and test/stree.test.ts now pins its behaviour
-  // against the C++ reader's result sets.
-
-  it('rejects a nearest query until Task 16 lands', async () => {
-    const r = await FcbReader.fromBytes(bytes('small.fcb'))
-    await expect(r.select({ spatial: { kind: 'nearest', value: [0, 0] } }))
-      .rejects.toThrow(/nearest queries not implemented yet/)
-  })
-})
-
 describe('cancellation', () => {
   it('threads the signal into the traversal, not just the facade', async () => {
     const r = await FcbReader.fromBytes(bytes('small.fcb'))

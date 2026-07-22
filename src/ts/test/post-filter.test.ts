@@ -325,10 +325,13 @@ describe('composition', () => {
     })).rejects.toThrow(/unsupported query combination/i)
   })
 
-  it('still rejects nearest on its own, as not implemented', async () => {
-    // The combination check must not swallow the plain-`nearest` rejection.
+  it('does NOT reject nearest on its own -- the combination check is not over-broad', async () => {
+    // The `nearest` + `where` rejection above must fire ONLY on the
+    // combination: a plain `nearest` (Task 16) is a valid query and returns
+    // one feature. Full nearest behaviour is pinned in test/nearest.test.ts.
     const r = await FcbReader.fromBytes(corpus('small.fcb'))
-    await expect(r.select({ spatial: { kind: 'nearest', value: [0, 0] } }))
-      .rejects.toThrow(/nearest/i)
+    const hit = await r.select({ spatial: { kind: 'nearest', value: [0, 0] } })
+    expect(hit.featuresCount).toBe(1)
+    expect(await ids(hit)).toHaveLength(1)
   })
 })

@@ -14,7 +14,7 @@ import { DEFAULT_FETCH_SIZE, FetchRangeReader, OPEN_PREFETCH_SIZE } from './io/f
 import type { FetchRangeReaderOpts } from './io/fetch.js'
 import { BufferedRangeReader, BytesRangeReader } from './io/range-reader.js'
 import type { RangeReader, ReadOpts } from './io/range-reader.js'
-import { queryToBBox, searchRtree } from './packed-rtree/index.js'
+import { queryToBBox, searchNearest, searchRtree, validateNearestPoint } from './packed-rtree/index.js'
 import type { SearchResultItem, SpatialQuery } from './packed-rtree/index.js'
 import { postFilterCandidates, requiresPostFilter } from './post-filter.js'
 import { intersectHits, searchAttributes } from './static-btree/index.js'
@@ -56,6 +56,14 @@ export interface SelectOptions {
   limit?: number
   offset?: number
   signal?: AbortSignal
+  /** Byte size at or below which a `nearest` query fetches the WHOLE R-tree in
+   *  one read and walks it in memory, instead of streaming a read per node
+   *  range. Defaults to `WHOLE_INDEX_THRESHOLD` (256 KB). Only `nearest` reads
+   *  it. Overridable chiefly so tests can force the streaming path -- every
+   *  corpus index is below the default, so without lowering it the best-first
+   *  traversal would never execute and the fast path would mask any bug in
+   *  it. */
+  wholeIndexThreshold?: number
 }
 
 /** Sources that hold an OS resource expose `close`; in-memory ones do not.
@@ -359,8 +367,13 @@ export class FcbReader {
       )
     }
 
-    // Validates the geometry and rejects `nearest`, before any I/O.
-    if (opts?.spatial !== undefined) queryToBBox(opts.spatial)
+    // Validates the geometry before any I/O, so a bad argument never costs a
+    // request. `nearest` is a ranked walk, not a rectangle, so it validates
+    // its point directly rather than lowering to a bbox.
+    if (opts?.spatial !== undefined) {
+      if (opts.spatial.kind === 'nearest') validateNearestPoint(opts.spatial.value)
+      else queryToBBox(opts.spatial)
+    }
 
     const readOpts: ReadOpts | undefined =
       opts?.signal === undefined ? undefined : { signal: opts.signal }
@@ -372,14 +385,33 @@ export class FcbReader {
         if (this.headerView.layout.rtreeSize === 0) {
           throw new FcbError(ErrorCode.NoIndex, 'file has no spatial index')
         }
-        hits = await searchRtree(
-          this.reader,
-          this.headerView.layout.rtreeBegin,
-          info.featuresCount,
-          info.indexNodeSize,
-          opts.spatial,
-          readOpts,
-        )
+        if (opts.spatial.kind === 'nearest') {
+          // Ranked nearest-centroid walk: returns at most one hit. Threads the
+          // header's OWN index_node_size and the overridable whole-index
+          // threshold; `nearest` cannot be combined with `where` (refused
+          // above), so its result is never intersected.
+          const [px, py] = opts.spatial.value
+          hits = await searchNearest(
+            this.reader,
+            this.headerView.layout.rtreeBegin,
+            this.headerView.layout.rtreeSize,
+            info.featuresCount,
+            info.indexNodeSize,
+            px,
+            py,
+            opts.wholeIndexThreshold,
+            readOpts,
+          )
+        } else {
+          hits = await searchRtree(
+            this.reader,
+            this.headerView.layout.rtreeBegin,
+            info.featuresCount,
+            info.indexNodeSize,
+            opts.spatial,
+            readOpts,
+          )
+        }
       }
       if (where !== undefined) {
         // Attribute hits are already sorted ascending by offset and
