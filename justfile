@@ -1,6 +1,6 @@
 # FlatCityBuf Workspace Justfile
 #
-# Unified task runner for entire FlatCityBuf workspace (Rust, C++, Python, WASM)
+# Unified task runner for entire FlatCityBuf workspace (Rust, C++, Python, TypeScript)
 
 # Default recipe - list all available commands
 default:
@@ -10,23 +10,18 @@ default:
 # Workspace Commands
 # ============================================================================
 
-# Run all pre-commit checks (Rust format, clippy, WASM, Python)
-pre-commit: check-common check-wasm check-py pre-commit-cpp
+# Run all pre-commit checks (Rust format, clippy, Python)
+pre-commit: check-common check-py pre-commit-cpp
 
-# Common workspace checks (Rust workspace format, clippy, test, build)
+# Common workspace checks (Rust workspace format, clippy, test, build).
+# fcb_py is excluded: it is a maturin-built PyO3 extension and is checked by
+# `check-py`, not by plain cargo (which cannot link libpython on macOS).
 check-common:
     cd src/rust && cargo fmt
-    cd src/rust && cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_wasm --exclude fcb_py
-    cd src/rust && cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
-    cd src/rust && cargo nextest run --all-features --workspace --exclude fcb_wasm --exclude fcb_py
-    cd src/rust && cargo check --all-features --workspace --exclude fcb_wasm --exclude fcb_py
-    cd src/rust && cargo build --workspace --all-features --exclude fcb_wasm --exclude fcb_py
-
-# Run WASM-specific checks
-check-wasm:
-    cd src/rust && cargo clippy --fix --allow-dirty -p fcb_wasm --target wasm32-unknown-unknown
-    cd src/rust && cargo check -p fcb_wasm --target wasm32-unknown-unknown
-    cd src/rust && cargo build -p fcb_wasm --target wasm32-unknown-unknown
+    cd src/rust && cargo clippy --fix --allow-dirty --workspace --all-targets --all-features --exclude fcb_py
+    cd src/rust && cargo nextest run --all-features --workspace --exclude fcb_py
+    cd src/rust && cargo check --all-features --workspace --exclude fcb_py
+    cd src/rust && cargo build --workspace --all-features --exclude fcb_py
 
 # Run Python-specific checks
 check-py:
@@ -125,7 +120,7 @@ docs:
 
 # Install development tools
 install-tools:
-    cd src/rust && cargo install just cargo-watch wasm-pack cargo-audit
+    cd src/rust && cargo install just cargo-watch cargo-audit
 
 # Start dev container
 devcon:
@@ -179,20 +174,6 @@ py-develop:
 
 build-py:
     cd src/rust/fcb_py && maturin build --release
-
-# ============================================================================
-# WASM Commands
-# ============================================================================
-
-# Build the WASM package into src/ts (debug). Same script CI publishes with,
-# so a local build and a release produce the same tree. The output is
-# gitignored; only src/ts/package.json is tracked.
-build-wasm:
-    ./scripts/build_wasm.sh --dev
-
-# Build WASM for production
-build-wasm-release:
-    ./scripts/build_wasm.sh
 
 # ============================================================================
 # TypeScript Commands

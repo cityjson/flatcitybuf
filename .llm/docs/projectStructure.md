@@ -60,11 +60,6 @@ flatcitybuf/
 │   │   │   │   └── lib.rs         # FFI bridge to C++
 │   │   │   └── Cargo.toml
 │   │   │
-│   │   ├── 📁 wasm/                # WebAssembly bindings (wasm-bindgen)
-│   │   │   ├── src/
-│   │   │   │   └── lib.rs         # FFI bridge to JS/TS
-│   │   │   └── Cargo.toml
-│   │   │
 │   │   ├── 📁 fcb_api/             # REST API server (axum)
 │   │   │   ├── src/
 │   │   │   │   └── main.rs        # API server entry point
@@ -82,12 +77,13 @@ flatcitybuf/
 │   │   ├── 📄 CMakeLists.txt       # CMake build configuration
 │   │   └── 📄 Doxyfile             # Doxygen documentation config
 │   │
-│   └── 📁 ts/                       # npm package dir -- ONE tracked file
-│       └── 📄 package.json         # npm name, version, metadata
-│                                    # fcb_wasm.{js,d.ts}, fcb_wasm_bg.wasm
-│                                    # and snippets/ land here from
-│                                    # `just build-wasm` and are gitignored;
-│                                    # the demo page lives in examples/wasm/
+│   └── 📁 ts/                       # Pure TypeScript reader (@cityjson/flatcitybuf)
+│       ├── 📁 src/                 # Reader source (ESM, one dep: flatbuffers)
+│       ├── 📁 test/                # Node + browser (Chromium) test suites
+│       ├── 📄 package.json         # npm name, version, metadata
+│       └── 📄 README.md            # Usage + wasm migration guide
+│                                    # `dist/` is built by `npm run build` and
+│                                    # is gitignored; the demo lives in examples/
 │
 ├── 📁 data/                         # Development data files
 │   └── out/                        # Output files from conversions
@@ -118,7 +114,7 @@ The Rust workspace is organized as a multi-crate project with the following memb
 | **cli** | Command-line interface (`fcb` command) | - |
 | **fcb_py** | Python bindings via PyO3 | Python |
 | **fcb_cpp** | C++ bindings via cxx bridge | C++ |
-| **wasm** | WebAssembly bindings via wasm-bindgen | JavaScript/TypeScript |
+| **src/ts** | Pure TypeScript reader (not a Rust crate) | JavaScript/TypeScript |
 | **fcb_api** | REST API server using axum | HTTP API |
 
 ### Language Bindings
@@ -157,4 +153,4 @@ Each crate follows standard Rust conventions:
 Language bindings use appropriate FFI technologies:
 - **Python**: PyO3 with async runtime support
 - **C++**: cxx bridge for automatic Rust/C++ interoperability
-- **WASM**: wasm-bindgen for browser compatibility
+- **TypeScript**: pure TypeScript reader (`src/ts`) for the browser and Node.js, no WebAssembly

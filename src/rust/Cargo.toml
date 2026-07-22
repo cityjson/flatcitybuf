@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["cli", "fcb_core", "wasm", "fcb_api", "fcb_py"]
+members = ["cli", "fcb_core", "fcb_api", "fcb_py"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -54,16 +54,6 @@ indicatif = "0.17"
 console = "0.15"
 cxx = "1.0"
 cxx-build = "1.0"
-
-#---WASM dependencies---
-getrandom = { version = "0.3.3" }
-gloo-net = "0.6.0"
-js-sys = "0.3.77"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4.50"
-serde-wasm-bindgen = "0.6.5"
-console_error_panic_hook = "0.1.7"
-console_log = "0.2"
 
 #---API dependencies---
 axum = "0.7"

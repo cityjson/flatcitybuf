@@ -1,86 +1,55 @@
 name: Publish NPM Package
 
+# Publishes the pure TypeScript reader at src/ts to npm.
+#
+# The version is read from src/ts/package.json ONLY -- the single committed
+# source of the npm name, version and metadata. This workflow never bumps or
+# regenerates it: to release, commit a version bump to package.json and push a
+# matching `npm-v<version>` tag (or trigger the workflow manually). There is no
+# wasm build here -- no wasm-pack, no wasm32-unknown-unknown target, no artifact
+# copying -- because the package is plain TypeScript compiled by `npm run build`.
+
 on:
+  push:
+    tags:
+      - "npm-v*"
   workflow_dispatch:
-    inputs:
-      version_bump:
-        description: "Version bump type"
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/ts
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GA_TOKEN }}
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Install wasm-pack
+      - name: Build the package
+        run: npm run build
+
+      - name: Verify the artifact before publishing
         run: |
-          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - name: Configure git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "actions[bot]@github.com"
-
-      - name: Add wasm32 target
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Build WASM package
-        run: ./scripts/build_wasm.sh
-
-      - name: Bump version
-        id: bump
-        run: |
-          cd src/ts
-          # package.json is the single source of the npm name, version and
-          # metadata. It is edited in place -- never regenerated here, so
-          # the workflow cannot drift from what is committed.
-          npm version ${{ github.event.inputs.version_bump }} --no-git-tag-version
-          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Verify the package contains only what it should
-        run: |
-          cd src/ts
-          # Fails the run rather than publishing a package missing its wasm.
-          for f in fcb_wasm_bg.wasm fcb_wasm.js fcb_wasm.d.ts; do
-            [[ -s "$f" ]] || { echo "missing or empty: $f"; exit 1; }
-          done
+          # Inspect exactly what would be published. `files` in package.json
+          # restricts the tarball to `dist`, so this must list the built
+          # dist/*.js and dist/*.d.ts and nothing from src or test.
           npm pack --dry-run
+          # The entry points named in package.json `exports` must exist in the
+          # build output, or consumers get an unresolvable import.
+          for f in dist/index.js dist/index.d.ts dist/io/node.js dist/io/node.d.ts; do
+            [[ -s "$f" ]] || { echo "missing or empty build output: $f"; exit 1; }
+          done
 
       - name: Publish to NPM
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          cd src/ts
-          npm publish --access public
-
-      - name: Commit the version bump
-        run: |
-          # Only package.json moves. The build output is gitignored, so
-          # there is nothing generated left to commit.
-          git add src/ts/package.json
-          git commit -m "chore: release npm v${{ steps.bump.outputs.version }}"
-          git tag "npm-v${{ steps.bump.outputs.version }}"
-          git push
-          git push --tags
+        run: npm publish --access public
