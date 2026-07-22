@@ -2,10 +2,14 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ColumnType } from '../src/generated/column-type.js'
+import { readHeader } from '../src/header/index.js'
+import { BytesRangeReader } from '../src/io/range-reader.js'
 import { FcbReader } from '../src/reader.js'
+import type { AttrCondition } from '../src/reader.js'
 import {
-  PAYLOAD_TAG, decodePayloadEntry, isTagged, streeNumNodes, stripTag,
+  PAYLOAD_TAG, decodePayloadEntry, isTagged, searchAttributes, streeNumNodes, stripTag,
 } from '../src/static-btree/index.js'
+import { featureBounds } from './fixtures/feature-bounds.js'
 
 // `__dirname` does not exist under ESM; `import.meta.dirname` is its
 // replacement (Node >= 22.12, which package.json already requires).
@@ -101,6 +105,24 @@ const GT_PIVOT = 1
 const ORACLE_GT_PIVOT = ['hi', 'mid', 'multi']
 const BOTH_VALUES_FEATURE_ID = 'multi'
 
+// `Gt` alone does not close the hole: a regression that reintroduced Rust's
+// subtraction for only `Lt` or only `Ne` would still pass everything above,
+// because with PIVOT = 5 no feature holds 5 as well as something on the other
+// side. These three pivots each make `multi` (which holds 1 AND 9) a genuine
+// match through one of its values while equalling the pivot through the
+// other, which is precisely what the subtraction removes. Pinned from the
+// same probe run:
+//   PROBE15M [Lt 9] -> lo mid multi
+//   PROBE15M [Ne 1] -> mid hi multi
+//   PROBE15M [Ne 9] -> lo mid multi
+//   PROBE15M [Le 1] -> lo multi
+const ORACLE_BOTH_VALUES = [
+  { op: 'Lt' as const, value: 9, ids: ['lo', 'mid', 'multi'] },
+  { op: 'Ne' as const, value: 1, ids: ['hi', 'mid', 'multi'] },
+  { op: 'Ne' as const, value: 9, ids: ['lo', 'mid', 'multi'] },
+  { op: 'Le' as const, value: 1, ids: ['lo', 'multi'] },
+]
+
 describe('attribute queries', () => {
   it.each(Object.keys(ORACLE) as Array<keyof typeof ORACLE>)(
     '%s matches the C++ reader exactly', async (op) => {
@@ -125,6 +147,20 @@ describe('attribute queries', () => {
     expect(sorted(hit)).toEqual(sorted(ORACLE_GT_PIVOT))
     expect(hit).toContain(BOTH_VALUES_FEATURE_ID)
   })
+
+  it.each(ORACLE_BOTH_VALUES)(
+    '$op($value) keeps a feature that ALSO holds the pivot exactly', async (row) => {
+      // The same finding-#1 regression, for the operators `Gt(1)` alone does
+      // not exercise. Under range-minus-exact, `multi` is found by the range
+      // (through its other value), found by find_exact(pivot), and subtracted
+      // away -- a false negative for a genuine match.
+      const r = await FcbReader.fromBytes(corpus('multi_object_attrs.fcb'))
+      const hit = await ids(await r.select({
+        where: [{ field: H, operator: row.op, value: row.value }],
+      }))
+      expect(sorted(hit)).toEqual(sorted(row.ids))
+      expect(hit).toContain(BOTH_VALUES_FEATURE_ID)
+    })
 
   it('Eq on the type maximum does not walk off the end of the level', async () => {
     // Separator entries with no right sibling carry K::max_value(), whose
@@ -156,13 +192,46 @@ describe('attribute queries', () => {
   })
 
   it('intersects a spatial query with an attribute query', async () => {
-    const r = await FcbReader.fromBytes(corpus('multi_object_attrs.fcb'))
-    const hit = await ids(await r.select({
-      spatial: { kind: 'bbox', value: [-1, -1, 1000, 1000] },
-      where: [{ field: H, operator: 'Ge', value: PIVOT }],
-    }))
-    // The box covers every feature, so the intersection is exactly Ge(5).
-    expect(sorted(hit)).toEqual(sorted(ORACLE.Ge))
+    // NOT on multi_object_attrs.fcb: all four of its features carry the same
+    // extent [0,0]-[1,1], so no box can separate them and the original
+    // version of this test (bbox [-1,-1,1000,1000], expecting exactly
+    // ORACLE.Ge) passed for a reader that ignored the spatial half entirely.
+    // small.fcb is the smallest corpus file whose features are spatially
+    // distinct AND whose attributes are indexed.
+    //
+    // Oracles, both independent of this reader's query path:
+    //  * attribute side, from the C++ reader (probe reverted):
+    //      b3_h_dak_50p Ge 2.0 -> ...016459  ...005156  ...012869  (all three)
+    //  * spatial side, from the brute-force `featureBounds` oracle below,
+    //    which recomputes each extent from the feature's own vertices.
+    // BOX excludes ...012869 (its maxX is 84597.5), so the intersection is a
+    // PROPER subset of the attribute answer and the box demonstrably cut.
+    const BOX: [number, number, number, number] = [84700, 446600, 85600, 446900]
+    const ORACLE_H50P_GE_2 = [
+      'NL.IMBAG.Pand.0503100000016459',
+      'NL.IMBAG.Pand.0503100000005156',
+      'NL.IMBAG.Pand.0503100000012869',
+    ]
+
+    const r = await FcbReader.fromBytes(corpus('small.fcb'))
+    const brute: string[] = []
+    for await (const f of await r.selectAll()) {
+      const b = featureBounds(f, r.header)
+      if (b.maxX >= BOX[0] && b.minX <= BOX[2] && b.maxY >= BOX[1] && b.minY <= BOX[3]) {
+        brute.push(f.id)
+      }
+    }
+    expect(sorted(brute)).toEqual(sorted([
+      'NL.IMBAG.Pand.0503100000016459', 'NL.IMBAG.Pand.0503100000005156',
+    ]))
+
+    const where = [{ field: 'b3_h_dak_50p', operator: 'Ge' as const, value: 2.0 }]
+    expect(sorted(await ids(await r.select({ where })))).toEqual(sorted(ORACLE_H50P_GE_2))
+
+    const hit = await ids(await r.select({ spatial: { kind: 'bbox', value: BOX }, where }))
+    expect(sorted(hit)).toEqual(sorted(ORACLE_H50P_GE_2.filter((id) => brute.includes(id))))
+    expect(hit.length).toBe(2)
+    expect(hit.length).toBeLessThan(ORACLE_H50P_GE_2.length) // the bbox really cut
   })
 
   it('rejects a query on a column with no attribute index', async () => {
@@ -217,14 +286,32 @@ const ORACLE_STR = {
   Le: ['long_a', 'long_b', 'long_exact', 'short_a', 'short_ab'],
 } as const
 
+/** The candidate ids for one condition, taken from the INDEX LAYER
+ *  (`searchAttributes`) rather than from `FcbReader.select`.
+ *
+ *  Task 15 attached a post-filter to `select`, so `select` no longer answers
+ *  with candidates -- but the traversal's deliberate over-return is exactly
+ *  what the lists below pin, and it is the property the post-filter depends
+ *  on. Reading it here keeps the C++ `exact_index_only` oracle meaningful
+ *  instead of silently re-pinning it to the filtered answer. Offsets are
+ *  mapped back to ids through a full scan, which touches no index. */
+async function candidateIds(file: string, cond: AttrCondition): Promise<string[]> {
+  const buf = corpus(file)
+  const reader = new BytesRangeReader(buf)
+  const header = await readHeader(reader)
+  const hits = await searchAttributes(reader, header, [cond])
+  const byOffset = new Map<number, string>()
+  const r = await FcbReader.fromBytes(buf)
+  for await (const f of await r.selectAll()) byOffset.set(f.byteOffset, f.id)
+  return hits.map((h) => byOffset.get(h.offset) ?? `?@${h.offset}`)
+}
+
 describe('string keys are truncated, so the index returns candidates', () => {
   it.each(Object.keys(ORACLE_STR) as Array<keyof typeof ORACLE_STR>)(
     '%s widens to the equal-prefix band, matching C++ exact_index_only',
     async (op) => {
-      const r = await FcbReader.fromBytes(corpus('colliding_strings.fcb'))
-      const hit = await ids(await r.select({
-        where: [{ field: 'label', operator: op, value: K50 }],
-      }))
+      const hit = await candidateIds('colliding_strings.fcb',
+        { field: 'label', operator: op, value: K50 })
       expect(sorted(hit)).toEqual(sorted(ORACLE_STR[op]))
     })
 

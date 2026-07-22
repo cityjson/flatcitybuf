@@ -16,6 +16,7 @@ import { BufferedRangeReader, BytesRangeReader } from './io/range-reader.js'
 import type { RangeReader, ReadOpts } from './io/range-reader.js'
 import { queryToBBox, searchRtree } from './packed-rtree/index.js'
 import type { SearchResultItem, SpatialQuery } from './packed-rtree/index.js'
+import { postFilterCandidates, requiresPostFilter } from './post-filter.js'
 import { intersectHits, searchAttributes } from './static-btree/index.js'
 
 /** A cursor over features. `featuresCount` is `undefined` when the header
@@ -147,6 +148,34 @@ async function* readHits(
     )
     yield feature
   }
+}
+
+/** Drops the candidates that do not survive `postFilterCandidates`, keeping
+ *  the input order (ascending offset).
+ *
+ *  Every candidate is READ here and read AGAIN by `readHits` when the caller
+ *  iterates -- the same two-pass shape as reader.cpp:396-436, which walks a
+ *  `probe` iterator and then hands a fresh one to the caller. It is what
+ *  makes `featuresCount` a match count: the total is not knowable without
+ *  decoding every candidate, and a caller who only takes the first page still
+ *  gets a correct total. The waste is bounded by the CANDIDATE set, not by
+ *  the file. */
+async function verifyHits(
+  reader: RangeReader,
+  header: HeaderView,
+  hits: readonly SearchResultItem[],
+  conditions: readonly AttrCondition[],
+  opts: ReadOpts | undefined,
+): Promise<SearchResultItem[]> {
+  const out: SearchResultItem[] = []
+  let at = 0
+  for await (const feature of readHits(reader, header, hits, opts)) {
+    // `readHits` walks `hits` in order, so the i-th feature it yields is
+    // hits[i]; `at` is incremented for every candidate, kept or not.
+    const hit = hits[at++]!
+    if (postFilterCandidates(feature, header, conditions)) out.push(hit)
+  }
+  return out
 }
 
 /** Skips `offset` items then yields at most `limit`. Used only on the
@@ -288,14 +317,19 @@ export class FcbReader {
    *      header's OWN `index_node_size`; a hardcoded 16 mis-traverses any file
    *      written with another node size. An attribute query descends one
    *      static B+tree per condition. For a `String` column the B+tree
-   *      answers with CANDIDATES, because its keys are truncated to 50 bytes
-   *      -- Task 15's post-filter is what turns those into answers.
-   *   3. Page the sorted result list. `featuresCount` still reports the total
-   *      match count, not the page size.
+   *      answers with CANDIDATES, because its keys are truncated to 50 bytes.
+   *   3. POST-FILTER those candidates against each feature's decoded,
+   *      untruncated attributes (`postFilterCandidates`). This is what turns
+   *      candidates into answers, and its position in this list is the whole
+   *      point: it runs after the intersection and BEFORE step 4.
+   *   4. Count, then page the sorted result list. `featuresCount` reports the
+   *      total MATCH count -- post-filtered, not the candidate count -- and
+   *      is unaffected by `limit`/`offset`.
    *
    *  A `where` and a `spatial` given together are AND-intersected on feature
    *  offset: both index searches return their hits sorted ascending and
-   *  de-duplicated, so the intersection is a sorted merge.
+   *  de-duplicated, so the intersection is a sorted merge. `nearest` with
+   *  `where` is refused outright (`UnsupportedQueryCombination`).
    *
    *  The `signal` is threaded into the actual reads on BOTH paths, not merely
    *  held here: into the R-tree traversal and each hit's feature read when
@@ -310,6 +344,20 @@ export class FcbReader {
 
     const limit = validatePageArg(opts?.limit, 'limit')
     const offset = validatePageArg(opts?.offset, 'offset') ?? 0
+    const where = opts?.where !== undefined && opts.where.length > 0 ? opts.where : undefined
+
+    // Checked BEFORE queryToBBox, which rejects `nearest` on its own grounds
+    // ("not implemented"): a caller who asked for both deserves to be told
+    // which COMBINATION is refused, not merely that one half is missing. A
+    // k-nearest search is a ranked, bounded walk, so intersecting it with an
+    // attribute set is not "search then filter" -- the k would have to be
+    // re-expanded until k survivors are found. Task 16 owns that decision.
+    if (opts?.spatial?.kind === 'nearest' && where !== undefined) {
+      throw new FcbError(
+        ErrorCode.UnsupportedQueryCombination,
+        'nearest cannot be combined with an attribute filter',
+      )
+    }
 
     // Validates the geometry and rejects `nearest`, before any I/O.
     if (opts?.spatial !== undefined) queryToBBox(opts.spatial)
@@ -317,7 +365,6 @@ export class FcbReader {
     const readOpts: ReadOpts | undefined =
       opts?.signal === undefined ? undefined : { signal: opts.signal }
     const info = this.headerView.info
-    const where = opts?.where !== undefined && opts.where.length > 0 ? opts.where : undefined
 
     if (opts?.spatial !== undefined || where !== undefined) {
       let hits: SearchResultItem[] | undefined
@@ -341,7 +388,19 @@ export class FcbReader {
         const attr = await searchAttributes(this.reader, this.headerView, where, readOpts)
         hits = hits === undefined ? attr : intersectHits(hits, attr)
       }
-      const all = hits ?? []
+      let all = hits ?? []
+      // Step 3: POST-FILTER, and it happens HERE -- after the intersection,
+      // before `all.length` is read as `featuresCount` and before `slice`
+      // pages it. A `String` column's index keys are truncated to 50 bytes
+      // and zero-padded, so its hits are candidates; verifying them any later
+      // would report candidate counts as match counts and page a list that
+      // still holds non-matches. Not gated on the query's length either --
+      // see post-filter.ts for why `'a'` collides just as `'k'*50+'alpha'`
+      // does. Skipped entirely when no condition targets such a column, which
+      // is the common case and costs no reads.
+      if (where !== undefined && all.length > 0 && requiresPostFilter(this.headerView, where)) {
+        all = await verifyHits(this.reader, this.headerView, all, where, readOpts)
+      }
       const page = limit === undefined ? all.slice(offset) : all.slice(offset, offset + limit)
       const gen = readHits(this.reader, this.headerView, page, readOpts)
       return {

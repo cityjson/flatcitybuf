@@ -18,14 +18,38 @@ let base: string
 
 beforeAll(async () => {
   proc = spawn('python3', [SERVER, CORPUS])
-  base = await new Promise<string>((ok) => {
+  base = await new Promise<string>((ok, reject) => {
+    // A bare `spawn` + `on('data')` with no other listeners hangs forever if
+    // python3 is missing or the server dies before printing a port: the
+    // promise simply never settles. Fail fast instead.
+    const timer = setTimeout(
+      () => reject(new Error('range_server.py did not print a port within 10s')), 10_000)
+    const settle = (fn: () => void) => { clearTimeout(timer); fn() }
+    proc.once('error', (err) => settle(() => reject(err)))
+    proc.once('exit', (code) =>
+      settle(() => reject(new Error(`range_server.py exited early (code ${code})`))))
     proc.stdout!.on('data', (d: Buffer) => {
       const m = /(\d+)/.exec(d.toString())
-      if (m) ok(`http://127.0.0.1:${m[1]}`)
+      if (m) settle(() => ok(`http://127.0.0.1:${m[1]}`))
     })
   })
 })
-afterAll(() => { proc.kill() })
+
+// SIGKILL the server and AWAIT its exit. A fire-and-forget `proc.kill()` let
+// vitest proceed to teardown while the child -- and undici's pooled HTTP/1.1
+// keep-alive sockets to it (the server sets `protocol_version = "HTTP/1.1"`)
+// -- were still open. Those open handles kept the node process alive until
+// vitest's ~10-minute forced-exit fallback, so `npx vitest run` appeared to
+// hang for ~11 minutes even though every test had already passed in seconds.
+// Killing the server closes its sockets, which RSTs the client sockets and
+// unrefs the event loop, so the run exits promptly.
+afterAll(async () => {
+  if (proc === undefined || proc.exitCode !== null || proc.signalCode !== null) return
+  await new Promise<void>((done) => {
+    proc.once('exit', () => done())
+    proc.kill('SIGKILL')
+  })
+})
 
 describe('FetchRangeReader', () => {
   it('learns its size from Content-Range at open', async () => {

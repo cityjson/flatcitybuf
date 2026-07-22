@@ -1,7 +1,8 @@
 /** Attribute query planning: column resolution, operand coercion, and the
  *  AND-intersection of several conditions -- ports `FcbReader::select_attr`'s
  *  planning half (src/cpp/src/reader.cpp:326-392). The post-filter half
- *  (reader.cpp:394-436) is Task 15 and is NOT here; see `searchAttributes`.
+ *  (reader.cpp:394-436) lives in ../post-filter.ts and is applied by
+ *  `FcbReader.select`, deliberately NOT here; see `searchAttributes`.
  *
  *  ---------------------------------------------------------------------
  *  FOUR DELIBERATE DIVERGENCES FROM THE RUST READER, VISIBLE FROM HERE
@@ -29,11 +30,13 @@
  *      fine. Consequence: `Le`, `Lt` and `Ne` on a datetime column are BLIND
  *      to pre-1970 timestamps. Also deliberately lossy, also for parity.
  *
- *  A fifth behaviour is not a divergence but a limitation worth the same
- *  billing: for `String` columns the index is built over keys TRUNCATED to 50
- *  bytes, so every result is a CANDIDATE SET. Task 15's post-filter narrows
- *  it against the decoded attribute; until then `Eq` can over-return, and
- *  `Gt`/`Lt`/`Ne` deliberately over-return by design (see stree.ts). */
+ *  A fifth behaviour is not a divergence but a property callers of THIS
+ *  function must know: for `String` columns the index is built over keys
+ *  TRUNCATED to 50 bytes and zero-padded, so what `searchAttributes` returns
+ *  is a CANDIDATE SET -- `Eq` over-returns, and `Gt`/`Lt`/`Ne` over-return
+ *  deliberately (see stree.ts). `FcbReader.select` narrows it with
+ *  `postFilterCandidates` (../post-filter.ts) before counting or paging;
+ *  a caller who uses `searchAttributes` directly must do the same. */
 import { ColumnType } from '../generated/column-type.js'
 import { ErrorCode, FcbError } from '../errors.js'
 import type { HeaderView } from '../header/index.js'
@@ -168,13 +171,16 @@ export function intersectHits(
  *  evaluated at the leaf instead of being lowered to "range minus exact" the
  *  way the Rust reader does -- see `scanRange` in stree.ts.
  *
- *  TASK 15 PLUGS IN AFTER THIS FUNCTION RETURNS: for `String` columns
+ *  THE POST-FILTER PLUGS IN AFTER THIS FUNCTION RETURNS: for `String` columns
  *  (`needsPostFilter(kind)`) the hits are CANDIDATES, because the keys are
- *  truncated to 50 bytes. The post-filter reads each candidate feature,
- *  decodes the real attribute value and re-applies `operator` to the
- *  untruncated value, dropping what does not survive. Nothing in this file
- *  should start doing that work: the traversal deliberately over-returns so
- *  the verifier has something to verify. */
+ *  truncated to 50 bytes and zero-padded. `postFilterCandidates`
+ *  (../post-filter.ts) reads each candidate feature, decodes the real
+ *  attribute value and re-applies `operator` to the untruncated value,
+ *  dropping what does not survive; `FcbReader.select` runs it before
+ *  `featuresCount` and paging. Nothing in this file should start doing that
+ *  work: the traversal deliberately over-returns so the verifier has
+ *  something to verify, and a bound tightened here is a false negative the
+ *  verifier can never recover. */
 export async function searchAttributes(
   reader: RangeReader,
   header: HeaderView,

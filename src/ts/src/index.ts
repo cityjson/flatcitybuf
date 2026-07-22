@@ -53,6 +53,17 @@ export type { BBox, NodeItem, SearchResultItem, SpatialQuery } from './packed-rt
 export { keyKindForColumn, searchAttributes, searchStree } from './static-btree/index.js'
 export type { DateTimeKey, KeyKind } from './static-btree/index.js'
 
+// The string post-filter. Published for exactly the callers the block above
+// describes: `searchAttributes` answers a `String` condition with CANDIDATES
+// (its keys are truncated to 50 bytes and zero-padded), so a caller who
+// bypasses `FcbReader.select` needs `postFilterCandidates` to turn those into
+// answers -- and `requiresPostFilter` to know whether it has to.
+// `compareFullStrings` is the UTF-8-byte ordering the verification uses,
+// which a caller must not re-spell as JS `<`.
+export {
+  compareFullStrings, postFilterCandidates, requiresPostFilter,
+} from './post-filter.js'
+
 // The reader facade.
 export { FcbReader } from './reader.js'
 export type { AttrCondition, FeatureCursor, Operator, SelectOptions } from './reader.js'
