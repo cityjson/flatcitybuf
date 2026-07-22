@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlatCityBuf browser demo</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+
+    body {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      margin: 0;
+      padding: 20px;
+      max-width: 900px;
+      margin-inline: auto;
+      line-height: 1.4;
+    }
+
+    h1 {
+      font-size: 1.3rem;
+    }
+
+    h2 {
+      font-size: 1.05rem;
+      margin-bottom: 6px;
+    }
+
+    section {
+      border: 1px solid #8888;
+      border-radius: 6px;
+      padding: 14px;
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.9rem;
+      opacity: 0.8;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      margin-bottom: 10px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .row>* {
+      flex: 1;
+    }
+
+    button {
+      padding: 8px 16px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    #drop-zone {
+      border: 2px dashed #8888;
+      border-radius: 6px;
+      padding: 20px;
+      text-align: center;
+      margin-bottom: 10px;
+      opacity: 0.8;
+    }
+
+    #drop-zone.dragover {
+      border-color: currentColor;
+      opacity: 1;
+    }
+
+    pre,
+    #results {
+      background: #80808022;
+      padding: 10px;
+      border-radius: 6px;
+      overflow: auto;
+      max-height: 320px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 0.9rem;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 3px 8px;
+      border-bottom: 1px solid #8884;
+    }
+
+    #status {
+      font-size: 0.9rem;
+      opacity: 0.85;
+      min-height: 1.2em;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>FlatCityBuf browser demo</h1>
+  <p>
+    Opens a <code>.fcb</code> file over HTTP range requests or from a local
+    drop/pick, using the native TypeScript reader
+    (<code>@cityjson/flatcitybuf</code>) directly in the browser -- no WASM,
+    no server-side component.
+  </p>
+
+  <section id="source-section">
+    <h2>1. Open a file</h2>
+
+    <label for="url-input">URL of a <code>.fcb</code> file</label>
+    <div class="row">
+      <input type="text" id="url-input"
+        value="https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb" />
+      <button id="load-url-btn" style="flex: 0 0 auto;">Load from URL</button>
+    </div>
+
+    <div id="drop-zone">
+      Drag and drop a local <code>.fcb</code> file here, or
+      <label for="file-input" style="display: inline; cursor: pointer; text-decoration: underline;">choose a
+        file</label>
+      <input type="file" id="file-input" accept=".fcb" class="hidden" />
+    </div>
+
+    <div id="status"></div>
+  </section>
+
+  <section id="header-section" class="hidden">
+    <h2>2. Header</h2>
+    <pre id="header-output"></pre>
+  </section>
+
+  <section id="query-section" class="hidden">
+    <h2>3. Bounding-box query</h2>
+    <div class="row">
+      <div>
+        <label for="min-x">min x</label>
+        <input type="number" id="min-x" step="any" />
+      </div>
+      <div>
+        <label for="min-y">min y</label>
+        <input type="number" id="min-y" step="any" />
+      </div>
+      <div>
+        <label for="max-x">max x</label>
+        <input type="number" id="max-x" step="any" />
+      </div>
+      <div>
+        <label for="max-y">max y</label>
+        <input type="number" id="max-y" step="any" />
+      </div>
+    </div>
+    <button id="bbox-query-btn">Run bbox query</button>
+    <p id="bbox-status"></p>
+    <div id="bbox-results"></div>
+  </section>
+
+  <section id="attr-section" class="hidden">
+    <h2>4. Attribute query</h2>
+    <div class="row">
+      <div>
+        <label for="attr-field">field</label>
+        <select id="attr-field"></select>
+      </div>
+      <div>
+        <label for="attr-operator">operator</label>
+        <select id="attr-operator">
+          <option value="Eq">= (Eq)</option>
+          <option value="Ne">!= (Ne)</option>
+          <option value="Gt">&gt; (Gt)</option>
+          <option value="Ge">&gt;= (Ge)</option>
+          <option value="Lt">&lt; (Lt)</option>
+          <option value="Le">&lt;= (Le)</option>
+        </select>
+      </div>
+      <div>
+        <label for="attr-value">value</label>
+        <input type="text" id="attr-value" />
+      </div>
+    </div>
+    <button id="attr-query-btn">Run attribute query</button>
+    <p id="attr-status"></p>
+    <div id="attr-results"></div>
+  </section>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+
+</html>
