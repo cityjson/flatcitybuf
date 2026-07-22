@@ -3,29 +3,58 @@
   "version": "0.3.0",
   "type": "module",
   "description": "Pure TypeScript reader for FlatCityBuf, a cloud-optimized binary format for 3D city models",
-  "author": { "name": "Hidemichi Baba", "email": "baba.papa1120.ba@gmail.com" },
+  "author": {
+    "name": "Hidemichi Baba",
+    "email": "baba.papa1120.ba@gmail.com"
+  },
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/cityjson/flatcitybuf" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cityjson/flatcitybuf"
+  },
   "homepage": "https://github.com/cityjson/flatcitybuf",
-  "bugs": { "url": "https://github.com/cityjson/flatcitybuf/issues" },
-  "keywords": ["cityjson", "flatbuffers", "geospatial", "3d-city-models"],
+  "bugs": {
+    "url": "https://github.com/cityjson/flatcitybuf/issues"
+  },
+  "keywords": [
+    "cityjson",
+    "flatbuffers",
+    "geospatial",
+    "3d-city-models"
+  ],
   "sideEffects": false,
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./node": { "types": "./dist/io/node.d.ts", "import": "./dist/io/node.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/io/node.d.ts",
+      "import": "./dist/io/node.js"
+    }
   },
   "scripts": {
     "build": "vite build && tsc --emitDeclarationOnly",
     "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
-  "dependencies": { "flatbuffers": "^25.9.23" },
+  "dependencies": {
+    "flatbuffers": "^25.9.23"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@vitest/browser": "5.0.0-beta.6",
+    "@vitest/browser-playwright": "5.0.0-beta.6",
+    "playwright": "^1.61.1",
+    "typescript": "^5.6.0",
     "vite": "^8.1.5",
-    "vitest": "5.0.0-beta.6",
-    "typescript": "^5.6.0"
+    "vitest": "5.0.0-beta.6"
   },
-  "engines": { "node": ">=22.12.0" }
+  "engines": {
+    "node": ">=22.12.0"
+  }
 }

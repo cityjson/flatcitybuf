@@ -5,12 +5,16 @@ on:
     branches: [main]
     paths:
       - "src/ts/**"
+      - "src/cpp/tests/range_server.py"
+      - "conformance/**"
       - ".github/workflows/ci-ts.yml"
 
   pull_request:
     branches: [main]
     paths:
       - "src/ts/**"
+      - "src/cpp/tests/range_server.py"
+      - "conformance/**"
       - ".github/workflows/ci-ts.yml"
 
 concurrency:
@@ -45,3 +49,38 @@ jobs:
 
       - name: Build
         run: just ts-build
+
+  # Separate, independent job: exercises the ACTUAL shipping target (a browser)
+  # in real Chromium via Vitest browser mode (Playwright provider). It has no
+  # `needs:` on `check`, so the two run in parallel and the browser job never
+  # blocks the Node matrix. The browser project's globalSetup spawns
+  # `range_server.py` (hence Python), which serves the corpus over cross-origin
+  # Range requests WITH the CORS headers the fetch test's failure path needs.
+  browser:
+    name: Browser (Chromium)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: src/ts
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: src/ts
+
+      - name: Run browser tests
+        run: npm run test:browser
+        working-directory: src/ts
