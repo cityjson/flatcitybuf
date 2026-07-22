@@ -9,7 +9,7 @@
 import {
   type AttrCondition,
   type ColumnInfo,
-  ErrorCode,
+  ColumnType,
   FcbError,
   type FeatureCursor,
   FcbReader,
@@ -17,21 +17,12 @@ import {
   type Operator,
 } from '@cityjson/flatcitybuf'
 
-// The FlatCityBuf wire enum for a column's type (src/fbs/header.fbs). The
-// package exposes the NUMBER it read (`ColumnInfo.type`) but not the enum
-// itself -- `ColumnType` is used structurally in the header module's types
-// but never re-exported from src/index.ts, so a consumer has nothing to
-// `import` for it. This table mirrors the spec's own numbering (a stable,
-// documented wire format, not an implementation detail) so the demo can
-// still show a name and coerce a query value correctly. Worth revisiting if
-// a later task decides to export `ColumnType` itself.
-const COLUMN_TYPE_NAMES = [
-  'Byte', 'UByte', 'Bool', 'Short', 'UShort', 'Int', 'UInt', 'Long', 'ULong',
-  'Float', 'Double', 'String', 'Json', 'DateTime', 'Binary',
-] as const
-
-function columnTypeName(type: number): string {
-  return COLUMN_TYPE_NAMES[type] ?? `Unknown(${type})`
+// `ColumnInfo.type` is a `ColumnType`; the package re-exports the enum so a
+// consumer can name it. A TypeScript numeric enum carries a reverse mapping,
+// so `ColumnType[type]` is the member name ('String', 'Double', ...) -- which
+// is exactly the human-readable label the demo wants to show.
+function columnTypeName(type: ColumnType): string {
+  return ColumnType[type] ?? `Unknown(${type})`
 }
 
 function el<T extends HTMLElement = HTMLElement>(id: string): T {

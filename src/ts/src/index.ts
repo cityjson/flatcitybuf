@@ -12,6 +12,10 @@ export type { FetchRangeReaderOpts } from './io/fetch.js'
 // Header.
 export { readHeader } from './header/index.js'
 export type { AttrIndexInfo, ColumnInfo, FileInfo, HeaderView } from './header/index.js'
+// `ColumnInfo.type` is a `ColumnType`, so a consumer that wants to switch on a
+// column's type -- to build a query, or label a UI -- needs the enum by name.
+// Re-exported from the generated bindings, which are otherwise internal.
+export { ColumnType } from './generated/column-type.js'
 
 // Features and attributes.
 export { CityObjectView, Feature, decodeAttributes } from './feature/index.js'
