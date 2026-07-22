@@ -21,8 +21,6 @@ export enum ErrorCode {
   RangeHeadersNotExposed = 'range headers not exposed',
   /** e.g. `nearest` combined with `where`. */
   UnsupportedQueryCombination = 'unsupported query combination',
-  /** Two overlapping next() calls on one cursor. */
-  ReentrantIteration = 'reentrant iteration',
   /** A caller argument failed validation before any I/O. */
   InvalidArgument = 'invalid argument',
 }
