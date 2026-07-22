@@ -35,7 +35,7 @@ export function resolveCrs(referenceSystem: string | undefined): CrsStatus {
   if (referenceSystem === undefined) {
     return { code: null, supported: false, label: '(none)' }
   }
-  const m = /(\d+)\s*$/.exec(referenceSystem)
+  const m = /^EPSG:(\d+)$/i.exec(referenceSystem.trim())
   const code = m ? Number(m[1]) : null
   const supported = code !== null && code in CRS_DEFS
   return { code, supported, label: referenceSystem }

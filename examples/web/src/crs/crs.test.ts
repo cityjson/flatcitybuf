@@ -18,6 +18,11 @@ describe('resolveCrs', () => {
     expect(s.code).toBeNull()
     expect(s.supported).toBe(false)
   })
+  it('rejects a non-short-form URN string', () => {
+    const s = resolveCrs('urn:ogc:def:crs:EPSG::7415')
+    expect(s.code).toBeNull()
+    expect(s.supported).toBe(false)
+  })
 })
 
 describe('forward/inverse round-trip near Delft', () => {
@@ -37,6 +42,37 @@ describe('forward/inverse round-trip near Delft', () => {
   })
 })
 
+describe('forward against an authoritative control point', () => {
+  // Onze-Lieve-Vrouwetoren, Amersfoort: RD [155000, 463000] is the RD New
+  // origin itself, with a well-known published WGS84 equivalent.
+  it('matches the known WGS84 coordinates within 0.002 degrees', () => {
+    const [lng, lat] = forward(7415, [155000, 463000])
+    expect(Math.abs(lng - 5.387206)).toBeLessThan(0.002)
+    expect(Math.abs(lat - 52.155174)).toBeLessThan(0.002)
+  })
+})
+
+describe('unsupported CRS refusal', () => {
+  it('forward throws for an unregistered code', () => {
+    expect(() => forward(9999, [0, 0])).toThrow()
+  })
+  it('inverse throws for an unregistered code', () => {
+    expect(() => inverse(9999, [0, 0])).toThrow()
+  })
+})
+
+describe('EPSG:28992 coverage', () => {
+  it('is marked supported', () => {
+    expect(resolveCrs('EPSG:28992').supported).toBe(true)
+  })
+  it('round-trips through forward/inverse within 1 cm', () => {
+    const rd: [number, number] = [85530, 447355]
+    const back = inverse(28992, forward(28992, rd))
+    expect(Math.abs(back[0] - rd[0])).toBeLessThan(0.01)
+    expect(Math.abs(back[1] - rd[1])).toBeLessThan(0.01)
+  })
+})
+
 describe('bboxToSource', () => {
   it('returns a source envelope ordered min<max', () => {
     const c = forward(7415, [85000, 447000])
@@ -50,5 +86,22 @@ describe('bboxToSource', () => {
     // Envelope must contain the RD corners it was built from.
     expect(minX).toBeLessThanOrEqual(85000 + 1)
     expect(maxX).toBeGreaterThanOrEqual(86000 - 1)
+  })
+  it('envelope contains all eight densified inverse-projected samples', () => {
+    const west = 4.35, south = 51.98, east = 4.4, north = 52.02
+    const midLng = (west + east) / 2
+    const midLat = (south + north) / 2
+    const samples: [number, number][] = [
+      [west, south], [east, south], [east, north], [west, north],
+      [midLng, south], [east, midLat], [midLng, north], [west, midLat],
+    ]
+    const [minX, minY, maxX, maxY] = bboxToSource(7415, west, south, east, north)
+    for (const s of samples) {
+      const [x, y] = inverse(7415, s)
+      expect(x).toBeGreaterThanOrEqual(minX - 1e-6)
+      expect(x).toBeLessThanOrEqual(maxX + 1e-6)
+      expect(y).toBeGreaterThanOrEqual(minY - 1e-6)
+      expect(y).toBeLessThanOrEqual(maxY + 1e-6)
+    }
   })
 })
