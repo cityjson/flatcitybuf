@@ -28,7 +28,11 @@ export type SpatialMode = 'all' | 'bbox' | 'follow'
 export const spatialModeAtom = atom<SpatialMode>('follow')
 
 /** Max features rendered per query (and "Load next batch" page size). */
-export const limitAtom = atom<number>(200)
+export const limitAtom = atom<number>(1000)
+
+/** True when follow-camera is on but the view is zoomed too far out to fetch
+ *  (the area would be too large). Drives a "zoom in" hint instead of a query. */
+export const followTooFarAtom = atom<boolean>(false)
 
 /** The active attribute filter, applied on top of every spatial mode. `[]`/
  *  undefined means no attribute filter. Held in an atom (not QueryPanel local

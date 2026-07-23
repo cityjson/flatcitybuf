@@ -1,5 +1,5 @@
 // src/components/MapView.tsx
-import { COORDINATE_SYSTEM } from '@deck.gl/core'
+import { COORDINATE_SYSTEM, WebMercatorViewport } from '@deck.gl/core'
 import { PolygonLayer } from '@deck.gl/layers'
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
 import { DeckGL } from '@deck.gl/react'
@@ -9,9 +9,26 @@ import { Map } from 'react-map-gl/maplibre'
 import { useCameraFollow } from '../hooks/useCameraFollow'
 import { useDrawBbox } from '../hooks/useDrawBbox'
 import {
-  colorByAtom, fetchBboxAtom, loadingAtom, renderedAtom, selectedAtom, viewStateAtom,
+  colorByAtom, fetchBboxAtom, followTooFarAtom, loadingAtom, renderedAtom,
+  selectedAtom, spatialModeAtom, viewStateAtom,
 } from '../store/index'
 import type { RenderedFeature } from '../store/index'
+import { FeatureInspector } from './FeatureInspector'
+
+/** Tracks the deck canvas size so the feature popup can be projected. */
+function useCanvasSize(): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 })
+  useEffect(() => {
+    const el = document.getElementById('deckgl-overlay')
+    if (el === null) return
+    const measure = () => setSize({ width: el.clientWidth, height: el.clientHeight })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return size
+}
 
 const BASEMAP = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 
@@ -47,7 +64,19 @@ export function MapView() {
   const [viewState, setViewState] = useAtom(viewStateAtom)
   const showLoading = useDelayed(useAtomValue(loadingAtom), 120)
   const fetchBbox = useAtomValue(fetchBboxAtom)
+  const mode = useAtomValue(spatialModeAtom)
+  const tooFar = useAtomValue(followTooFarAtom)
+  const size = useCanvasSize()
   const { draw, onMapClick, onMapHover, bbox } = useDrawBbox()
+
+  // Screen position of the selected feature's centroid, for the popup. Computed
+  // at the real pitch so the popup tracks the building as the camera moves.
+  const popupPos = useMemo(() => {
+    if (selected === undefined || size.width === 0) return null
+    const [x, y] = new WebMercatorViewport({ ...viewState, ...size })
+      .project(selected.centroidLngLat)
+    return { x, y }
+  }, [selected, viewState, size])
   // In follow-camera mode, re-query the viewport (throttled) as the map moves.
   useCameraFollow()
 
@@ -177,6 +206,38 @@ export function MapView() {
             style={{ borderColor: 'rgb(30,120,255)' }}
           />
           fetched area (inset in view)
+        </div>
+      )}
+
+      {/* Follow mode, too far out to fetch — prompt the user to zoom in. */}
+      {mode === 'follow' && tooFar && (
+        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
+          <div className="rounded-full bg-black/70 px-4 py-1.5 text-xs text-white shadow">
+            Get closer to the ground to fetch features
+          </div>
+        </div>
+      )}
+
+      {/* Attribute inspector as a map popup, anchored above the selected
+          building. A deck.gl overlay child so it renders above the deck canvas
+          (a react-map-gl Popup would be hidden beneath it). */}
+      {selected && popupPos && (
+        <div
+          className="absolute z-10 w-64 -translate-x-1/2 -translate-y-full"
+          style={{ left: popupPos.x, top: popupPos.y - 12 }}
+        >
+          <div className="max-h-80 overflow-auto rounded-lg bg-white p-3 text-gray-900 shadow-xl ring-1 ring-black/10">
+            <button
+              className="absolute right-1 top-1 h-6 w-6 rounded text-gray-500 hover:bg-gray-100"
+              aria-label="close"
+              onClick={() => setSelected(undefined)}
+            >
+              ✕
+            </button>
+            <FeatureInspector />
+          </div>
+          {/* little pointer toward the building */}
+          <div className="mx-auto h-0 w-0 border-x-8 border-t-8 border-x-transparent border-t-white" />
         </div>
       )}
     </DeckGL>

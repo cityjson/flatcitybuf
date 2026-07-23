@@ -4,13 +4,21 @@ import type { AttrCondition } from '@cityjson/flatcitybuf'
 import { useAtomValue } from 'jotai'
 import { useEffect, useRef } from 'react'
 import type { HeaderModel } from '../reader/index'
-import { headerAtom, spatialModeAtom, viewStateAtom, whereAtom } from '../store/index'
+import {
+  followTooFarAtom, headerAtom, spatialModeAtom, viewStateAtom, whereAtom,
+} from '../store/index'
+import { useSetAtom } from 'jotai'
 import { useFcbData } from './useFcbData'
 
 // How long the camera must settle before a follow query fires. `viewState`
 // changes on every camera frame, so the effect below reruns and resets this
 // timer each frame — the query runs only once the camera has been still.
 const DEBOUNCE_MS = 350
+
+// Below this zoom the visible area is too large to fetch (a city / region);
+// follow mode shows a "zoom in" hint instead of querying. Higher = closer to
+// the ground.
+const MIN_FETCH_ZOOM = 13
 
 // The fetched bbox is INSET this fraction of the visible span on every side, so
 // the fetch region sits strictly inside the view: nothing renders outside the
@@ -85,6 +93,7 @@ export function useCameraFollow(): void {
   const viewState = useAtomValue(viewStateAtom)
   const where = useAtomValue(whereAtom)
   const header = useAtomValue(headerAtom)
+  const setTooFar = useSetAtom(followTooFarAtom)
   const { queryViewport } = useFcbData()
 
   // The last issued query's view centre/span. A new file (new header) or
@@ -94,7 +103,8 @@ export function useCameraFollow(): void {
   const lastHeader = useRef<HeaderModel | undefined>(undefined)
 
   useEffect(() => {
-    if (mode !== 'follow' || header === undefined) return
+    if (mode !== 'follow') { setTooFar(false); return }
+    if (header === undefined) return
     if (header !== lastHeader.current || where !== lastWhere.current) {
       last.current = null
       lastHeader.current = header
@@ -106,6 +116,10 @@ export function useCameraFollow(): void {
     if (width === 0 || height === 0) return
     const timer = setTimeout(() => {
       try {
+        // Too far out: the visible area is a whole city/region. Don't fetch —
+        // prompt the user to zoom in instead.
+        if (viewState.zoom < MIN_FETCH_ZOOM) { setTooFar(true); return }
+        setTooFar(false)
         const b = visibleBounds(viewState, width, height)
         const center: [number, number] = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]
         const span = Math.max(b[2] - b[0], b[3] - b[1])
@@ -124,5 +138,5 @@ export function useCameraFollow(): void {
       }
     }, DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [mode, viewState, where, header, queryViewport])
+  }, [mode, viewState, where, header, setTooFar, queryViewport])
 }

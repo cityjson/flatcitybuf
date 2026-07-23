@@ -1,4 +1,3 @@
-import { FeatureInspector } from './components/FeatureInspector'
 import { HeaderPanel } from './components/HeaderPanel'
 import { MapView } from './components/MapView'
 import { QueryPanel } from './components/QueryPanel'
@@ -15,7 +14,6 @@ export function App() {
         <SourcePanel />
         <HeaderPanel />
         <QueryPanel />
-        <FeatureInspector />
       </aside>
       <main className="relative flex-1">
         <MapView />
