@@ -26,8 +26,10 @@ npm install      # picks up ../../src/ts via a file: dependency
 npm run dev
 ```
 
-Open the printed URL, load the default 3DBAG subset URL (or a local `.fcb`),
-draw a bbox, and run a query.
+Open the printed URL and load a `.fcb` — the default 3DBAG subset URL, another
+URL, or a local file. The first buildings render as soon as the file opens (the
+camera flies to the data); then refine with a drawn bbox or an attribute query,
+and page through more with "Load next batch".
 
 ## How it works
 
