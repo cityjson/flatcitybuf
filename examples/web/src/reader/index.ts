@@ -120,6 +120,9 @@ export interface QuerySpec {
   where?: AttrCondition[]
   limit: number
   offset: number
+  /** Aborts the underlying range reads; a superseded follow-camera query
+   *  passes a fresh signal and aborts the previous one. */
+  signal?: AbortSignal
 }
 
 /** Runs one page of a query and drains its cursor. `total` is the cursor's
@@ -134,6 +137,7 @@ export async function runQuery(
     where: spec.where && spec.where.length > 0 ? spec.where : undefined,
     limit: spec.limit,
     offset: spec.offset,
+    signal: spec.signal,
   })
   const features: Feature[] = []
   for await (const f of cursor) features.push(f)

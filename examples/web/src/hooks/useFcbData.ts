@@ -4,20 +4,16 @@ import {
 } from '@cityjson/flatcitybuf'
 import { useAtom } from 'jotai'
 import { useCallback } from 'react'
-import { forward } from '../crs/index'
+import { bboxToSource, forward } from '../crs/index'
 import { buildFeatureMesh } from '../geometry/index'
 import {
   describeError, type HeaderModel, headerModel, openFromBlob, openFromUrl, runQuery,
 } from '../reader/index'
 import {
-  activeQueryAtom, headerAtom, readerAtom, type RenderedFeature, renderedAtom,
-  selectedAtom, statusAtom, totalAtom, type ViewState, viewStateAtom,
+  activeQueryAtom, type FeatureInfo, headerAtom, limitAtom, readerAtom,
+  type RenderedFeature, renderedAtom, selectedAtom, statusAtom, totalAtom,
+  type ViewState, viewStateAtom,
 } from '../store/index'
-
-// How many features the auto-render on open (and a filterless query) shows.
-// Kept in step with QueryPanel's default limit; also caps the per-feature
-// deck.gl layer count.
-const DEFAULT_LIMIT = 200
 
 // Rough Web-Mercator zoom that frames a lng/lat span. Exact fitBounds needs the
 // live viewport size; this heuristic is good enough to bring the data on-screen,
@@ -27,9 +23,19 @@ function zoomForSpan(spanLng: number, spanLat: number): number {
   return Math.min(18, Math.max(11, Math.log2(360 / span) - 1.5))
 }
 
+// The highest-LoD geometry of a CityObject (numeric LoD; unlabeled sorts last).
+function highestLodGeometry(
+  obj: { geometry?: { type: string; lod?: string }[] } | undefined,
+): { type: string; lod?: string } | undefined {
+  const geoms = obj?.geometry ?? []
+  if (geoms.length === 0) return undefined
+  return geoms.reduce((best, g) =>
+    (Number(g.lod ?? -1) > Number(best.lod ?? -1) ? g : best), geoms[0])
+}
+
 // Builds render-ready features from a SPECIFIC reader + header model rather than
 // the hook's atoms, so it works before `setReader`/`setHeader` have committed
-// (the auto-render on open needs exactly that). Returns empty when the CRS is
+// (the render on open needs exactly that). Returns empty when the CRS is
 // unsupported — the caller decides the status message.
 function buildRenderedFeatures(
   reader: FcbReader, model: HeaderModel, features: Feature[],
@@ -60,9 +66,17 @@ function buildRenderedFeatures(
       },
       objects[0],
     )
+    const g = highestLodGeometry(primary)
+    const info: FeatureInfo = {
+      objectType: primary?.type,
+      geometryType: g?.type,
+      lod: g?.lod,
+      vertexCount: cj.vertices.length,
+      triangleCount: fm.triangleCount,
+    }
     out.push({
       id: f.id, centroidLngLat: fm.centroidLngLat, mesh: fm.mesh,
-      attributes: primary?.attributes ?? {},
+      attributes: primary?.attributes ?? {}, info,
     })
   }
   return { out, skipped }
@@ -70,10 +84,15 @@ function buildRenderedFeatures(
 
 // Module-level (not useRef) because useFcbData is called from multiple
 // components; a per-instance ref wouldn't see requests issued by siblings.
-// Bumped at the start of every open/query/loadNext call; any commit whose
-// captured `seq` no longer matches the current counter is stale and is
-// dropped instead of overwriting newer state.
+// `requestSeq` drops stale commits; `controller` aborts the actual range reads
+// of a superseded request (chiefly the throttled follow-camera queries).
 let requestSeq = 0
+let controller: AbortController | null = null
+function freshSignal(): AbortSignal {
+  controller?.abort()
+  controller = new AbortController()
+  return controller.signal
+}
 
 export function useFcbData() {
   const [reader, setReader] = useAtom(readerAtom)
@@ -82,6 +101,7 @@ export function useFcbData() {
   const [total, setTotal] = useAtom(totalAtom)
   const [status, setStatus] = useAtom(statusAtom)
   const [active, setActive] = useAtom(activeQueryAtom)
+  const [limit] = useAtom(limitAtom)
   const [, setSelected] = useAtom(selectedAtom)
   const [, setViewState] = useAtom(viewStateAtom)
 
@@ -101,16 +121,29 @@ export function useFcbData() {
     }))
   }, [setViewState])
 
-  // Opening a file also RENDERS it: without an automatic first query the map
-  // shows only the basemap and the file looks "not displayed". Auto-runs a
-  // filterless query (first DEFAULT_LIMIT features) so the model appears on
-  // load; "Load next batch" then pages through the rest.
+  // `frameCamera` is false for follow-camera queries: re-framing would move the
+  // camera, which would retrigger the follow query — an infinite loop.
+  const render = useCallback((features: Feature[], frameCamera = true) => {
+    if (reader === undefined || header === undefined) return
+    if (!header.crs.supported || header.crs.code === null) {
+      setStatus('CRS not supported — cannot georeference; not rendering')
+      return
+    }
+    const { out, skipped } = buildRenderedFeatures(reader, header, features)
+    setRendered(out)
+    if (frameCamera) frameToFeatures(out)
+    setStatus(`${out.length} rendered${skipped ? `, ${skipped} skipped` : ''}`)
+  }, [reader, header, setRendered, frameToFeatures, setStatus])
+
+  // Opening a file also RENDERS it: without a first query the map shows only
+  // the basemap and the file looks "not displayed". Renders the first `limit`
+  // features so the model appears on load; the follow-camera default then
+  // refines to the viewport as the camera moves.
   const onOpened = useCallback(async (r: FcbReader, seq: number) => {
     const model = headerModel(r.header)
     setReader(r)
     setHeader(model)
     setSelected(undefined)
-    // Frame to the file extent immediately, before features finish building.
     if (model.crs.supported && model.crs.code !== null && model.extent) {
       const code = model.crs.code
       const [minX, minY, , maxX, maxY] = model.extent
@@ -135,22 +168,22 @@ export function useFcbData() {
       return
     }
     setStatus('rendering features…')
-    const spec = { limit: DEFAULT_LIMIT, offset: 0 }
+    const spec = { limit, offset: 0, signal: freshSignal() }
     try {
       const { features, total: t } = await runQuery(r, spec)
       if (seq !== requestSeq) return
       const { out, skipped } = buildRenderedFeatures(r, model, features)
       setRendered(out)
       setTotal(t)
-      setActive(spec)
+      setActive({ limit, offset: 0 })
       frameToFeatures(out)
       const more = t !== undefined && t > out.length ? ` of ${t}` : ''
       setStatus(`${out.length} rendered${skipped ? `, ${skipped} skipped` : ''}${more}`)
     } catch (e) {
-      if (seq !== requestSeq) return
+      if (spec.signal.aborted || seq !== requestSeq) return
       setStatus(`file opened, but rendering failed: ${describeError(e)}`)
     }
-  }, [setReader, setHeader, setRendered, setTotal, setSelected, setActive,
+  }, [limit, setReader, setHeader, setRendered, setTotal, setSelected, setActive,
       setViewState, setStatus, frameToFeatures])
 
   const openUrl = useCallback(async (url: string) => {
@@ -179,54 +212,66 @@ export function useFcbData() {
     }
   }, [onOpened, setStatus])
 
-  const render = useCallback((features: Feature[]) => {
-    if (reader === undefined || header === undefined) return
-    if (!header.crs.supported || header.crs.code === null) {
-      setStatus('CRS not supported — cannot georeference; not rendering')
-      return
-    }
-    const { out, skipped } = buildRenderedFeatures(reader, header, features)
-    setRendered(out)
-    frameToFeatures(out)
-    setStatus(`${out.length} rendered${skipped ? `, ${skipped} skipped` : ''}`)
-  }, [reader, header, setRendered, frameToFeatures, setStatus])
-
   const query = useCallback(async (
     spec: { bboxSource?: [number, number, number, number]
-            where?: AttrCondition[]; limit: number },
+            where?: AttrCondition[] },
   ) => {
     if (reader === undefined) return
     const seq = ++requestSeq
-    const q = { ...spec, offset: 0 }
+    const signal = freshSignal()
+    const q = { ...spec, limit, offset: 0 }
     setSelected(undefined)
     setStatus('querying...')
     try {
-      const { features, total: t } = await runQuery(reader, q)
+      const { features, total: t } = await runQuery(reader, { ...q, signal })
       if (seq !== requestSeq) return
       setActive(q); setTotal(t); render(features)
     } catch (e) {
-      if (seq !== requestSeq) return
+      if (signal.aborted || seq !== requestSeq) return
       setStatus(`query failed: ${describeError(e)}`)
     }
-  }, [reader, render, setActive, setSelected, setStatus, setTotal])
+  }, [reader, limit, render, setActive, setSelected, setStatus, setTotal])
+
+  // Follow-camera: query the current viewport bbox (source CRS) without moving
+  // the camera. Aborts any in-flight request so rapid camera moves don't pile up.
+  const queryViewport = useCallback(async (
+    bounds: [number, number, number, number], where?: AttrCondition[],
+  ) => {
+    if (reader === undefined || header === undefined) return
+    if (!header.crs.supported || header.crs.code === null) return
+    const seq = ++requestSeq
+    const signal = freshSignal()
+    const bboxSource = bboxToSource(header.crs.code, bounds[0], bounds[1], bounds[2], bounds[3])
+    const q = { bboxSource, where, limit, offset: 0 }
+    try {
+      const { features, total: t } = await runQuery(reader, { ...q, signal })
+      if (seq !== requestSeq) return
+      setActive(q); setTotal(t); render(features, false)
+    } catch (e) {
+      if (signal.aborted || seq !== requestSeq) return
+      setStatus(`view query failed: ${describeError(e)}`)
+    }
+  }, [reader, header, limit, render, setActive, setStatus, setTotal])
 
   const loadNext = useCallback(async () => {
     if (reader === undefined || active === undefined) return
     const seq = ++requestSeq
+    const signal = freshSignal()
     const q = { ...active, offset: active.offset + active.limit }
     setSelected(undefined) // the current page (and its selection) is about to be replaced
     setStatus('loading next batch...')
     try {
-      const { features, total: t } = await runQuery(reader, q)
+      const { features, total: t } = await runQuery(reader, { ...q, signal })
       if (seq !== requestSeq) return
       setActive(q); setTotal(t); render(features) // replaces the rendered set with the next page
     } catch (e) {
-      if (seq !== requestSeq) return
+      if (signal.aborted || seq !== requestSeq) return
       setStatus(`load failed: ${describeError(e)}`)
     }
   }, [reader, active, render, setActive, setSelected, setStatus, setTotal])
 
-  return { openUrl, openFile, query, loadNext, status, header, rendered, total,
+  return { openUrl, openFile, query, queryViewport, loadNext, status, header,
+           rendered, total,
            hasMore: total !== undefined && active !== undefined
              && active.offset + active.limit < total }
 }

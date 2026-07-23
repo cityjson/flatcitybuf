@@ -6,6 +6,7 @@ import { DeckGL } from '@deck.gl/react'
 import { useAtom, useAtomValue } from 'jotai'
 import { useMemo } from 'react'
 import { Map } from 'react-map-gl/maplibre'
+import { useCameraFollow } from '../hooks/useCameraFollow'
 import { useDrawBbox } from '../hooks/useDrawBbox'
 import { colorByAtom, renderedAtom, selectedAtom, viewStateAtom } from '../store/index'
 import type { RenderedFeature } from '../store/index'
@@ -31,6 +32,8 @@ export function MapView() {
   const [selected, setSelected] = useAtom(selectedAtom)
   const [viewState, setViewState] = useAtom(viewStateAtom)
   const { draw, onMapClick, onMapHover, bbox } = useDrawBbox()
+  // In follow-camera mode, re-query the viewport (throttled) as the map moves.
+  useCameraFollow()
 
   // Mesh layers are memoised on their own inputs so rubber-banding a bbox
   // (which changes `bbox` on every mouse-move) does not rebuild all N feature
