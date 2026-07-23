@@ -3,6 +3,7 @@
 //! This library exposes the merger and reader modules for integration testing.
 //! The main CLI binary is in main.rs.
 
+pub mod inspect;
 pub mod merger;
 pub mod reader;
 
