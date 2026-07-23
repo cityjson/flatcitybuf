@@ -1,9 +1,9 @@
-#include <doctest/doctest.h>
-
 #include <fcb/reader.hpp>
 
 #include <set>
 #include <string>
+
+#include <doctest/doctest.h>
 
 using namespace fcb;
 

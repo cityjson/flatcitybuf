@@ -10,9 +10,8 @@ namespace fcb {
 /// Minimal C++17 stand-in for std::span: a non-owning view over contiguous
 /// memory. The library targets C++17 because the GIS ecosystem consuming it
 /// still ships C++17 compilers, so std::span is not available.
-template <typename T>
-class span {
-public:
+template <typename T> class span {
+  public:
     span() noexcept : data_(nullptr), size_(0) {}
     span(T* data, std::size_t size) noexcept : data_(data), size_(size) {}
 
@@ -21,8 +20,7 @@ public:
     span(const std::vector<U>& v) noexcept : data_(v.data()), size_(v.size()) {}
 
     /// Implicit view over a mutable vector.
-    span(std::vector<std::remove_const_t<T>>& v) noexcept
-        : data_(v.data()), size_(v.size()) {}
+    span(std::vector<std::remove_const_t<T>>& v) noexcept : data_(v.data()), size_(v.size()) {}
 
     T* data() const noexcept { return data_; }
     std::size_t size() const noexcept { return size_; }
@@ -36,7 +34,7 @@ public:
         return span(data_ + offset, count);
     }
 
-private:
+  private:
     T* data_;
     std::size_t size_;
 };

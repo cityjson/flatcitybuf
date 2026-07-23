@@ -2,13 +2,13 @@
 
 #ifdef FCB_WITH_CURL
 
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
+#    include <fcb/error.hpp>
+#    include <fcb/range_reader.hpp>
 
-#include <fcb/error.hpp>
-#include <fcb/range_reader.hpp>
+#    include <cstdint>
+#    include <memory>
+#    include <string>
+#    include <vector>
 
 namespace fcb {
 
@@ -33,7 +33,7 @@ struct CurlOptions {
 /// system OpenSSL), so this library never link-depends on a TLS stack. That
 /// is what keeps the vcpkg port acceptable.
 class CurlRangeReader : public RangeReader {
-public:
+  public:
     explicit CurlRangeReader(const std::string& url, CurlOptions options = {});
     ~CurlRangeReader() override;
 
@@ -48,7 +48,7 @@ public:
     std::uint64_t request_count() const { return request_count_; }
     void reset_request_count() { request_count_ = 0; }
 
-private:
+  private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
     std::uint64_t request_count_ = 0;

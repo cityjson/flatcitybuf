@@ -23,11 +23,21 @@ export type { AttrIndexInfo } from './attribute-index.js'
 /** The 4-byte LE u32 size prefix itself -- layout.hpp's kHeaderSizeSize. */
 const HEADER_SIZE_SIZE = 4
 
+/** Everything the reader learned from the file's header, and the only part of
+ *  an `.fcb` file that is read eagerly. Obtained as `reader.header`; every
+ *  query and every CityJSON emission is driven from it. */
 export interface HeaderView {
+  /** The header's metadata as OWNED JS values, copied out of the FlatBuffers
+   *  table: CityJSON version, transform, geographical extent, the attribute
+   *  column schema, and which columns carry a B+tree index. */
   info: FileInfo
   /** The generated FlatBuffers accessor, for callers that need a field this
    *  port's FileInfo does not surface (e.g. the point-of-contact fields). */
   raw: Header
+  /** Where each section physically starts and how long it is -- the R-tree,
+   *  the attribute indices, and the feature section. Derived arithmetically
+   *  from the header, then validated against the resource's real byte length,
+   *  so a truncated file is rejected at open rather than mid-scan. */
   layout: FileLayout
 }
 

@@ -1,5 +1,16 @@
 name: Create Release
 
+# Tags `v<fcb_core version>`, creates the GitHub release, attaches prebuilt C++
+# static libraries + headers for each platform, and publishes the API docs.
+#
+# NOTE ON VERSIONING: the four packages version independently --
+#   src/rust/fcb_core/Cargo.toml   (crates.io; also the tag this workflow cuts)
+#   src/ts/package.json            (npm,  tagged npm-v*    by publish-npm.yml)
+#   src/py/pyproject.toml          (PyPI, tagged python-v* by publish-python.yml)
+#   src/cpp/CMakeLists.txt         (C++,  no independent tag)
+# so `v0.7.6` names the Rust version only. Do not read it as a repo-wide
+# version.
+
 on:
   workflow_dispatch:
 
@@ -26,7 +37,8 @@ jobs:
       - name: Check if tag exists
         id: check_tag
         run: |
-          if git ls-remote --tags origin | grep -q "refs/tags/v${{ steps.extract_version.outputs.VERSION }}"; then
+          # Anchored: without the trailing $, v0.7.6 also matched v0.7.60.
+          if git ls-remote --tags origin | grep -q "refs/tags/v${{ steps.extract_version.outputs.VERSION }}$"; then
             echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
           else
             echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
@@ -36,33 +48,30 @@ jobs:
         if: steps.check_tag.outputs.TAG_EXISTS == 'false'
         id: release_notes
         run: |
-          # Get the latest tag
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-
-          # Generate changelog
-          echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
-          echo "## What's Changed" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-
-          if [ -z "$LATEST_TAG" ]; then
-            echo "Initial release" >> $GITHUB_OUTPUT
-          else
-            # Get commit messages since last tag
-            git log $LATEST_TAG..HEAD --pretty=format:"- %s" >> $GITHUB_OUTPUT
-          fi
-
-          echo "" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "### Crate Version: ${{ steps.extract_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-
-          # Check npm version
-          NPM_VERSION=$(grep "\"version\"" src/ts/package.json | cut -d'"' -f4)
-          echo "### NPM Version: $NPM_VERSION" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-
-          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ steps.extract_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "RELEASE_NOTES<<FCBEOF"
+            echo "## What's Changed"
+            echo ""
+            if [ -z "$LATEST_TAG" ]; then
+              echo "Initial release"
+            else
+              git log "$LATEST_TAG"..HEAD --pretty=format:"- %s"
+            fi
+            echo ""
+            echo ""
+            echo "### Package versions in this commit"
+            echo ""
+            echo "| Package | Registry | Version |"
+            echo "|---|---|---|"
+            echo "| fcb_core / fcb_cli | crates.io | ${{ steps.extract_version.outputs.VERSION }} |"
+            echo "| @cityjson/flatcitybuf | npm | $(grep -m1 '"version"' src/ts/package.json | cut -d'"' -f4) |"
+            echo "| flatcitybuf | PyPI | $(grep -m1 '^version' src/py/pyproject.toml | cut -d'"' -f2) |"
+            echo "| flatcitybuf (C++) | GitHub release | $(grep -m1 'project(flatcitybuf VERSION' src/cpp/CMakeLists.txt | sed 's/.*VERSION \([0-9.]*\).*/\1/') |"
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ steps.extract_version.outputs.VERSION }}"
+            echo "FCBEOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Create and push tag
         if: steps.check_tag.outputs.TAG_EXISTS == 'false'
@@ -72,152 +81,127 @@ jobs:
           git tag -a "v${{ steps.extract_version.outputs.VERSION }}" -m "Release v${{ steps.extract_version.outputs.VERSION }}"
           git push origin "v${{ steps.extract_version.outputs.VERSION }}"
 
+      # actions/create-release@v1 was archived by GitHub and is unmaintained;
+      # softprops/action-gh-release is the maintained replacement, and is
+      # already what uploads the assets below.
       - name: Create GitHub Release
         if: steps.check_tag.outputs.TAG_EXISTS == 'false'
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GA_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.extract_version.outputs.VERSION }}
-          release_name: v${{ steps.extract_version.outputs.VERSION }}
+          name: v${{ steps.extract_version.outputs.VERSION }}
           body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
           draft: false
           prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GA_TOKEN }}
 
-  build-cpp-bindings:
-    name: Build C++ Bindings
+  build-cpp:
+    name: C++ ${{ matrix.artifact_name }}
     needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            platform: linux
-            artifact_name: flatcitybuf-linux-x86_64
-            cmake_generator: Unix Makefiles
-          - os: ubuntu-latest
-            platform: linux
-            artifact_name: flatcitybuf-linux-x86_64-musl
-            cmake_generator: Unix Makefiles
-            rust_target: x86_64-unknown-linux-musl
-            musl: true
+            artifact_name: flatcitybuf-cpp-linux-x86_64
           - os: ubuntu-24.04-arm
-            platform: linux
-            artifact_name: flatcitybuf-linux-aarch64
-            cmake_generator: Unix Makefiles
-          - os: macos-15
-            platform: macos
-            artifact_name: flatcitybuf-macos-x86_64
-            cmake_generator: Unix Makefiles
+            artifact_name: flatcitybuf-cpp-linux-aarch64
+          # macos-13 is the last x86_64 image; macos-14 and newer (including
+          # macos-latest) are Apple Silicon. The previous matrix labelled a
+          # macos-15 build "x86_64", so that artifact was arm64 under an
+          # x86_64 name and no genuine x86_64 macOS build existed.
+          - os: macos-13
+            artifact_name: flatcitybuf-cpp-macos-x86_64
           - os: macos-latest
-            platform: macos
-            artifact_name: flatcitybuf-macos-aarch64
-            cmake_generator: Unix Makefiles
+            artifact_name: flatcitybuf-cpp-macos-aarch64
           - os: windows-latest
-            platform: windows
-            artifact_name: flatcitybuf-windows-x86_64
-            cmake_generator: Visual Studio 17 2022
+            artifact_name: flatcitybuf-cpp-windows-x86_64
+            vcpkg_triplet: x64-windows
           - os: windows-11-arm
-            platform: windows
-            artifact_name: fcb_cpp-windows-aarch64
-            cmake_generator: Visual Studio 17 2022
+            artifact_name: flatcitybuf-cpp-windows-aarch64
+            vcpkg_triplet: arm64-windows
+          # The musl row was dropped: it set CMAKE_C_COMPILER=musl-gcc for a
+          # C++ project (musl-tools ships no C++ driver), and a static .a does
+          # not carry a libc the way an executable does, so it had no consumer.
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Install musl tools
-        if: matrix.musl == true
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
-          targets: ${{ matrix.rust_target || '' }}
-
-      - name: Install CMake
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: "3.26.x"
-
-      - name: Install nlohmann-json
-        shell: bash
+      # CMake needs BOTH flatbuffers and nlohmann-json (FCB_WITH_JSON is ON by
+      # default). The previous workflow installed only nlohmann-json, so
+      # `find_package(flatbuffers CONFIG REQUIRED)` failed at configure time on
+      # every platform.
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev libssl-dev
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            brew install nlohmann-json
-          fi
+          sudo apt-get update
+          sudo apt-get install -y cmake libflatbuffers-dev nlohmann-json3-dev
 
-      - name: Install nlohmann-json (Windows)
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install flatbuffers nlohmann-json
+
+      # Manifest mode: src/cpp/vcpkg.json already declares flatbuffers and
+      # nlohmann-json, so vcpkg resolves them from the committed manifest
+      # instead of an ad-hoc package list that can drift. The previous
+      # workflow hardcoded `nlohmann-json:x64-windows`, which also named the
+      # wrong triplet on the arm64 runner and never installed flatbuffers.
+      - name: Configure vcpkg (Windows)
         if: runner.os == 'Windows'
-        run: |
-          vcpkg install nlohmann-json:x64-windows
-          echo "CMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
         shell: bash
+        run: |
+          echo "CMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
+          echo "VCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }}" >> $GITHUB_ENV
 
-      - name: Configure CMake
+      # Tests and examples are OFF: both default to ON, and FCB_BUILD_TESTS=ON
+      # additionally requires doctest, which is not installed here -- another
+      # reason the previous release build could not configure. Correctness is
+      # gated by ci.yml, not by the release artifacts.
+      - name: Configure
         shell: bash
+        working-directory: src/cpp
         run: |
-          CMAKE_ARGS="-B build -G \"${{ matrix.cmake_generator }}\" -DCMAKE_BUILD_TYPE=Release"
-          if [[ -n "${CMAKE_TOOLCHAIN_FILE}" ]]; then
-            CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
+          ARGS="-B build -DCMAKE_BUILD_TYPE=Release -DFCB_BUILD_TESTS=OFF -DFCB_BUILD_EXAMPLES=OFF"
+          if [[ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]]; then
+            ARGS="$ARGS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
+            ARGS="$ARGS -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}"
           fi
-          if [[ "${{ matrix.musl }}" == "true" ]]; then
-            CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_C_COMPILER=musl-gcc -DCMAKE_EXE_LINKER_FLAGS='-static' -DCMAKE_SHARED_LINKER_FLAGS='-static'"
-          fi
-          eval cmake ${CMAKE_ARGS}
-        working-directory: ./src/cpp
+          cmake $ARGS
 
-      - name: Build C++ bindings
+      - name: Build
+        shell: bash
+        working-directory: src/cpp
+        run: cmake --build build --config Release
+
+      - name: Package
         shell: bash
         run: |
-          if [[ "${{ runner.os }}" = "Windows" ]]; then
-            cmake --build build --config Release
+          mkdir -p release-artifacts/lib release-artifacts/include
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp src/cpp/build/Release/fcb_core_cpp.lib release-artifacts/lib/
           else
-            NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
-            cmake --build build -- -j${NPROC}
+            cp src/cpp/build/libfcb_core_cpp.a release-artifacts/lib/
           fi
-        working-directory: ./src/cpp
-
-      - name: Prepare release artifacts
-        shell: bash
-        run: |
-          mkdir -p release-artifacts
-
-          # Copy static library (Windows .lib renamed to .a for consistency)
-          if [[ "${{ runner.os }}" = "Windows" ]]; then
-            cp src/cpp/build/fcb_core_cpp.lib release-artifacts/libfcb_core_cpp.a
-          elif [[ -n "${{ matrix.rust_target }}" ]]; then
-            cp src/cpp/build/libfcb_core_cpp.a release-artifacts/
-          else
-            cp src/cpp/build/libfcb_core_cpp.a release-artifacts/
-          fi
-
-          # Copy CXX bridge header and source
-
-          # Copy include directory
-          cp -r src/cpp/include/. release-artifacts/
-
-          # Create package
-          if [[ "${{ runner.os }}" = "Windows" ]]; then
+          cp -r src/cpp/include/. release-artifacts/include/
+          cp src/cpp/README.md src/cpp/INSTALL.md LICENSE release-artifacts/
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             7z a -tzip ${{ matrix.artifact_name }}.zip ./release-artifacts/*
           else
             tar -czf ${{ matrix.artifact_name }}.tar.gz -C release-artifacts .
           fi
 
-      - name: Upload release artifacts
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}.*
           retention-days: 90
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: ${{ matrix.artifact_name }}.*
@@ -225,34 +209,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GA_TOKEN }}
 
-  build-docs:
-    name: Build Documentation
-    needs: [create-release, build-cpp-bindings]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Doxygen
-        run: sudo apt-get install -y doxygen graphviz
-
-      - name: Generate API documentation
-        run: doxygen Doxyfile
-        working-directory: ./src/cpp
-
-      - name: Upload documentation artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: flatcitybuf-docs
-          path: src/cpp/docs/html
-          retention-days: 90
-
-      - name: Upload documentation to release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ needs.create-release.outputs.version }}
-          files: src/cpp/docs/html/*
-          generate_release_notes: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GA_TOKEN }}
+  # API documentation for all four languages, published to GitHub Pages and
+  # attached to the release as a single tarball. Previously this job ran
+  # Doxygen only, and uploaded every generated .html file as an individual
+  # release asset.
+  docs:
+    name: API documentation
+    needs: create-release
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      release_tag: v${{ needs.create-release.outputs.version }}
+    secrets: inherit

@@ -1,14 +1,39 @@
-/** RangeReader over a `node:fs` file handle -- the source used by CLI and
- *  server consumers reading a local file. This is the ONLY file in the
- *  package allowed to import `node:*`: a browser bundle that resolves
- *  `node:fs` is a build failure for every other module, so this reader is
- *  reachable only through the package's separate `"./node"` subpath export
- *  (see package.json `exports`), never through the package root. */
+/** The `@cityjson/flatcitybuf/node` entry point: reading a local `.fcb` file
+ *  from Node.
+ *
+ *  ```ts
+ *  import { fromFile } from '@cityjson/flatcitybuf/node'
+ *
+ *  await using reader = await fromFile('./city.fcb')
+ *  for await (const feature of await reader.selectAll()) console.log(feature.id)
+ *  ```
+ *
+ *  This is the ONLY file in the package allowed to import `node:*`: a browser
+ *  bundle that resolves `node:fs` is a build failure for every other module, so
+ *  it is reachable only through this separate subpath (see package.json
+ *  `exports`), never through the package root. Everything else -- `FcbReader`,
+ *  the CityJSON emitters, the query types -- comes from the root entry point
+ *  and works unchanged in both runtimes.
+ *
+ *  @module
+ */
 import { type FileHandle, open as openFile } from 'node:fs/promises'
 import { ErrorCode, FcbError } from '../errors.js'
 import { FcbReader } from '../reader.js'
 import { checkAborted, type RangeReader, type ReadOpts, validateArgs, validateBounds } from './range-reader.js'
 
+/** `RangeReader` over a `node:fs` file handle -- the source used by CLI and
+ *  server consumers reading a local file, and what {@link fromFile} builds.
+ *
+ *  Owns an open file descriptor for its whole lifetime, because later queries
+ *  seek back into the header and the indices; call `close()` (or
+ *  `FcbReader.close`, or `await using`) to release it.
+ *  Node's own `open`/`stat`/`read` errors are never surfaced raw: they are
+ *  wrapped as `FcbError` with `code` `IoError`, so a caller of this package
+ *  only ever has to catch `FcbError`.
+ *
+ *  Unbuffered: a sequential scan costs two `pread` syscalls per feature. Wrap
+ *  it in a `BufferedRangeReader` if that matters. */
 export class FileRangeReader implements RangeReader {
   private readonly handle: FileHandle
   private readonly fileSize: number
@@ -89,9 +114,18 @@ export class FileRangeReader implements RangeReader {
   }
 }
 
-/** Opens a local `.fcb` file for reading. The file handle stays open for the
- *  reader's lifetime -- later queries seek back into the indices -- so the
- *  caller owns closing it, via `FcbReader.close()` or `await using`. */
+/** Opens a local `.fcb` file for reading and returns a fully-constructed
+ *  `FcbReader` -- its header already read and validated.
+ *
+ *  The file handle stays open for the reader's lifetime -- later queries seek
+ *  back into the indices -- so the caller owns closing it, via
+ *  `FcbReader.close()` or `await using`.
+ *
+ *  @param path anything `fs.open` accepts, relative to `process.cwd()`.
+ *  @throws `FcbError` with `code` `IoError` if the path cannot be opened or
+ *  stat'ed, and the header-validation errors of `FcbReader.fromReader`
+ *  (`MissingMagicBytes`, `IllegalHeaderSize`, ...) for a file that is not a
+ *  well-formed `.fcb`. */
 export async function fromFile(path: string): Promise<FcbReader> {
   return FcbReader.fromReader(await FileRangeReader.open(path))
 }

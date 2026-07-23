@@ -6,6 +6,13 @@ from typing import Iterator
 
 
 class ErrorCode(Enum):
+    """What went wrong, as a machine-testable tag on `FcbError`.
+
+    Mirrors fcb::ErrorCode (error.hpp). Branch on `FcbError.code`
+    rather than on the message text, which is free-form and carries
+    offsets/sizes that vary per file.
+    """
+
     INVALID_MAGIC_BYTES = "invalid magic bytes"
     ILLEGAL_HEADER_SIZE = "illegal header size"
     INVALID_FLATBUFFER = "invalid flatbuffer"

@@ -180,6 +180,20 @@ async function fetchRange(
   return { bytes, total }
 }
 
+/** {@link RangeReader} over HTTP `Range` requests, built on the platform
+ *  `fetch`. Used by `FcbReader.fromUrl`, and usable directly for a caller that
+ *  wants to compose its own decorator stack.
+ *
+ *  Range support is validated STRICTLY at `open()`: a server that ignores
+ *  `Range` and answers `200` with the whole body is rejected
+ *  (`RangeNotSupported`) rather than silently mis-read, and a cross-origin
+ *  `206` whose `Content-Range` CORS does not expose is rejected too
+ *  (`RangeHeadersNotExposed`) -- because without that header the response's
+ *  own offset cannot be confirmed.
+ *
+ *  Not internally buffered beyond the one window it prefetches at `open()`;
+ *  wrap it in a {@link BufferedRangeReader} (as `FcbReader.fromUrl` does)
+ *  before scanning features, or every feature costs two HTTP requests. */
 export class FetchRangeReader implements RangeReader {
   private readonly url: string
   private readonly fetchImpl: typeof globalThis.fetch

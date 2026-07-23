@@ -1,12 +1,12 @@
 #pragma once
 
+#include <fcb/error.hpp>
+
 #include <cstdint>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
-
-#include <fcb/error.hpp>
 
 namespace fcb {
 
@@ -48,7 +48,7 @@ struct RangeRequest {
 ///  * There is no cancellation mechanism. A transport needing one should
 ///    implement it out-of-band (e.g. a flag its read() checks and throws on).
 class RangeReader {
-public:
+  public:
     virtual ~RangeReader() = default;
 
     /// Total byte length of the resource.
@@ -61,8 +61,7 @@ public:
     virtual std::uint64_t total_size() = 0;
 
     /// Read `length` bytes at `offset`, subject to the contract above.
-    virtual std::vector<std::uint8_t> read(std::uint64_t offset,
-                                           std::uint64_t length) = 0;
+    virtual std::vector<std::uint8_t> read(std::uint64_t offset, std::uint64_t length) = 0;
 
     /// Fill every request, preserving order. Transports that can pipeline or
     /// multiplex should override this; the default is a sequential loop.
@@ -71,13 +70,13 @@ public:
 
 /// Local-file adapter.
 class FileRangeReader : public RangeReader {
-public:
+  public:
     explicit FileRangeReader(const std::string& path);
 
     std::uint64_t total_size() override;
     std::vector<std::uint8_t> read(std::uint64_t offset, std::uint64_t length) override;
 
-private:
+  private:
     std::string path_;
     std::ifstream stream_;
     std::uint64_t size_;
@@ -94,21 +93,20 @@ private:
 /// iterators silently alter each other's buffering policy and invites a
 /// decorator wrapping a decorator. Hence there is no set_min_req_size.
 class BufferedRangeReader : public RangeReader {
-public:
+  public:
     BufferedRangeReader(std::shared_ptr<RangeReader> inner, std::uint64_t min_req_size);
 
     std::uint64_t total_size() override;
     std::vector<std::uint8_t> read(std::uint64_t offset, std::uint64_t length) override;
     void read_batch(std::vector<RangeRequest>& requests) override;
 
-private:
+  private:
     /// Checked: an overflowing offset+length must not wrap into a false
     /// cache hit, which would then build invalid iterators when slicing.
     bool covers(std::uint64_t offset, std::uint64_t length) const;
     /// Over-fetch size, clamped to the resource so it cannot overflow.
     std::uint64_t clamped_fetch(std::uint64_t offset, std::uint64_t length);
-    std::vector<std::uint8_t> slice_from_buffer(std::uint64_t offset,
-                                                std::uint64_t length) const;
+    std::vector<std::uint8_t> slice_from_buffer(std::uint64_t offset, std::uint64_t length) const;
 
     std::shared_ptr<RangeReader> inner_;
     std::uint64_t min_req_size_;

@@ -1,7 +1,13 @@
 """Pure-Python reader for FlatCityBuf.
 
+FlatCityBuf holds CityJSON's semantics in FlatBuffers, alongside a
+packed Hilbert R-tree for spatial queries and a static B+tree for
+attribute queries, so a client can fetch only the bytes it needs. This
+package parses those bytes directly -- no FFI and no compiled
+extension, just a `py3-none-any` wheel on CPython 3.9+.
+
 Public API re-exports only -- every name below is defined in a
-submodule. The usual entry point is::
+submodule. The usual entry point is:
 
     import flatcitybuf as fcb
 
@@ -10,7 +16,42 @@ submodule. The usual entry point is::
     for feature in reader.select_all():
         cj = fcb.to_cityjson_feature(feature, reader.header)
 
-Anything not listed in ``__all__`` is internal and may change without
+## Query paths
+
+`FcbReader.select_all` scans sequentially, in stored (Hilbert) order,
+and yields `Feature` objects. The two INDEXED paths do not: both hand
+back `SearchResultItem`, a feature-section-relative BYTE OFFSET rather
+than a decoded feature, which `FcbReader.feature_at` turns into a
+`Feature`.
+
+* `search_rtree` answers a bounding box from the packed R-tree.
+* `FcbReader.select_attr` answers `AttrCondition`s from the attribute
+  B+trees; `search_stree` is the raw, unverified layer beneath it.
+
+Bytes come from any `RangeReader`: `FileRangeReader` for a local file,
+`HttpRangeReader` for a URL over HTTP range requests (synchronously,
+on stdlib `urllib.request` -- there is no asyncio API here), and
+`BufferedRangeReader` as a per-query caching decorator over either.
+
+## Two things that surprise callers
+
+**`u32::MAX` (4294967295) means NULL**, not the number 4294967295, in
+a geometry's `semantics.values` and in the material/texture appearance
+index arrays. The CityJSON that `to_cityjson_feature` emits already
+maps it to JSON `null`; code reading those arrays by any other route
+has to do so itself.
+
+**String index keys are truncated to 50 bytes**, possibly
+mid-codepoint, so distinct values sharing a prefix are
+indistinguishable to the index. (The format truncates Json and Binary
+columns at 100 bytes instead; this reader rejects both column types
+outright -- see `search_stree`.) `search_stree` therefore returns
+CANDIDATES for string columns, and
+`FcbReader.select_attr` re-checks each one against the full,
+untruncated attribute value before returning it -- pass
+`exact_index_only=True` to skip that and take the raw candidates.
+
+Anything not listed in `__all__` is internal and may change without
 notice; importing it from its submodule is at your own risk.
 """
 

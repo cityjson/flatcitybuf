@@ -1,0 +1,96 @@
+# FlatCityBuf — Rust (fcb_core + cli + fcb_api).
+#
+# The reference implementation, and the oracle every other reader is checked
+# against. It is also the only implementation that WRITES .fcb files.
+#
+# Standard interface, identical in every justfile in this repo:
+#
+#     just check    # everything below, read-only
+#     just test | lint | type | build
+#     just fix      # the only recipe that rewrites source
+
+default:
+    @just --list
+
+# Lint + type + test + build, read-only
+check: lint type test build
+
+# NOTE: two tests (fcb_core::http) fetch from a public Google Cloud Storage
+# bucket, so this needs network access.
+
+# Unit + integration tests (cargo nextest, whole workspace)
+test:
+    cargo nextest run --all-features --workspace
+
+# Clippy is deliberately NOT gated on `-D warnings` yet: fcb_core carries 50
+# pre-existing style lints (should_implement_trait, missing_safety_doc,
+# non_canonical_partial_ord_impl, extra_unused_lifetimes, empty_docs). Clean
+# those up, then append `-- -D warnings` here and delete this comment.
+
+# rustfmt --check + clippy
+lint:
+    cargo fmt --check
+    cargo clippy --workspace --all-targets --all-features
+
+# Type check only (cargo check) — in Rust the compiler front end is the checker
+type:
+    cargo check --all-features --workspace
+
+build:
+    cargo build --workspace --all-features
+
+# rustfmt + clippy --fix — MUTATES the working tree
+fix:
+    cargo fmt
+    cargo clippy --fix --allow-dirty --workspace --all-targets --all-features
+
+# ---------------------------------------------------------------------------
+# Extras
+# ---------------------------------------------------------------------------
+
+build-release:
+    cargo build --release --workspace --all-features
+
+clean:
+    cargo clean
+
+test-verbose:
+    cargo nextest run --all-features --workspace --no-capture
+
+bench:
+    cargo bench -p fcb_core --bench read -- --release
+
+# `--all-features` matches what docs.rs builds for fcb_core and fcb_cli, so a
+# doc warning here is a doc warning there. Output lands in target/doc.
+
+# Rustdoc for the workspace, all features on
+docs:
+    cargo doc --no-deps --all-features
+
+# Rustdoc for the workspace, then open it in a browser
+docs-open:
+    cargo doc --no-deps --all-features --open
+
+audit:
+    cargo audit
+
+update:
+    cargo update
+
+# Show header, extent and index summary for a .fcb file.
+info file="fcb_core/tests/data/delft.fcb":
+    cargo run -q -p fcb_cli -- info -i {{file}}
+
+# CityJSONSeq -> .fcb
+ser input output:
+    cargo run -q -p fcb_cli -- ser -i {{input}} -o {{output}} -A -g
+
+# This is the oracle output the other readers are compared against; see
+# docs/TESTING.md §6.
+
+# .fcb -> CityJSONSeq
+deser input output:
+    cargo run -q -p fcb_cli -- deser -i {{input}} -o {{output}}
+
+file-stats:
+    cargo run -p fcb_core --bin stats -- -d fcb_core/benchmark_data/ -f csv

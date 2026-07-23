@@ -7,6 +7,9 @@ license = "MIT"
 repository = "https://github.com/HideBa/flatcitybuf"
 description = "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers."
 
+[package.metadata.docs.rs]
+all-features = true
+
 [[bin]]
 name = "fcb"
 path = "src/main.rs"

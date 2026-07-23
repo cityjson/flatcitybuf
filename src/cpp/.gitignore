@@ -2,3 +2,6 @@ build-native/
 build/
 build-asan/
 build-curl/
+
+# doxygen output (`just docs`); OUTPUT_DIRECTORY in Doxyfile
+/docs/

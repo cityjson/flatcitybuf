@@ -1,12 +1,12 @@
 #include <fcb/packed_rtree.hpp>
 #include <fcb/reader.hpp>
 
-#include "detail/checked.hpp"
-
 #include <algorithm>
 #include <cstring>
 #include <deque>
 #include <utility>
+
+#include "detail/checked.hpp"
 
 namespace fcb {
 
@@ -34,8 +34,7 @@ struct LevelBound {
 
 /// Mirrors generate_level_bounds (packed_rtree/mod.rs:342-375).
 /// level_bounds[0] is the LEAF level and is stored LAST; back() is the root.
-std::vector<LevelBound> generate_level_bounds(std::uint64_t num_items,
-                                              std::uint16_t node_size) {
+std::vector<LevelBound> generate_level_bounds(std::uint64_t num_items, std::uint16_t node_size) {
     if (node_size < 2) {
         throw Error(ErrorCode::IllegalHeaderSize, "invalid index_node_size");
     }
@@ -51,7 +50,8 @@ std::vector<LevelBound> generate_level_bounds(std::uint64_t num_items,
         n = detail::ceil_div(n, node_size);
         num_nodes = detail::checked_add(num_nodes, n, "rtree num_nodes");
         level_num_nodes.push_back(n);
-        if (n == 1) break;
+        if (n == 1)
+            break;
     }
 
     // Walk backwards accumulating offsets, as the Rust version does.
@@ -87,10 +87,14 @@ NodeItem NodeItem::decode(bytes_view b) {
 
 bool NodeItem::intersects(const BBox& q) const {
     // Strict comparisons, matching packed_rtree/mod.rs:122-134.
-    if (q.max_x < min_x) return false;
-    if (q.max_y < min_y) return false;
-    if (q.min_x > max_x) return false;
-    if (q.min_y > max_y) return false;
+    if (q.max_x < min_x)
+        return false;
+    if (q.max_y < min_y)
+        return false;
+    if (q.min_x > max_x)
+        return false;
+    if (q.min_y > max_y)
+        return false;
     return true;
 }
 
@@ -98,25 +102,26 @@ std::uint64_t rtree_num_nodes(std::uint64_t num_items, std::uint16_t node_size) 
     if (node_size < 2) {
         throw Error(ErrorCode::IllegalHeaderSize, "invalid index_node_size");
     }
-    if (num_items == 0) return 0;
+    if (num_items == 0)
+        return 0;
 
     std::uint64_t n = num_items;
     std::uint64_t num_nodes = n;
     for (;;) {
         n = detail::ceil_div(n, node_size);
         num_nodes = detail::checked_add(num_nodes, n, "rtree num_nodes");
-        if (n == 1) break;
+        if (n == 1)
+            break;
     }
     return num_nodes;
 }
 
-std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader,
-                                                std::uint64_t index_begin,
-                                                std::uint64_t num_items,
-                                                std::uint16_t node_size,
+std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader, std::uint64_t index_begin,
+                                                std::uint64_t num_items, std::uint16_t node_size,
                                                 const BBox& query) {
     std::vector<SearchResultItem> results;
-    if (num_items == 0) return results;
+    if (num_items == 0)
+        return results;
 
     const auto level_bounds = generate_level_bounds(num_items, node_size);
     const std::uint64_t num_nodes = rtree_num_nodes(num_items, node_size);
@@ -137,15 +142,14 @@ std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader,
         // lies within the level we believe we are on BEFORE using it, and
         // derive leaf-ness from the trusted level rather than from the
         // index itself.
-        if (node_index < level_bounds[level].start ||
-            node_index >= level_bounds[level].end) {
+        if (node_index < level_bounds[level].start || node_index >= level_bounds[level].end) {
             throw Error(ErrorCode::NoIndex, "rtree node index outside its level");
         }
         const bool is_leaf = (level == 0);
         const std::uint64_t end = std::min<std::uint64_t>(
-            detail::checked_add(node_index, node_size, "rtree node end"),
-            level_bounds[level].end);
-        if (end <= node_index) continue;
+            detail::checked_add(node_index, node_size, "rtree node end"), level_bounds[level].end);
+        if (end <= node_index)
+            continue;
 
         const std::uint64_t length = end - node_index;
         const std::uint64_t byte_offset = detail::checked_add(
@@ -161,10 +165,10 @@ std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader,
 
         for (std::uint64_t pos = node_index; pos < end; ++pos) {
             const std::uint64_t slot = pos - node_index;
-            NodeItem item = NodeItem::decode(
-                bytes_view(block).subspan(static_cast<std::size_t>(slot * NodeItem::kSize),
-                                          NodeItem::kSize));
-            if (!item.intersects(query)) continue;
+            NodeItem item = NodeItem::decode(bytes_view(block).subspan(
+                static_cast<std::size_t>(slot * NodeItem::kSize), NodeItem::kSize));
+            if (!item.intersects(query))
+                continue;
 
             if (is_leaf) {
                 results.push_back(SearchResultItem{item.offset, pos - leaf_nodes_offset});
@@ -172,8 +176,7 @@ std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader,
                 const std::size_t child_level = level - 1;
                 if (item.offset < level_bounds[child_level].start ||
                     item.offset >= level_bounds[child_level].end) {
-                    throw Error(ErrorCode::NoIndex,
-                                "rtree child index outside the child level");
+                    throw Error(ErrorCode::NoIndex, "rtree child index outside the child level");
                 }
                 queue.emplace_back(item.offset, child_level);
             }
@@ -181,10 +184,9 @@ std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader,
     }
 
     // Read forward through the features section.
-    std::sort(results.begin(), results.end(),
-              [](const SearchResultItem& a, const SearchResultItem& b) {
-                  return a.offset < b.offset;
-              });
+    std::sort(
+        results.begin(), results.end(),
+        [](const SearchResultItem& a, const SearchResultItem& b) { return a.offset < b.offset; });
     return results;
 }
 

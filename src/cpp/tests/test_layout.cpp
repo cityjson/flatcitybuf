@@ -1,9 +1,9 @@
-#include <doctest/doctest.h>
-
 #include <fcb/layout.hpp>
 
 #include <cstdint>
 #include <vector>
+
+#include <doctest/doctest.h>
 
 using namespace fcb;
 

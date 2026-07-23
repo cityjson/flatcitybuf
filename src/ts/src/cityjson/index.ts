@@ -47,6 +47,12 @@ export type * from './types.js'
 /** How a `Long`/`ULong` attribute -- a `bigint` after decoding -- is spelled
  *  in the emitted, JSON-serializable document. See `emitInt64`. */
 export interface Int64Policy {
+  /** `'lossy-number'` (the default) emits a JS number, rounding beyond
+   *  `Number.MAX_SAFE_INTEGER`; it is what makes whole-line comparison against
+   *  the conformance oracle meaningful. `'decimal-string'` keeps every digit
+   *  at the cost of changing the JSON type from number to string.
+   *  `'error'` throws `InvalidAttributeValue` rather than lose a digit
+   *  silently. No policy ever leaks a `bigint` into the emitted object. */
   int64?: 'lossy-number' | 'decimal-string' | 'error'
 }
 
@@ -607,10 +613,20 @@ function geometryTemplates(
 /** The first line of a CityJSONSeq stream: the document's metadata, an empty
  *  `CityObjects` map and an empty `vertices` array.
  *
+ *  This is what carries `transform` -- the `scale`/`translate` that maps a
+ *  feature's quantised integer vertices back to world coordinates -- plus
+ *  `version`, `metadata`, and, when the file has them, `geometry-templates`
+ *  and `extensions`. Pure computation over an already-parsed header: it issues
+ *  no reads and can be called any number of times.
+ *
  *  The header's own `appearance` table is deliberately NOT emitted here: the
  *  reference does not emit it either (`to_cj_metadata` never sets
  *  `cj.appearance`), and each feature carries the slice of the palette it
- *  actually uses in its own `appearance`. */
+ *  actually uses in its own `appearance`.
+ *
+ *  @param header `reader.header`.
+ *  @param opts how to spell `Long`/`ULong` attribute values; see
+ *  {@link Int64Policy}. Defaults to `'lossy-number'`. */
 export function toCityJSONMetadata(header: HeaderView, opts?: Int64Policy): CityJSON {
   const policy = opts?.int64 ?? 'lossy-number'
   const hdr = header.raw
@@ -650,7 +666,24 @@ export function toCityJSONMetadata(header: HeaderView, opts?: Int64Policy): City
   return cj
 }
 
-/** One CityJSONFeature line. */
+/** One CityJSONFeature line: every CityObject the feature holds, keyed by id,
+ *  with its attributes decoded, its geometry boundaries re-nested to the depth
+ *  the geometry type implies, and its semantics / material / texture index
+ *  arrays rebuilt (a stored `u32::MAX` becomes `null`).
+ *
+ *  `vertices` stays QUANTISED: they are the integers as stored, and the
+ *  `transform` from {@link toCityJSONMetadata} is what maps them to world
+ *  coordinates. The reference reader does not apply it here either, and the
+ *  conformance corpus pins that.
+ *
+ *  Pure computation over an already-read `Feature`; it issues no reads.
+ *
+ *  @param feature one feature from a cursor -- `reader.select()` or
+ *  `reader.selectAll()`.
+ *  @param header the header of the SAME file the feature came from; it
+ *  supplies the fallback attribute schema and the semantic-surface schema.
+ *  @param opts how to spell `Long`/`ULong` attribute values; see
+ *  {@link Int64Policy}. Defaults to `'lossy-number'`. */
 export function toCityJSONFeature(
   feature: Feature, header: HeaderView, opts?: Int64Policy,
 ): CityJSONFeature {

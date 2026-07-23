@@ -1,19 +1,17 @@
 #include <fcb/attribute.hpp>
-
-#include "detail/checked.hpp"
-
 #include <fcb/generated/header_generated.h>
 
 #include <algorithm>
 #include <cstring>
 #include <unordered_map>
 
+#include "detail/checked.hpp"
+
 namespace fcb {
 
 namespace {
 
-template <typename T>
-T get_le(bytes_view b, std::size_t at) {
+template <typename T> T get_le(bytes_view b, std::size_t at) {
     using U = typename std::make_unsigned<T>::type;
     U u = 0;
     for (std::size_t i = 0; i < sizeof(T); ++i) {
@@ -45,14 +43,16 @@ void need(bytes_view b, std::size_t at, std::size_t n, const char* what) {
 
 }  // namespace
 
-std::vector<std::pair<std::string, AttrValue>> decode_attributes(
-    bytes_view blob, const std::vector<ColumnInfo>& schema) {
+std::vector<std::pair<std::string, AttrValue>>
+decode_attributes(bytes_view blob, const std::vector<ColumnInfo>& schema) {
     std::vector<std::pair<std::string, AttrValue>> out;
-    if (blob.empty()) return out;
+    if (blob.empty())
+        return out;
 
     std::unordered_map<std::uint16_t, const ColumnInfo*> by_index;
     by_index.reserve(schema.size());
-    for (const auto& c : schema) by_index.emplace(c.index, &c);
+    for (const auto& c : schema)
+        by_index.emplace(c.index, &c);
 
     std::size_t at = 0;
     while (at < blob.size()) {
@@ -63,8 +63,7 @@ std::vector<std::pair<std::string, AttrValue>> decode_attributes(
         auto found = by_index.find(col_index);
         if (found == by_index.end()) {
             throw Error(ErrorCode::InvalidAttributeValue,
-                        "attribute references unknown column index " +
-                            std::to_string(col_index));
+                        "attribute references unknown column index " + std::to_string(col_index));
         }
         const ColumnInfo& col = *found->second;
         const auto type = static_cast<::ColumnType>(col.type);
@@ -135,8 +134,8 @@ std::vector<std::pair<std::string, AttrValue>> decode_attributes(
                 const std::uint32_t len = get_le<std::uint32_t>(blob, at);
                 at += 4;
                 need(blob, at, len, "string body");
-                v.type = (type == ::ColumnType::Json) ? AttrValue::Type::Json
-                                                      : AttrValue::Type::String;
+                v.type =
+                    (type == ::ColumnType::Json) ? AttrValue::Type::Json : AttrValue::Type::String;
                 v.s.assign(reinterpret_cast<const char*>(blob.data()) + at, len);
                 at += len;
                 break;
@@ -166,12 +165,24 @@ nlohmann::json attributes_to_json(bytes_view blob, const std::vector<ColumnInfo>
     nlohmann::json obj = nlohmann::json::object();
     for (auto& [name, v] : decode_attributes(blob, schema)) {
         switch (v.type) {
-            case AttrValue::Type::Null: obj[name] = nullptr; break;
-            case AttrValue::Type::Bool: obj[name] = v.b; break;
-            case AttrValue::Type::Int: obj[name] = v.i; break;
-            case AttrValue::Type::UInt: obj[name] = v.u; break;
-            case AttrValue::Type::Double: obj[name] = v.d; break;
-            case AttrValue::Type::String: obj[name] = v.s; break;
+            case AttrValue::Type::Null:
+                obj[name] = nullptr;
+                break;
+            case AttrValue::Type::Bool:
+                obj[name] = v.b;
+                break;
+            case AttrValue::Type::Int:
+                obj[name] = v.i;
+                break;
+            case AttrValue::Type::UInt:
+                obj[name] = v.u;
+                break;
+            case AttrValue::Type::Double:
+                obj[name] = v.d;
+                break;
+            case AttrValue::Type::String:
+                obj[name] = v.s;
+                break;
             case AttrValue::Type::Binary:
                 // Raw bytes have no faithful JSON form; emit as a byte array.
                 obj[name] = std::vector<std::uint8_t>(v.s.begin(), v.s.end());

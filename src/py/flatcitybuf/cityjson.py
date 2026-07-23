@@ -105,8 +105,16 @@ _SEMANTIC_ATTRIBUTES_VTABLE_OFFSET = 6
 
 
 def city_object_type_name(type_: int) -> str:
-    """cityjson.cpp:339-347. Raises on any ubyte value outside the
-    CityObjectType enum (feature.fbs)."""
+    """The CityJSON type name for a raw `CityObjectView.type` ubyte --
+    e.g. 6 -> "Building". cityjson.cpp:339-347.
+
+    Names and order come from feature.fbs's CityObjectType enum and
+    must match CityJSON exactly. Raises
+    FcbError(INVALID_FLATBUFFER) on any value outside the enum;
+    "ExtensionObject" is a real member, but a CityObject carrying one
+    also carries `extension_type`, which `to_cityjson_feature` prefers
+    over this function's answer.
+    """
     if not 0 <= type_ < len(_CITY_OBJECT_TYPE_NAMES):
         raise FcbError(
             ErrorCode.INVALID_FLATBUFFER,
@@ -825,12 +833,25 @@ def _to_cityjson_metadata_impl(header: HeaderView) -> Dict[str, Any]:
 def to_cityjson_feature(
     feature: Feature, header: HeaderView
 ) -> Dict[str, Any]:
-    """One CityJSONFeature. Mirrors cityjson.cpp's to_cityjson_feature
-    (cityjson.cpp:408-503).
+    """One CityJSONFeature, as a plain dict ready for `json.dumps`.
+    Mirrors cityjson.cpp's to_cityjson_feature (cityjson.cpp:408-503).
+
+    `header` supplies the transform and the DEFAULT attribute schema;
+    each CityObject that carries its own `columns` overrides it, which
+    is the normal case in real data (see
+    `attribute.decode_attributes`). Vertices are emitted as the raw
+    scaled integers on disk, exactly as CityJSON specifies -- apply
+    `header.info.scale`/`.translate` to get coordinates.
+
+    NULL SENTINEL: u32::MAX (4294967295) means "absent" in a
+    geometry's `semantics.values` and in the material/texture index
+    arrays, and is emitted here as JSON `null`. It is never passed
+    through as the literal number.
 
     Wrapped in reraise_as_invalid_flatbuffer for the same reason
     to_cityjson_metadata is -- see its docstring (Codex review, Task
-    12).
+    12) -- so a corruption several levels down surfaces as
+    FcbError(INVALID_FLATBUFFER) rather than a bare IndexError.
     """
     with reraise_as_invalid_flatbuffer(
         f"failed to build CityJSON for feature {feature.id!r}"

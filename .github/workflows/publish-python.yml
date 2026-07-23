@@ -32,6 +32,22 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "actions[bot]@github.com"
 
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      # A manual dispatch can land on any commit, so re-run the gate here
+      # rather than trusting that CI happened to pass on this SHA. `just
+      # check` covers ruff, mypy --strict and pytest in BOTH the numpy and
+      # numpy-less states. PyPI versions cannot be replaced once uploaded,
+      # only yanked. publish-npm.yml has always done this; this workflow
+      # published without running a single test.
+      - name: Verify before publishing
+        working-directory: src/py
+        run: just check
+
       - name: Install build tooling
         run: pip install build twine
 

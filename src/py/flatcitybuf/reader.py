@@ -97,7 +97,33 @@ def _read_feature_at(
 
 class FcbReader:
     """The library's entry point. Mirrors fcb::FcbReader
-    (reader.hpp:69-101), minus select_bbox."""
+    (reader.hpp:69-101), minus select_bbox.
+
+    Open a file with `open_file`, or any other byte source with `open`;
+    the header is parsed once, there, and exposed as the `header`
+    attribute (a HeaderView) for the lifetime of the reader. From there
+    there are three ways to reach features:
+
+    * `select_all` -- sequential scan, in stored (Hilbert) order,
+      yielding decoded Features.
+    * `select_attr` -- the attribute B+trees, returning
+      SearchResultItem OFFSETS.
+    * `packed_rtree.search_rtree` -- the spatial index, likewise
+      returning offsets. It is a free function over a RangeReader
+      rather than a method (there is no `select_bbox` here), so pass it
+      `range_reader` and the geometry from `header`.
+
+    `feature_at` is the inverse of both index paths: it turns one
+    offset back into a Feature. `cityjson.to_cityjson_feature` then
+    turns a Feature into a plain CityJSONFeature dict, and
+    `cityjson.to_cityjson_metadata(reader.header)` produces the
+    CityJSONSeq header line that precedes them.
+
+    NOT thread-safe, because the underlying RangeReader is not (see
+    RangeReader's contract): one reader per thread, or serialise
+    access. Instances hold the byte source open and have no explicit
+    close.
+    """
 
     def __init__(self, reader: RangeReader, header: HeaderView) -> None:
         self._reader = reader
@@ -105,10 +131,31 @@ class FcbReader:
 
     @classmethod
     def open_file(cls, path: str | Path) -> FcbReader:
+        """Open a local `.fcb` file by path. Convenience wrapper for
+        `open(FileRangeReader(path))`.
+
+        Raises FcbError(IO_ERROR) if the file cannot be opened or
+        stat'd, FcbError(INVALID_MAGIC_BYTES) if it is not a
+        FlatCityBuf file, and FcbError(ILLEGAL_HEADER_SIZE) /
+        FcbError(INVALID_FLATBUFFER) for a truncated or malformed
+        header -- see `header.read_header`.
+        """
         return cls.open(FileRangeReader(path))
 
     @classmethod
     def open(cls, reader: RangeReader) -> FcbReader:
+        """Open any byte source implementing the RangeReader protocol
+        -- `FileRangeReader`, `HttpRangeReader`, or your own transport.
+
+        Reads and validates the preamble and header eagerly, through
+        one buffered prefetch rather than a read per field, so opening
+        a remote file costs a couple of range requests instead of
+        dozens; nothing else is touched until a query runs. The
+        parsed `header` describes THIS reader's bytes, and the reader
+        keeps using the source it was given -- do not hand the same
+        RangeReader to two FcbReaders and expect either to be
+        thread-safe.
+        """
         return cls(reader, read_header(reader))
 
     @property

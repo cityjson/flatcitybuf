@@ -35,20 +35,39 @@ find one, it goes there.
 
 ## Commands
 
-The `justfile` is the task runner. `just --list` shows everything.
+`just` is the task runner, and **every language directory has its own justfile
+exposing the same five verbs**. The root justfile fans each one out across
+`src/rust`, `src/cpp`, `src/py`, `src/ts`, `examples/web` — in that order,
+because `examples/web` consumes `src/ts/dist`.
 
 ```bash
-just py-test          # Python suite            (or: cd src/py && uv run pytest)
-just py-lint          # ruff check + format --check
-just check-py         # sync, autofix, mypy, test
-just check-cpp        # cmake configure + build + ctest
-just check-common     # Rust fmt, clippy, nextest, build
-just gen-conformance  # regenerate the corpus (needs the Rust CLI)
-just pre-commit       # everything above
+just check    # lint + type + test + build, everywhere, read-only
+just test     # tests only, everywhere
+just lint     # linters and format checks only
+just type     # cargo check / compiler / mypy --strict / tsc --noEmit
+just build    # builds only
+just fix      # rustfmt, clippy --fix, ruff, clang-format — MUTATES the tree
 ```
+
+The same verbs work inside any one language:
+
+```bash
+cd src/py  && just test        # just this suite
+cd src/cpp && just test-http   # the libcurl adapter, in its own build tree
+cd src/ts  && just test-browser
+```
+
+`just --list` (root or any subdirectory) shows everything, including the
+per-language extras (`src/rust`: `ser`/`deser`/`info`/`bench`; `src/cpp`:
+`tidy`/`harden`; `src/py`: `test-no-numpy`).
+
+Never gate on `just fix` output: it is the only recipe that rewrites source.
+`check` never modifies a file.
 
 Python tooling is `uv`; type-checking is `mypy --strict`; linting is `ruff` at
 line length 79 with `E501` enabled.
+
+Full manual verification procedure, local and remote: `docs/TESTING.md`.
 
 ## Conventions that bite
 

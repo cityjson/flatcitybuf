@@ -10,8 +10,13 @@ import type { AttrIndexInfo } from './attribute-index.js'
 
 /** One attribute column's schema, copied out of the header. */
 export interface ColumnInfo {
+  /** The column's ordinal. Attribute blobs are keyed by this, and
+   *  `AttrIndexInfo.columnIndex` refers to it. */
   index: number
+  /** The attribute name, and what an `AttrCondition.field` must match. */
   name: string
+  /** Selects both how the attribute blob is decoded and what JS type an
+   *  `AttrCondition.value` against this column may have. */
   type: ColumnType
   nullable: boolean
 }

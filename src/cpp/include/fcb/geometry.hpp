@@ -1,14 +1,14 @@
 #pragma once
 
+#include <fcb/error.hpp>
+#include <fcb/span.hpp>
+
 #include <cstdint>
 #include <string>
 #include <vector>
 
-#include <fcb/error.hpp>
-#include <fcb/span.hpp>
-
 #ifdef FCB_WITH_JSON
-#include <nlohmann/json.hpp>
+#    include <nlohmann/json.hpp>
 #endif
 
 namespace fcb {
@@ -85,14 +85,11 @@ enum class GeometryKind : std::uint8_t {
 /// function, because `geometry_type_name` rejects it first. The `default:`
 /// arm in the switch is a C++ formality with no fallback semantics -- see the
 /// policy note at the top of cityjson.cpp.
-nlohmann::json decode_boundaries(GeometryKind type,
-                                 UIntView solids,
-                                 UIntView shells,
-                                 UIntView surfaces,
-                                 UIntView strings,
-                                 UIntView indices);
+nlohmann::json decode_boundaries(GeometryKind type, UIntView solids, UIntView shells,
+                                 UIntView surfaces, UIntView strings, UIntView indices);
 
-/// Rebuild `semantics.<...>.values` from the flat run of semantic indices.
+/// Rebuild the nested semantics `values` array from the flat run of semantic
+/// indices.
 ///
 /// `semantics.values` is one level shallower than the boundaries. A semantics
 /// mapping carries no count arrays of its own, so the group sizes come from
@@ -101,12 +98,10 @@ nlohmann::json decode_boundaries(GeometryKind type,
 /// `UINT32_MAX` is `null` at the leaf. There is no wire encoding for a `null`
 /// shell or solid in semantics; the encoder expands one to a `null` per
 /// surface. Mirrors `decode_semantics` (geom_decoder.rs:226).
-nlohmann::json decode_semantics_values(GeometryKind type,
-                                       UIntView solids,
-                                       UIntView shells,
+nlohmann::json decode_semantics_values(GeometryKind type, UIntView solids, UIntView shells,
                                        UIntView values);
 
-/// Rebuild a `material.<theme>.values` array from a MaterialMapping.
+/// Rebuild the `values` array of one `material` theme from a MaterialMapping.
 ///
 /// Material indices sit two levels shallower than boundaries: one index per
 /// SURFACE, not per ring. So there is no `surfaces`/`strings` argument --
@@ -121,12 +116,10 @@ nlohmann::json decode_semantics_values(GeometryKind type,
 /// this NEVER throws: the reference reads a missing count as zero and clamps
 /// every slice to the vertex array, so a mapping that over-claims yields
 /// short or empty entries rather than an error.
-nlohmann::json decode_material_values(GeometryKind type,
-                                      UIntView solids,
-                                      UIntView shells,
+nlohmann::json decode_material_values(GeometryKind type, UIntView solids, UIntView shells,
                                       UIntView vertices);
 
-/// Rebuild a `texture.<theme>.values` array from a TextureMapping.
+/// Rebuild the `values` array of one `texture` theme from a TextureMapping.
 ///
 /// Texture values nest exactly as deeply as the boundaries -- solid, shell,
 /// surface, ring -- except the innermost list is `[texture index, then one
@@ -138,12 +131,8 @@ nlohmann::json decode_material_values(GeometryKind type,
 ///
 /// Mirrors `decode_textures` (geom_decoder.rs:468). Also never throws; see
 /// above.
-nlohmann::json decode_texture_values(GeometryKind type,
-                                     UIntView solids,
-                                     UIntView shells,
-                                     UIntView surfaces,
-                                     UIntView strings,
-                                     UIntView vertices);
+nlohmann::json decode_texture_values(GeometryKind type, UIntView solids, UIntView shells,
+                                     UIntView surfaces, UIntView strings, UIntView vertices);
 
 #endif  // FCB_WITH_JSON
 

@@ -214,9 +214,24 @@ def _city_object_view_from(obj: Any) -> CityObjectView:
 
 class Feature:
     """One decoded CityFeature. Mirrors fcb::Feature (feature.hpp,
-    reader.cpp:23-109). `_raw` is exposed to cityjson.py only, through
-    the module-level `raw_city_feature` gateway above -- see its
-    docstring.
+    reader.cpp:23-109).
+
+    Produced by `reader.FcbReader.select_all` and
+    `reader.FcbReader.feature_at`; pass one to
+    `cityjson.to_cityjson_feature` for a CityJSONFeature dict.
+
+    `id` is the feature identifier (required by the format; a missing
+    one is FcbError(MISSING_REQUIRED_FIELD)). `byte_offset` is where
+    this feature starts RELATIVE TO THE FEATURE SECTION -- the same
+    coordinate space `SearchResultItem.offset` and
+    `FcbReader.feature_at` use, so it round-trips.
+
+    Construction is cheap: `city_objects()` and `vertices()` walk the
+    FlatBuffer on each call and cache nothing, so bind their results
+    if you need them twice.
+
+    `_raw` is exposed to cityjson.py only, through the module-level
+    `raw_city_feature` gateway above -- see its docstring.
     """
 
     def __init__(self, raw: Any, byte_offset: int) -> None:
@@ -235,6 +250,15 @@ class Feature:
         self._raw = raw
 
     def city_objects(self) -> list[CityObjectView]:
+        """This feature's CityObjects, decoded fresh on every call.
+
+        Each view carries its OWN attribute schema when it has one
+        (`has_columns`/`columns`), which overrides the header's and is
+        the normal case in real data -- see attribute.decode_attributes.
+
+        Raises FcbError(INVALID_FLATBUFFER) on a corrupt Objects
+        vector.
+        """
         # Codex review (Task 12): _parse_feature (reader.py) only wraps
         # the INITIAL GetRootAs/Feature(...) call in
         # reraise_as_invalid_flatbuffer; this deeper accessor -- called
@@ -251,6 +275,19 @@ class Feature:
             ]
 
     def vertices(self) -> list[tuple[int, int, int]]:
+        """This feature's vertices as (x, y, z) triples of the RAW
+        SCALED INTEGERS stored on disk, decoded fresh on every call.
+
+        These are not coordinates: multiply by `header.info.scale` and
+        add `header.info.translate` to get them. CityJSON stores the
+        same integers, so `cityjson.to_cityjson_feature` emits them
+        unchanged.
+
+        Uses numpy for the bulk decode when it is importable and falls
+        back to a per-vertex loop when it is not; both paths return
+        identical values. Raises FcbError(INVALID_FLATBUFFER) on a
+        corrupt Vertices vector.
+        """
         # feature.fbs:55-59 -- Vertex is a struct of 3 plain (non-null)
         # int32 fields; these are the raw scaled integers on disk, not
         # transformed coordinates -- applying header.scale/translate is

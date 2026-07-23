@@ -55,7 +55,13 @@ function fieldPresent(obj: CityObject, slot: number): boolean {
 /** One CityObject inside a feature, with the attribute schema that governs
  *  it already resolved. */
 export class CityObjectView {
+  /** The CityObject's id -- the key it appears under in the emitted
+   *  `CityObjects` map. `''` for a malformed object that omits it. */
   readonly id: string
+  /** The CityJSON type name (`'Building'`, `'BuildingPart'`, ...). An
+   *  extension object's own `extension_type` string wins verbatim; a tag
+   *  outside the generated enum's range becomes `'+UnknownCityObject'` rather
+   *  than throwing. */
   readonly type: string
   private readonly raw: CityObject
   private readonly headerColumns: readonly ColumnInfo[]
@@ -126,6 +132,10 @@ export class CityObjectView {
     return this.raw.attributesArray() ?? new Uint8Array(0)
   }
 
+  /** This object's attributes, decoded against {@link CityObjectView.columns}.
+   *  `{}` both for an object that declares no attributes vector and for one
+   *  that declares an empty one -- use {@link CityObjectView.hasAttributes} to
+   *  tell those apart. Decoded fresh on every call, not cached. */
   attributes(): Record<string, AttrValue> {
     const blob = this.attributesBlob()
     if (blob === null) return {}
@@ -139,6 +149,8 @@ export class CityObjectView {
  *  index 0 of its own ArrayBuffer -- readFeature guarantees that. See
  *  readFeature for why both halves of that matter. */
 export class Feature {
+  /** The feature's id -- the `id` member of the emitted CityJSONFeature.
+   *  `''` for a malformed feature that omits the required field. */
   readonly id: string
   /** Byte offset of this feature RELATIVE to the start of the features
    *  section, matching the offsets stored in the R-tree leaves. */
@@ -189,6 +201,12 @@ export class Feature {
     return this.objects
   }
 
+  /** Shorthand for `cityObjects()[objectIndex].attributes()`, decoded against
+   *  the schema that governs THAT object -- its own `columns` when it declares
+   *  them, the header's otherwise.
+   *
+   *  @throws `FcbError` with `code` `InvalidArgument` when `objectIndex` is out
+   *  of range. */
   attributes(objectIndex: number): Record<string, AttrValue> {
     const obj = this.cityObjects()[objectIndex]
     if (obj === undefined) {

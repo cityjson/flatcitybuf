@@ -53,11 +53,28 @@ if(FCB_BUILD_TESTS)
 endif()
 
 if(FCB_BUILD_EXAMPLES)
+    # Each example is one self-contained .cpp covering one capability; see
+    # examples/README.md. read_features and query_attributes need the CityJSON
+    # component for nlohmann::json rendering, so they are gated on it.
     add_executable(fcb_read_local examples/read_local.cpp)
     target_link_libraries(fcb_read_local PRIVATE fcb_core_cpp)
 
     add_executable(fcb_read_http examples/read_http.cpp)
     target_link_libraries(fcb_read_http PRIVATE fcb_core_cpp)
+
+    add_executable(fcb_inspect_header examples/inspect_header.cpp)
+    target_link_libraries(fcb_inspect_header PRIVATE fcb_core_cpp)
+
+    add_executable(fcb_query_attributes examples/query_attributes.cpp)
+    target_link_libraries(fcb_query_attributes PRIVATE fcb_core_cpp)
+
+    add_executable(fcb_custom_reader examples/custom_reader.cpp)
+    target_link_libraries(fcb_custom_reader PRIVATE fcb_core_cpp)
+
+    if(FCB_WITH_JSON)
+        add_executable(fcb_read_features examples/read_features.cpp)
+        target_link_libraries(fcb_read_features PRIVATE fcb_core_cpp)
+    endif()
 endif()
 
 # ------------------------------------------------------------- install ---

@@ -6,6 +6,12 @@
 import { ErrorCode, FcbError } from '../errors.js'
 import { checkAborted, type ReadOpts, type RangeReader, validateArgs, validateBounds } from './range-reader.js'
 
+/** {@link RangeReader} over a `Blob` -- or a `File`, which extends it, so this
+ *  is what backs `FcbReader.fromBlob` for a file picker or a drop event.
+ *
+ *  Holds only a reference: each `read` is a `Blob.slice().arrayBuffer()`, so a
+ *  multi-gigabyte upload is never materialised in memory. There is no OS
+ *  resource behind it and nothing to close. */
 export class BlobRangeReader implements RangeReader {
   private readonly blob: Blob
 

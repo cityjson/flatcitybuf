@@ -1,15 +1,15 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <vector>
-
 #include <fcb/error.hpp>
 #include <fcb/header.hpp>
 #include <fcb/span.hpp>
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #ifdef FCB_WITH_JSON
-#include <nlohmann/json.hpp>
+#    include <nlohmann/json.hpp>
 #endif
 
 namespace fcb {
@@ -54,8 +54,8 @@ struct AttrValue {
 /// Byte, UByte and Binary are decoded here. The Rust reader used to hit
 /// `unreachable!()` on them despite the writer emitting them; that has been
 /// fixed upstream, so both implementations handle them.
-std::vector<std::pair<std::string, AttrValue>> decode_attributes(
-    bytes_view blob, const std::vector<ColumnInfo>& schema);
+std::vector<std::pair<std::string, AttrValue>>
+decode_attributes(bytes_view blob, const std::vector<ColumnInfo>& schema);
 
 #ifdef FCB_WITH_JSON
 /// Same decode, rendered as a JSON object for CityJSON emission.

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <cstdint>
-
 #include <fcb/error.hpp>
 #include <fcb/span.hpp>
+
+#include <cstdint>
 
 namespace fcb {
 
@@ -40,10 +40,8 @@ struct FileLayout {
 
 /// Throws fcb::Error{IllegalHeaderSize} when header_size is out of range or
 /// any size arithmetic overflows.
-FileLayout compute_layout(std::uint32_t header_size,
-                          std::uint64_t features_count,
-                          std::uint16_t index_node_size,
-                          std::uint64_t attr_index_size);
+FileLayout compute_layout(std::uint32_t header_size, std::uint64_t features_count,
+                          std::uint16_t index_node_size, std::uint64_t attr_index_size);
 
 /// Throws unless the computed sections fit inside the resource. Call this
 /// immediately after compute_layout, before issuing any index read.

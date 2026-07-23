@@ -19,14 +19,12 @@ int main(int argc, char** argv) {
 
         std::cout << fcb::to_cityjson_metadata(reader.header()).dump() << "\n";
 
-        auto it = (argc >= 6) ? reader.select_bbox(fcb::BBox{std::stod(argv[2]),
-                                                             std::stod(argv[3]),
-                                                             std::stod(argv[4]),
-                                                             std::stod(argv[5])})
-                              : reader.select_all();
+        auto it = (argc >= 6)
+                      ? reader.select_bbox(fcb::BBox{std::stod(argv[2]), std::stod(argv[3]),
+                                                     std::stod(argv[4]), std::stod(argv[5])})
+                      : reader.select_all();
         while (it.next()) {
-            std::cout << fcb::to_cityjson_feature(it.current(), reader.header()).dump()
-                      << "\n";
+            std::cout << fcb::to_cityjson_feature(it.current(), reader.header()).dump() << "\n";
         }
         return 0;
     } catch (const fcb::Error& e) {

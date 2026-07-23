@@ -1,15 +1,14 @@
-#include <doctest/doctest.h>
-
 #include <fcb/attribute.hpp>
+#include <fcb/generated/header_generated.h>
 #include <fcb/reader.hpp>
 #include <fcb/stree.hpp>
-
-#include <fcb/generated/header_generated.h>
 
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
+
+#include <doctest/doctest.h>
 
 using namespace fcb;
 
@@ -18,10 +17,10 @@ static const char* kFixture = FCB_TEST_DATA_DIR "/delft.fcb";
 TEST_CASE("stree node count uses branching_factor and breaks at n < bf") {
     // Unlike the R-tree (which breaks at n == 1), the B+tree loop stops when
     // a level fits in one node's worth of separators. stree.rs:462-497.
-    CHECK(stree_num_nodes(100, 16) == 107);   // 100 -> 7 (107), 7 < 16
-    CHECK(stree_num_nodes(16, 16) == 17);     // 16 -> 1 (17), 1 < 16
+    CHECK(stree_num_nodes(100, 16) == 107);  // 100 -> 7 (107), 7 < 16
+    CHECK(stree_num_nodes(16, 16) == 17);    // 16 -> 1 (17), 1 < 16
     CHECK(stree_num_nodes(10, 16) == 11);
-    CHECK(stree_num_nodes(1000, 16) == 1067); // 1000 -> 63 (1063) -> 4 (1067)
+    CHECK(stree_num_nodes(1000, 16) == 1067);  // 1000 -> 63 (1063) -> 4 (1067)
     CHECK_THROWS_AS(stree_num_nodes(10, 1), Error);
 }
 
@@ -35,9 +34,7 @@ TEST_CASE("payload tag is the MSB, mask is the low 63 bits") {
 
 TEST_CASE("payload entries decode as u32 count then count x u64, all LE") {
     std::vector<std::uint8_t> raw = {
-        0x02, 0x00, 0x00, 0x00,
-        0x0A, 0, 0, 0, 0, 0, 0, 0,
-        0x14, 0, 0, 0, 0, 0, 0, 0,
+        0x02, 0x00, 0x00, 0x00, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0x14, 0, 0, 0, 0, 0, 0, 0,
     };
     auto offsets = decode_payload_entry(bytes_view(raw));
     REQUIRE(offsets.size() == 2);
@@ -53,15 +50,15 @@ TEST_CASE("a truncated payload entry throws") {
 /// Collect the value of `field` for every feature, by decoding attributes
 /// with the per-object schema. Used as an independent oracle: the index
 /// says which features match; this says what the data actually holds.
-static std::map<std::string, std::string> string_values(FcbReader& r,
-                                                        const std::string& field) {
+static std::map<std::string, std::string> string_values(FcbReader& r, const std::string& field) {
     std::map<std::string, std::string> out;
     FeatureIterator it = r.select_all();
     while (it.next()) {
         const Feature& f = it.current();
         for (std::size_t i = 0; i < f.city_object_count(); ++i) {
             auto blob = f.object_attributes(i);
-            if (blob.empty()) continue;
+            if (blob.empty())
+                continue;
             auto own = f.object_columns(i);
             for (auto& [name, v] :
                  decode_attributes(blob, own.empty() ? r.header().info().columns : own)) {
@@ -83,23 +80,29 @@ TEST_CASE("Eq on a duplicated string column returns exactly the matching feature
 
     // Pick the most common value so the payload path is definitely used.
     std::map<std::string, int> freq;
-    for (auto& [id, v] : truth) ++freq[v];
+    for (auto& [id, v] : truth)
+        ++freq[v];
     std::string want;
     int best = 0;
     for (auto& [v, n] : freq) {
-        if (n > best) { best = n; want = v; }
+        if (n > best) {
+            best = n;
+            want = v;
+        }
     }
     REQUIRE(best > 1);
 
     std::set<std::string> expected;
     for (auto& [id, v] : truth) {
-        if (v == want) expected.insert(id);
+        if (v == want)
+            expected.insert(id);
     }
 
     AttrQuery q = {{"status", Operator::Eq, KeyValue::from_string(KeyKind::String50, want)}};
     FeatureIterator it = r.select_attr(q);
     std::set<std::string> got;
-    while (it.next()) got.insert(it.current().id());
+    while (it.next())
+        got.insert(it.current().id());
 
     CHECK(got == expected);
     CHECK(got.size() == static_cast<std::size_t>(best));
@@ -111,12 +114,12 @@ TEST_CASE("Eq on a unique string column returns exactly one feature") {
     REQUIRE_FALSE(truth.empty());
 
     const std::string want = truth.begin()->second;
-    AttrQuery q = {
-        {"identificatie", Operator::Eq, KeyValue::from_string(KeyKind::String50, want)}};
+    AttrQuery q = {{"identificatie", Operator::Eq, KeyValue::from_string(KeyKind::String50, want)}};
 
     FeatureIterator it = r.select_attr(q);
     std::vector<std::string> got;
-    while (it.next()) got.push_back(it.current().id());
+    while (it.next())
+        got.push_back(it.current().id());
 
     REQUIRE(got.size() == 1);
     CHECK(got[0] == truth.begin()->first);
@@ -131,7 +134,8 @@ TEST_CASE("Ge, Gt and Eq partition a numeric column consistently") {
         AttrQuery q = {{"b3_bouwlagen", op, KeyValue::from_u64(v)}};
         FeatureIterator it = r.select_attr(q);
         std::set<std::string> ids;
-        while (it.next()) ids.insert(it.current().id());
+        while (it.next())
+            ids.insert(it.current().id());
         return ids;
     };
 
@@ -142,9 +146,12 @@ TEST_CASE("Ge, Gt and Eq partition a numeric column consistently") {
     CHECK_FALSE(ge.empty());
     // Ge is exactly Gt plus Eq, and they are disjoint.
     CHECK(ge.size() == gt.size() + eq.size());
-    for (const auto& id : gt) CHECK(ge.count(id) == 1);
-    for (const auto& id : eq) CHECK(ge.count(id) == 1);
-    for (const auto& id : eq) CHECK(gt.count(id) == 0);
+    for (const auto& id : gt)
+        CHECK(ge.count(id) == 1);
+    for (const auto& id : eq)
+        CHECK(ge.count(id) == 1);
+    for (const auto& id : eq)
+        CHECK(gt.count(id) == 0);
 }
 
 TEST_CASE("Le and Lt partition consistently, and Ne is the complement of Eq") {
@@ -154,7 +161,8 @@ TEST_CASE("Le and Lt partition consistently, and Ne is the complement of Eq") {
         AttrQuery q = {{"b3_bouwlagen", op, KeyValue::from_u64(v)}};
         FeatureIterator it = r.select_attr(q);
         std::set<std::string> s;
-        while (it.next()) s.insert(it.current().id());
+        while (it.next())
+            s.insert(it.current().id());
         return s;
     };
 
@@ -162,10 +170,12 @@ TEST_CASE("Le and Lt partition consistently, and Ne is the complement of Eq") {
     auto lt = ids(Operator::Lt, 3);
     auto eq = ids(Operator::Eq, 3);
     CHECK(le.size() == lt.size() + eq.size());
-    for (const auto& id : eq) CHECK(lt.count(id) == 0);
+    for (const auto& id : eq)
+        CHECK(lt.count(id) == 0);
 
     auto ne = ids(Operator::Ne, 3);
-    for (const auto& id : eq) CHECK(ne.count(id) == 0);
+    for (const auto& id : eq)
+        CHECK(ne.count(id) == 0);
 }
 
 TEST_CASE("multiple conditions are ANDed and strictly narrow the result") {
@@ -174,7 +184,8 @@ TEST_CASE("multiple conditions are ANDed and strictly narrow the result") {
     auto ids = [&](const AttrQuery& q) {
         FeatureIterator it = r.select_attr(q);
         std::set<std::string> s;
-        while (it.next()) s.insert(it.current().id());
+        while (it.next())
+            s.insert(it.current().id());
         return s;
     };
 
@@ -189,7 +200,8 @@ TEST_CASE("multiple conditions are ANDed and strictly narrow the result") {
     // A test asserting only b.size() <= a.size() would pass even if the
     // second condition were ignored entirely; require a strict reduction.
     CHECK(b.size() < a.size());
-    for (const auto& id : b) CHECK(a.count(id) == 1);
+    for (const auto& id : b)
+        CHECK(a.count(id) == 1);
 }
 
 TEST_CASE("results contain no duplicate features") {
@@ -198,7 +210,8 @@ TEST_CASE("results contain no duplicate features") {
 
     FeatureIterator it = r.select_attr(q);
     std::vector<std::string> ids;
-    while (it.next()) ids.push_back(it.current().id());
+    while (it.next())
+        ids.push_back(it.current().id());
 
     std::set<std::string> uniq(ids.begin(), ids.end());
     CHECK(ids.size() == uniq.size());
@@ -228,12 +241,12 @@ TEST_CASE("querying a Json/Binary column is rejected as unsupported") {
 
     bool found_json_column = false;
     for (const auto& c : r.header().info().columns) {
-        if (c.name == "a_json") found_json_column = true;
+        if (c.name == "a_json")
+            found_json_column = true;
     }
     REQUIRE(found_json_column);
 
-    AttrQuery q = {
-        {"a_json", Operator::Eq, KeyValue::from_string(KeyKind::String100, "x")}};
+    AttrQuery q = {{"a_json", Operator::Eq, KeyValue::from_string(KeyKind::String100, "x")}};
     try {
         r.select_attr(q);
         FAIL("expected select_attr to throw for a Json column");
@@ -249,20 +262,22 @@ TEST_CASE("exact_index_only returns a superset of the verified result") {
     auto truth = string_values(r, "identificatie");
     const std::string want = truth.begin()->second;
 
-    AttrQuery q = {
-        {"identificatie", Operator::Eq, KeyValue::from_string(KeyKind::String50, want)}};
+    AttrQuery q = {{"identificatie", Operator::Eq, KeyValue::from_string(KeyKind::String50, want)}};
 
     std::set<std::string> verified, raw;
     {
         FeatureIterator it = r.select_attr(q);
-        while (it.next()) verified.insert(it.current().id());
+        while (it.next())
+            verified.insert(it.current().id());
     }
     {
         AttrQueryOptions o;
         o.exact_index_only = true;
         FeatureIterator it = r.select_attr(q, o);
-        while (it.next()) raw.insert(it.current().id());
+        while (it.next())
+            raw.insert(it.current().id());
     }
     CHECK(verified.size() <= raw.size());
-    for (const auto& id : verified) CHECK(raw.count(id) == 1);
+    for (const auto& id : verified)
+        CHECK(raw.count(id) == 1);
 }

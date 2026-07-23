@@ -1,15 +1,15 @@
 #ifdef FCB_WITH_CURL
 
-#include <doctest/doctest.h>
+#    include <fcb/cityjson.hpp>
+#    include <fcb/http/curl_range_reader.hpp>
+#    include <fcb/reader.hpp>
 
-#include <fcb/cityjson.hpp>
-#include <fcb/http/curl_range_reader.hpp>
-#include <fcb/reader.hpp>
+#    include <cstdlib>
+#    include <memory>
+#    include <set>
+#    include <string>
 
-#include <cstdlib>
-#include <memory>
-#include <set>
-#include <string>
+#    include <doctest/doctest.h>
 
 using namespace fcb;
 
@@ -19,18 +19,23 @@ static std::string fixture_url() {
     return u != nullptr ? std::string(u) : std::string();
 }
 
-#define SKIP_IF_NO_SERVER(url)                                  \
-    if ((url).empty()) {                                        \
-        MESSAGE("FCB_TEST_HTTP_URL not set; skipping");         \
-        return;                                                 \
-    }
+#    define SKIP_IF_NO_SERVER(url)                          \
+        if ((url).empty()) {                                \
+            MESSAGE("FCB_TEST_HTTP_URL not set; skipping"); \
+            return;                                         \
+        }
 
 TEST_CASE("CurlRangeReader reports total size") {
     const std::string url = fixture_url();
     SKIP_IF_NO_SERVER(url);
 
+    // Derived from the fixture at run time, never hardcoded: the corpus is not
+    // byte-reproducible, so a literal drifts silently. It already had -- this
+    // asserted 7668160 until 540772a regenerated delft.fcb at 7666308 bytes,
+    // and nothing caught it because CI never sets FCB_TEST_HTTP_URL.
+    FileRangeReader local(FCB_TEST_DATA_DIR "/delft.fcb");
     CurlRangeReader r(url);
-    CHECK(r.total_size() == 7668160);
+    CHECK(r.total_size() == local.total_size());
 }
 
 TEST_CASE("remote reads return the same bytes as the local file") {
@@ -143,13 +148,13 @@ TEST_CASE("a bbox query over HTTP returns the same ids as over the local file") 
     auto ids_from = [](std::shared_ptr<RangeReader> rr) {
         FcbReader r = FcbReader::open(std::move(rr));
         const auto& info = r.header().info();
-        const double mid_x =
-            (info.geographical_extent[0] + info.geographical_extent[3]) / 2.0;
+        const double mid_x = (info.geographical_extent[0] + info.geographical_extent[3]) / 2.0;
         BBox half{info.geographical_extent[0], info.geographical_extent[1], mid_x,
                   info.geographical_extent[4]};
         FeatureIterator it = r.select_bbox(half);
         std::set<std::string> ids;
-        while (it.next()) ids.insert(it.current().id());
+        while (it.next())
+            ids.insert(it.current().id());
         return ids;
     };
 

@@ -1,18 +1,16 @@
-#include <fcb/reader.hpp>
-
-#include <fcb/packed_rtree.hpp>
 #include <fcb/attribute.hpp>
-#include <fcb/stree.hpp>
-
-#include "detail/checked.hpp"
-#include "detail/feature_access.hpp"
-
 #include <fcb/generated/feature_generated.h>
 #include <fcb/generated/header_generated.h>
+#include <fcb/packed_rtree.hpp>
+#include <fcb/reader.hpp>
+#include <fcb/stree.hpp>
 
 #include <algorithm>
 #include <cstring>
 #include <utility>
+
+#include "detail/checked.hpp"
+#include "detail/feature_access.hpp"
 
 namespace fcb {
 
@@ -21,13 +19,13 @@ static constexpr std::size_t kBodyAlignPad = 0;
 
 // -------------------------------------------------------------- Feature ---
 
-Feature::Feature(std::shared_ptr<const std::vector<std::uint8_t>> buffer,
-                 std::uint64_t byte_offset,
+Feature::Feature(std::shared_ptr<const std::vector<std::uint8_t>> buffer, std::uint64_t byte_offset,
                  std::size_t body_offset)
     : buffer_(std::move(buffer)), byte_offset_(byte_offset), body_offset_(body_offset) {}
 
 const ::CityFeature* Feature::raw() const {
-    if (buffer_ == nullptr) return nullptr;
+    if (buffer_ == nullptr)
+        return nullptr;
     return GetSizePrefixedCityFeature(buffer_->data() + body_offset_);
 }
 
@@ -35,21 +33,25 @@ const ::CityFeature* detail::FeatureAccess::get(const Feature& f) { return f.raw
 
 std::string Feature::id() const {
     const ::CityFeature* cf = raw();
-    if (cf == nullptr || cf->id() == nullptr) return {};
+    if (cf == nullptr || cf->id() == nullptr)
+        return {};
     return cf->id()->str();
 }
 
 namespace {
 const ::CityObject* object_at(const ::CityFeature* cf, std::size_t i) {
-    if (cf == nullptr || cf->objects() == nullptr) return nullptr;
-    if (i >= cf->objects()->size()) return nullptr;
+    if (cf == nullptr || cf->objects() == nullptr)
+        return nullptr;
+    if (i >= cf->objects()->size())
+        return nullptr;
     return cf->objects()->Get(static_cast<flatbuffers::uoffset_t>(i));
 }
 }  // namespace
 
 bytes_view Feature::object_attributes(std::size_t i) const {
     const auto* obj = object_at(raw(), i);
-    if (obj == nullptr || obj->attributes() == nullptr) return {};
+    if (obj == nullptr || obj->attributes() == nullptr)
+        return {};
     const auto* a = obj->attributes();
     return bytes_view(a->data(), a->size());
 }
@@ -61,7 +63,8 @@ bool Feature::object_has_attributes(std::size_t i) const {
 
 bool Feature::object_extent(std::size_t i, std::array<double, 6>& out) const {
     const auto* obj = object_at(raw(), i);
-    if (obj == nullptr || obj->geographical_extent() == nullptr) return false;
+    if (obj == nullptr || obj->geographical_extent() == nullptr)
+        return false;
     const auto* e = obj->geographical_extent();
     // memcpy-based reads: these structs can sit at misaligned internal
     // offsets, same as Transform in the header. See header.cpp.
@@ -70,8 +73,7 @@ bool Feature::object_extent(std::size_t i, std::array<double, 6>& out) const {
         std::memcpy(&d, static_cast<const std::uint8_t*>(base) + off, sizeof(double));
         return d;
     };
-    out = {rd(e, 0),  rd(e, 8),  rd(e, 16),
-           rd(e, 24), rd(e, 32), rd(e, 40)};
+    out = {rd(e, 0), rd(e, 8), rd(e, 16), rd(e, 24), rd(e, 32), rd(e, 40)};
     return true;
 }
 
@@ -83,10 +85,12 @@ bool Feature::object_has_columns(std::size_t i) const {
 std::vector<ColumnInfo> Feature::object_columns(std::size_t i) const {
     std::vector<ColumnInfo> out;
     const auto* obj = object_at(raw(), i);
-    if (obj == nullptr || obj->columns() == nullptr) return out;
+    if (obj == nullptr || obj->columns() == nullptr)
+        return out;
     out.reserve(obj->columns()->size());
     for (const auto* c : *obj->columns()) {
-        if (c == nullptr) continue;
+        if (c == nullptr)
+            continue;
         ColumnInfo ci{};
         ci.index = c->index();
         ci.name = c->name() != nullptr ? c->name()->str() : std::string();
@@ -99,26 +103,23 @@ std::vector<ColumnInfo> Feature::object_columns(std::size_t i) const {
 
 std::string Feature::object_id(std::size_t i) const {
     const auto* obj = object_at(raw(), i);
-    if (obj == nullptr || obj->id() == nullptr) return {};
+    if (obj == nullptr || obj->id() == nullptr)
+        return {};
     return obj->id()->str();
 }
 
 std::size_t Feature::city_object_count() const {
     const ::CityFeature* cf = raw();
-    if (cf == nullptr || cf->objects() == nullptr) return 0;
+    if (cf == nullptr || cf->objects() == nullptr)
+        return 0;
     return cf->objects()->size();
 }
 
 // ------------------------------------------------------- FeatureIterator ---
 
-FeatureIterator::FeatureIterator(std::shared_ptr<RangeReader> reader,
-                                 HeaderView header,
-                                 IterationMode mode,
-                                 std::vector<SearchResultItem> hits)
-    : reader_(std::move(reader)),
-      header_(std::move(header)),
-      mode_(mode),
-      hits_(std::move(hits)) {
+FeatureIterator::FeatureIterator(std::shared_ptr<RangeReader> reader, HeaderView header,
+                                 IterationMode mode, std::vector<SearchResultItem> hits)
+    : reader_(std::move(reader)), header_(std::move(header)), mode_(mode), hits_(std::move(hits)) {
     cursor_ = header_.layout().feature_begin;
 }
 
@@ -138,8 +139,7 @@ bool FeatureIterator::next() {
             // fewer features than it carries.
             if (cursor_ < total_size) {
                 throw Error(ErrorCode::IoError,
-                            "trailing bytes after " + std::to_string(features_count) +
-                                " features");
+                            "trailing bytes after " + std::to_string(features_count) + " features");
             }
             return false;
         }
@@ -153,8 +153,8 @@ bool FeatureIterator::next() {
             current_ = Feature();
             return false;
         }
-        at = detail::checked_add(header_.layout().feature_begin,
-                                 hits_[hit_index_].offset, "feature offset");
+        at = detail::checked_add(header_.layout().feature_begin, hits_[hit_index_].offset,
+                                 "feature offset");
         ++hit_index_;
     }
 
@@ -174,10 +174,9 @@ bool FeatureIterator::next() {
             current_ = Feature();
             return false;
         }
-        throw Error(ErrorCode::IoError,
-                    "truncated feature section: expected " +
-                        std::to_string(features_count) + " features, got " +
-                        std::to_string(produced_));
+        throw Error(ErrorCode::IoError, "truncated feature section: expected " +
+                                            std::to_string(features_count) + " features, got " +
+                                            std::to_string(produced_));
     }
 
     const std::uint32_t len = static_cast<std::uint32_t>(prefix[0]) |
@@ -203,12 +202,10 @@ bool FeatureIterator::next() {
     std::copy(raw_buf.begin(), raw_buf.end(), buf->begin() + kBodyAlignPad);
 
     // Full structural verification, alignment included; see header.cpp.
-    flatbuffers::Verifier verifier(buf->data() + kBodyAlignPad,
-                                   buf->size() - kBodyAlignPad);
+    flatbuffers::Verifier verifier(buf->data() + kBodyAlignPad, buf->size() - kBodyAlignPad);
     if (!VerifySizePrefixedCityFeatureBuffer(verifier)) {
         throw Error(ErrorCode::InvalidFlatbuffer,
-                    "feature failed FlatBuffers verification at offset " +
-                        std::to_string(at));
+                    "feature failed FlatBuffers verification at offset " + std::to_string(at));
     }
 
     current_ = Feature(std::const_pointer_cast<const std::vector<std::uint8_t>>(buf),
@@ -247,12 +244,12 @@ FeatureIterator FcbReader::select_bbox(const BBox& query) {
     // coalesces node ranges up to 256 KB (http_reader/mod.rs:213); a window
     // of that size gives the same effect through the decorator.
     auto index_reader = std::make_shared<BufferedRangeReader>(reader_, 256 * 1024);
-    auto hits = rtree_search_bbox(*index_reader, layout.rtree_begin,
-                                  info.features_count, info.index_node_size, query);
+    auto hits = rtree_search_bbox(*index_reader, layout.rtree_begin, info.features_count,
+                                  info.index_node_size, query);
 
     auto feature_reader = std::make_shared<BufferedRangeReader>(reader_, 1048576);
-    return FeatureIterator(std::move(feature_reader), header_,
-                           IterationMode::OffsetList, std::move(hits));
+    return FeatureIterator(std::move(feature_reader), header_, IterationMode::OffsetList,
+                           std::move(hits));
 }
 
 namespace {
@@ -261,10 +258,18 @@ namespace {
 bool value_satisfies(const AttrValue& v, Operator op, const KeyValue& want, KeyKind kind) {
     KeyValue actual;
     switch (v.type) {
-        case AttrValue::Type::Bool: actual = KeyValue::from_bool(v.b); break;
-        case AttrValue::Type::Int: actual = KeyValue::from_i64(v.i); break;
-        case AttrValue::Type::UInt: actual = KeyValue::from_u64(v.u); break;
-        case AttrValue::Type::Double: actual = KeyValue::from_f64(v.d); break;
+        case AttrValue::Type::Bool:
+            actual = KeyValue::from_bool(v.b);
+            break;
+        case AttrValue::Type::Int:
+            actual = KeyValue::from_i64(v.i);
+            break;
+        case AttrValue::Type::UInt:
+            actual = KeyValue::from_u64(v.u);
+            break;
+        case AttrValue::Type::Double:
+            actual = KeyValue::from_f64(v.d);
+            break;
         case AttrValue::Type::String:
         case AttrValue::Type::Json:
             // Compare the FULL strings, not the truncated keys -- this is the
@@ -274,16 +279,23 @@ bool value_satisfies(const AttrValue& v, Operator op, const KeyValue& want, KeyK
                 const std::string& b = want.original_string();
                 const int c = a.compare(b);
                 switch (op) {
-                    case Operator::Eq: return c == 0;
-                    case Operator::Ne: return c != 0;
-                    case Operator::Gt: return c > 0;
-                    case Operator::Ge: return c >= 0;
-                    case Operator::Lt: return c < 0;
-                    case Operator::Le: return c <= 0;
+                    case Operator::Eq:
+                        return c == 0;
+                    case Operator::Ne:
+                        return c != 0;
+                    case Operator::Gt:
+                        return c > 0;
+                    case Operator::Ge:
+                        return c >= 0;
+                    case Operator::Lt:
+                        return c < 0;
+                    case Operator::Le:
+                        return c <= 0;
                 }
                 return false;
             }
-        case AttrValue::Type::Null: return false;
+        case AttrValue::Type::Null:
+            return false;
     }
 
     // Numeric kinds: coerce both sides to the query's kind before comparing.
@@ -291,35 +303,40 @@ bool value_satisfies(const AttrValue& v, Operator op, const KeyValue& want, KeyK
         switch (kind) {
             case KeyKind::Float32:
             case KeyKind::Float64:
-                actual = KeyValue::from_f64(v.type == AttrValue::Type::Double
-                                                ? v.d
-                                                : static_cast<double>(v.i));
+                actual = KeyValue::from_f64(
+                    v.type == AttrValue::Type::Double ? v.d : static_cast<double>(v.i));
                 break;
             default:
-                actual = (v.type == AttrValue::Type::UInt)
-                             ? KeyValue::from_u64(v.u)
-                             : KeyValue::from_i64(v.i);
-                if (actual.kind() != want.kind()) return false;
+                actual = (v.type == AttrValue::Type::UInt) ? KeyValue::from_u64(v.u)
+                                                           : KeyValue::from_i64(v.i);
+                if (actual.kind() != want.kind())
+                    return false;
                 break;
         }
-        if (actual.kind() != want.kind()) return false;
+        if (actual.kind() != want.kind())
+            return false;
     }
 
     const int c = compare_keys(actual, want);
     switch (op) {
-        case Operator::Eq: return c == 0;
-        case Operator::Ne: return c != 0;
-        case Operator::Gt: return c > 0;
-        case Operator::Ge: return c >= 0;
-        case Operator::Lt: return c < 0;
-        case Operator::Le: return c <= 0;
+        case Operator::Eq:
+            return c == 0;
+        case Operator::Ne:
+            return c != 0;
+        case Operator::Gt:
+            return c > 0;
+        case Operator::Ge:
+            return c >= 0;
+        case Operator::Lt:
+            return c < 0;
+        case Operator::Le:
+            return c <= 0;
     }
     return false;
 }
 
 bool needs_post_filter(KeyKind kind) {
-    return kind == KeyKind::String20 || kind == KeyKind::String50 ||
-           kind == KeyKind::String100;
+    return kind == KeyKind::String20 || kind == KeyKind::String50 || kind == KeyKind::String100;
 }
 
 }  // namespace
@@ -339,11 +356,13 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
         // Resolve the column and its index.
         const ColumnInfo* col = nullptr;
         for (const auto& c : header_.info().columns) {
-            if (c.name == cond.field) { col = &c; break; }
+            if (c.name == cond.field) {
+                col = &c;
+                break;
+            }
         }
         if (col == nullptr) {
-            throw Error(ErrorCode::AttributeIndexNotFound,
-                        "no such column: " + cond.field);
+            throw Error(ErrorCode::AttributeIndexNotFound, "no such column: " + cond.field);
         }
 
         // Json/Binary keys are the first 100 bytes of a serialized blob:
@@ -368,15 +387,18 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
 
         const AttrIndexInfo* idx = nullptr;
         for (const auto& a : header_.attr_indices()) {
-            if (a.column_index == col->index) { idx = &a; break; }
+            if (a.column_index == col->index) {
+                idx = &a;
+                break;
+            }
         }
         if (idx == nullptr) {
-            throw Error(ErrorCode::AttributeIndexNotFound,
-                        "column is not indexed: " + cond.field);
+            throw Error(ErrorCode::AttributeIndexNotFound, "column is not indexed: " + cond.field);
         }
 
         const KeyKind kind = key_kind_for_column(col->type);
-        if (needs_post_filter(kind)) any_post_filter = true;
+        if (needs_post_filter(kind))
+            any_post_filter = true;
 
         auto hits = stree_query(*index_reader, *idx, kind, cond.op, cond.value);
 
@@ -403,14 +425,15 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
                                   });
             acc = std::move(merged);
         }
-        if (acc.empty()) break;
+        if (acc.empty())
+            break;
     }
 
     auto feature_reader = std::make_shared<BufferedRangeReader>(reader_, 1048576);
 
     if (opts.exact_index_only || !any_post_filter || acc.empty()) {
-        return FeatureIterator(std::move(feature_reader), header_,
-                               IterationMode::OffsetList, std::move(acc));
+        return FeatureIterator(std::move(feature_reader), header_, IterationMode::OffsetList,
+                               std::move(acc));
     }
 
     // Post-filter: fixed-width string keys collide, so the tree gave us
@@ -425,28 +448,40 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
         for (const auto& cond : query) {
             const ColumnInfo* col = nullptr;
             for (const auto& c : header_.info().columns) {
-                if (c.name == cond.field) { col = &c; break; }
+                if (c.name == cond.field) {
+                    col = &c;
+                    break;
+                }
             }
-            if (col == nullptr) { ok = false; break; }
+            if (col == nullptr) {
+                ok = false;
+                break;
+            }
             const KeyKind kind = key_kind_for_column(col->type);
-            if (!needs_post_filter(kind)) continue;
+            if (!needs_post_filter(kind))
+                continue;
 
             // Existential over CityObjects: attributes may live on any of
             // them, each with its own column schema.
             bool matched = false;
             for (std::size_t i = 0; i < f.city_object_count() && !matched; ++i) {
                 auto blob = f.object_attributes(i);
-                if (blob.empty()) continue;
+                if (blob.empty())
+                    continue;
                 auto own = f.object_columns(i);
-                const auto& schema =
-                f.object_has_columns(i) ? own : header_.info().columns;
+                const auto& schema = f.object_has_columns(i) ? own : header_.info().columns;
                 for (auto& [name, val] : decode_attributes(blob, schema)) {
-                    if (name != cond.field) continue;
-                    if (value_satisfies(val, cond.op, cond.value, kind)) matched = true;
+                    if (name != cond.field)
+                        continue;
+                    if (value_satisfies(val, cond.op, cond.value, kind))
+                        matched = true;
                     break;
                 }
             }
-            if (!matched) { ok = false; break; }
+            if (!matched) {
+                ok = false;
+                break;
+            }
         }
         if (ok) {
             verified.push_back(SearchResultItem{f.byte_offset(), 0});
@@ -463,8 +498,7 @@ FeatureIterator FcbReader::select_all() {
     // DEFAULT_HTTP_FETCH_SIZE in http_reader/mod.rs:42. Constructed fresh
     // per query so concurrent iterators cannot disturb each other.
     auto buffered = std::make_shared<BufferedRangeReader>(reader_, 1048576);
-    return FeatureIterator(std::move(buffered), header_,
-                           IterationMode::SequentialScan, {});
+    return FeatureIterator(std::move(buffered), header_, IterationMode::SequentialScan, {});
 }
 
 }  // namespace fcb

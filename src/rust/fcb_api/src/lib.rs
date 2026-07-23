@@ -1,3 +1,14 @@
+//! An OGC API - Features server over a single FlatCityBuf dataset.
+//!
+//! [`create_app`] builds the [`axum`] `Router`; the dataset is named by the
+//! `FCB_URL` environment variable and may be a local path or an HTTP(S) URL,
+//! in which case [`fcb_core`]'s range-request reader fetches only the bytes a
+//! request needs. Bounding-box and attribute filters are pushed down into the
+//! R-tree and B+tree indices rather than scanning.
+//!
+//! This crate is not published to crates.io; it is built and run from the
+//! repository (see the `Dockerfile` in `src/rust`).
+
 pub mod constants;
 mod crs;
 mod filter_parser;

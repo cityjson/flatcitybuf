@@ -1,11 +1,11 @@
 #pragma once
 
+#include <fcb/error.hpp>
+#include <fcb/span.hpp>
+
 #include <cstdint>
 #include <string>
 #include <vector>
-
-#include <fcb/error.hpp>
-#include <fcb/span.hpp>
 
 namespace fcb {
 
@@ -38,7 +38,7 @@ std::size_t key_serialized_size(KeyKind kind);
 /// IEEE-754 bit pattern, and ordered_float semantics are applied after
 /// decoding (see compare_keys).
 class KeyValue {
-public:
+  public:
     KeyValue() = default;
 
     static KeyValue from_i8(std::int8_t v);
@@ -61,7 +61,7 @@ public:
     /// post-filtering, since the encoded key keeps only the first N bytes.
     const std::string& original_string() const { return str_; }
 
-private:
+  private:
     friend std::vector<std::uint8_t> encode_key(const KeyValue&);
     friend KeyValue decode_key(KeyKind, bytes_view);
     friend int compare_keys(const KeyValue&, const KeyValue&);

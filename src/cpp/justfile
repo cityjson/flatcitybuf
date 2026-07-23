@@ -1,0 +1,95 @@
+# FlatCityBuf — native C++17 reader.
+#
+# Standard interface, identical in every justfile in this repo:
+#
+#     just check    # everything below, read-only
+#     just test | lint | type | build
+#     just fix      # the only recipe that rewrites source
+
+FMT_FILES := "include src tests examples"
+
+# List all available commands
+default:
+    @just --list
+
+# Includes the HTTP adapter, which lives in its own build tree and is NOT
+# covered by a plain `just test`.
+
+# Lint + build + tests + HTTP tests, read-only
+check: lint build test test-http
+
+# Native build + the doctest suite (no HTTP adapter)
+test: build
+    ctest --test-dir build-native --output-on-failure
+
+# Configured into a SEPARATE build tree so the default build stays curl-free and
+# TLS-free. run_http_tests.sh starts the range-capable test server and exports
+# FCB_TEST_HTTP_URL — without that variable every HTTP test silently skips,
+# which is exactly why `just test` above does not cover them.
+
+# Build and test the libcurl HTTP adapter
+test-http:
+    cmake -B build-curl -S . -DFCB_WITH_CURL=ON -DFCB_BUILD_TESTS=ON
+    cmake --build build-curl
+    ./tests/run_http_tests.sh python3 tests/range_server.py \
+        ../../examples/data ./build-curl/tests/fcb_tests
+
+# Configure and build the native core with tests
+build:
+    cmake -B build-native -S . -DFCB_BUILD_TESTS=ON
+    cmake --build build-native
+
+# Generated flatc output is excluded — it is machine output, not subject to our
+# style. .clang-tidy also exists but is NOT gated: under the clang-tidy on PATH
+# it reports dozens of warnings plus hard diagnostic errors. Run `just tidy` to
+# see them, and clean them up before promoting it into `lint`.
+
+# clang-format check against the committed .clang-format
+lint:
+    find {{FMT_FILES}} \( -name '*.hpp' -o -name '*.cpp' \) -not -path '*/generated/*' -print0 | xargs -0 clang-format --dry-run --Werror
+
+# C++ has no type checker separate from the compiler — this is `build`
+type: build
+
+# Reformat every source file in place with clang-format
+fix:
+    find {{FMT_FILES}} \( -name '*.hpp' -o -name '*.cpp' \) -not -path '*/generated/*' -print0 | xargs -0 clang-format -i
+
+# ---------------------------------------------------------------------------
+# Extras
+# ---------------------------------------------------------------------------
+
+# clang-tidy static analysis — NOT part of `check`, see the note on `lint`
+tidy:
+    cmake -B build-native -S . -DFCB_BUILD_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    find src -name '*.cpp' -not -path '*/http/*' | xargs -P 4 -I{} clang-tidy -p build-native {}
+
+# The two gates CI enforces and no other recipe does: the default build must
+# link neither curl nor a TLS stack, and the suite must be clean under
+# ASan/UBSan. Slow, so not part of `check`.
+
+# No-curl/no-TLS link check + ASan/UBSan run
+harden:
+    cmake -B build-default -S . -DFCB_BUILD_TESTS=OFF -DFCB_BUILD_EXAMPLES=OFF
+    cmake --build build-default
+    ! nm -u build-default/libfcb_core_cpp.a 2>/dev/null | grep -iE 'curl|ssl_|crypto'
+    cmake -B build-asan -S . -DCMAKE_BUILD_TYPE=Debug -DFCB_BUILD_TESTS=ON -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+    cmake --build build-asan
+    ctest --test-dir build-asan --output-on-failure
+
+# Regenerate the committed FlatBuffers headers
+gen-fbs:
+    ../../scripts/gen_cpp_flatbuffers.sh
+
+# Needs doxygen on PATH (`brew install doxygen`). Output lands in docs/html and
+# is gitignored. include/fcb/generated/ is excluded as machine output, and
+# FCB_WITH_JSON/FCB_WITH_CURL are PREDEFINED so the CityJSON and HTTP headers
+# are not skipped as dead preprocessor branches.
+
+# Generate the HTML API documentation with doxygen
+docs:
+    doxygen Doxyfile
+
+# Remove every C++ build tree
+clean:
+    rm -rf build build-native build-curl build-asan build-default

@@ -55,6 +55,10 @@ __pycache__/
 *.pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# `just docs` output (src/py/justfile): pdoc renders it from the package's own
+# docstrings, so it is derived, not source. Anchored so the repo's own tracked
+# docs/ tree is unaffected.
+/src/py/docs/
 
 temp/
 data/

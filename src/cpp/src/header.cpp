@@ -1,13 +1,12 @@
-#include <fcb/header.hpp>
-
-#include "detail/checked.hpp"
-#include "detail/header_access.hpp"
-
 #include <fcb/generated/header_generated.h>
+#include <fcb/header.hpp>
 
 #include <algorithm>
 #include <cstring>
 #include <string>
+
+#include "detail/checked.hpp"
+#include "detail/header_access.hpp"
 
 namespace fcb {
 
@@ -23,7 +22,8 @@ static constexpr std::size_t kBodyAlignPad = 0;
 const ::Header* HeaderView::raw() const {
     // A default-constructed HeaderView owns no bytes. Report that rather
     // than dereferencing the empty shared_ptr, as Feature::raw() does.
-    if (buffer_ == nullptr) return nullptr;
+    if (buffer_ == nullptr)
+        return nullptr;
     return GetSizePrefixedHeader(buffer_->data() + kBodyAlignPad);
 }
 
@@ -51,18 +51,19 @@ double read_f64_at(const void* base, std::size_t byte_offset) {
 /// Explicit little-endian assembly rather than memcpy of a uint32_t, so the
 /// decode is endian-correct by construction rather than by host accident.
 std::uint32_t read_u32_le(const std::vector<std::uint8_t>& b, std::size_t at) {
-    return static_cast<std::uint32_t>(b[at]) |
-           (static_cast<std::uint32_t>(b[at + 1]) << 8) |
+    return static_cast<std::uint32_t>(b[at]) | (static_cast<std::uint32_t>(b[at + 1]) << 8) |
            (static_cast<std::uint32_t>(b[at + 2]) << 16) |
            (static_cast<std::uint32_t>(b[at + 3]) << 24);
 }
 
 void collect_columns(const flatbuffers::Vector<flatbuffers::Offset<::Column>>* cols,
                      std::vector<ColumnInfo>& out) {
-    if (cols == nullptr) return;
+    if (cols == nullptr)
+        return;
     out.reserve(cols->size());
     for (const auto* c : *cols) {
-        if (c == nullptr) continue;
+        if (c == nullptr)
+            continue;
         ColumnInfo ci{};
         ci.index = c->index();
         ci.name = c->name() != nullptr ? c->name()->str() : std::string();
@@ -92,9 +93,8 @@ void fill_metadata(const ::Header* hdr, FileInfo& info) {
     // GeographicalExtent = { Vector min; Vector max; }.
     if (const auto* e = hdr->geographical_extent()) {
         info.has_extent = true;
-        info.geographical_extent = {read_f64_at(e, 0),  read_f64_at(e, 8),
-                                    read_f64_at(e, 16), read_f64_at(e, 24),
-                                    read_f64_at(e, 32), read_f64_at(e, 40)};
+        info.geographical_extent = {read_f64_at(e, 0),  read_f64_at(e, 8),  read_f64_at(e, 16),
+                                    read_f64_at(e, 24), read_f64_at(e, 32), read_f64_at(e, 40)};
     }
 
     if (const auto* rs = hdr->reference_system()) {
@@ -107,10 +107,14 @@ void fill_metadata(const ::Header* hdr, FileInfo& info) {
         }
     }
 
-    if (hdr->version() != nullptr) info.cityjson_version = hdr->version()->str();
-    if (hdr->identifier() != nullptr) info.identifier = hdr->identifier()->str();
-    if (hdr->title() != nullptr) info.title = hdr->title()->str();
-    if (hdr->reference_date() != nullptr) info.reference_date = hdr->reference_date()->str();
+    if (hdr->version() != nullptr)
+        info.cityjson_version = hdr->version()->str();
+    if (hdr->identifier() != nullptr)
+        info.identifier = hdr->identifier()->str();
+    if (hdr->title() != nullptr)
+        info.title = hdr->title()->str();
+    if (hdr->reference_date() != nullptr)
+        info.reference_date = hdr->reference_date()->str();
 
     if (hdr->poc_contact_name() != nullptr) {
         info.poc_contact_name = hdr->poc_contact_name()->str();
@@ -118,13 +122,16 @@ void fill_metadata(const ::Header* hdr, FileInfo& info) {
     if (hdr->poc_contact_type() != nullptr) {
         info.poc_contact_type = hdr->poc_contact_type()->str();
     }
-    if (hdr->poc_role() != nullptr) info.poc_role = hdr->poc_role()->str();
-    if (hdr->poc_phone() != nullptr) info.poc_phone = hdr->poc_phone()->str();
+    if (hdr->poc_role() != nullptr)
+        info.poc_role = hdr->poc_role()->str();
+    if (hdr->poc_phone() != nullptr)
+        info.poc_phone = hdr->poc_phone()->str();
     if (hdr->poc_email() != nullptr) {
         info.poc_email = hdr->poc_email()->str();
         info.has_poc_email = true;
     }
-    if (hdr->poc_website() != nullptr) info.poc_website = hdr->poc_website()->str();
+    if (hdr->poc_website() != nullptr)
+        info.poc_website = hdr->poc_website()->str();
     if (hdr->poc_address_thoroughfare_number() != nullptr) {
         info.poc_address_thoroughfare_number = hdr->poc_address_thoroughfare_number()->str();
     }
@@ -145,14 +152,15 @@ void fill_metadata(const ::Header* hdr, FileInfo& info) {
 /// Sum the attribute index lengths and record each index's absolute start.
 /// Entries are walked in ascending column index, because that is the order
 /// the writer concatenated the blobs in (writer/mod.rs:190-195).
-std::uint64_t collect_attr_indices(const ::Header* hdr,
-                                   std::vector<AttrIndexInfo>& out) {
+std::uint64_t collect_attr_indices(const ::Header* hdr, std::vector<AttrIndexInfo>& out) {
     const auto* ais = hdr->attribute_index();
-    if (ais == nullptr) return 0;
+    if (ais == nullptr)
+        return 0;
 
     out.reserve(ais->size());
     for (const auto* ai : *ais) {
-        if (ai == nullptr) continue;
+        if (ai == nullptr)
+            continue;
         AttrIndexInfo info{};
         info.column_index = ai->index();
         info.length = ai->length();
@@ -162,18 +170,16 @@ std::uint64_t collect_attr_indices(const ::Header* hdr,
         out.push_back(info);
     }
 
-    std::sort(out.begin(), out.end(),
-              [](const AttrIndexInfo& a, const AttrIndexInfo& b) {
-                  return a.column_index < b.column_index;
-              });
+    std::sort(out.begin(), out.end(), [](const AttrIndexInfo& a, const AttrIndexInfo& b) {
+        return a.column_index < b.column_index;
+    });
 
     // Two indexes claiming the same column makes the cumulative-offset walk
     // ambiguous: there is no way to know which blob comes first.
     for (std::size_t i = 1; i < out.size(); ++i) {
         if (out[i].column_index == out[i - 1].column_index) {
-            throw Error(ErrorCode::AttributeIndexNotFound,
-                        "duplicate attribute index for column " +
-                            std::to_string(out[i].column_index));
+            throw Error(ErrorCode::AttributeIndexNotFound, "duplicate attribute index for column " +
+                                                               std::to_string(out[i].column_index));
         }
     }
 
@@ -236,8 +242,7 @@ HeaderView read_header(std::shared_ptr<RangeReader> reader) {
     // and no buffer placement could align both. Bumping the Rust writer to
     // flatbuffers 25.x fixed the layout, so the check now passes and is
     // enforced.
-    flatbuffers::Verifier verifier(buf.data() + kBodyAlignPad,
-                                   buf.size() - kBodyAlignPad);
+    flatbuffers::Verifier verifier(buf.data() + kBodyAlignPad, buf.size() - kBodyAlignPad);
     if (!VerifySizePrefixedHeaderBuffer(verifier)) {
         throw Error(ErrorCode::InvalidFlatbuffer, "header failed FlatBuffers verification");
     }
@@ -249,8 +254,7 @@ HeaderView read_header(std::shared_ptr<RangeReader> reader) {
     fill_metadata(hdr, view.info_);
     fill_columns(hdr, view.info_);
 
-    const std::uint64_t attr_index_size =
-        collect_attr_indices(hdr, view.attr_indices_);
+    const std::uint64_t attr_index_size = collect_attr_indices(hdr, view.attr_indices_);
 
     view.layout_ = compute_layout(header_size, view.info_.features_count,
                                   view.info_.index_node_size, attr_index_size);

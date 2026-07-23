@@ -1,141 +1,84 @@
-# FlatCityBuf Workspace Justfile
+# FlatCityBuf workspace justfile.
 #
-# Unified task runner for entire FlatCityBuf workspace (Rust, C++, Python, TypeScript)
+# Every language directory has its own justfile exposing the SAME interface:
+#
+#     just check    # lint + type + test + build, read-only
+#     just test | lint | type | build
+#     just fix      # the only recipe that rewrites source
+#
+# The recipes here fan each one out across all five, in dependency order.
+# To work on one language, cd into it and use the same verbs:
+#
+#     cd src/py && just test
+#     cd src/cpp && just check
+#
+# Directory order matters: examples/web consumes src/ts/dist through a `file:`
+# dependency, so src/ts must be built before examples/web is touched.
 
-# Default recipe - list all available commands
+DIRS := "src/rust src/cpp src/py src/ts examples/web"
+
+# List all available commands
 default:
     @just --list
 
 # ============================================================================
-# Workspace Commands
+# Unified workspace verbs
 # ============================================================================
 
-# Run all pre-commit checks (Rust format, clippy, Python)
-pre-commit: check-common check-py pre-commit-cpp
+# Verify EVERYTHING, read-only: lint, type check, tests and build, for all four
+# reader implementations plus the web example. Never rewrites a file — that is
+# what `just fix` is for.
 
-# Common workspace checks (Rust workspace format, clippy, test, build).
-# The workspace is cli + fcb_core + fcb_api; the Python and TypeScript readers
-# are standalone (checked by `check-py` / `ts-*`) and the wasm crate is gone.
-check-common:
-    cd src/rust && cargo fmt
-    cd src/rust && cargo clippy --fix --allow-dirty --workspace --all-targets --all-features
-    cd src/rust && cargo nextest run --all-features --workspace
-    cd src/rust && cargo check --all-features --workspace
-    cd src/rust && cargo build --workspace --all-features
+# Lint + type + test + build, every language, read-only
+check: (_each "check")
 
-# Run Python-specific checks (pure-Python package at src/py; the PyO3
-# extension this used to build was retired in Task 13)
-check-py:
-    cd src/py && uv sync --extra dev
-    cd src/py && uv run ruff check --fix .
-    cd src/py && uv run ruff format .
-    cd src/py && uv run mypy
-    cd src/py && uv run pytest
+# Tests only, every language
+test: (_each "test")
 
-# Run tests for the pure-Python package (src/py)
-py-test:
-    cd src/py && uv run --extra dev pytest
+# src/ts and examples/web have no linter configured; they say so and pass.
 
-# Run linter for the pure-Python package (src/py)
-py-lint:
-    cd src/py && uv run --extra dev ruff check .
-    cd src/py && uv run --extra dev ruff format --check .
+# Linters and format checks only, every language
+lint: (_each "lint")
 
-# Run C++ checks (native implementation)
-pre-commit-cpp: check-cpp
+# Rust: cargo check. C++: the compiler. Python: mypy --strict. TS: tsc --noEmit.
 
-# Build and test the native C++ core
-check-cpp:
-    cd src/cpp && cmake -B build-native -S . -DFCB_BUILD_TESTS=ON
-    cd src/cpp && cmake --build build-native
-    cd src/cpp && ctest --test-dir build-native --output-on-failure
+# Type checks only, every language
+type: (_each "type")
 
-# Regenerate the committed FlatBuffers C++ headers
-gen-cpp-fbs:
-    ./scripts/gen_cpp_flatbuffers.sh
+# Builds only, every language
+build: (_each "build")
 
-# Regenerate the C++ conformance corpus (needs the Rust CLI).
+# Apply every automatic fix (rustfmt, clippy --fix, ruff, clang-format) — MUTATES
+fix: (_each "fix")
+
+# Run one recipe in every language justfile, in DIRS order, first failure wins
+_each recipe:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for d in {{DIRS}}; do
+      printf '\n\033[1m==> %s: just %s\033[0m\n' "$d" "{{recipe}}"
+      (cd "$d" && just {{recipe}})
+    done
+
+# ============================================================================
+# Workspace-level tasks (not language-specific)
+# ============================================================================
+
 # conformance/*.fcb and *.expected.jsonl are tracked, and regeneration is NOT
-# byte-reproducible (cjseq2 iterates CityObjects from a HashMap with
-# per-process ordering) -- so this always dirties the working tree, even when
-# nothing semantic changed. Diff the *parsed* JSON, not the raw bytes, before
-# committing; don't commit pure churn.
+# byte-reproducible (cjseq2 iterates CityObjects from a HashMap with per-process
+# ordering) -- so this always dirties the working tree, even when nothing
+# semantic changed. Diff the *parsed* JSON, not the raw bytes, before committing;
+# don't commit pure churn.
+
+# Regenerate the conformance corpus (needs the Rust CLI)
 gen-conformance:
     ./scripts/gen_conformance.sh
 
-# Build and test the native C++ core with the HTTP adapter
-check-cpp-http:
-    cd src/cpp && cmake -B build-curl -S . -DFCB_WITH_CURL=ON -DFCB_BUILD_TESTS=ON
-    cd src/cpp && cmake --build build-curl
-    cd src/cpp && ./tests/run_http_tests.sh python3 tests/range_server.py \
-        ../../examples/data ./build-curl/tests/fcb_tests
-
-# Run all generation scripts in scripts directory
+# Regenerate every committed FlatBuffers binding (C++, Python, TypeScript)
 gen-all:
-    @echo "Running all shell scripts in scripts..."
-    @for script in scripts/*.sh; do \
-        echo "Executing $script..."; \
-        bash "$script"; \
-    done
-    @echo "All scripts executed."
-
-# Build entire workspace (Rust + C++ + Python)
-build-all: gen-all build check-cpp
-
-# ============================================================================
-# Rust Commands
-# ============================================================================
-
-# Build Rust workspace
-build:
-    cd src/rust && cargo build
-
-# Build Rust workspace with release optimizations
-build-release:
-    cd src/rust && cargo build --release
-
-# Clean Rust build artifacts
-clean:
-    cd src/rust && cargo clean
-
-# Run tests
-test:
-    cd src/rust && cargo test
-
-# Run tests with output
-test-verbose:
-    cd src/rust && cargo test -- --nocapture
-
-# Run clippy linter
-clippy:
-    cd src/rust && cargo clippy -- -D warnings
-
-# Format code
-fmt:
-    cd src/rust && cargo fmt
-
-# Check formatting without making changes
-fmt-check:
-    cd src/rust && cargo fmt --check
-
-# Full CI check (format, clippy, test)
-ci: fmt-check clippy test
-
-# Update dependencies
-update:
-    cd src/rust && cargo update
-
-# Check for security vulnerabilities
-audit:
-    cd src/rust && cargo audit
-
-# Generate documentation
-docs:
-    cd src/rust && cargo doc --no-deps --open
-
-# Install development tools
-install-tools:
-    cd src/rust && cargo install just cargo-watch cargo-audit
+    cd src/cpp && just gen-fbs
+    cd src/py && just gen-fbs
+    cd src/ts && just gen-fbs
 
 # Start dev container
 devcon:
@@ -147,45 +90,16 @@ devcon-build:
     devcontainer build --workspace-folder . --no-cache
     just devcon
 
-# ============================================================================
-# C++ Commands
-# ============================================================================
+# Install development tools
+install-tools:
+    cargo install just cargo-nextest cargo-watch cargo-audit
 
-# Clean and rebuild C++ bindings
-clean-cpp:
-    cd src/cpp && rm -rf build build-native build-curl build-asan
+# Remove every build artifact, in every language
+clean:
+    cd src/rust && just clean
+    cd src/cpp && just clean
+    cd src/ts && just clean
+    cd examples/web && just clean
 
-# ============================================================================
-# TypeScript Commands
-# ============================================================================
-
-# TypeScript reader
-ts-test:
-    cd src/ts && npm ci && npx vitest run
-
-ts-lint:
-    cd src/ts && npx tsc --noEmit
-    cd src/ts && npx tsc --noEmit -p tsconfig.test.json
-
-ts-build:
-    cd src/ts && npm run build
-
-# ============================================================================
-# CLI Commands
-# ============================================================================
-
-# Run FCB info command on test data
-fcb_info:
-    cd src/rust && cargo run -p fcb_cli info -i fcb_core/tests/data/delft.fcb
-
-# Generate file statistics (CSV output)
-file-stats:
-    cd src/rust && cargo run -p fcb_core --bin stats -- -d fcb_core/benchmark_data/ -f csv
-
-# Run benchmarks
-bench:
-    cd src/rust && cargo bench -p fcb_core --bench read -- --release
-
-# Build fcb_core release binary
-build-fcb_core:
-    cd src/rust && cargo build --release -p fcb_core
+# Generate API documentation for every language
+docs: (_each "docs")

@@ -1,9 +1,9 @@
-#include <doctest/doctest.h>
-
 #include <fcb/generated/feature_generated.h>
 #include <fcb/generated/header_generated.h>
 
 #include <cstdint>
+
+#include <doctest/doctest.h>
 
 // The generated types live in the GLOBAL namespace: every `namespace
 // FlatCityBuf;` declaration in src/fbs/*.fbs is commented out, so flatc

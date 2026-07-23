@@ -1,8 +1,11 @@
 name: Deploy API to Cloud Run
 
+# The workflow name below must match `name:` in ci.yml exactly -- a
+# workflow_run trigger matches on the workflow's NAME, not its filename, so
+# renaming ci.yml silently stops this from ever firing.
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["CI (Rust + C++)"]
     types:
       - completed
     branches: [main]
@@ -17,6 +20,12 @@ env:
 jobs:
   build-and-push:
     name: Build and Push Docker Image
+    # `types: [completed]` fires whether CI passed OR FAILED. Without this
+    # guard a red CI run still deployed to Cloud Run. workflow_dispatch has no
+    # workflow_run payload, so allow that path through explicitly.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read

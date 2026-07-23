@@ -1,3 +1,35 @@
+/** The `@cityjson/flatcitybuf` package root: a pure TypeScript reader for
+ *  FlatCityBuf, a cloud-optimized binary encoding of CityJSON.
+ *
+ *  Start at {@link FcbReader}. Open a file with one of its static factories,
+ *  query it with {@link FcbReader.select}, and turn the results into CityJSON
+ *  with {@link toCityJSONMetadata} and {@link toCityJSONFeature}:
+ *
+ *  ```ts
+ *  import { FcbReader, toCityJSONFeature } from '@cityjson/flatcitybuf'
+ *
+ *  const reader = await FcbReader.fromUrl('https://example.com/city.fcb')
+ *  const hits = await reader.select({
+ *    spatial: { kind: 'bbox', value: [minX, minY, maxX, maxY] },
+ *  })
+ *  for await (const feature of hits) {
+ *    console.log(toCityJSONFeature(feature, reader.header))
+ *  }
+ *  ```
+ *
+ *  Nothing here imports `node:*`, so this entry point runs unchanged in a
+ *  browser. Reading a local file is the one thing it cannot do; that lives
+ *  behind the package's separate `"./node"` subpath.
+ *
+ *  Everything this module exports is public API. The traversal internals --
+ *  node decoding, level bounds, B+tree entries and payloads -- are
+ *  deliberately NOT exported; the per-block comments below say why for each
+ *  group. Every error this package raises is an {@link FcbError} carrying an
+ *  {@link ErrorCode}.
+ *
+ *  @module
+ */
+
 // Ports the error taxonomy of src/rust/fcb_core/src/error.rs (via src/cpp/include/fcb/error.hpp)
 export { ErrorCode, FcbError } from './errors.js'
 

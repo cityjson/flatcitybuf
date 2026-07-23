@@ -1,19 +1,20 @@
-#include <doctest/doctest.h>
-
 #include <fcb/range_reader.hpp>
-
-#include "fake_range_reader.hpp"
 
 #include <cstdio>
 #include <fstream>
 #include <memory>
 #include <vector>
 
+#include <doctest/doctest.h>
+
+#include "fake_range_reader.hpp"
+
 using namespace fcb;
 
 static std::vector<std::uint8_t> iota_bytes(std::size_t n) {
     std::vector<std::uint8_t> v(n);
-    for (std::size_t i = 0; i < n; ++i) v[i] = static_cast<std::uint8_t>(i & 0xFF);
+    for (std::size_t i = 0; i < n; ++i)
+        v[i] = static_cast<std::uint8_t>(i & 0xFF);
     return v;
 }
 

@@ -1,16 +1,16 @@
 #pragma once
 
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
-
 #include <fcb/error.hpp>
 #include <fcb/feature.hpp>
 #include <fcb/header.hpp>
 #include <fcb/packed_rtree.hpp>
 #include <fcb/range_reader.hpp>
 #include <fcb/stree.hpp>
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace fcb {
 
@@ -33,10 +33,8 @@ enum class IterationMode {
 
 /// Single-pass iterator over features. Not copyable.
 class FeatureIterator {
-public:
-    FeatureIterator(std::shared_ptr<RangeReader> reader,
-                    HeaderView header,
-                    IterationMode mode,
+  public:
+    FeatureIterator(std::shared_ptr<RangeReader> reader, HeaderView header, IterationMode mode,
                     std::vector<SearchResultItem> hits);
 
     FeatureIterator(const FeatureIterator&) = delete;
@@ -53,21 +51,21 @@ public:
     /// Total features the header claims, for progress reporting.
     std::uint64_t features_count() const { return header_.info().features_count; }
 
-private:
+  private:
     std::shared_ptr<RangeReader> reader_;
     HeaderView header_;
     IterationMode mode_;
     std::vector<SearchResultItem> hits_;
 
     Feature current_;
-    std::uint64_t cursor_ = 0;    // absolute, for SequentialScan
-    std::size_t hit_index_ = 0;   // for OffsetList
+    std::uint64_t cursor_ = 0;   // absolute, for SequentialScan
+    std::size_t hit_index_ = 0;  // for OffsetList
     std::uint64_t produced_ = 0;
 };
 
 /// The library's entry point.
 class FcbReader {
-public:
+  public:
     static FcbReader open_file(const std::string& path);
     static FcbReader open(std::shared_ptr<RangeReader> reader);
 
@@ -93,7 +91,7 @@ public:
     /// most once.
     FeatureIterator select_attr(const AttrQuery& query, AttrQueryOptions opts = {});
 
-private:
+  private:
     FcbReader(std::shared_ptr<RangeReader> reader, HeaderView header);
 
     std::shared_ptr<RangeReader> reader_;

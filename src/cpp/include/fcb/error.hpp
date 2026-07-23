@@ -28,13 +28,12 @@ enum class ErrorCode {
 /// std::runtime_error so callers that only care that something went wrong
 /// can catch it without knowing about fcb at all.
 class Error : public std::runtime_error {
-public:
-    Error(ErrorCode code, const std::string& message)
-        : std::runtime_error(message), code_(code) {}
+  public:
+    Error(ErrorCode code, const std::string& message) : std::runtime_error(message), code_(code) {}
 
     ErrorCode code() const noexcept { return code_; }
 
-private:
+  private:
     ErrorCode code_;
 };
 

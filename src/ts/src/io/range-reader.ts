@@ -24,6 +24,8 @@
  */
 import { ErrorCode, FcbError } from '../errors.js'
 
+/** Per-read options, accepted by every {@link RangeReader} and threaded
+ *  through the reader down to the actual transport call. */
 export interface ReadOpts {
   /** Best-effort cancellation. An already-aborted signal is honoured before
    *  any work happens; an in-memory source cannot usefully abort mid-read
@@ -31,8 +33,21 @@ export interface ReadOpts {
   signal?: AbortSignal
 }
 
+/** A random-access byte source. Implement this to point the reader at a
+ *  transport the package does not ship (an S3 SDK, an OPFS handle, a test
+ *  double), then hand it to `FcbReader.fromReader`. The contract every
+ *  implementor must honour is stated in this module's own documentation. */
 export interface RangeReader {
+  /** Resolves to EXACTLY `length` bytes starting at `offset`, or rejects with
+   *  an `FcbError`. Never returns a short buffer, and never clamps a range
+   *  that crosses the end of the resource. The returned array MAY be a view
+   *  into a buffer the reader reuses on its next call, so a caller that needs
+   *  the bytes to outlive the next read must copy them. */
   read(offset: number, length: number, opts?: ReadOpts): Promise<Uint8Array>
+  /** The resource's total byte length. Synchronous by contract: every source
+   *  learns its size when it opens (a `stat`, `blob.size`, or a
+   *  `Content-Range` at open time), so the reader's layout arithmetic never
+   *  has to await. */
   size(): number
 }
 

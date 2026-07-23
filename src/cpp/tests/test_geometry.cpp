@@ -1,9 +1,9 @@
-#include <doctest/doctest.h>
-
 #include <fcb/geometry.hpp>
 
 #include <cstdint>
 #include <vector>
+
+#include <doctest/doctest.h>
 
 using namespace fcb;
 using nlohmann::json;
@@ -78,8 +78,8 @@ TEST_CASE("the SAME arrays give a MultiSolid one more level than a Solid") {
 
     CHECK(decode_boundaries(GeometryKind::Solid, v(solids), v(shells), v(surfaces), v(strings),
                             v(idx)) == json::parse("[[[[0,1,2]],[[3,4,5]]]]"));
-    CHECK(decode_boundaries(GeometryKind::MultiSolid, v(solids), v(shells), v(surfaces),
-                            v(strings), v(idx)) == json::parse("[[[[[0,1,2]],[[3,4,5]]]]]"));
+    CHECK(decode_boundaries(GeometryKind::MultiSolid, v(solids), v(shells), v(surfaces), v(strings),
+                            v(idx)) == json::parse("[[[[[0,1,2]],[[3,4,5]]]]]"));
     CHECK(decode_boundaries(GeometryKind::CompositeSolid, v(solids), v(shells), v(surfaces),
                             v(strings), v(idx)) == json::parse("[[[[[0,1,2]],[[3,4,5]]]]]"));
 }
@@ -88,8 +88,7 @@ TEST_CASE("two solids each keep their own shell list") {
     std::vector<std::uint32_t> solids = {1, 1}, shells = {1, 1}, surfaces = {1, 1};
     std::vector<std::uint32_t> strings = {3, 3}, idx = {0, 1, 2, 3, 4, 5};
     CHECK(decode_boundaries(GeometryKind::CompositeSolid, v(solids), v(shells), v(surfaces),
-                            v(strings), v(idx)) ==
-          json::parse("[[[[[0,1,2]]]],[[[[3,4,5]]]]]"));
+                            v(strings), v(idx)) == json::parse("[[[[[0,1,2]]]],[[[[3,4,5]]]]]"));
 }
 
 TEST_CASE("a ring claiming more indices than exist throws") {
@@ -137,14 +136,14 @@ TEST_CASE("the SAME arrays give MultiSolid semantics one more level than Solid")
           json::parse("[[0,1]]"));
     CHECK(decode_semantics_values(GeometryKind::MultiSolid, v(solids), v(shells), v(values)) ==
           json::parse("[[[0,1]]]"));
-    CHECK(decode_semantics_values(GeometryKind::CompositeSolid, v(solids), v(shells),
-                                  v(values)) == json::parse("[[[0,1]]]"));
+    CHECK(decode_semantics_values(GeometryKind::CompositeSolid, v(solids), v(shells), v(values)) ==
+          json::parse("[[[0,1]]]"));
 }
 
 TEST_CASE("a CompositeSolid groups semantics values by shell, then by solid") {
     std::vector<std::uint32_t> solids = {2, 1}, shells = {1, 1, 1}, values = {0, 1, kNone};
-    CHECK(decode_semantics_values(GeometryKind::CompositeSolid, v(solids), v(shells),
-                                  v(values)) == json::parse("[[[0],[1]],[[null]]]"));
+    CHECK(decode_semantics_values(GeometryKind::CompositeSolid, v(solids), v(shells), v(values)) ==
+          json::parse("[[[0],[1]],[[null]]]"));
 }
 
 TEST_CASE("semantics values clamp rather than throw when the counts over-claim") {
@@ -155,8 +154,8 @@ TEST_CASE("semantics values clamp rather than throw when the counts over-claim")
     }
     SUBCASE("shells run out across solids: the trailing solid keeps an empty shell") {
         std::vector<std::uint32_t> solids = {1, 1}, shells = {1}, values = {9};
-        CHECK(decode_semantics_values(GeometryKind::MultiSolid, v(solids), v(shells),
-                                      v(values)) == json::parse("[[[9]],[[]]]"));
+        CHECK(decode_semantics_values(GeometryKind::MultiSolid, v(solids), v(shells), v(values)) ==
+              json::parse("[[[9]],[[]]]"));
     }
 }
 
@@ -164,8 +163,8 @@ TEST_CASE("semantics values clamp rather than throw when the counts over-claim")
 
 TEST_CASE("material values are one index per surface for the surface types") {
     std::vector<std::uint32_t> vertices = {0, 1, kNone, 2};
-    CHECK(decode_material_values(GeometryKind::MultiSurface, UIntView(), UIntView(),
-                                 v(vertices)) == json::parse("[0,1,null,2]"));
+    CHECK(decode_material_values(GeometryKind::MultiSurface, UIntView(), UIntView(), v(vertices)) ==
+          json::parse("[0,1,null,2]"));
     CHECK(decode_material_values(GeometryKind::CompositeSurface, UIntView(), UIntView(),
                                  v(vertices)) == json::parse("[0,1,null,2]"));
 }
@@ -197,15 +196,14 @@ TEST_CASE("the SAME arrays give MultiSolid material values one more level than S
           json::parse("[[0,1]]"));
     CHECK(decode_material_values(GeometryKind::MultiSolid, v(solids), v(shells), v(vertices)) ==
           json::parse("[[[0,1]]]"));
-    CHECK(decode_material_values(GeometryKind::CompositeSolid, v(solids), v(shells),
-                                 v(vertices)) == json::parse("[[[0,1]]]"));
+    CHECK(decode_material_values(GeometryKind::CompositeSolid, v(solids), v(shells), v(vertices)) ==
+          json::parse("[[[0,1]]]"));
 }
 
 TEST_CASE("a CompositeSolid's material values nest solid -> shell -> index") {
     std::vector<std::uint32_t> solids = {2, 1}, shells = {3, 3, 3};
     std::vector<std::uint32_t> vertices = {0, 1, kNone, 2, kNone, kNone, 3, 4, kNone};
-    CHECK(decode_material_values(GeometryKind::CompositeSolid, v(solids), v(shells),
-                                 v(vertices)) ==
+    CHECK(decode_material_values(GeometryKind::CompositeSolid, v(solids), v(shells), v(vertices)) ==
           json::parse("[[[0,1,null],[2,null,null]],[[3,4,null]]]"));
 }
 
@@ -229,13 +227,13 @@ TEST_CASE("material values clamp rather than throw when the counts over-claim") 
     }
     SUBCASE("shells run out inside a solid: the missing shell is empty, not dropped") {
         std::vector<std::uint32_t> solids = {3}, shells = {1, 1}, vertices = {1, 2};
-        CHECK(decode_material_values(GeometryKind::MultiSolid, v(solids), v(shells),
-                                     v(vertices)) == json::parse("[[[1],[2],[]]]"));
+        CHECK(decode_material_values(GeometryKind::MultiSolid, v(solids), v(shells), v(vertices)) ==
+              json::parse("[[[1],[2],[]]]"));
     }
     SUBCASE("shells run out across solids: the trailing solid keeps an empty shell") {
         std::vector<std::uint32_t> solids = {1, 1}, shells = {1}, vertices = {9};
-        CHECK(decode_material_values(GeometryKind::MultiSolid, v(solids), v(shells),
-                                     v(vertices)) == json::parse("[[[9]],[[]]]"));
+        CHECK(decode_material_values(GeometryKind::MultiSolid, v(solids), v(shells), v(vertices)) ==
+              json::parse("[[[9]],[[]]]"));
     }
     SUBCASE("vertices run out mid-shell: that shell is short and the next empty") {
         std::vector<std::uint32_t> solids = {2}, shells = {3, 3}, vertices = {1, 2};
@@ -269,8 +267,8 @@ TEST_CASE("the SAME arrays give MultiSolid texture values one more level than So
     // one-solid MultiSolid, from identical arrays.
     std::vector<std::uint32_t> solids = {1}, shells = {1}, surfaces = {1}, strings = {3};
     std::vector<std::uint32_t> vertices = {0, 10, 20};
-    CHECK(decode_texture_values(GeometryKind::Solid, v(solids), v(shells), v(surfaces),
-                                v(strings), v(vertices)) == json::parse("[[[[0,10,20]]]]"));
+    CHECK(decode_texture_values(GeometryKind::Solid, v(solids), v(shells), v(surfaces), v(strings),
+                                v(vertices)) == json::parse("[[[[0,10,20]]]]"));
     CHECK(decode_texture_values(GeometryKind::MultiSolid, v(solids), v(shells), v(surfaces),
                                 v(strings), v(vertices)) == json::parse("[[[[[0,10,20]]]]]"));
     CHECK(decode_texture_values(GeometryKind::CompositeSolid, v(solids), v(shells), v(surfaces),
@@ -281,16 +279,16 @@ TEST_CASE("a Solid's texture values are one entry per shell") {
     std::vector<std::uint32_t> solids = {2}, shells = {2, 1}, surfaces = {1, 1, 1};
     std::vector<std::uint32_t> strings = {3, 3, 3};
     std::vector<std::uint32_t> vertices = {0, 10, 20, 1, 11, kNone, 2, 12, 22};
-    CHECK(decode_texture_values(GeometryKind::Solid, v(solids), v(shells), v(surfaces),
-                                v(strings), v(vertices)) ==
+    CHECK(decode_texture_values(GeometryKind::Solid, v(solids), v(shells), v(surfaces), v(strings),
+                                v(vertices)) ==
           json::parse("[[[[0,10,20]],[[1,11,null]]],[[[2,12,22]]]]"));
 }
 
 TEST_CASE("a CompositeSolid's texture values nest solid -> shell -> surface -> ring") {
     std::vector<std::uint32_t> solids = {2, 1}, shells = {2, 2, 2};
     std::vector<std::uint32_t> surfaces = {1, 1, 1, 1, 1, 1}, strings = {3, 3, 3, 3, 3, 3};
-    std::vector<std::uint32_t> vertices = {0, 10, 20, 1, 11, kNone, 2,  12, 22,
-                                           3, kNone, 23, 4, 14, 24, 5, 15, 25};
+    std::vector<std::uint32_t> vertices = {0, 10,    20, 1, 11, kNone, 2, 12, 22,
+                                           3, kNone, 23, 4, 14, 24,    5, 15, 25};
     CHECK(decode_texture_values(GeometryKind::CompositeSolid, v(solids), v(shells), v(surfaces),
                                 v(strings), v(vertices)) ==
           json::parse("[[[[[0,10,20]],[[1,11,null]]],[[[2,12,22]],[[3,null,23]]]],"
@@ -303,9 +301,8 @@ TEST_CASE("a texture on a type that cannot carry one falls back to one surface")
     // index list. Not valid CityJSON either way; pinned so the two agree.
     std::vector<std::uint32_t> surfaces = {2}, strings = {3, 3};
     std::vector<std::uint32_t> vertices = {0, 10, 20, 1, 11, 21};
-    CHECK(decode_texture_values(GeometryKind::MultiLineString, UIntView(), UIntView(),
-                                v(surfaces), v(strings), v(vertices)) ==
-          json::parse("[[[0,10,20],[1,11,21]]]"));
+    CHECK(decode_texture_values(GeometryKind::MultiLineString, UIntView(), UIntView(), v(surfaces),
+                                v(strings), v(vertices)) == json::parse("[[[0,10,20],[1,11,21]]]"));
 
     std::vector<std::uint32_t> flat = {0, kNone, 2};
     CHECK(decode_texture_values(GeometryKind::MultiPoint, UIntView(), UIntView(), UIntView(),
@@ -315,9 +312,8 @@ TEST_CASE("a texture on a type that cannot carry one falls back to one surface")
 TEST_CASE("texture values clamp rather than throw when the counts over-claim") {
     SUBCASE("strings run out: the later rings and surfaces stay, empty") {
         std::vector<std::uint32_t> surfaces = {2, 1}, strings = {3}, vertices = {0, 1};
-        CHECK(decode_texture_values(GeometryKind::MultiSurface, UIntView(), UIntView(),
-                                    v(surfaces), v(strings), v(vertices)) ==
-              json::parse("[[[0,1],[]],[[]]]"));
+        CHECK(decode_texture_values(GeometryKind::MultiSurface, UIntView(), UIntView(), v(surfaces),
+                                    v(strings), v(vertices)) == json::parse("[[[0,1],[]],[[]]]"));
     }
     SUBCASE("a solid with no shells yields one empty shell") {
         // Diverges from the old reader, which returned [] here, and from

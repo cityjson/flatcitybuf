@@ -1,12 +1,11 @@
-#include <fcb/stree.hpp>
-
 #include <fcb/reader.hpp>
-
-#include "detail/checked.hpp"
+#include <fcb/stree.hpp>
 
 #include <algorithm>
 #include <deque>
 #include <utility>
+
+#include "detail/checked.hpp"
 
 namespace fcb {
 
@@ -43,7 +42,8 @@ std::vector<LevelBound> generate_level_bounds(std::uint64_t num_items,
         n = detail::ceil_div(n, branching_factor);
         num_nodes = detail::checked_add(num_nodes, n, "stree num_nodes");
         level_num_nodes.push_back(n);
-        if (n < branching_factor) break;
+        if (n < branching_factor)
+            break;
     }
 
     std::vector<LevelBound> bounds;
@@ -73,15 +73,15 @@ std::uint64_t read_u64_le(bytes_view b, std::size_t at) {
 }
 
 /// Read entries [first, last) of the flat node array.
-std::vector<Entry> read_entries(RangeReader& reader, std::uint64_t index_begin,
-                                KeyKind kind, std::uint64_t first, std::uint64_t last) {
+std::vector<Entry> read_entries(RangeReader& reader, std::uint64_t index_begin, KeyKind kind,
+                                std::uint64_t first, std::uint64_t last) {
     std::vector<Entry> out;
-    if (last <= first) return out;
+    if (last <= first)
+        return out;
 
     const std::uint64_t esz = entry_size(kind);
-    const std::uint64_t at =
-        detail::checked_add(index_begin, detail::checked_mul(first, esz, "entry offset"),
-                            "entry base");
+    const std::uint64_t at = detail::checked_add(
+        index_begin, detail::checked_mul(first, esz, "entry offset"), "entry base");
     const std::uint64_t len = detail::checked_mul(last - first, esz, "entry span");
 
     auto block = reader.read(at, len);
@@ -113,7 +113,8 @@ BinarySearch binary_search(const std::vector<Entry>& items, const KeyValue& key)
     while (lo < hi) {
         const std::size_t mid = lo + (hi - lo) / 2;
         const int c = compare_keys(items[mid].key, key);
-        if (c == 0) return {true, mid};
+        if (c == 0)
+            return {true, mid};
         if (c < 0) {
             lo = mid + 1;
         } else {
@@ -143,10 +144,11 @@ void emit_offset(std::uint64_t off, std::uint64_t index, RangeReader& reader,
         throw Error(ErrorCode::AttributeIndexNotFound, "truncated payload entry");
     }
     std::uint32_t count = 0;
-    for (std::size_t i = 0; i < 4; ++i) count |= static_cast<std::uint32_t>(head[i]) << (8 * i);
+    for (std::size_t i = 0; i < 4; ++i)
+        count |= static_cast<std::uint32_t>(head[i]) << (8 * i);
 
-    const std::uint64_t want = detail::checked_add(4, detail::checked_mul(count, 8, "payload"),
-                                                   "payload entry");
+    const std::uint64_t want =
+        detail::checked_add(4, detail::checked_mul(count, 8, "payload"), "payload entry");
     if (rel + want > payload_size) {
         throw Error(ErrorCode::AttributeIndexNotFound, "payload entry overruns its section");
     }
@@ -191,7 +193,8 @@ std::vector<SearchResultItem> find_exact(const Tree& t, const KeyValue& key) {
         queue.pop_front();
 
         auto items = t.node_at(node_index, level);
-        if (items.empty()) continue;
+        if (items.empty())
+            continue;
 
         const auto hit = binary_search(items, key);
 
@@ -225,8 +228,7 @@ std::vector<SearchResultItem> find_exact(const Tree& t, const KeyValue& key) {
         }
 
         if (hit.found) {
-            emit_offset(items[hit.index].offset,
-                        node_index + hit.index - t.leaf_start(), t.reader,
+            emit_offset(items[hit.index].offset, node_index + hit.index - t.leaf_start(), t.reader,
                         t.payload_begin, t.payload_size, out);
         }
     }
@@ -241,7 +243,8 @@ std::uint64_t find_partition(const Tree& t, const KeyValue& key) {
     std::uint64_t node_index = 0;
     for (std::size_t level = t.levels.size(); level-- > 1;) {
         auto items = t.node_at(node_index, level);
-        if (items.empty()) continue;
+        if (items.empty())
+            continue;
 
         const auto hit = binary_search(items, key);
         if (hit.found) {
@@ -267,12 +270,13 @@ std::uint64_t find_partition(const Tree& t, const KeyValue& key) {
 /// scan (via k') and also by find_exact(k) (via k), so subtracting deletes a
 /// genuine match. Filtering at the leaf by bound strictness cannot make that
 /// mistake, and costs one traversal instead of two.
-std::vector<SearchResultItem> scan_range(const Tree& t, const KeyValue& lower,
-                                         bool lower_strict, const KeyValue& upper,
-                                         bool upper_strict) {
+std::vector<SearchResultItem> scan_range(const Tree& t, const KeyValue& lower, bool lower_strict,
+                                         const KeyValue& upper, bool upper_strict) {
     const int lu = compare_keys(lower, upper);
-    if (lu > 0) return {};
-    if (lu == 0 && (lower_strict || upper_strict)) return {};
+    if (lu > 0)
+        return {};
+    if (lu == 0 && (lower_strict || upper_strict))
+        return {};
 
     const std::uint64_t lower_idx = find_partition(t, lower);
     const std::uint64_t upper_idx = find_partition(t, upper);
@@ -287,8 +291,7 @@ std::vector<SearchResultItem> scan_range(const Tree& t, const KeyValue& lower,
     // silently dropped. Widening is safe because the filter below rejects
     // out-of-range keys; it costs at most one extra node read. The same fix
     // has been applied upstream.
-    const std::uint64_t end =
-        std::min<std::uint64_t>(upper_idx + 2 * t.node_size, t.leaf_end());
+    const std::uint64_t end = std::min<std::uint64_t>(upper_idx + 2 * t.node_size, t.leaf_end());
 
     std::vector<SearchResultItem> out;
     std::uint64_t cur = start;
@@ -316,14 +319,16 @@ std::uint64_t stree_num_nodes(std::uint64_t num_items, std::uint16_t branching_f
     if (branching_factor < 2) {
         throw Error(ErrorCode::AttributeIndexNotFound, "invalid branching factor");
     }
-    if (num_items == 0) return 0;
+    if (num_items == 0)
+        return 0;
 
     std::uint64_t n = num_items;
     std::uint64_t num_nodes = n;
     for (;;) {
         n = detail::ceil_div(n, branching_factor);
         num_nodes = detail::checked_add(num_nodes, n, "stree num_nodes");
-        if (n < branching_factor) break;
+        if (n < branching_factor)
+            break;
     }
     return num_nodes;
 }
@@ -333,7 +338,8 @@ std::vector<std::uint64_t> decode_payload_entry(bytes_view b) {
         throw Error(ErrorCode::AttributeIndexNotFound, "short payload entry");
     }
     std::uint32_t count = 0;
-    for (std::size_t i = 0; i < 4; ++i) count |= static_cast<std::uint32_t>(b[i]) << (8 * i);
+    for (std::size_t i = 0; i < 4; ++i)
+        count |= static_cast<std::uint32_t>(b[i]) << (8 * i);
 
     if (b.size() < 4 + static_cast<std::size_t>(count) * 8) {
         throw Error(ErrorCode::AttributeIndexNotFound, "truncated payload entry");
@@ -346,15 +352,10 @@ std::vector<std::uint64_t> decode_payload_entry(bytes_view b) {
     return out;
 }
 
-std::vector<SearchResultItem> stree_query(RangeReader& reader,
-                                          const AttrIndexInfo& index,
-                                          KeyKind kind,
-                                          Operator op,
-                                          const KeyValue& value) {
-    const std::uint64_t num_nodes = stree_num_nodes(index.num_unique_items,
-                                                    index.branching_factor);
-    const std::uint64_t tree_bytes =
-        detail::checked_mul(num_nodes, entry_size(kind), "stree size");
+std::vector<SearchResultItem> stree_query(RangeReader& reader, const AttrIndexInfo& index,
+                                          KeyKind kind, Operator op, const KeyValue& value) {
+    const std::uint64_t num_nodes = stree_num_nodes(index.num_unique_items, index.branching_factor);
+    const std::uint64_t tree_bytes = detail::checked_mul(num_nodes, entry_size(kind), "stree size");
     if (tree_bytes > index.length) {
         throw Error(ErrorCode::AttributeIndexNotFound,
                     "attribute index node region exceeds its declared length");
@@ -375,8 +376,8 @@ std::vector<SearchResultItem> stree_query(RangeReader& reader,
     // select_attr's post-filter applies the real operator to the untruncated
     // value. Ne in particular must be a FULL scan -- excluding the prefix
     // matches would drop features whose value merely shares a prefix.
-    const bool is_string = (kind == KeyKind::String20 || kind == KeyKind::String50 ||
-                            kind == KeyKind::String100);
+    const bool is_string =
+        (kind == KeyKind::String20 || kind == KeyKind::String50 || kind == KeyKind::String100);
 
     switch (op) {
         case Operator::Eq:

@@ -2,14 +2,14 @@
 
 #ifdef FCB_WITH_CURL
 
-#include "../detail/checked.hpp"
+#    include <algorithm>
+#    include <cctype>
+#    include <cstdlib>
+#    include <cstring>
 
-#include <curl/curl.h>
+#    include <curl/curl.h>
 
-#include <algorithm>
-#include <cctype>
-#include <cstdlib>
-#include <cstring>
+#    include "../detail/checked.hpp"
 
 namespace fcb {
 
@@ -43,7 +43,8 @@ std::string find_header(const std::vector<std::string>& headers, const std::stri
             // trim
             const auto b = v.find_first_not_of(" \t");
             const auto e = v.find_last_not_of(" \t\r\n");
-            if (b == std::string::npos) return {};
+            if (b == std::string::npos)
+                return {};
             return v.substr(b, e - b + 1);
         }
     }
@@ -53,16 +54,19 @@ std::string find_header(const std::vector<std::string>& headers, const std::stri
 /// Parse "bytes <start>-<end>/<total>". Returns false if malformed.
 bool parse_content_range(const std::string& v, std::uint64_t& start, std::uint64_t& end,
                          std::uint64_t& total) {
-    if (v.rfind("bytes ", 0) != 0) return false;
+    if (v.rfind("bytes ", 0) != 0)
+        return false;
     const std::string rest = v.substr(6);
     const auto dash = rest.find('-');
     const auto slash = rest.find('/');
-    if (dash == std::string::npos || slash == std::string::npos || slash < dash) return false;
+    if (dash == std::string::npos || slash == std::string::npos || slash < dash)
+        return false;
     try {
         start = std::stoull(rest.substr(0, dash));
         end = std::stoull(rest.substr(dash + 1, slash - dash - 1));
         const std::string t = rest.substr(slash + 1);
-        if (t == "*") return false;
+        if (t == "*")
+            return false;
         total = std::stoull(t);
     } catch (...) {
         return false;
@@ -78,13 +82,15 @@ struct CurlRangeReader::Impl {
     CURL* easy = nullptr;
     bool have_size = false;
     std::uint64_t size = 0;
-    std::string validator;      // ETag or Last-Modified value
+    std::string validator;  // ETag or Last-Modified value
     bool validator_is_etag = false;
     struct curl_slist* extra_headers = nullptr;
 
     ~Impl() {
-        if (extra_headers != nullptr) curl_slist_free_all(extra_headers);
-        if (easy != nullptr) curl_easy_cleanup(easy);
+        if (extra_headers != nullptr)
+            curl_slist_free_all(extra_headers);
+        if (easy != nullptr)
+            curl_easy_cleanup(easy);
     }
 
     void apply_common() {
@@ -104,16 +110,16 @@ struct CurlRangeReader::Impl {
             extra_headers = nullptr;
         }
         if (options.require_stable_representation && !validator.empty()) {
-            const std::string h = validator_is_etag
-                                      ? ("If-Match: " + validator)
-                                      : ("If-Unmodified-Since: " + validator);
+            const std::string h = validator_is_etag ? ("If-Match: " + validator)
+                                                    : ("If-Unmodified-Since: " + validator);
             extra_headers = curl_slist_append(extra_headers, h.c_str());
         }
         curl_easy_setopt(easy, CURLOPT_HTTPHEADER, extra_headers);
     }
 
     void capture_validator(const std::vector<std::string>& headers) {
-        if (!validator.empty()) return;
+        if (!validator.empty())
+            return;
         const std::string etag = find_header(headers, "ETag");
         if (!etag.empty()) {
             validator = etag;
@@ -147,7 +153,8 @@ CurlRangeReader::CurlRangeReader(const std::string& url, CurlOptions options)
 CurlRangeReader::~CurlRangeReader() = default;
 
 std::uint64_t CurlRangeReader::total_size() {
-    if (impl_->have_size) return impl_->size;
+    if (impl_->have_size)
+        return impl_->size;
 
     std::vector<std::string> headers;
     std::vector<std::uint8_t> body;
@@ -163,8 +170,7 @@ std::uint64_t CurlRangeReader::total_size() {
     ++request_count_;
     const CURLcode rc = curl_easy_perform(impl_->easy);
     if (rc != CURLE_OK) {
-        throw Error(ErrorCode::HttpError,
-                    std::string("HEAD failed: ") + curl_easy_strerror(rc));
+        throw Error(ErrorCode::HttpError, std::string("HEAD failed: ") + curl_easy_strerror(rc));
     }
 
     long status = 0;
@@ -192,7 +198,8 @@ std::uint64_t CurlRangeReader::total_size() {
 }
 
 std::vector<std::uint8_t> CurlRangeReader::read(std::uint64_t offset, std::uint64_t length) {
-    if (length == 0) return {};  // contract: never contact the transport
+    if (length == 0)
+        return {};  // contract: never contact the transport
 
     const std::uint64_t last = detail::range_end(offset, length) - 1;
     const std::string range = std::to_string(offset) + "-" + std::to_string(last);
@@ -221,14 +228,14 @@ std::vector<std::uint8_t> CurlRangeReader::read(std::uint64_t offset, std::uint6
     impl_->capture_validator(headers);
 
     if (status == 412) {
-        throw Error(ErrorCode::HttpError,
-                    "resource changed between requests (If-Match failed); "
-                    "the URL is not stable");
+        throw Error(ErrorCode::HttpError, "resource changed between requests (If-Match failed); "
+                                          "the URL is not stable");
     }
 
     if (status == 416) {
         // Unsatisfiable. Legitimate only when reading at or past the end.
-        if (impl_->have_size && offset >= impl_->size) return {};
+        if (impl_->have_size && offset >= impl_->size)
+            return {};
         throw Error(ErrorCode::HttpError, "server returned 416 for an in-range request");
     }
 
@@ -241,9 +248,9 @@ std::vector<std::uint8_t> CurlRangeReader::read(std::uint64_t offset, std::uint6
             throw Error(ErrorCode::HttpError, "malformed or missing Content-Range on 206");
         }
         if (s != offset) {
-            throw Error(ErrorCode::HttpError,
-                        "server returned range starting at " + std::to_string(s) +
-                            ", expected " + std::to_string(offset));
+            throw Error(ErrorCode::HttpError, "server returned range starting at " +
+                                                  std::to_string(s) + ", expected " +
+                                                  std::to_string(offset));
         }
         if (body.size() != (e - s + 1)) {
             throw Error(ErrorCode::HttpError, "206 body length disagrees with Content-Range");
@@ -267,12 +274,12 @@ std::vector<std::uint8_t> CurlRangeReader::read(std::uint64_t offset, std::uint6
             impl_->size = body.size();
             impl_->have_size = true;
         }
-        if (offset >= body.size()) return {};
+        if (offset >= body.size())
+            return {};
         const std::uint64_t avail = body.size() - offset;
         const std::uint64_t n = std::min<std::uint64_t>(length, avail);
-        return std::vector<std::uint8_t>(
-            body.begin() + static_cast<std::ptrdiff_t>(offset),
-            body.begin() + static_cast<std::ptrdiff_t>(offset + n));
+        return std::vector<std::uint8_t>(body.begin() + static_cast<std::ptrdiff_t>(offset),
+                                         body.begin() + static_cast<std::ptrdiff_t>(offset + n));
     }
 
     throw Error(ErrorCode::HttpError, "unexpected HTTP status " + std::to_string(status));

@@ -1,14 +1,14 @@
 #pragma once
 
+#include <fcb/error.hpp>
+#include <fcb/layout.hpp>
+#include <fcb/range_reader.hpp>
+
 #include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
-
-#include <fcb/error.hpp>
-#include <fcb/layout.hpp>
-#include <fcb/range_reader.hpp>
 
 // The generated FlatBuffers types live in the GLOBAL namespace (every
 // `namespace FlatCityBuf;` in src/fbs/*.fbs is commented out). Forward
@@ -97,14 +97,14 @@ struct FileInfo {
 /// retain it past this object's destruction and read freed memory. Internal
 /// decoders reach it through detail::HeaderAccess.
 class HeaderView {
-public:
+  public:
     HeaderView() = default;
 
     const FileInfo& info() const { return info_; }
     const FileLayout& layout() const { return layout_; }
     const std::vector<AttrIndexInfo>& attr_indices() const { return attr_indices_; }
 
-private:
+  private:
     friend struct detail::HeaderAccess;
     friend HeaderView read_header(std::shared_ptr<RangeReader> reader);
 

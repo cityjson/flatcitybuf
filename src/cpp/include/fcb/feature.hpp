@@ -1,14 +1,16 @@
 #pragma once
 
+#include <fcb/span.hpp>
+
 #include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include <fcb/span.hpp>
-
-namespace fcb { struct ColumnInfo; }
+namespace fcb {
+struct ColumnInfo;
+}
 
 // Generated FlatBuffers types are in the GLOBAL namespace. Forward declare
 // so this public header does not drag them into consumers' scope.
@@ -29,10 +31,9 @@ struct FeatureAccess;
 /// could retain it past this object's destruction. Internal decoders reach
 /// it via detail::FeatureAccess.
 class Feature {
-public:
+  public:
     Feature() = default;
-    Feature(std::shared_ptr<const std::vector<std::uint8_t>> buffer,
-            std::uint64_t byte_offset,
+    Feature(std::shared_ptr<const std::vector<std::uint8_t>> buffer, std::uint64_t byte_offset,
             std::size_t body_offset);
 
     /// True for a default-constructed Feature.
@@ -79,7 +80,7 @@ public:
     /// section, matching the offsets stored in the R-tree leaves.
     std::uint64_t byte_offset() const { return byte_offset_; }
 
-private:
+  private:
     friend struct detail::FeatureAccess;
     const ::CityFeature* raw() const;
 

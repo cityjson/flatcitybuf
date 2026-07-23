@@ -2,10 +2,10 @@
 
 #ifdef FCB_WITH_JSON
 
-#include <nlohmann/json.hpp>
+#    include <fcb/feature.hpp>
+#    include <fcb/header.hpp>
 
-#include <fcb/feature.hpp>
-#include <fcb/header.hpp>
+#    include <nlohmann/json.hpp>
 
 namespace fcb {
 

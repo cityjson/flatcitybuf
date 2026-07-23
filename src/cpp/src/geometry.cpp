@@ -1,6 +1,5 @@
-#include <fcb/geometry.hpp>
-
 #include <fcb/generated/geometry_generated.h>
+#include <fcb/geometry.hpp>
 
 #include <algorithm>
 
@@ -15,9 +14,9 @@ namespace {
 // SWAP through: exchanging Solid(4) and MultiSolid(5) in geometry.fbs keeps
 // the first and last enumerators in place while silently inverting the exact
 // depths this file exists to get right.
-#define FCB_ASSERT_KIND(name)                                             \
-    static_assert(static_cast<std::uint8_t>(GeometryKind::name) ==        \
-                      static_cast<std::uint8_t>(::GeometryType::name),    \
+#define FCB_ASSERT_KIND(name)                                          \
+    static_assert(static_cast<std::uint8_t>(GeometryKind::name) ==     \
+                      static_cast<std::uint8_t>(::GeometryType::name), \
                   "GeometryKind::" #name " has drifted from the generated GeometryType")
 FCB_ASSERT_KIND(MultiPoint);
 FCB_ASSERT_KIND(MultiLineString);
@@ -44,7 +43,8 @@ static_assert(static_cast<std::uint8_t>(::GeometryType::MAX) ==
 /// UINT32_MAX marks "no index here" and becomes JSON null, not 4294967295.
 /// Mirrors `geom_decoder::index`.
 nlohmann::json index_to_json(std::uint32_t v) {
-    if (v == UINT32_MAX) return nullptr;
+    if (v == UINT32_MAX)
+        return nullptr;
     return v;
 }
 
@@ -72,7 +72,8 @@ struct Cursors {
 
 /// One ring: `strings[ring]` vertex indices taken from `indices`.
 nlohmann::json take_ring(UIntView strings, UIntView indices, Cursors& c) {
-    if (c.ring >= strings.size()) overrun("strings");
+    if (c.ring >= strings.size())
+        overrun("strings");
     const std::uint32_t ring_size = strings[c.ring++];
 
     if (c.index > indices.size() || indices.size() - c.index < ring_size) {
@@ -87,9 +88,9 @@ nlohmann::json take_ring(UIntView strings, UIntView indices, Cursors& c) {
 }
 
 /// One surface: `surfaces[surface]` rings.
-nlohmann::json take_surface(UIntView surfaces, UIntView strings, UIntView indices,
-                            Cursors& c) {
-    if (c.surface >= surfaces.size()) overrun("surfaces");
+nlohmann::json take_surface(UIntView surfaces, UIntView strings, UIntView indices, Cursors& c) {
+    if (c.surface >= surfaces.size())
+        overrun("surfaces");
     const std::uint32_t ring_count = surfaces[c.surface++];
 
     auto surface = nlohmann::json::array();
@@ -100,9 +101,10 @@ nlohmann::json take_surface(UIntView surfaces, UIntView strings, UIntView indice
 }
 
 /// One shell: `shells[shell]` surfaces.
-nlohmann::json take_shell(UIntView shells, UIntView surfaces, UIntView strings,
-                          UIntView indices, Cursors& c) {
-    if (c.shell >= shells.size()) overrun("shells");
+nlohmann::json take_shell(UIntView shells, UIntView surfaces, UIntView strings, UIntView indices,
+                          Cursors& c) {
+    if (c.shell >= shells.size())
+        overrun("shells");
     const std::uint32_t surface_count = shells[c.shell++];
 
     auto shell = nlohmann::json::array();
@@ -131,21 +133,24 @@ struct TexCursors {
         const std::uint32_t size = count_at(strings, string);
         const std::size_t end = std::min(vertex + size, vertices.size());
         auto ring = nlohmann::json::array();
-        for (; vertex < end; ++vertex) ring.push_back(index_to_json(vertices[vertex]));
+        for (; vertex < end; ++vertex)
+            ring.push_back(index_to_json(vertices[vertex]));
         return ring;
     }
 
     nlohmann::json take_surface() {
         const std::uint32_t rings = count_at(surfaces, surface);
         auto out = nlohmann::json::array();
-        for (std::uint32_t i = 0; i < rings; ++i) out.push_back(take_ring());
+        for (std::uint32_t i = 0; i < rings; ++i)
+            out.push_back(take_ring());
         return out;
     }
 
     nlohmann::json take_shell() {
         const std::uint32_t n = count_at(shells, shell);
         auto out = nlohmann::json::array();
-        for (std::uint32_t i = 0; i < n; ++i) out.push_back(take_surface());
+        for (std::uint32_t i = 0; i < n; ++i)
+            out.push_back(take_surface());
         return out;
     }
 };
@@ -156,19 +161,16 @@ struct TexCursors {
 
 #ifdef FCB_WITH_JSON
 
-nlohmann::json decode_boundaries(GeometryKind type,
-                                 UIntView solids,
-                                 UIntView shells,
-                                 UIntView surfaces,
-                                 UIntView strings,
-                                 UIntView indices) {
+nlohmann::json decode_boundaries(GeometryKind type, UIntView solids, UIntView shells,
+                                 UIntView surfaces, UIntView strings, UIntView indices) {
     Cursors c;
     auto out = nlohmann::json::array();
 
     switch (type) {
         case GeometryKind::MultiPoint:
             // Every index is a point of the one and only ring.
-            for (std::size_t i = 0; i < indices.size(); ++i) out.push_back(indices[i]);
+            for (std::size_t i = 0; i < indices.size(); ++i)
+                out.push_back(indices[i]);
             return out;
 
         case GeometryKind::MultiLineString:
@@ -219,15 +221,14 @@ nlohmann::json decode_boundaries(GeometryKind type,
     }
 }
 
-nlohmann::json decode_semantics_values(GeometryKind type,
-                                       UIntView solids,
-                                       UIntView shells,
+nlohmann::json decode_semantics_values(GeometryKind type, UIntView solids, UIntView shells,
                                        UIntView values) {
     std::size_t cursor = 0;
     auto take = [&](std::uint32_t n) {
         const std::size_t end = std::min(cursor + n, values.size());
         auto out = nlohmann::json::array();
-        for (; cursor < end; ++cursor) out.push_back(index_to_json(values[cursor]));
+        for (; cursor < end; ++cursor)
+            out.push_back(index_to_json(values[cursor]));
         return out;
     };
 
@@ -235,7 +236,8 @@ nlohmann::json decode_semantics_values(GeometryKind type,
     switch (type) {
         case GeometryKind::Solid:
             // One array per shell.
-            for (std::size_t i = 0; i < shells.size(); ++i) out.push_back(take(shells[i]));
+            for (std::size_t i = 0; i < shells.size(); ++i)
+                out.push_back(take(shells[i]));
             return out;
 
         case GeometryKind::MultiSolid:
@@ -263,15 +265,14 @@ nlohmann::json decode_semantics_values(GeometryKind type,
     }
 }
 
-nlohmann::json decode_material_values(GeometryKind type,
-                                      UIntView solids,
-                                      UIntView shells,
+nlohmann::json decode_material_values(GeometryKind type, UIntView solids, UIntView shells,
                                       UIntView vertices) {
     std::size_t vertex = 0;
     auto take_shell = [&](std::uint32_t n) {
         const std::size_t end = std::min(vertex + n, vertices.size());
         auto out = nlohmann::json::array();
-        for (; vertex < end; ++vertex) out.push_back(index_to_json(vertices[vertex]));
+        for (; vertex < end; ++vertex)
+            out.push_back(index_to_json(vertices[vertex]));
         return out;
     };
     auto flat = [&] {
@@ -327,12 +328,8 @@ nlohmann::json decode_material_values(GeometryKind type,
     }
 }
 
-nlohmann::json decode_texture_values(GeometryKind type,
-                                     UIntView solids,
-                                     UIntView shells,
-                                     UIntView surfaces,
-                                     UIntView strings,
-                                     UIntView vertices) {
+nlohmann::json decode_texture_values(GeometryKind type, UIntView solids, UIntView shells,
+                                     UIntView surfaces, UIntView strings, UIntView vertices) {
     TexCursors c{shells, surfaces, strings, vertices, 0, 0, 0, 0};
 
     auto out = nlohmann::json::array();
@@ -340,12 +337,14 @@ nlohmann::json decode_texture_values(GeometryKind type,
         case GeometryKind::MultiSurface:
         case GeometryKind::CompositeSurface:
             // Per surface, per ring.
-            for (std::size_t i = 0; i < surfaces.size(); ++i) out.push_back(c.take_surface());
+            for (std::size_t i = 0; i < surfaces.size(); ++i)
+                out.push_back(c.take_surface());
             return out;
 
         case GeometryKind::Solid:
             // ... per shell.
-            for (std::size_t i = 0; i < shells.size(); ++i) out.push_back(c.take_shell());
+            for (std::size_t i = 0; i < shells.size(); ++i)
+                out.push_back(c.take_shell());
             return out;
 
         case GeometryKind::MultiSolid:
@@ -353,7 +352,8 @@ nlohmann::json decode_texture_values(GeometryKind type,
             // ... per solid.
             for (std::size_t i = 0; i < solids.size(); ++i) {
                 auto solid = nlohmann::json::array();
-                for (std::uint32_t k = 0; k < solids[i]; ++k) solid.push_back(c.take_shell());
+                for (std::uint32_t k = 0; k < solids[i]; ++k)
+                    solid.push_back(c.take_shell());
                 out.push_back(std::move(solid));
             }
             return out;
@@ -364,7 +364,8 @@ nlohmann::json decode_texture_values(GeometryKind type,
         // a textureless count array still produce one empty surface.
         default: {
             const std::size_t n = std::max<std::size_t>(surfaces.size(), 1);
-            for (std::size_t i = 0; i < n; ++i) out.push_back(c.take_surface());
+            for (std::size_t i = 0; i < n; ++i)
+                out.push_back(c.take_surface());
             return out;
         }
     }
@@ -374,14 +375,22 @@ nlohmann::json decode_texture_values(GeometryKind type,
 
 std::string geometry_type_name(std::uint8_t type) {
     switch (static_cast<::GeometryType>(type)) {
-        case ::GeometryType::MultiPoint: return "MultiPoint";
-        case ::GeometryType::MultiLineString: return "MultiLineString";
-        case ::GeometryType::MultiSurface: return "MultiSurface";
-        case ::GeometryType::CompositeSurface: return "CompositeSurface";
-        case ::GeometryType::Solid: return "Solid";
-        case ::GeometryType::MultiSolid: return "MultiSolid";
-        case ::GeometryType::CompositeSolid: return "CompositeSolid";
-        case ::GeometryType::GeometryInstance: return "GeometryInstance";
+        case ::GeometryType::MultiPoint:
+            return "MultiPoint";
+        case ::GeometryType::MultiLineString:
+            return "MultiLineString";
+        case ::GeometryType::MultiSurface:
+            return "MultiSurface";
+        case ::GeometryType::CompositeSurface:
+            return "CompositeSurface";
+        case ::GeometryType::Solid:
+            return "Solid";
+        case ::GeometryType::MultiSolid:
+            return "MultiSolid";
+        case ::GeometryType::CompositeSolid:
+            return "CompositeSolid";
+        case ::GeometryType::GeometryInstance:
+            return "GeometryInstance";
     }
     // UNKNOWN-TAG POLICY. Unlike a City Object type or a semantic surface
     // type, a geometry type has no CityJSON extension escape hatch: the spec
@@ -390,8 +399,7 @@ std::string geometry_type_name(std::uint8_t type) {
     // here. Erroring is the only option that neither mislabels the geometry
     // nor writes a document a validator rejects. The Rust reader now does the
     // same (geom_decoder.rs::GeometryType::to_cj, Error::UnknownEnumTag).
-    throw Error(ErrorCode::InvalidFlatbuffer,
-                "unknown geometry type " + std::to_string(type));
+    throw Error(ErrorCode::InvalidFlatbuffer, "unknown geometry type " + std::to_string(type));
 }
 
 }  // namespace fcb

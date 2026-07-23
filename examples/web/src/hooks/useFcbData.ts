@@ -5,7 +5,7 @@ import { useCallback } from 'react'
 import { bboxToSource, forward } from '../crs/index'
 import type { HeaderModel } from '../reader/index'
 import {
-  activeQueryAtom, headerAtom, limitAtom, loadingAtom, readyAtom,
+  activeQueryAtom, fetchBboxAtom, headerAtom, limitAtom, loadingAtom, readyAtom,
   type RenderedFeature, renderedAtom, selectedAtom, statusAtom, totalAtom,
   type ViewState, viewStateAtom,
 } from '../store/index'
@@ -54,6 +54,7 @@ export function useFcbData() {
   const [limit] = useAtom(limitAtom)
   const [, setReady] = useAtom(readyAtom)
   const [, setLoading] = useAtom(loadingAtom)
+  const [, setFetchBbox] = useAtom(fetchBboxAtom)
   const [, setSelected] = useAtom(selectedAtom)
   const [, setViewState] = useAtom(viewStateAtom)
 

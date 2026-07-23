@@ -1,8 +1,8 @@
 #include <fcb/range_reader.hpp>
 
-#include "detail/checked.hpp"
-
 #include <algorithm>
+
+#include "detail/checked.hpp"
 
 namespace fcb {
 
@@ -24,10 +24,11 @@ FileRangeReader::FileRangeReader(const std::string& path)
 
 std::uint64_t FileRangeReader::total_size() { return size_; }
 
-std::vector<std::uint8_t> FileRangeReader::read(std::uint64_t offset,
-                                                std::uint64_t length) {
-    if (length == 0) return {};
-    if (offset >= size_) return {};
+std::vector<std::uint8_t> FileRangeReader::read(std::uint64_t offset, std::uint64_t length) {
+    if (length == 0)
+        return {};
+    if (offset >= size_)
+        return {};
 
     // Clamp to EOF: a range crossing the end returns exactly what exists.
     const std::uint64_t n = std::min<std::uint64_t>(length, size_ - offset);
@@ -50,14 +51,14 @@ BufferedRangeReader::BufferedRangeReader(std::shared_ptr<RangeReader> inner,
 
 std::uint64_t BufferedRangeReader::total_size() { return inner_->total_size(); }
 
-std::uint64_t BufferedRangeReader::clamped_fetch(std::uint64_t offset,
-                                                 std::uint64_t length) {
+std::uint64_t BufferedRangeReader::clamped_fetch(std::uint64_t offset, std::uint64_t length) {
     // Over-fetch to min_req_size, but never past the end of the resource --
     // otherwise a small valid request near UINT64_MAX becomes an
     // overflowing one.
     const std::uint64_t want = std::max<std::uint64_t>(length, min_req_size_);
     const std::uint64_t total = inner_->total_size();
-    if (offset >= total) return length;
+    if (offset >= total)
+        return length;
     return std::min<std::uint64_t>(want, total - offset);
 }
 
@@ -65,23 +66,22 @@ bool BufferedRangeReader::covers(std::uint64_t offset, std::uint64_t length) con
     // Validate the request unconditionally: returning early on an empty
     // cache would let an overflowing range through to the transport.
     (void)detail::range_end(offset, length);
-    if (buf_.empty() || offset < buf_offset_) return false;
+    if (buf_.empty() || offset < buf_offset_)
+        return false;
     // Throws rather than wrapping; both ends derive from file-supplied values.
-    return detail::range_end(offset, length) <=
-           detail::range_end(buf_offset_, buf_.size());
+    return detail::range_end(offset, length) <= detail::range_end(buf_offset_, buf_.size());
 }
 
-std::vector<std::uint8_t> BufferedRangeReader::slice_from_buffer(
-    std::uint64_t offset, std::uint64_t length) const {
+std::vector<std::uint8_t> BufferedRangeReader::slice_from_buffer(std::uint64_t offset,
+                                                                 std::uint64_t length) const {
     const std::uint64_t rel = offset - buf_offset_;
-    return std::vector<std::uint8_t>(
-        buf_.begin() + static_cast<std::ptrdiff_t>(rel),
-        buf_.begin() + static_cast<std::ptrdiff_t>(rel + length));
+    return std::vector<std::uint8_t>(buf_.begin() + static_cast<std::ptrdiff_t>(rel),
+                                     buf_.begin() + static_cast<std::ptrdiff_t>(rel + length));
 }
 
-std::vector<std::uint8_t> BufferedRangeReader::read(std::uint64_t offset,
-                                                    std::uint64_t length) {
-    if (length == 0) return {};  // contract: never contact the transport
+std::vector<std::uint8_t> BufferedRangeReader::read(std::uint64_t offset, std::uint64_t length) {
+    if (length == 0)
+        return {};  // contract: never contact the transport
 
     if (!covers(offset, length)) {
         buf_ = inner_->read(offset, clamped_fetch(offset, length));
@@ -89,7 +89,8 @@ std::vector<std::uint8_t> BufferedRangeReader::read(std::uint64_t offset,
     }
 
     const std::uint64_t rel = offset - buf_offset_;
-    if (rel >= buf_.size()) return {};
+    if (rel >= buf_.size())
+        return {};
     const std::uint64_t n = std::min<std::uint64_t>(length, buf_.size() - rel);
     return slice_from_buffer(offset, n);
 }
@@ -114,11 +115,11 @@ void BufferedRangeReader::read_batch(std::vector<RangeRequest>& requests) {
         } else if (covers(r.offset, r.length)) {
             r.data = slice_from_buffer(r.offset, r.length);
         } else {
-            misses.push_back(Miss{i, r.offset, r.length,
-                                  clamped_fetch(r.offset, r.length)});
+            misses.push_back(Miss{i, r.offset, r.length, clamped_fetch(r.offset, r.length)});
         }
     }
-    if (misses.empty()) return;
+    if (misses.empty())
+        return;
 
     // Over-fetch each miss to min_req_size, exactly as read() does; otherwise
     // the cache seeded below would be one request wide and buy nothing.
@@ -135,8 +136,7 @@ void BufferedRangeReader::read_batch(std::vector<RangeRequest>& requests) {
         const auto& m = misses[k];
         auto& got = fetches[k].data;
         const std::uint64_t n = std::min<std::uint64_t>(m.want, got.size());
-        requests[m.index].data.assign(
-            got.begin(), got.begin() + static_cast<std::ptrdiff_t>(n));
+        requests[m.index].data.assign(got.begin(), got.begin() + static_cast<std::ptrdiff_t>(n));
     }
 
     // Seed the single-window cache from the last over-fetched block:

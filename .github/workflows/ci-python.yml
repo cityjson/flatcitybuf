@@ -1,15 +1,15 @@
-name: Python CI
+name: CI (Python)
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "src/py/**"
       - "conformance/**"
       - ".github/workflows/ci-python.yml"
 
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "src/py/**"
       - "conformance/**"
@@ -21,8 +21,8 @@ concurrency:
 
 jobs:
   # Pure-Python package at src/py: no compiled dependency, no Rust toolchain.
-  test-py-native:
-    name: Test pure-Python package (src/py)
+  check:
+    name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -35,6 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -43,37 +46,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      # numpy is a genuine optional extra (never imported at module
-      # scope -- see flatcitybuf/cityjson.py's/feature.py's
-      # `_import_numpy`), and both the "numpy absent" and "numpy
-      # installed" code paths must actually be verified in CI, not just
-      # whichever one happens to be installed. `uv sync --extra dev`
-      # here matches it exactly, so the first pass below is genuinely
-      # numpy-less: the pure-Python fallback runs, and the
-      # numpy-parity tests (test_cityjson.py) skip cleanly via
-      # `pytest.importorskip("numpy")`.
-      - name: Install dev dependencies (no numpy)
-        run: uv sync --extra dev
-
-      - name: Run tests (no numpy)
-        run: uv run pytest -v
-
-      - name: Run linter
-        run: |
-          uv run ruff check .
-          uv run ruff format --check .
-
-      - name: Run mypy (no numpy)
-        run: uv run mypy
-
-      # Second pass: numpy installed, so the bulk-decode path actually
-      # runs (rather than skipping) and the numpy-parity tests assert
-      # the two paths agree.
-      - name: Install numpy extra
-        run: uv sync --extra dev --extra numpy
-
-      - name: Run tests (with numpy)
-        run: uv run pytest -v
-
-      - name: Run mypy (with numpy)
-        run: uv run mypy
+      # `just check` runs ruff, mypy --strict and pytest, then re-runs mypy +
+      # pytest a second time with numpy UNINSTALLED (the `test-no-numpy`
+      # recipe). numpy is a genuine optional extra -- every code path has a
+      # working pure-Python fallback -- so both states must be exercised, or
+      # whichever one happens to be installed is the only one ever tested.
+      # Expect `255 passed` on the numpy pass and `251 passed, 4 skipped` on
+      # the numpy-less one, where the parity tests importorskip cleanly.
+      - name: just check
+        run: just check

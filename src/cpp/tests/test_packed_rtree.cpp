@@ -1,5 +1,3 @@
-#include <doctest/doctest.h>
-
 #include <fcb/packed_rtree.hpp>
 #include <fcb/reader.hpp>
 
@@ -7,6 +5,8 @@
 #include <set>
 #include <string>
 #include <vector>
+
+#include <doctest/doctest.h>
 
 using namespace fcb;
 
@@ -34,11 +34,11 @@ TEST_CASE("intersects matches Rust NodeItem::intersects boundary semantics") {
     // query result, so pin the boundary cases explicitly.
     NodeItem n{0.0, 0.0, 10.0, 10.0, 0};
 
-    CHECK(n.intersects(BBox{5.0, 5.0, 6.0, 6.0}));       // fully inside
-    CHECK(n.intersects(BBox{-5.0, -5.0, 5.0, 5.0}));     // overlapping
-    CHECK(n.intersects(BBox{-5.0, -5.0, 20.0, 20.0}));   // enclosing
-    CHECK(n.intersects(BBox{10.0, 10.0, 20.0, 20.0}));   // corner touch
-    CHECK(n.intersects(BBox{-5.0, -5.0, 0.0, 0.0}));     // corner touch
+    CHECK(n.intersects(BBox{5.0, 5.0, 6.0, 6.0}));      // fully inside
+    CHECK(n.intersects(BBox{-5.0, -5.0, 5.0, 5.0}));    // overlapping
+    CHECK(n.intersects(BBox{-5.0, -5.0, 20.0, 20.0}));  // enclosing
+    CHECK(n.intersects(BBox{10.0, 10.0, 20.0, 20.0}));  // corner touch
+    CHECK(n.intersects(BBox{-5.0, -5.0, 0.0, 0.0}));    // corner touch
 
     CHECK_FALSE(n.intersects(BBox{10.1, 0.0, 20.0, 10.0}));   // past max_x
     CHECK_FALSE(n.intersects(BBox{-20.0, 0.0, -0.1, 10.0}));  // before min_x
@@ -61,12 +61,13 @@ TEST_CASE("a bbox covering the whole extent returns every feature") {
     const auto& info = r.header().info();
     REQUIRE(info.has_extent);
 
-    BBox all{info.geographical_extent[0], info.geographical_extent[1],
-             info.geographical_extent[3], info.geographical_extent[4]};
+    BBox all{info.geographical_extent[0], info.geographical_extent[1], info.geographical_extent[3],
+             info.geographical_extent[4]};
 
     FeatureIterator it = r.select_bbox(all);
     std::uint64_t seen = 0;
-    while (it.next()) ++seen;
+    while (it.next())
+        ++seen;
     CHECK(seen == info.features_count);
 }
 
@@ -76,7 +77,8 @@ TEST_CASE("a bbox far outside the extent returns nothing") {
 
     FeatureIterator it = r.select_bbox(none);
     std::uint64_t seen = 0;
-    while (it.next()) ++seen;
+    while (it.next())
+        ++seen;
     CHECK(seen == 0);
 }
 
@@ -89,7 +91,8 @@ TEST_CASE("a quarter bbox returns a strict non-empty subset") {
     BBox quarter{info.geographical_extent[0], info.geographical_extent[1], mid_x, mid_y};
     FeatureIterator it = r.select_bbox(quarter);
     std::uint64_t seen = 0;
-    while (it.next()) ++seen;
+    while (it.next())
+        ++seen;
 
     CHECK(seen > 0);
     CHECK(seen < info.features_count);
@@ -102,7 +105,8 @@ TEST_CASE("bbox results are a subset of the full scan, by id") {
     std::set<std::string> all_ids;
     {
         FeatureIterator it = r.select_all();
-        while (it.next()) all_ids.insert(it.current().id());
+        while (it.next())
+            all_ids.insert(it.current().id());
     }
 
     const double mid_x = (info.geographical_extent[0] + info.geographical_extent[3]) / 2.0;
@@ -123,11 +127,12 @@ TEST_CASE("the last feature in the file is reachable by bbox query") {
     // offset, so its length must come from its own 4-byte prefix.
     FcbReader r = FcbReader::open_file(kFixture);
     const auto& info = r.header().info();
-    BBox all{info.geographical_extent[0], info.geographical_extent[1],
-             info.geographical_extent[3], info.geographical_extent[4]};
+    BBox all{info.geographical_extent[0], info.geographical_extent[1], info.geographical_extent[3],
+             info.geographical_extent[4]};
 
     FeatureIterator it = r.select_bbox(all);
     std::string last_id;
-    while (it.next()) last_id = it.current().id();
+    while (it.next())
+        last_id = it.current().id();
     CHECK_FALSE(last_id.empty());
 }

@@ -1,11 +1,11 @@
 #pragma once
 
-#include <cstdint>
-#include <vector>
-
 #include <fcb/error.hpp>
 #include <fcb/range_reader.hpp>
 #include <fcb/span.hpp>
+
+#include <cstdint>
+#include <vector>
 
 namespace fcb {
 
@@ -50,10 +50,8 @@ std::uint64_t rtree_num_nodes(std::uint64_t num_items, std::uint16_t node_size);
 /// Breadth-first bbox search over the packed R-tree, reading nodes through
 /// the supplied reader. Results are returned sorted by feature offset so the
 /// caller reads forward through the file.
-std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader,
-                                                std::uint64_t index_begin,
-                                                std::uint64_t num_items,
-                                                std::uint16_t node_size,
+std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader, std::uint64_t index_begin,
+                                                std::uint64_t num_items, std::uint16_t node_size,
                                                 const BBox& query);
 
 }  // namespace fcb

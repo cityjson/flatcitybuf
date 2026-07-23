@@ -1,3 +1,10 @@
+//! `fcb` — the FlatCityBuf command-line tool.
+//!
+//! Argument parsing and subcommand dispatch. The conversions themselves are
+//! [`fcb_core`]; the shared helpers (multi-file merging, input sniffing, the
+//! `inspect` terminal UI) are [`fcb_cli`]. Run `fcb --help` for the full
+//! interface, or see the [`fcb_cli`] crate docs for a summary.
+
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use clap::{ArgAction, Parser, Subcommand};
 use console::{style, Term};

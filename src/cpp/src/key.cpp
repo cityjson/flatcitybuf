@@ -1,6 +1,5 @@
-#include <fcb/key.hpp>
-
 #include <fcb/generated/header_generated.h>
+#include <fcb/key.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -15,8 +14,7 @@ bool is_string_kind(KeyKind k) {
     return k == KeyKind::String20 || k == KeyKind::String50 || k == KeyKind::String100;
 }
 
-template <typename T>
-void put_le(std::vector<std::uint8_t>& out, T value) {
+template <typename T> void put_le(std::vector<std::uint8_t>& out, T value) {
     static_assert(std::is_integral<T>::value, "integral only");
     using U = typename std::make_unsigned<T>::type;
     U u = static_cast<U>(value);
@@ -25,8 +23,7 @@ void put_le(std::vector<std::uint8_t>& out, T value) {
     }
 }
 
-template <typename T>
-T get_le(bytes_view b, std::size_t at = 0) {
+template <typename T> T get_le(bytes_view b, std::size_t at = 0) {
     using U = typename std::make_unsigned<T>::type;
     U u = 0;
     for (std::size_t i = 0; i < sizeof(T); ++i) {
@@ -40,18 +37,22 @@ T get_le(bytes_view b, std::size_t at = 0) {
 int cmp_ordered_double(double a, double b) {
     const bool na = std::isnan(a);
     const bool nb = std::isnan(b);
-    if (na && nb) return 0;
-    if (na) return 1;
-    if (nb) return -1;
-    if (a < b) return -1;
-    if (a > b) return 1;
+    if (na && nb)
+        return 0;
+    if (na)
+        return 1;
+    if (nb)
+        return -1;
+    if (a < b)
+        return -1;
+    if (a > b)
+        return 1;
     return 0;  // also covers -0.0 == +0.0
 }
 
 void require_size(bytes_view b, std::size_t need, const char* what) {
     if (b.size() < need) {
-        throw Error(ErrorCode::InvalidAttributeValue,
-                    std::string("short key buffer for ") + what);
+        throw Error(ErrorCode::InvalidAttributeValue, std::string("short key buffer for ") + what);
     }
 }
 
@@ -61,29 +62,37 @@ std::size_t key_serialized_size(KeyKind kind) {
     switch (kind) {
         case KeyKind::Int8:
         case KeyKind::UInt8:
-        case KeyKind::Bool: return 1;
+        case KeyKind::Bool:
+            return 1;
         case KeyKind::Int16:
-        case KeyKind::UInt16: return 2;
+        case KeyKind::UInt16:
+            return 2;
         case KeyKind::Int32:
         case KeyKind::UInt32:
-        case KeyKind::Float32: return 4;
+        case KeyKind::Float32:
+            return 4;
         case KeyKind::Int64:
         case KeyKind::UInt64:
-        case KeyKind::Float64: return 8;
-        case KeyKind::DateTime: return 12;  // i64 seconds + u32 nanos
-        case KeyKind::String20: return 20;
-        case KeyKind::String50: return 50;
-        case KeyKind::String100: return 100;
+        case KeyKind::Float64:
+            return 8;
+        case KeyKind::DateTime:
+            return 12;  // i64 seconds + u32 nanos
+        case KeyKind::String20:
+            return 20;
+        case KeyKind::String50:
+            return 50;
+        case KeyKind::String100:
+            return 100;
     }
     throw Error(ErrorCode::UnsupportedColumnType, "unknown key kind");
 }
 
-#define FCB_KV_INT(NAME, TYPE, KIND, FIELD)               \
-    KeyValue KeyValue::NAME(TYPE v) {                     \
-        KeyValue k;                                       \
-        k.kind_ = KeyKind::KIND;                          \
-        k.FIELD = static_cast<decltype(k.FIELD)>(v);      \
-        return k;                                         \
+#define FCB_KV_INT(NAME, TYPE, KIND, FIELD)          \
+    KeyValue KeyValue::NAME(TYPE v) {                \
+        KeyValue k;                                  \
+        k.kind_ = KeyKind::KIND;                     \
+        k.FIELD = static_cast<decltype(k.FIELD)>(v); \
+        return k;                                    \
     }
 
 FCB_KV_INT(from_i8, std::int8_t, Int8, i_)
@@ -141,15 +150,33 @@ std::vector<std::uint8_t> encode_key(const KeyValue& v) {
     out.reserve(n);
 
     switch (v.kind_) {
-        case KeyKind::Int8: put_le<std::int8_t>(out, static_cast<std::int8_t>(v.i_)); break;
-        case KeyKind::UInt8: put_le<std::uint8_t>(out, static_cast<std::uint8_t>(v.u_)); break;
-        case KeyKind::Int16: put_le<std::int16_t>(out, static_cast<std::int16_t>(v.i_)); break;
-        case KeyKind::UInt16: put_le<std::uint16_t>(out, static_cast<std::uint16_t>(v.u_)); break;
-        case KeyKind::Int32: put_le<std::int32_t>(out, static_cast<std::int32_t>(v.i_)); break;
-        case KeyKind::UInt32: put_le<std::uint32_t>(out, static_cast<std::uint32_t>(v.u_)); break;
-        case KeyKind::Int64: put_le<std::int64_t>(out, v.i_); break;
-        case KeyKind::UInt64: put_le<std::uint64_t>(out, v.u_); break;
-        case KeyKind::Bool: out.push_back(v.u_ != 0 ? 1 : 0); break;
+        case KeyKind::Int8:
+            put_le<std::int8_t>(out, static_cast<std::int8_t>(v.i_));
+            break;
+        case KeyKind::UInt8:
+            put_le<std::uint8_t>(out, static_cast<std::uint8_t>(v.u_));
+            break;
+        case KeyKind::Int16:
+            put_le<std::int16_t>(out, static_cast<std::int16_t>(v.i_));
+            break;
+        case KeyKind::UInt16:
+            put_le<std::uint16_t>(out, static_cast<std::uint16_t>(v.u_));
+            break;
+        case KeyKind::Int32:
+            put_le<std::int32_t>(out, static_cast<std::int32_t>(v.i_));
+            break;
+        case KeyKind::UInt32:
+            put_le<std::uint32_t>(out, static_cast<std::uint32_t>(v.u_));
+            break;
+        case KeyKind::Int64:
+            put_le<std::int64_t>(out, v.i_);
+            break;
+        case KeyKind::UInt64:
+            put_le<std::uint64_t>(out, v.u_);
+            break;
+        case KeyKind::Bool:
+            out.push_back(v.u_ != 0 ? 1 : 0);
+            break;
 
         case KeyKind::Float32: {
             // Raw IEEE-754 bits, little-endian. NO order-preserving
@@ -194,15 +221,24 @@ KeyValue decode_key(KeyKind kind, bytes_view b) {
     require_size(b, n, "decode_key");
 
     switch (kind) {
-        case KeyKind::Int8: return KeyValue::from_i8(get_le<std::int8_t>(b));
-        case KeyKind::UInt8: return KeyValue::from_u8(get_le<std::uint8_t>(b));
-        case KeyKind::Int16: return KeyValue::from_i16(get_le<std::int16_t>(b));
-        case KeyKind::UInt16: return KeyValue::from_u16(get_le<std::uint16_t>(b));
-        case KeyKind::Int32: return KeyValue::from_i32(get_le<std::int32_t>(b));
-        case KeyKind::UInt32: return KeyValue::from_u32(get_le<std::uint32_t>(b));
-        case KeyKind::Int64: return KeyValue::from_i64(get_le<std::int64_t>(b));
-        case KeyKind::UInt64: return KeyValue::from_u64(get_le<std::uint64_t>(b));
-        case KeyKind::Bool: return KeyValue::from_bool(b[0] != 0);
+        case KeyKind::Int8:
+            return KeyValue::from_i8(get_le<std::int8_t>(b));
+        case KeyKind::UInt8:
+            return KeyValue::from_u8(get_le<std::uint8_t>(b));
+        case KeyKind::Int16:
+            return KeyValue::from_i16(get_le<std::int16_t>(b));
+        case KeyKind::UInt16:
+            return KeyValue::from_u16(get_le<std::uint16_t>(b));
+        case KeyKind::Int32:
+            return KeyValue::from_i32(get_le<std::int32_t>(b));
+        case KeyKind::UInt32:
+            return KeyValue::from_u32(get_le<std::uint32_t>(b));
+        case KeyKind::Int64:
+            return KeyValue::from_i64(get_le<std::int64_t>(b));
+        case KeyKind::UInt64:
+            return KeyValue::from_u64(get_le<std::uint64_t>(b));
+        case KeyKind::Bool:
+            return KeyValue::from_bool(b[0] != 0);
 
         case KeyKind::Float32: {
             const std::uint32_t bits = get_le<std::uint32_t>(b);
@@ -217,17 +253,17 @@ KeyValue decode_key(KeyKind kind, bytes_view b) {
             return KeyValue::from_f64(d);
         }
         case KeyKind::DateTime:
-            return KeyValue::from_datetime(get_le<std::int64_t>(b),
-                                           get_le<std::uint32_t>(b, 8));
+            return KeyValue::from_datetime(get_le<std::int64_t>(b), get_le<std::uint32_t>(b, 8));
 
         case KeyKind::String20:
         case KeyKind::String50:
         case KeyKind::String100: {
             // Stop at the first NUL, as to_string_lossy does (key.rs:511).
             std::size_t len = 0;
-            while (len < n && b[len] != 0) ++len;
-            return KeyValue::from_string(
-                kind, std::string(reinterpret_cast<const char*>(b.data()), len));
+            while (len < n && b[len] != 0)
+                ++len;
+            return KeyValue::from_string(kind,
+                                         std::string(reinterpret_cast<const char*>(b.data()), len));
         }
     }
     throw Error(ErrorCode::UnsupportedColumnType, "unknown key kind");
@@ -256,7 +292,8 @@ int compare_keys(const KeyValue& a, const KeyValue& b) {
             return cmp_ordered_double(a.f_, b.f_);
 
         case KeyKind::DateTime:
-            if (a.i_ != b.i_) return a.i_ < b.i_ ? -1 : 1;
+            if (a.i_ != b.i_)
+                return a.i_ < b.i_ ? -1 : 1;
             return a.u_ < b.u_ ? -1 : (a.u_ > b.u_ ? 1 : 0);
 
         case KeyKind::String20:
@@ -275,21 +312,33 @@ int compare_keys(const KeyValue& a, const KeyValue& b) {
 
 KeyValue key_min(KeyKind kind) {
     switch (kind) {
-        case KeyKind::Int8: return KeyValue::from_i8(std::numeric_limits<std::int8_t>::min());
-        case KeyKind::UInt8: return KeyValue::from_u8(0);
-        case KeyKind::Int16: return KeyValue::from_i16(std::numeric_limits<std::int16_t>::min());
-        case KeyKind::UInt16: return KeyValue::from_u16(0);
-        case KeyKind::Int32: return KeyValue::from_i32(std::numeric_limits<std::int32_t>::min());
-        case KeyKind::UInt32: return KeyValue::from_u32(0);
-        case KeyKind::Int64: return KeyValue::from_i64(std::numeric_limits<std::int64_t>::min());
-        case KeyKind::UInt64: return KeyValue::from_u64(0);
-        case KeyKind::Float32: return KeyValue::from_f32(-std::numeric_limits<float>::infinity());
-        case KeyKind::Float64: return KeyValue::from_f64(-std::numeric_limits<double>::infinity());
-        case KeyKind::Bool: return KeyValue::from_bool(false);
+        case KeyKind::Int8:
+            return KeyValue::from_i8(std::numeric_limits<std::int8_t>::min());
+        case KeyKind::UInt8:
+            return KeyValue::from_u8(0);
+        case KeyKind::Int16:
+            return KeyValue::from_i16(std::numeric_limits<std::int16_t>::min());
+        case KeyKind::UInt16:
+            return KeyValue::from_u16(0);
+        case KeyKind::Int32:
+            return KeyValue::from_i32(std::numeric_limits<std::int32_t>::min());
+        case KeyKind::UInt32:
+            return KeyValue::from_u32(0);
+        case KeyKind::Int64:
+            return KeyValue::from_i64(std::numeric_limits<std::int64_t>::min());
+        case KeyKind::UInt64:
+            return KeyValue::from_u64(0);
+        case KeyKind::Float32:
+            return KeyValue::from_f32(-std::numeric_limits<float>::infinity());
+        case KeyKind::Float64:
+            return KeyValue::from_f64(-std::numeric_limits<double>::infinity());
+        case KeyKind::Bool:
+            return KeyValue::from_bool(false);
         // Epoch 0, matching key.rs:242 -- NOT the true i64 minimum. Pre-1970
         // timestamps are therefore invisible to range queries, in both
         // implementations. Reproduced deliberately.
-        case KeyKind::DateTime: return KeyValue::from_datetime(0, 0);
+        case KeyKind::DateTime:
+            return KeyValue::from_datetime(0, 0);
         case KeyKind::String20:
         case KeyKind::String50:
         case KeyKind::String100:
@@ -300,21 +349,33 @@ KeyValue key_min(KeyKind kind) {
 
 KeyValue key_max(KeyKind kind) {
     switch (kind) {
-        case KeyKind::Int8: return KeyValue::from_i8(std::numeric_limits<std::int8_t>::max());
-        case KeyKind::UInt8: return KeyValue::from_u8(std::numeric_limits<std::uint8_t>::max());
-        case KeyKind::Int16: return KeyValue::from_i16(std::numeric_limits<std::int16_t>::max());
-        case KeyKind::UInt16: return KeyValue::from_u16(std::numeric_limits<std::uint16_t>::max());
-        case KeyKind::Int32: return KeyValue::from_i32(std::numeric_limits<std::int32_t>::max());
-        case KeyKind::UInt32: return KeyValue::from_u32(std::numeric_limits<std::uint32_t>::max());
-        case KeyKind::Int64: return KeyValue::from_i64(std::numeric_limits<std::int64_t>::max());
-        case KeyKind::UInt64: return KeyValue::from_u64(std::numeric_limits<std::uint64_t>::max());
+        case KeyKind::Int8:
+            return KeyValue::from_i8(std::numeric_limits<std::int8_t>::max());
+        case KeyKind::UInt8:
+            return KeyValue::from_u8(std::numeric_limits<std::uint8_t>::max());
+        case KeyKind::Int16:
+            return KeyValue::from_i16(std::numeric_limits<std::int16_t>::max());
+        case KeyKind::UInt16:
+            return KeyValue::from_u16(std::numeric_limits<std::uint16_t>::max());
+        case KeyKind::Int32:
+            return KeyValue::from_i32(std::numeric_limits<std::int32_t>::max());
+        case KeyKind::UInt32:
+            return KeyValue::from_u32(std::numeric_limits<std::uint32_t>::max());
+        case KeyKind::Int64:
+            return KeyValue::from_i64(std::numeric_limits<std::int64_t>::max());
+        case KeyKind::UInt64:
+            return KeyValue::from_u64(std::numeric_limits<std::uint64_t>::max());
         // +inf, matching key.rs:139. NaN sorts ABOVE +inf in the total
         // order, so NaN-keyed features are excluded from range-lowered
         // operators (Ge, Ne). Reproduced deliberately so results match Rust.
-        case KeyKind::Float32: return KeyValue::from_f32(std::numeric_limits<float>::infinity());
-        case KeyKind::Float64: return KeyValue::from_f64(std::numeric_limits<double>::infinity());
-        case KeyKind::Bool: return KeyValue::from_bool(true);
-        case KeyKind::DateTime: return KeyValue::from_datetime(253402300799LL, 999999999U);
+        case KeyKind::Float32:
+            return KeyValue::from_f32(std::numeric_limits<float>::infinity());
+        case KeyKind::Float64:
+            return KeyValue::from_f64(std::numeric_limits<double>::infinity());
+        case KeyKind::Bool:
+            return KeyValue::from_bool(true);
+        case KeyKind::DateTime:
+            return KeyValue::from_datetime(253402300799LL, 999999999U);
         case KeyKind::String20:
         case KeyKind::String50:
         case KeyKind::String100:
@@ -332,21 +393,36 @@ KeyKind key_kind_for_column(std::uint8_t column_type) {
         // stored values above 127. We match the writer, and therefore
         // decode files correctly, at the cost of disagreeing with the Rust
         // reader on those values. See "Known divergences" in the plan.
-        case ::ColumnType::Byte: return KeyKind::UInt8;
-        case ::ColumnType::UByte: return KeyKind::UInt8;
-        case ::ColumnType::Bool: return KeyKind::Bool;
-        case ::ColumnType::Short: return KeyKind::Int16;
-        case ::ColumnType::UShort: return KeyKind::UInt16;
-        case ::ColumnType::Int: return KeyKind::Int32;
-        case ::ColumnType::UInt: return KeyKind::UInt32;
-        case ::ColumnType::Long: return KeyKind::Int64;
-        case ::ColumnType::ULong: return KeyKind::UInt64;
-        case ::ColumnType::Float: return KeyKind::Float32;
-        case ::ColumnType::Double: return KeyKind::Float64;
-        case ::ColumnType::String: return KeyKind::String50;
-        case ::ColumnType::DateTime: return KeyKind::DateTime;
-        case ::ColumnType::Json: return KeyKind::String100;
-        case ::ColumnType::Binary: return KeyKind::String100;
+        case ::ColumnType::Byte:
+            return KeyKind::UInt8;
+        case ::ColumnType::UByte:
+            return KeyKind::UInt8;
+        case ::ColumnType::Bool:
+            return KeyKind::Bool;
+        case ::ColumnType::Short:
+            return KeyKind::Int16;
+        case ::ColumnType::UShort:
+            return KeyKind::UInt16;
+        case ::ColumnType::Int:
+            return KeyKind::Int32;
+        case ::ColumnType::UInt:
+            return KeyKind::UInt32;
+        case ::ColumnType::Long:
+            return KeyKind::Int64;
+        case ::ColumnType::ULong:
+            return KeyKind::UInt64;
+        case ::ColumnType::Float:
+            return KeyKind::Float32;
+        case ::ColumnType::Double:
+            return KeyKind::Float64;
+        case ::ColumnType::String:
+            return KeyKind::String50;
+        case ::ColumnType::DateTime:
+            return KeyKind::DateTime;
+        case ::ColumnType::Json:
+            return KeyKind::String100;
+        case ::ColumnType::Binary:
+            return KeyKind::String100;
     }
     throw Error(ErrorCode::UnsupportedColumnType, "unknown column type");
 }

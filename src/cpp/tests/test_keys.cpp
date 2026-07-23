@@ -1,10 +1,10 @@
-#include <doctest/doctest.h>
-
 #include <fcb/key.hpp>
 
 #include <cmath>
 #include <limits>
 #include <string>
+
+#include <doctest/doctest.h>
 
 using namespace fcb;
 
@@ -94,7 +94,8 @@ TEST_CASE("truncation splits multi-byte UTF-8 without complaint") {
     // 17 'a' + 11 euro signs (3 bytes each) = 17 + 33 = 50 bytes exactly at
     // the boundary; adding one more 'a' first pushes a euro across it.
     std::string s(18, 'a');
-    for (int i = 0; i < 11; ++i) s += "\xE2\x82\xAC";  // U+20AC EURO SIGN
+    for (int i = 0; i < 11; ++i)
+        s += "\xE2\x82\xAC";  // U+20AC EURO SIGN
 
     auto b = encode_key(KeyValue::from_string(KeyKind::String50, s));
     REQUIRE(b.size() == 50);
@@ -141,16 +142,31 @@ TEST_CASE("DateTime is i64 seconds followed by u32 nanos, both LE") {
 TEST_CASE("DateTime ordering handles negative seconds") {
     // The wire format stores a signed i64, so pre-1970 timestamps encode
     // fine even though the query sentinel min_value() is epoch 0.
-    CHECK(compare_keys(KeyValue::from_datetime(-100, 0),
-                       KeyValue::from_datetime(100, 0)) < 0);
+    CHECK(compare_keys(KeyValue::from_datetime(-100, 0), KeyValue::from_datetime(100, 0)) < 0);
 }
 
 TEST_CASE("column type maps to the key kind the WRITER produces") {
     // Raw ubyte values, matching header.fbs's ColumnType declaration order,
     // so this test does not depend on the generated API either.
-    struct CT { enum : std::uint8_t { Byte=0,UByte=1,Bool=2,Short=3,UShort=4,Int=5,
-                UInt=6,Long=7,ULong=8,Float=9,Double=10,String=11,Json=12,
-                DateTime=13,Binary=14 }; };
+    struct CT {
+        enum : std::uint8_t {
+            Byte = 0,
+            UByte = 1,
+            Bool = 2,
+            Short = 3,
+            UShort = 4,
+            Int = 5,
+            UInt = 6,
+            Long = 7,
+            ULong = 8,
+            Float = 9,
+            Double = 10,
+            String = 11,
+            Json = 12,
+            DateTime = 13,
+            Binary = 14
+        };
+    };
     CHECK(key_kind_for_column(CT::String) == KeyKind::String50);
     CHECK(key_kind_for_column(CT::Json) == KeyKind::String100);
     CHECK(key_kind_for_column(CT::Binary) == KeyKind::String100);

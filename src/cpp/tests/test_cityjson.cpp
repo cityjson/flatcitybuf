@@ -1,17 +1,17 @@
-#include <doctest/doctest.h>
-
 #include <fcb/cityjson.hpp>
 #include <fcb/generated/header_generated.h>
 #include <fcb/header.hpp>
 #include <fcb/layout.hpp>
 #include <fcb/reader.hpp>
 
-#include "fake_range_reader.hpp"
-
 #include <nlohmann/json.hpp>
 
 #include <memory>
 #include <vector>
+
+#include <doctest/doctest.h>
+
+#include "fake_range_reader.hpp"
 
 using namespace fcb;
 using nlohmann::json;
@@ -26,38 +26,37 @@ namespace {
 /// is `(required)` in header.fbs, so it must always be set for the
 /// FlatBuffers verifier to accept the buffer.
 std::vector<std::uint8_t> build_header_only_file(const char* poc_contact_name,
-                                                  const char* poc_email) {
+                                                 const char* poc_email) {
     flatbuffers::FlatBufferBuilder fbb;
-    auto header = CreateHeaderDirect(
-        fbb,
-        /*transform=*/nullptr,
-        /*appearance=*/0,
-        /*columns=*/nullptr,
-        /*semantic_columns=*/nullptr,
-        /*features_count=*/0,
-        /*index_node_size=*/16,
-        /*attribute_index=*/nullptr,
-        /*geographical_extent=*/nullptr,
-        /*reference_system=*/0,
-        /*identifier=*/nullptr,
-        /*reference_date=*/nullptr,
-        /*title=*/nullptr,
-        /*templates=*/nullptr,
-        /*templates_vertices=*/nullptr,
-        /*extensions=*/nullptr,
-        /*poc_contact_name=*/poc_contact_name,
-        /*poc_contact_type=*/nullptr,
-        /*poc_role=*/nullptr,
-        /*poc_phone=*/nullptr,
-        /*poc_email=*/poc_email,
-        /*poc_website=*/nullptr,
-        /*poc_address_thoroughfare_number=*/nullptr,
-        /*poc_address_thoroughfare_name=*/nullptr,
-        /*poc_address_locality=*/nullptr,
-        /*poc_address_postcode=*/nullptr,
-        /*poc_address_country=*/nullptr,
-        /*attributes=*/nullptr,
-        /*version=*/"2.0");
+    auto header = CreateHeaderDirect(fbb,
+                                     /*transform=*/nullptr,
+                                     /*appearance=*/0,
+                                     /*columns=*/nullptr,
+                                     /*semantic_columns=*/nullptr,
+                                     /*features_count=*/0,
+                                     /*index_node_size=*/16,
+                                     /*attribute_index=*/nullptr,
+                                     /*geographical_extent=*/nullptr,
+                                     /*reference_system=*/0,
+                                     /*identifier=*/nullptr,
+                                     /*reference_date=*/nullptr,
+                                     /*title=*/nullptr,
+                                     /*templates=*/nullptr,
+                                     /*templates_vertices=*/nullptr,
+                                     /*extensions=*/nullptr,
+                                     /*poc_contact_name=*/poc_contact_name,
+                                     /*poc_contact_type=*/nullptr,
+                                     /*poc_role=*/nullptr,
+                                     /*poc_phone=*/nullptr,
+                                     /*poc_email=*/poc_email,
+                                     /*poc_website=*/nullptr,
+                                     /*poc_address_thoroughfare_number=*/nullptr,
+                                     /*poc_address_thoroughfare_name=*/nullptr,
+                                     /*poc_address_locality=*/nullptr,
+                                     /*poc_address_postcode=*/nullptr,
+                                     /*poc_address_country=*/nullptr,
+                                     /*attributes=*/nullptr,
+                                     /*version=*/"2.0");
     FinishSizePrefixedHeaderBuffer(fbb, header);
 
     std::vector<std::uint8_t> file_bytes = {'f', 'c', 'b', kVersion, 'f', 'c', 'b', kVersion};
@@ -181,8 +180,10 @@ TEST_CASE("every feature in the file emits without error") {
         json f = to_cityjson_feature(it.current(), r.header());
         CHECK(f["type"] == "CityJSONFeature");
         for (const auto& co : f["CityObjects"]) {
-            if (co.contains("geometry")) ++with_geom;
-            if (co.contains("attributes")) ++with_attrs;
+            if (co.contains("geometry"))
+                ++with_geom;
+            if (co.contains("attributes"))
+                ++with_attrs;
         }
         ++n;
     }
@@ -212,7 +213,8 @@ TEST_CASE("geometry boundaries reach vertex indices at some depth") {
         json f = to_cityjson_feature(it.current(), r.header());
         const std::size_t nverts = f["vertices"].size();
         for (const auto& co : f["CityObjects"]) {
-            if (!co.contains("geometry")) continue;
+            if (!co.contains("geometry"))
+                continue;
             for (const auto& g : co["geometry"]) {
                 CHECK(g.contains("boundaries"));
                 CHECK(g.contains("type"));

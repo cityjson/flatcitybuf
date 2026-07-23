@@ -1,5 +1,3 @@
-#include <doctest/doctest.h>
-
 #include <fcb/cityjson.hpp>
 #include <fcb/reader.hpp>
 
@@ -8,6 +6,8 @@
 #include <fstream>
 #include <string>
 #include <vector>
+
+#include <doctest/doctest.h>
 
 using namespace fcb;
 using nlohmann::json;
@@ -18,7 +18,8 @@ static std::vector<json> read_jsonl(const std::string& path) {
     REQUIRE_MESSAGE(f.good(), "cannot open " << path);
     std::string line;
     while (std::getline(f, line)) {
-        if (!line.empty()) out.push_back(json::parse(line));
+        if (!line.empty())
+            out.push_back(json::parse(line));
     }
     return out;
 }
@@ -39,7 +40,8 @@ static void check_case(const std::string& name) {
     std::vector<json> actual;
     actual.push_back(to_cityjson_metadata(r.header()));
     FeatureIterator it = r.select_all();
-    while (it.next()) actual.push_back(to_cityjson_feature(it.current(), r.header()));
+    while (it.next())
+        actual.push_back(to_cityjson_feature(it.current(), r.header()));
 
     REQUIRE(actual.size() == expected.size());
 
@@ -111,10 +113,11 @@ TEST_CASE("conformance: a single-feature file iterates exactly once") {
 TEST_CASE("conformance: a zero-area extent does not break bbox queries") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/degenerate_extent.fcb");
     const auto& info = r.header().info();
-    BBox all{info.geographical_extent[0], info.geographical_extent[1],
-             info.geographical_extent[3], info.geographical_extent[4]};
+    BBox all{info.geographical_extent[0], info.geographical_extent[1], info.geographical_extent[3],
+             info.geographical_extent[4]};
     FeatureIterator it = r.select_bbox(all);
     std::uint64_t n = 0;
-    while (it.next()) ++n;
+    while (it.next())
+        ++n;
     CHECK(n == info.features_count);
 }

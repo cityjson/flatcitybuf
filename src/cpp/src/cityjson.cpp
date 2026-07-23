@@ -2,19 +2,18 @@
 
 #ifdef FCB_WITH_JSON
 
-#include <fcb/attribute.hpp>
-#include <fcb/geometry.hpp>
+#    include <fcb/attribute.hpp>
+#    include <fcb/generated/feature_generated.h>
+#    include <fcb/generated/header_generated.h>
+#    include <fcb/geometry.hpp>
 
-#include "detail/feature_access.hpp"
-#include "detail/header_access.hpp"
+#    include <array>
+#    include <charconv>
+#    include <cstring>
+#    include <string>
 
-#include <fcb/generated/feature_generated.h>
-#include <fcb/generated/header_generated.h>
-
-#include <array>
-#include <charconv>
-#include <cstring>
-#include <string>
+#    include "detail/feature_access.hpp"
+#    include "detail/header_access.hpp"
 
 namespace fcb {
 
@@ -51,16 +50,38 @@ namespace {
 /// feature.fbs's CityObjectType declaration. ExtensionObject, the last
 /// enumerator, is deliberately absent: see the policy note above.
 const char* const kCityObjectTypeNames[] = {
-    "Bridge", "BridgePart", "BridgeInstallation", "BridgeConstructiveElement",
-    "BridgeRoom", "BridgeFurniture",
-    "Building", "BuildingPart", "BuildingInstallation",
-    "BuildingConstructiveElement", "BuildingFurniture", "BuildingStorey",
-    "BuildingRoom", "BuildingUnit",
-    "CityFurniture", "CityObjectGroup", "GenericCityObject", "LandUse",
-    "OtherConstruction", "PlantCover", "SolitaryVegetationObject", "TINRelief",
-    "Road", "Railway", "Waterway", "TransportSquare",
-    "Tunnel", "TunnelPart", "TunnelInstallation", "TunnelConstructiveElement",
-    "TunnelHollowSpace", "TunnelFurniture",
+    "Bridge",
+    "BridgePart",
+    "BridgeInstallation",
+    "BridgeConstructiveElement",
+    "BridgeRoom",
+    "BridgeFurniture",
+    "Building",
+    "BuildingPart",
+    "BuildingInstallation",
+    "BuildingConstructiveElement",
+    "BuildingFurniture",
+    "BuildingStorey",
+    "BuildingRoom",
+    "BuildingUnit",
+    "CityFurniture",
+    "CityObjectGroup",
+    "GenericCityObject",
+    "LandUse",
+    "OtherConstruction",
+    "PlantCover",
+    "SolitaryVegetationObject",
+    "TINRelief",
+    "Road",
+    "Railway",
+    "Waterway",
+    "TransportSquare",
+    "Tunnel",
+    "TunnelPart",
+    "TunnelInstallation",
+    "TunnelConstructiveElement",
+    "TunnelHollowSpace",
+    "TunnelFurniture",
     "WaterBody",
 };
 
@@ -68,17 +89,17 @@ const char* const kCityObjectTypeNames[] = {
 constexpr const char* kUnknownCityObjectName = "+UnknownCityObject";
 
 UIntView as_uint_view(const flatbuffers::Vector<std::uint32_t>* v) {
-    if (v == nullptr) return {};
+    if (v == nullptr)
+        return {};
     return UIntView(v->data(), v->size());
 }
 
 const char* const kSemanticSurfaceTypeNames[] = {
-    "RoofSurface", "GroundSurface", "WallSurface", "ClosureSurface",
-    "OuterCeilingSurface", "OuterFloorSurface", "Window", "Door",
-    "InteriorWallSurface", "CeilingSurface", "FloorSurface",
-    "WaterSurface", "WaterGroundSurface", "WaterClosureSurface",
-    "TrafficArea", "AuxiliaryTrafficArea", "TransportationMarking",
-    "TransportationHole",
+    "RoofSurface",           "GroundSurface",       "WallSurface",  "ClosureSurface",
+    "OuterCeilingSurface",   "OuterFloorSurface",   "Window",       "Door",
+    "InteriorWallSurface",   "CeilingSurface",      "FloorSurface", "WaterSurface",
+    "WaterGroundSurface",    "WaterClosureSurface", "TrafficArea",  "AuxiliaryTrafficArea",
+    "TransportationMarking", "TransportationHole",
 };
 
 /// The CityJSON spelling of a semantic surface tag this reader cannot name.
@@ -95,9 +116,11 @@ GeometryKind kind_of(const ::Geometry* g) {
 /// (deserializer.rs::to_color). The reader used to emit whatever length was
 /// stored, which the Rust reader no longer does.
 nlohmann::json color_to_json(const flatbuffers::Vector<double>* c) {
-    if (c == nullptr || c->size() != 3) return nullptr;
+    if (c == nullptr || c->size() != 3)
+        return nullptr;
     auto out = nlohmann::json::array();
-    for (double v : *c) out.push_back(v);
+    for (double v : *c)
+        out.push_back(v);
     return out;
 }
 
@@ -105,9 +128,11 @@ nlohmann::json color_to_json(const flatbuffers::Vector<double>* c) {
 /// three numbers: `"minItems": 3, "maxItems": 4`. Any other length is dropped
 /// (deserializer.rs::to_border_color).
 nlohmann::json border_color_to_json(const flatbuffers::Vector<double>* c) {
-    if (c == nullptr || (c->size() != 3 && c->size() != 4)) return nullptr;
+    if (c == nullptr || (c->size() != 3 && c->size() != 4))
+        return nullptr;
     auto out = nlohmann::json::array();
-    for (double v : *c) out.push_back(v);
+    for (double v : *c)
+        out.push_back(v);
     return out;
 }
 
@@ -129,28 +154,38 @@ nlohmann::json border_color_to_json(const flatbuffers::Vector<double>* c) {
 /// `appearance.schema.json`, not from memory.
 const char* texture_format_name(::TextureFormat f) {
     switch (f) {
-        case ::TextureFormat::PNG: return "PNG";
-        case ::TextureFormat::JPG: return "JPG";
+        case ::TextureFormat::PNG:
+            return "PNG";
+        case ::TextureFormat::JPG:
+            return "JPG";
     }
     unknown_enum_tag("type", static_cast<int>(f));
 }
 
 const char* wrap_mode_name(::WrapMode w) {
     switch (w) {
-        case ::WrapMode::None: return "none";
-        case ::WrapMode::Wrap: return "wrap";
-        case ::WrapMode::Mirror: return "mirror";
-        case ::WrapMode::Clamp: return "clamp";
-        case ::WrapMode::Border: return "border";
+        case ::WrapMode::None:
+            return "none";
+        case ::WrapMode::Wrap:
+            return "wrap";
+        case ::WrapMode::Mirror:
+            return "mirror";
+        case ::WrapMode::Clamp:
+            return "clamp";
+        case ::WrapMode::Border:
+            return "border";
     }
     unknown_enum_tag("wrapMode", static_cast<int>(w));
 }
 
 const char* texture_type_name(::TextureType t) {
     switch (t) {
-        case ::TextureType::Unknown: return "unknown";
-        case ::TextureType::Specific: return "specific";
-        case ::TextureType::Typical: return "typical";
+        case ::TextureType::Unknown:
+            return "unknown";
+        case ::TextureType::Specific:
+            return "specific";
+        case ::TextureType::Typical:
+            return "typical";
     }
     unknown_enum_tag("textureType", static_cast<int>(t));
 }
@@ -164,18 +199,26 @@ nlohmann::json appearance_to_json(const ::Appearance* a) {
     if (a->materials() != nullptr) {
         auto materials = nlohmann::json::array();
         for (const auto* m : *a->materials()) {
-            if (m == nullptr) continue;
+            if (m == nullptr)
+                continue;
             nlohmann::json j = nlohmann::json::object();
             j["name"] = (m->name() != nullptr) ? m->name()->str() : "";
             // Every other field is optional and omitted when unset, which
             // is what serde's skip_serializing_if does on the Rust side.
-            if (const auto v = m->ambient_intensity()) j["ambientIntensity"] = *v;
-            if (auto c = color_to_json(m->diffuse_color()); !c.is_null()) j["diffuseColor"] = c;
-            if (auto c = color_to_json(m->emissive_color()); !c.is_null()) j["emissiveColor"] = c;
-            if (auto c = color_to_json(m->specular_color()); !c.is_null()) j["specularColor"] = c;
-            if (const auto v = m->shininess()) j["shininess"] = *v;
-            if (const auto v = m->transparency()) j["transparency"] = *v;
-            if (const auto v = m->is_smooth()) j["isSmooth"] = *v;
+            if (const auto v = m->ambient_intensity())
+                j["ambientIntensity"] = *v;
+            if (auto c = color_to_json(m->diffuse_color()); !c.is_null())
+                j["diffuseColor"] = c;
+            if (auto c = color_to_json(m->emissive_color()); !c.is_null())
+                j["emissiveColor"] = c;
+            if (auto c = color_to_json(m->specular_color()); !c.is_null())
+                j["specularColor"] = c;
+            if (const auto v = m->shininess())
+                j["shininess"] = *v;
+            if (const auto v = m->transparency())
+                j["transparency"] = *v;
+            if (const auto v = m->is_smooth())
+                j["isSmooth"] = *v;
             materials.push_back(std::move(j));
         }
         out["materials"] = std::move(materials);
@@ -184,7 +227,8 @@ nlohmann::json appearance_to_json(const ::Appearance* a) {
     if (a->textures() != nullptr) {
         auto textures = nlohmann::json::array();
         for (const auto* t : *a->textures()) {
-            if (t == nullptr) continue;
+            if (t == nullptr)
+                continue;
             nlohmann::json j = nlohmann::json::object();
             j["type"] = texture_format_name(t->type());
             // `image` is mandatory in header.fbs but optional in CityJSON, so
@@ -197,8 +241,10 @@ nlohmann::json appearance_to_json(const ::Appearance* a) {
             if (t->image() != nullptr && t->image()->size() > 0) {
                 j["image"] = t->image()->str();
             }
-            if (const auto w = t->wrap_mode()) j["wrapMode"] = wrap_mode_name(*w);
-            if (const auto tt = t->texture_type()) j["textureType"] = texture_type_name(*tt);
+            if (const auto w = t->wrap_mode())
+                j["wrapMode"] = wrap_mode_name(*w);
+            if (const auto tt = t->texture_type())
+                j["textureType"] = texture_type_name(*tt);
             if (auto c = border_color_to_json(t->border_color()); !c.is_null()) {
                 j["borderColor"] = c;
             }
@@ -241,12 +287,13 @@ nlohmann::json appearance_to_json(const ::Appearance* a) {
 /// value, which the schema requires and permits. A mapping whose `vertices`
 /// is present but empty is `"values": []`. Collapsing the two onto "skip the
 /// theme" is what dropped an explicit null.
-nlohmann::json materials_to_json(const flatbuffers::Vector<
-                                 flatbuffers::Offset<::MaterialMapping>>* mappings,
-                                 GeometryKind type) {
+nlohmann::json
+materials_to_json(const flatbuffers::Vector<flatbuffers::Offset<::MaterialMapping>>* mappings,
+                  GeometryKind type) {
     nlohmann::json out = nlohmann::json::object();
     for (const auto* m : *mappings) {
-        if (m == nullptr) continue;
+        if (m == nullptr)
+            continue;
         const std::string theme = (m->theme() != nullptr) ? m->theme()->str() : "theme";
         // A `value` colours the whole object and has no depth at all.
         if (const auto v = m->value()) {
@@ -257,8 +304,7 @@ nlohmann::json materials_to_json(const flatbuffers::Vector<
             out[theme] = {{"values", nullptr}};
             continue;
         }
-        out[theme] = {{"values", decode_material_values(type,
-                                                        as_uint_view(m->solids()),
+        out[theme] = {{"values", decode_material_values(type, as_uint_view(m->solids()),
                                                         as_uint_view(m->shells()),
                                                         as_uint_view(m->vertices()))}};
     }
@@ -272,23 +318,22 @@ nlohmann::json materials_to_json(const flatbuffers::Vector<
 /// CityJSON and is written with no `vertices` vector; it decodes to an empty
 /// object, NOT to a missing theme and NOT to `"values": []`. A present but
 /// empty `vertices` is `"values": []` (geom_decoder.rs:483).
-nlohmann::json textures_to_json(const flatbuffers::Vector<
-                                flatbuffers::Offset<::TextureMapping>>* mappings,
-                                GeometryKind type) {
+nlohmann::json
+textures_to_json(const flatbuffers::Vector<flatbuffers::Offset<::TextureMapping>>* mappings,
+                 GeometryKind type) {
     nlohmann::json out = nlohmann::json::object();
     for (const auto* m : *mappings) {
-        if (m == nullptr) continue;
+        if (m == nullptr)
+            continue;
         const std::string theme = (m->theme() != nullptr) ? m->theme()->str() : "theme";
         if (m->vertices() == nullptr) {
             out[theme] = nlohmann::json::object();
             continue;
         }
-        out[theme] = {{"values", decode_texture_values(type,
-                                                       as_uint_view(m->solids()),
-                                                       as_uint_view(m->shells()),
-                                                       as_uint_view(m->surfaces()),
-                                                       as_uint_view(m->strings()),
-                                                       as_uint_view(m->vertices()))}};
+        out[theme] = {{"values", decode_texture_values(
+                                     type, as_uint_view(m->solids()), as_uint_view(m->shells()),
+                                     as_uint_view(m->surfaces()), as_uint_view(m->strings()),
+                                     as_uint_view(m->vertices()))}};
     }
     return out;
 }
@@ -302,7 +347,8 @@ nlohmann::json geometry_instance_to_json(const ::GeometryInstance* gi) {
     // "referencePoint" for the instance.
     auto b = nlohmann::json::array();
     if (gi->boundaries() != nullptr) {
-        for (std::uint32_t v : *gi->boundaries()) b.push_back(v);
+        for (std::uint32_t v : *gi->boundaries())
+            b.push_back(v);
     }
     out["boundaries"] = std::move(b);
 
@@ -325,12 +371,12 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
                                 const std::vector<ColumnInfo>& semantic_columns) {
     nlohmann::json out = nlohmann::json::object();
     out["type"] = geometry_type_name(static_cast<std::uint8_t>(g->type()));
-    if (g->lod() != nullptr) out["lod"] = g->lod()->str();
+    if (g->lod() != nullptr)
+        out["lod"] = g->lod()->str();
 
     out["boundaries"] = decode_boundaries(
         kind_of(g), as_uint_view(g->solids()), as_uint_view(g->shells()),
-        as_uint_view(g->surfaces()), as_uint_view(g->strings()),
-        as_uint_view(g->boundaries()));
+        as_uint_view(g->surfaces()), as_uint_view(g->strings()), as_uint_view(g->boundaries()));
 
     // Semantics: a surface list plus a values array indexing into it.
     // ABSENT-VS-EMPTY, fourth site. The reference keys the `semantics` member
@@ -342,17 +388,18 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
     if (g->semantics_objects() != nullptr) {
         auto surfaces = nlohmann::json::array();
         for (const auto* so : *g->semantics_objects()) {
-            if (so == nullptr) continue;
+            if (so == nullptr)
+                continue;
             nlohmann::json s = nlohmann::json::object();
             s["type"] = (so->extension_type() != nullptr)
                             ? so->extension_type()->str()
-                            : semantic_surface_type_name(
-                                  static_cast<std::uint8_t>(so->type()));
+                            : semantic_surface_type_name(static_cast<std::uint8_t>(so->type()));
             // `parent:uint = null` in the schema -- absent and zero are both
             // real states, so this must check the Optional rather than
             // testing for non-zero. Links a Door/Window surface back to its
             // WallSurface (geom_decoder.rs:217).
-            if (const auto p = so->parent()) s["parent"] = *p;
+            if (const auto p = so->parent())
+                s["parent"] = *p;
             // Semantic surfaces carry their own attributes, decoded against
             // Header.semantic_columns -- a schema separate from the feature
             // attribute columns. Merged inline, as the reference does.
@@ -360,11 +407,13 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
                 auto attrs = attributes_to_json(
                     bytes_view(so->attributes()->data(), so->attributes()->size()),
                     semantic_columns);
-                for (auto& [k, v] : attrs.items()) s[k] = v;
+                for (auto& [k, v] : attrs.items())
+                    s[k] = v;
             }
             if (so->children() != nullptr && so->children()->size() > 0) {
                 auto kids = nlohmann::json::array();
-                for (std::uint32_t c : *so->children()) kids.push_back(c);
+                for (std::uint32_t c : *so->children())
+                    kids.push_back(c);
                 s["children"] = std::move(kids);
             }
             surfaces.push_back(std::move(s));
@@ -379,9 +428,9 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
         if (g->semantics() == nullptr) {
             sem["values"] = nullptr;
         } else {
-            sem["values"] = decode_semantics_values(kind_of(g), as_uint_view(g->solids()),
-                                                    as_uint_view(g->shells()),
-                                                    as_uint_view(g->semantics()));
+            sem["values"] =
+                decode_semantics_values(kind_of(g), as_uint_view(g->solids()),
+                                        as_uint_view(g->shells()), as_uint_view(g->semantics()));
         }
         out["semantics"] = std::move(sem);
     }
@@ -416,14 +465,16 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
 nlohmann::json point_of_contact_address_to_json(const FileInfo& info) {
     nlohmann::json addr = nlohmann::json::object();
     const auto insert = [&addr](const char* key, const std::string& value) {
-        if (!value.empty()) addr[key] = value;
+        if (!value.empty())
+            addr[key] = value;
     };
     insert("thoroughfareNumber", info.poc_address_thoroughfare_number);
     insert("thoroughfareName", info.poc_address_thoroughfare_name);
     insert("locality", info.poc_address_locality);
     insert("postcode", info.poc_address_postcode);
     insert("country", info.poc_address_country);
-    if (addr.empty()) return nullptr;
+    if (addr.empty())
+        return nullptr;
     return addr;
 }
 
@@ -451,18 +502,23 @@ nlohmann::json point_of_contact_address_to_json(const FileInfo& info) {
 /// "absent" and "present but empty" flatten to the same empty
 /// `std::string`, so a separate presence flag is required here.
 nlohmann::json point_of_contact_to_json(const FileInfo& info) {
-    if (info.poc_contact_name.empty()) return nullptr;
+    if (info.poc_contact_name.empty())
+        return nullptr;
     if (!info.has_poc_email) {
         throw Error(ErrorCode::MissingRequiredField, "email_address");
     }
 
     nlohmann::json poc = nlohmann::json::object();
     poc["contactName"] = info.poc_contact_name;
-    if (!info.poc_contact_type.empty()) poc["contactType"] = info.poc_contact_type;
-    if (!info.poc_role.empty()) poc["role"] = info.poc_role;
-    if (!info.poc_phone.empty()) poc["phone"] = info.poc_phone;
+    if (!info.poc_contact_type.empty())
+        poc["contactType"] = info.poc_contact_type;
+    if (!info.poc_role.empty())
+        poc["role"] = info.poc_role;
+    if (!info.poc_phone.empty())
+        poc["phone"] = info.poc_phone;
     poc["emailAddress"] = info.poc_email;
-    if (!info.poc_website.empty()) poc["website"] = info.poc_website;
+    if (!info.poc_website.empty())
+        poc["website"] = info.poc_website;
     if (auto addr = point_of_contact_address_to_json(info); !addr.is_null()) {
         poc["address"] = std::move(addr);
     }
@@ -478,11 +534,13 @@ nlohmann::json point_of_contact_to_json(const FileInfo& info) {
 /// entry lacked a name -- not merely when the vector is empty, matching
 /// `if !extensions_map.is_empty()`.
 nlohmann::json extensions_to_json(const ::Header* hdr) {
-    if (hdr == nullptr || hdr->extensions() == nullptr) return nullptr;
+    if (hdr == nullptr || hdr->extensions() == nullptr)
+        return nullptr;
 
     nlohmann::json out = nlohmann::json::object();
     for (const auto* e : *hdr->extensions()) {
-        if (e == nullptr || e->name() == nullptr) continue;
+        if (e == nullptr || e->name() == nullptr)
+            continue;
         nlohmann::json entry = nlohmann::json::object();
         entry["url"] = (e->url() != nullptr) ? e->url()->str() : "";
         entry["version"] = (e->version() != nullptr) ? e->version()->str() : "";
@@ -494,15 +552,15 @@ nlohmann::json extensions_to_json(const ::Header* hdr) {
 }  // namespace
 
 std::string city_object_type_name(std::uint8_t type) {
-    constexpr std::size_t kCount =
-        sizeof(kCityObjectTypeNames) / sizeof(kCityObjectTypeNames[0]);
+    constexpr std::size_t kCount = sizeof(kCityObjectTypeNames) / sizeof(kCityObjectTypeNames[0]);
     // UNKNOWN-TAG POLICY. ExtensionObject (the enumerator just past the table)
     // and any tag a newer encoder may add come back as "+UnknownCityObject".
     // This used to throw, which meant a file whose ExtensionObject had lost
     // its `extension_type` string was unreadable here while the Rust reader
     // read it happily. It is only ever reached when `extension_type` is
     // absent -- when it is present, its verbatim string wins.
-    if (type >= kCount) return kUnknownCityObjectName;
+    if (type >= kCount)
+        return kUnknownCityObjectName;
     return kCityObjectTypeNames[type];
 }
 
@@ -514,7 +572,8 @@ std::string semantic_surface_type_name(std::uint8_t type) {
     // newer encoder adds come back as "+GenericSurface" -- the same string the
     // Rust reader emits (geom_decoder.rs::to_cj_surface_type). Only reached
     // when the surface's `extension_type` string is absent.
-    if (type >= kCount) return kGenericSurfaceName;
+    if (type >= kCount)
+        return kGenericSurfaceName;
     return kSemanticSurfaceTypeNames[type];
 }
 
@@ -551,17 +610,19 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
     meta["geographicalExtent"] =
         info.has_extent ? info.geographical_extent : std::array<double, 6>{};
     if (!info.crs.empty()) {
-        meta["referenceSystem"] =
-            "https://www.opengis.net/def/crs/" +
-            info.crs.substr(0, info.crs.find(':')) + "/0/" +
-            info.crs.substr(info.crs.find(':') + 1);
+        meta["referenceSystem"] = "https://www.opengis.net/def/crs/" +
+                                  info.crs.substr(0, info.crs.find(':')) + "/0/" +
+                                  info.crs.substr(info.crs.find(':') + 1);
     }
-    if (!info.identifier.empty()) meta["identifier"] = info.identifier;
+    if (!info.identifier.empty())
+        meta["identifier"] = info.identifier;
     if (auto poc = point_of_contact_to_json(info); !poc.is_null()) {
         meta["pointOfContact"] = std::move(poc);
     }
-    if (!info.reference_date.empty()) meta["referenceDate"] = info.reference_date;
-    if (!info.title.empty()) meta["title"] = info.title;
+    if (!info.reference_date.empty())
+        meta["referenceDate"] = info.reference_date;
+    if (!info.title.empty())
+        meta["title"] = info.title;
     cj["metadata"] = std::move(meta);
 
     // A CityJSONSeq header line carries no features of its own.
@@ -577,11 +638,11 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
         cj["extensions"] = std::move(ext);
     }
 
-    if (hdr != nullptr && hdr->templates() != nullptr &&
-        hdr->templates_vertices() != nullptr) {
+    if (hdr != nullptr && hdr->templates() != nullptr && hdr->templates_vertices() != nullptr) {
         auto templates = nlohmann::json::array();
         for (const auto* t : *hdr->templates()) {
-            if (t != nullptr) templates.push_back(geometry_to_json(t, info.semantic_columns));
+            if (t != nullptr)
+                templates.push_back(geometry_to_json(t, info.semantic_columns));
         }
 
         // Template vertices are absolute doubles, NOT quantised: the header
@@ -618,7 +679,8 @@ nlohmann::json to_cityjson_feature(const Feature& feature, const HeaderView& hea
     const std::size_t n = feature.city_object_count();
     for (std::size_t i = 0; i < n; ++i) {
         const auto* obj = cf->objects()->Get(static_cast<flatbuffers::uoffset_t>(i));
-        if (obj == nullptr) continue;
+        if (obj == nullptr)
+            continue;
 
         nlohmann::json co = nlohmann::json::object();
         co["type"] = (obj->extension_type() != nullptr)
@@ -633,10 +695,9 @@ nlohmann::json to_cityjson_feature(const Feature& feature, const HeaderView& hea
         if (feature.object_has_attributes(i)) {
             auto own = feature.object_columns(i);
             auto blob = feature.object_attributes(i);
-            const auto& schema =
-                feature.object_has_columns(i) ? own : header.info().columns;
-            co["attributes"] = blob.empty() ? nlohmann::json::object()
-                                            : attributes_to_json(blob, schema);
+            const auto& schema = feature.object_has_columns(i) ? own : header.info().columns;
+            co["attributes"] =
+                blob.empty() ? nlohmann::json::object() : attributes_to_json(blob, schema);
         }
 
         std::array<double, 6> extent{};
@@ -657,22 +718,26 @@ nlohmann::json to_cityjson_feature(const Feature& feature, const HeaderView& hea
         // single reference-point vertex.
         if (obj->geometry_instances() != nullptr) {
             for (const auto* gi : *obj->geometry_instances()) {
-                if (gi != nullptr) geoms.push_back(geometry_instance_to_json(gi));
+                if (gi != nullptr)
+                    geoms.push_back(geometry_instance_to_json(gi));
             }
         }
-        if (!geoms.empty()) co["geometry"] = std::move(geoms);
+        if (!geoms.empty())
+            co["geometry"] = std::move(geoms);
 
         if (obj->children() != nullptr && obj->children()->size() > 0) {
             auto kids = nlohmann::json::array();
             for (const auto* c : *obj->children()) {
-                if (c != nullptr) kids.push_back(c->str());
+                if (c != nullptr)
+                    kids.push_back(c->str());
             }
             co["children"] = std::move(kids);
         }
         if (obj->parents() != nullptr && obj->parents()->size() > 0) {
             auto ps = nlohmann::json::array();
             for (const auto* p : *obj->parents()) {
-                if (p != nullptr) ps.push_back(p->str());
+                if (p != nullptr)
+                    ps.push_back(p->str());
             }
             co["parents"] = std::move(ps);
         }

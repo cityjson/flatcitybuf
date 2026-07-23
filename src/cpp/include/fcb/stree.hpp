@@ -1,13 +1,13 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <vector>
-
 #include <fcb/error.hpp>
 #include <fcb/header.hpp>
 #include <fcb/key.hpp>
 #include <fcb/range_reader.hpp>
+
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace fcb {
 
@@ -51,10 +51,7 @@ std::vector<std::uint64_t> decode_payload_entry(bytes_view b);
 
 /// Run one condition against one column's index blob, returning candidate
 /// feature offsets (relative to the features section).
-std::vector<SearchResultItem> stree_query(RangeReader& reader,
-                                          const AttrIndexInfo& index,
-                                          KeyKind kind,
-                                          Operator op,
-                                          const KeyValue& value);
+std::vector<SearchResultItem> stree_query(RangeReader& reader, const AttrIndexInfo& index,
+                                          KeyKind kind, Operator op, const KeyValue& value);
 
 }  // namespace fcb

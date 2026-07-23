@@ -16,6 +16,23 @@ numpy = ["numpy>=1.21"]
 # removed `http = ["httpx>=0.27"]` extra, left over from an async reader
 # that was deliberately never built.
 dev = ["pytest>=8", "ruff>=0.12", "mypy>=1.11"]
+# API docs are generated FROM THE PACKAGE ITSELF: pdoc imports
+# `flatcitybuf`, reads `__all__` and the type hints, and renders the
+# docstrings that are already the reference for this reader's
+# behaviour. There is therefore no docs/ scaffold (no conf.py, no .rst
+# stubs) that could drift out of step with the code -- the one thing
+# `just docs` needs is pdoc itself. An extra rather than a hard
+# dependency for the same reason `dev` is one: nothing at runtime, and
+# nothing in the test suite, imports it.
+#
+# No upper bound: pdoc 16 requires Python >= 3.10 while
+# `requires-python` above is >= 3.9, so uv forks the lock on the
+# interpreter -- pdoc 15.x under 3.9, 16.x from 3.10 -- exactly as it
+# already does for the `numpy` extra. Pinning `<16` here would pointlessly
+# hold 3.10+ back. The `>=15` floor is a plain currency floor, not a
+# compatibility one -- pdoc 14 would still install under 3.9; there is
+# just no reason to render these docs with anything older.
+docs = ["pdoc>=15"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["flatcitybuf"]

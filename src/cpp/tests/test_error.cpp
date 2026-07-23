@@ -1,7 +1,8 @@
-#include <doctest/doctest.h>
 #include <fcb/error.hpp>
 
 #include <string>
+
+#include <doctest/doctest.h>
 
 TEST_CASE("Error carries a code and a message") {
     fcb::Error e(fcb::ErrorCode::MissingMagicBytes, "bad magic");

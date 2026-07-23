@@ -23,10 +23,18 @@ import { intersectHits, searchAttributes } from './static-btree/index.js'
  *  does not know it: the format writes 0 for UNKNOWN, not for empty, so it
  *  must never be reported as a count of zero. */
 export interface FeatureCursor extends AsyncIterable<Feature> {
+  /** TOTAL number of features this query matched, unaffected by
+   *  `limit`/`offset` -- it is the size of the answer, not of the page you are
+   *  about to iterate. For a filtered query it is the post-filtered match
+   *  count, never the candidate count. `undefined` means the file declares an
+   *  unknown feature count (a stored 0) and the query did not go through an
+   *  index, so no total is knowable without a full scan. */
   readonly featuresCount: number | undefined
 }
 
-/** Comparison operators for an attribute condition.
+/** Comparison operators for an attribute condition: equal, not equal, greater
+ *  than, greater or equal, less than, less or equal. Spelled in the same
+ *  capitalised names the Rust reader and the FlatCityBuf query syntax use.
  *
  *  Declared HERE, in the R-tree task, even though nothing consumes them until
  *  the attribute-index task: `SelectOptions.where` has to reference them, so
@@ -38,8 +46,19 @@ export type Operator = 'Eq' | 'Ne' | 'Gt' | 'Ge' | 'Lt' | 'Le'
  *  depends on the column's declared type, which is only known once the header
  *  has been read. */
 export interface AttrCondition {
+  /** Column name, as it appears in `reader.header.info.columns`. An unknown
+   *  name, or a known one the writer did not index, throws
+   *  `AttributeIndexNotFound`: this reader queries indices, it never falls back
+   *  to a scan. `Json` and `Binary` columns throw `UnsupportedColumnType`. */
   field: string
   operator: Operator
+  /** Compared against the column's values. The admissible JS type follows the
+   *  column's `ColumnType`: `number` (integral) for the integer types,
+   *  `number` for `Float`/`Double`, `boolean` for `Bool`, `string` for
+   *  `String`, `bigint` or an integral `number` for `Long`/`ULong`, and either
+   *  a `DateTimeKey` or a `Date` for `DateTime` -- a `Date` is widened
+   *  losslessly, but only a `DateTimeKey` can express sub-millisecond
+   *  precision. Anything else throws `InvalidArgument` before any I/O. */
   value: unknown
 }
 
@@ -51,10 +70,31 @@ export interface AttrCondition {
  *  returned cursor therefore reports the TOTAL number of matches (or the
  *  file's total, for an unfiltered select), regardless of paging. */
 export interface SelectOptions {
+  /** Spatial filter, answered from the packed Hilbert R-tree:
+   *  `{ kind: 'bbox', value: [minX, minY, maxX, maxY] }`,
+   *  `{ kind: 'point', value: [x, y] }`, or
+   *  `{ kind: 'nearest', value: [x, y] }` (at most one feature).
+   *  A file with no spatial index throws `NoIndex`. */
   spatial?: SpatialQuery
+  /** Attribute predicates, each answered from that column's static B+tree and
+   *  AND-intersected with the others. Matching is EXISTENTIAL over a feature's
+   *  CityObjects: the feature matches if any one of its objects does. An empty
+   *  array is treated as no filter at all. */
   where?: AttrCondition[]
+  /** At most this many features are iterated. Applied to the sorted result
+   *  list, so it pages the answer without changing it -- the cursor's
+   *  `featuresCount` still reports the total. Omitted means no cap; `0` yields
+   *  nothing. */
   limit?: number
+  /** How many matches to skip before the first one iterated. On an indexed
+   *  query the skipped features are never read (the exception is a `String`
+   *  condition, where every candidate has to be read once to be post-filtered
+   *  before the list can be paged at all). Defaults to 0. */
   offset?: number
+  /** Cancels the query. Threaded into the actual in-flight reads -- the index
+   *  traversal and each feature read -- not merely held on this facade, and
+   *  re-checked between features, so aborting a cursor that has already
+   *  yielded stops the reads that have not happened yet. */
   signal?: AbortSignal
   /** Byte size at or below which a `nearest` query fetches the WHOLE R-tree in
    *  one read and walks it in memory, instead of streaming a read per node
@@ -218,6 +258,39 @@ function validatePageArg(value: number | undefined, what: string): number | unde
   return value
 }
 
+/** The reader facade: open an `.fcb` resource once, then answer queries
+ *  against it.
+ *
+ *  Construct one with the static factory that matches the source --
+ *  {@link FcbReader.fromUrl} (HTTP range requests), {@link FcbReader.fromBlob}
+ *  (a browser `Blob`/`File`), {@link FcbReader.fromBytes} (an in-memory
+ *  buffer), {@link FcbReader.fromReader} (any {@link RangeReader}) -- or
+ *  `fromFile(path)` from the package's separate `"./node"` subpath, which is
+ *  where the `node:fs` source lives so the package root never imports `node:*`.
+ *  All of them are async because all of them read and validate the header up
+ *  front.
+ *
+ *  Opening reads the header and nothing else -- `fromUrl` costs exactly one
+ *  HTTP request. {@link FcbReader.select} then reads the index it needs and
+ *  only the features that matched, so a bbox query over a remote file fetches
+ *  a few index pages plus those features, never the whole file.
+ *
+ *  ```ts
+ *  const reader = await FcbReader.fromUrl('https://example.com/city.fcb')
+ *  const hits = await reader.select({
+ *    spatial: { kind: 'bbox', value: [minX, minY, maxX, maxY] },
+ *    where: [{ field: 'b3_h_dak_50p', operator: 'Gt', value: 20 }],
+ *  })
+ *  console.log(hits.featuresCount)      // total matches, not the page size
+ *  for await (const feature of hits) {
+ *    console.log(toCityJSONFeature(feature, reader.header))
+ *  }
+ *  ```
+ *
+ *  Call {@link FcbReader.close} (or use `await using`) when the source holds an
+ *  OS resource -- `fromFile` does; the in-memory, `Blob` and `fetch` sources
+ *  have nothing to release. Either way the reader is spent afterwards: a
+ *  further `select` or `selectAll` throws. */
 export class FcbReader {
   private readonly reader: RangeReader
   private readonly headerView: HeaderView
@@ -254,10 +327,18 @@ export class FcbReader {
     return new FcbReader(reader, await readHeader(reader))
   }
 
+  /** Reads an `.fcb` file already in memory. The bytes are COPIED (see
+   *  {@link BytesRangeReader}), so the caller may afterwards mutate the array
+   *  or transfer its `ArrayBuffer` to a worker without corrupting an open
+   *  reader. Nothing to close. */
   static async fromBytes(bytes: Uint8Array): Promise<FcbReader> {
     return FcbReader.fromReader(new BytesRangeReader(bytes))
   }
 
+  /** Reads an `.fcb` file from a `Blob` -- or a `File`, which extends it, so
+   *  this is the entry point for an `<input type="file">` or a drag-and-drop
+   *  upload. Backed by `Blob.slice()`, so only the ranges a query actually
+   *  needs are ever materialised. Nothing to close. */
   static async fromBlob(blob: Blob): Promise<FcbReader> {
     return FcbReader.fromReader(new BlobRangeReader(blob))
   }
@@ -290,6 +371,13 @@ export class FcbReader {
     return reader
   }
 
+  /** The parsed file header, read once when the reader was constructed:
+   *  `info` (owned metadata -- version, transform, geographical extent, the
+   *  attribute columns and which of them are indexed), `layout` (byte offsets
+   *  of the R-tree, the attribute indices and the feature section) and `raw`
+   *  (the FlatBuffers table, for the few fields `info` does not surface).
+   *  Pass it to {@link toCityJSONMetadata} for the CityJSON `metadata`
+   *  object. */
   get header(): HeaderView {
     return this.headerView
   }
@@ -344,7 +432,16 @@ export class FcbReader {
    *  `spatial` is given, and into `scan`'s per-feature reads (re-checked
    *  between features) when it is not. A signal that only lived on this
    *  facade would cancel nothing -- the reads are where the in-flight work
-   *  is. */
+   *  is.
+   *
+   *  @throws `FcbError` with `code` `UnsupportedQueryCombination` when
+   *  `spatial.kind` is `'nearest'` and a non-empty `where` is also given;
+   *  `NoIndex` when a spatial query is run against a file that carries no
+   *  R-tree; `AttributeIndexNotFound` when a `where` names a column that does
+   *  not exist or that the writer did not index; `UnsupportedColumnType` for a
+   *  `where` on a `Json` or `Binary` column; `InvalidArgument` for a negative
+   *  or non-integral `limit`/`offset`, a malformed query geometry, or a
+   *  `value` whose type does not match its column. */
   async select(opts?: SelectOptions): Promise<FeatureCursor> {
     if (this.closed) {
       throw new FcbError(ErrorCode.IoError, 'select on a closed FcbReader')

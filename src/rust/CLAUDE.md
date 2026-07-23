@@ -64,7 +64,9 @@ conformance corpus. See the root `CLAUDE.md`.
 - Use **integration tests** for public APIs in the `tests/` directory.
 - Mock external dependencies where necessary.
 - Use `#[tokio::test]` for async tests.
-- `cargo nextest run` is the runner used by `just check-common`.
+- `cargo nextest run` is the runner. From this directory: `just test` (or
+  `just check` for lint + type + test + build). See the root `CLAUDE.md` for
+  the workspace-wide verbs.
 
 ---
 
