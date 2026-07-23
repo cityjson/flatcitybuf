@@ -87,21 +87,50 @@ describe('bboxToSource', () => {
     expect(minX).toBeLessThanOrEqual(85000 + 1)
     expect(maxX).toBeGreaterThanOrEqual(86000 - 1)
   })
-  it('envelope contains all eight densified inverse-projected samples', () => {
-    const west = 4.35, south = 51.98, east = 4.4, north = 52.02
-    const midLng = (west + east) / 2
-    const midLat = (south + north) / 2
-    const samples: [number, number][] = [
-      [west, south], [east, south], [east, north], [west, north],
-      [midLng, south], [east, midLat], [midLng, north], [west, midLat],
-    ]
+  it('envelope contains a densely sampled boundary (50 points per edge)', () => {
+    // Independently generated from the implementation: walks all four edges
+    // of the same lng/lat rectangle at a resolution not tied to
+    // bboxToSource's own subdivision count, so this fails for a
+    // corners-only (or corners+midpoints-only) envelope that omits area
+    // near a curved edge.
+    //
+    // The rectangle straddles the RD New central meridian (lon_0 ~5.3877)
+    // at a latitude ~1.7 degrees south of the projection origin
+    // (lat_0 ~52.156) — exactly where the south edge bows hardest away from
+    // the chord between its corners, since the true extremum sits near the
+    // meridian crossing, well inside the edge. A box near the origin (e.g.
+    // central Delft) does *not* expose this: at that scale the bow is far
+    // below floating-point-relevant magnitudes, so a corners-only bug would
+    // go undetected there. Here a corners-only envelope is wrong by ~167m.
+    const west = 4.8, south = 50.4, east = 6.0, north = 50.5
+    const perEdge = 50
+    const samples: [number, number][] = []
+    const addEdge = (x0: number, y0: number, x1: number, y1: number) => {
+      for (let i = 0; i <= perEdge; i++) {
+        const t = i / perEdge
+        samples.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t])
+      }
+    }
+    addEdge(west, south, east, south)
+    addEdge(east, south, east, north)
+    addEdge(east, north, west, north)
+    addEdge(west, north, west, south)
+
     const [minX, minY, maxX, maxY] = bboxToSource(7415, west, south, east, north)
+    // A "tiny" epsilon here is relative to the ~600 km span of RD New
+    // coordinates, not to floating-point precision: bboxToSource and this
+    // test sample the same smooth curve on independent, non-nested grids,
+    // so two genuinely-converged envelopes can still differ by sub-cm noise
+    // right at the flat extremum near the central meridian. 1 cm comfortably
+    // absorbs that noise while still rejecting the corners-only bug (~167 m,
+    // four orders of magnitude larger) by a wide margin.
+    const eps = 1e-2
     for (const s of samples) {
       const [x, y] = inverse(7415, s)
-      expect(x).toBeGreaterThanOrEqual(minX - 1e-6)
-      expect(x).toBeLessThanOrEqual(maxX + 1e-6)
-      expect(y).toBeGreaterThanOrEqual(minY - 1e-6)
-      expect(y).toBeLessThanOrEqual(maxY + 1e-6)
+      expect(x).toBeGreaterThanOrEqual(minX - eps)
+      expect(x).toBeLessThanOrEqual(maxX + eps)
+      expect(y).toBeGreaterThanOrEqual(minY - eps)
+      expect(y).toBeLessThanOrEqual(maxY + eps)
     }
   })
 })

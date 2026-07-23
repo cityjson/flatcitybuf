@@ -86,11 +86,6 @@ describe('coerceAttrValue', () => {
     expect(() => coerceAttrValue(col(type), '1.5')).toThrow()
   })
 
-  it('Int (explicit) rejects a non-integer', () => {
-    expect(coerceAttrValue(col(ColumnType.Int), '42')).toBe(42)
-    expect(() => coerceAttrValue(col(ColumnType.Int), '1.5')).toThrow()
-  })
-
   it.each([ColumnType.Long, ColumnType.ULong])(
     'bigint type %i parses beyond Number.MAX_SAFE_INTEGER',
     (type) => {
@@ -127,6 +122,91 @@ describe('coerceAttrValue', () => {
         .toThrow(/not queryable/)
     },
   )
+})
+
+describe('coerceAttrValue range validation', () => {
+  const col = (type: ColumnType, name = 'c'): ColumnInfo => (
+    { index: 0, name, type, nullable: true }
+  )
+
+  it('Byte accepts -128..127 and rejects one past each bound', () => {
+    expect(coerceAttrValue(col(ColumnType.Byte), '-128')).toBe(-128)
+    expect(coerceAttrValue(col(ColumnType.Byte), '127')).toBe(127)
+    expect(() => coerceAttrValue(col(ColumnType.Byte), '-129'))
+      .toThrow(/out of range/)
+    expect(() => coerceAttrValue(col(ColumnType.Byte), '128'))
+      .toThrow(/out of range/)
+  })
+
+  it('UByte accepts 0..255 and rejects a negative and 256', () => {
+    expect(coerceAttrValue(col(ColumnType.UByte), '0')).toBe(0)
+    expect(coerceAttrValue(col(ColumnType.UByte), '255')).toBe(255)
+    expect(() => coerceAttrValue(col(ColumnType.UByte), '-1'))
+      .toThrow(/out of range/)
+    expect(() => coerceAttrValue(col(ColumnType.UByte), '256'))
+      .toThrow(/out of range/)
+  })
+
+  it('Short accepts -32768..32767 and rejects one past each bound', () => {
+    expect(coerceAttrValue(col(ColumnType.Short), '-32768')).toBe(-32768)
+    expect(coerceAttrValue(col(ColumnType.Short), '32767')).toBe(32767)
+    expect(() => coerceAttrValue(col(ColumnType.Short), '-32769'))
+      .toThrow(/out of range/)
+    expect(() => coerceAttrValue(col(ColumnType.Short), '32768'))
+      .toThrow(/out of range/)
+  })
+
+  it('UShort accepts 0..65535 and rejects a negative and 65536', () => {
+    expect(coerceAttrValue(col(ColumnType.UShort), '0')).toBe(0)
+    expect(coerceAttrValue(col(ColumnType.UShort), '65535')).toBe(65535)
+    expect(() => coerceAttrValue(col(ColumnType.UShort), '-1'))
+      .toThrow(/out of range/)
+    expect(() => coerceAttrValue(col(ColumnType.UShort), '65536'))
+      .toThrow(/out of range/)
+  })
+
+  it('Int accepts -2147483648..2147483647 and rejects one past each bound', () => {
+    expect(coerceAttrValue(col(ColumnType.Int), '-2147483648'))
+      .toBe(-2147483648)
+    expect(coerceAttrValue(col(ColumnType.Int), '2147483647'))
+      .toBe(2147483647)
+    expect(() => coerceAttrValue(col(ColumnType.Int), '-2147483649'))
+      .toThrow(/out of range/)
+    expect(() => coerceAttrValue(col(ColumnType.Int), '2147483648'))
+      .toThrow(/out of range/)
+  })
+
+  it('UInt accepts 0..4294967295 and rejects a negative and 4294967296', () => {
+    expect(coerceAttrValue(col(ColumnType.UInt), '0')).toBe(0)
+    expect(coerceAttrValue(col(ColumnType.UInt), '4294967295'))
+      .toBe(4294967295)
+    expect(() => coerceAttrValue(col(ColumnType.UInt), '-1'))
+      .toThrow(/out of range/)
+    expect(() => coerceAttrValue(col(ColumnType.UInt), '4294967296'))
+      .toThrow(/out of range/)
+  })
+
+  it('Long accepts the signed 64-bit bounds and rejects one past each', () => {
+    expect(coerceAttrValue(col(ColumnType.Long), (-(2n ** 63n)).toString()))
+      .toBe(-(2n ** 63n))
+    expect(coerceAttrValue(col(ColumnType.Long), (2n ** 63n - 1n).toString()))
+      .toBe(2n ** 63n - 1n)
+    expect(() => coerceAttrValue(
+      col(ColumnType.Long), (-(2n ** 63n) - 1n).toString(),
+    )).toThrow(/out of range/)
+    expect(() => coerceAttrValue(col(ColumnType.Long), (2n ** 63n).toString()))
+      .toThrow(/out of range/)
+  })
+
+  it('ULong accepts 0..2^64-1 and rejects a negative and 2^64', () => {
+    expect(coerceAttrValue(col(ColumnType.ULong), '0')).toBe(0n)
+    expect(coerceAttrValue(col(ColumnType.ULong), (2n ** 64n - 1n).toString()))
+      .toBe(2n ** 64n - 1n)
+    expect(() => coerceAttrValue(col(ColumnType.ULong), '-1'))
+      .toThrow(/out of range/)
+    expect(() => coerceAttrValue(col(ColumnType.ULong), (2n ** 64n).toString()))
+      .toThrow(/out of range/)
+  })
 })
 
 describe('runQuery pagination', () => {

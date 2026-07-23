@@ -76,7 +76,22 @@ export function useFcbData() {
       const cj = f.toCityJSON(reader.header)
       const fm = buildFeatureMesh(cj, transform, (xy) => forward(code, xy))
       if (fm === null) { skipped++; continue }
-      const primary = Object.values(cj.CityObjects)[0]
+      // Reader attribute matching is existential over ALL CityObjects in a
+      // feature (parent + children), but a feature renders only one set of
+      // attributes. There is no way to recover *which* object matched, so
+      // this picks the CityObject with the most attribute keys as a
+      // deterministic proxy (ties -> first in iteration order). This is a
+      // demo simplification: it can still surface a different object's
+      // values than the one that actually satisfied the query condition.
+      const objects = Object.values(cj.CityObjects)
+      const primary = objects.reduce<typeof objects[number] | undefined>(
+        (best, obj) => {
+          const bestCount = Object.keys(best?.attributes ?? {}).length
+          const count = Object.keys(obj.attributes ?? {}).length
+          return count > bestCount ? obj : best
+        },
+        objects[0],
+      )
       out.push({
         id: f.id, centroidLngLat: fm.centroidLngLat, mesh: fm.mesh,
         attributes: primary?.attributes ?? {},
@@ -109,6 +124,7 @@ export function useFcbData() {
     if (reader === undefined || active === undefined) return
     const seq = ++requestSeq
     const q = { ...active, offset: active.offset + active.limit }
+    setSelected(undefined) // the current page (and its selection) is about to be replaced
     setStatus('loading next batch...')
     try {
       const { features, total: t } = await runQuery(reader, q)
@@ -118,7 +134,7 @@ export function useFcbData() {
       if (seq !== requestSeq) return
       setStatus(`load failed: ${describeError(e)}`)
     }
-  }, [reader, active, render, setActive, setStatus, setTotal])
+  }, [reader, active, render, setActive, setSelected, setStatus, setTotal])
 
   return { openUrl, openFile, query, loadNext, status, header, rendered, total,
            hasMore: total !== undefined && active !== undefined

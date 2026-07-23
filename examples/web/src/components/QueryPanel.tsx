@@ -31,7 +31,11 @@ export function QueryPanel() {
   const run = () => {
     setErr('')
     let bboxSource: [number, number, number, number] | undefined
-    if (bbox && header.crs.code !== null && header.crs.supported) {
+    if (bbox) {
+      if (header.crs.code === null || !header.crs.supported) {
+        setErr('cannot run a spatial query: CRS is unsupported')
+        return
+      }
       bboxSource = bboxToSource(header.crs.code, bbox[0], bbox[1], bbox[2], bbox[3])
     }
     let where: AttrCondition[] | undefined

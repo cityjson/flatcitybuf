@@ -59,18 +59,32 @@ export function inverse(code: number, lngLat: [number, number]): [number, number
   return proj4('EPSG:4326', defFor(code), lngLat) as [number, number]
 }
 
-/** A lng/lat rectangle is not a rectangle in a transverse-Mercator source CRS,
- *  so inverse-project the boundary densified with edge midpoints and take the
- *  source-CRS envelope. Returns `[minX, minY, maxX, maxY]`. */
+/** A lng/lat rectangle is not a rectangle in a transverse-Mercator source CRS
+ *  — its edges bow — so sampling only the corners (or corners + midpoints)
+ *  can miss the extremum and OMIT area near a curved edge from the returned
+ *  envelope. This matters most when an edge crosses near the projection's
+ *  central meridian/parallel, where the bow is sharpest and the true extremum
+ *  sits well inside the edge rather than at a corner. To stay conservative we
+ *  densify each of the four edges into `EDGE_SUBDIVISIONS` segments (>=16 per
+ *  edge; 64 is used here — a coarser 16-32 measurably undershoots the true
+ *  envelope for edges near the central meridian), inverse-project every
+ *  sample, and take the min/max. Returns `[minX, minY, maxX, maxY]`. */
+const EDGE_SUBDIVISIONS = 64
+
 export function bboxToSource(
   code: number, west: number, south: number, east: number, north: number,
 ): [number, number, number, number] {
-  const midX = (west + east) / 2
-  const midY = (south + north) / 2
-  const samples: [number, number][] = [
-    [west, south], [east, south], [east, north], [west, north],
-    [midX, south], [east, midY], [midX, north], [west, midY],
-  ]
+  const samples: [number, number][] = []
+  const addEdge = (x0: number, y0: number, x1: number, y1: number) => {
+    for (let i = 0; i < EDGE_SUBDIVISIONS; i++) {
+      const t = i / EDGE_SUBDIVISIONS
+      samples.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t])
+    }
+  }
+  addEdge(west, south, east, south) // bottom
+  addEdge(east, south, east, north) // right
+  addEdge(east, north, west, north) // top
+  addEdge(west, north, west, south) // left
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const s of samples) {
     const [x, y] = inverse(code, s)

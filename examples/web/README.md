@@ -9,6 +9,15 @@ basemap with deck.gl.
 > Supersedes the archived `cityjson/flatcitybuf-web-prototype`, which used the
 > old WASM binding.
 
+## Prerequisite
+
+`@cityjson/flatcitybuf` is a `file:../../src/ts` dependency, resolved from its
+`dist/` output. Build that package once before installing here:
+
+```bash
+cd ../../src/ts && npm install && npm run build
+```
+
 ## Run
 
 ```bash
