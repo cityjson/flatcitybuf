@@ -1,5 +1,5 @@
 // src/store/index.ts
-import type { AttrCondition, FcbReader } from '@cityjson/flatcitybuf'
+import type { AttrCondition } from '@cityjson/flatcitybuf'
 import { atom } from 'jotai'
 import type { Mesh } from '../geometry/index'
 import type { HeaderModel } from '../reader/index'
@@ -50,7 +50,8 @@ export const INITIAL_VIEW: ViewState = {
 }
 export const viewStateAtom = atom<ViewState>(INITIAL_VIEW)
 
-export const readerAtom = atom<FcbReader | undefined>(undefined)
+/** True once a file is open in the worker (the reader itself lives there). */
+export const readyAtom = atom<boolean>(false)
 export const headerAtom = atom<HeaderModel | undefined>(undefined)
 export const renderedAtom = atom<RenderedFeature[]>([])
 export const totalAtom = atom<number | undefined>(undefined)

@@ -1,107 +1,57 @@
 // src/hooks/useFcbData.ts
-import {
-  type AttrCondition, type FcbReader, type Feature, toCityJSONMetadata,
-} from '@cityjson/flatcitybuf'
+import type { AttrCondition } from '@cityjson/flatcitybuf'
 import { useAtom } from 'jotai'
 import { useCallback } from 'react'
 import { bboxToSource, forward } from '../crs/index'
-import { buildFeatureMesh } from '../geometry/index'
+import type { HeaderModel } from '../reader/index'
 import {
-  describeError, type HeaderModel, headerModel, openFromBlob, openFromUrl, runQuery,
-} from '../reader/index'
-import {
-  activeQueryAtom, type FeatureInfo, headerAtom, limitAtom, readerAtom,
-  type RenderedFeature, renderedAtom, selectedAtom, statusAtom, totalAtom,
-  type ViewState, viewStateAtom,
+  activeQueryAtom, headerAtom, limitAtom, readyAtom, type RenderedFeature,
+  renderedAtom, selectedAtom, statusAtom, totalAtom, type ViewState, viewStateAtom,
 } from '../store/index'
+import type { WorkerRequest, WorkerResponse } from '../worker/protocol'
 
-// Rough Web-Mercator zoom that frames a lng/lat span. Exact fitBounds needs the
-// live viewport size; this heuristic is good enough to bring the data on-screen,
-// clamped to sane city/building-scale bounds.
+// One worker for the whole app: it owns the reader and does the query +
+// triangulation off the main thread. Created lazily on first use.
+let worker: Worker | undefined
+let msgId = 0
+const pending = new Map<number, (r: WorkerResponse) => void>()
+
+function getWorker(): Worker {
+  if (worker === undefined) {
+    worker = new Worker(new URL('../worker/fcb.worker.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
+      const cb = pending.get(ev.data.id)
+      if (cb !== undefined) { pending.delete(ev.data.id); cb(ev.data) }
+    }
+  }
+  return worker
+}
+
+function callWorker(msg: WorkerRequest, transfer: Transferable[] = []): Promise<WorkerResponse> {
+  return new Promise((resolve) => {
+    pending.set(msg.id, resolve)
+    getWorker().postMessage(msg, transfer)
+  })
+}
+
+// Drops stale commits: a newer open/query bumps this, and any response whose
+// captured seq no longer matches is ignored (the worker also aborts the
+// superseded query's range reads).
+let requestSeq = 0
+
 function zoomForSpan(spanLng: number, spanLat: number): number {
   const span = Math.max(spanLng, spanLat, 1e-4)
   return Math.min(18, Math.max(11, Math.log2(360 / span) - 1.5))
 }
 
-// The highest-LoD geometry of a CityObject (numeric LoD; unlabeled sorts last).
-function highestLodGeometry(
-  obj: { geometry?: { type: string; lod?: string }[] } | undefined,
-): { type: string; lod?: string } | undefined {
-  const geoms = obj?.geometry ?? []
-  if (geoms.length === 0) return undefined
-  return geoms.reduce((best, g) =>
-    (Number(g.lod ?? -1) > Number(best.lod ?? -1) ? g : best), geoms[0])
-}
-
-// Builds render-ready features from a SPECIFIC reader + header model rather than
-// the hook's atoms, so it works before `setReader`/`setHeader` have committed
-// (the render on open needs exactly that). Returns empty when the CRS is
-// unsupported — the caller decides the status message.
-function buildRenderedFeatures(
-  reader: FcbReader, model: HeaderModel, features: Feature[],
-): { out: RenderedFeature[]; skipped: number } {
-  if (!model.crs.supported || model.crs.code === null) {
-    return { out: [], skipped: features.length }
-  }
-  const code = model.crs.code
-  const transform = toCityJSONMetadata(reader.header).transform
-  const out: RenderedFeature[] = []
-  let skipped = 0
-  for (const f of features) {
-    const cj = f.toCityJSON(reader.header)
-    const fm = buildFeatureMesh(cj, transform, (xy) => forward(code, xy))
-    if (fm === null) { skipped++; continue }
-    // Reader attribute matching is existential over ALL CityObjects in a
-    // feature (parent + children), but a feature renders only one set of
-    // attributes. There is no way to recover *which* object matched, so this
-    // picks the CityObject with the most attribute keys as a deterministic
-    // proxy (ties -> first in iteration order). A demo simplification: it can
-    // still surface a different object's values than the one that matched.
-    const objects = Object.values(cj.CityObjects)
-    const primary = objects.reduce<typeof objects[number] | undefined>(
-      (best, obj) => {
-        const bestCount = Object.keys(best?.attributes ?? {}).length
-        const count = Object.keys(obj.attributes ?? {}).length
-        return count > bestCount ? obj : best
-      },
-      objects[0],
-    )
-    const g = highestLodGeometry(primary)
-    const info: FeatureInfo = {
-      objectType: primary?.type,
-      geometryType: g?.type,
-      lod: g?.lod,
-      vertexCount: cj.vertices.length,
-      triangleCount: fm.triangleCount,
-    }
-    out.push({
-      id: f.id, centroidLngLat: fm.centroidLngLat, mesh: fm.mesh,
-      attributes: primary?.attributes ?? {}, info,
-    })
-  }
-  return { out, skipped }
-}
-
-// Module-level (not useRef) because useFcbData is called from multiple
-// components; a per-instance ref wouldn't see requests issued by siblings.
-// `requestSeq` drops stale commits; `controller` aborts the actual range reads
-// of a superseded request (chiefly the throttled follow-camera queries).
-let requestSeq = 0
-let controller: AbortController | null = null
-function freshSignal(): AbortSignal {
-  controller?.abort()
-  controller = new AbortController()
-  return controller.signal
-}
-
 export function useFcbData() {
-  const [reader, setReader] = useAtom(readerAtom)
   const [header, setHeader] = useAtom(headerAtom)
   const [rendered, setRendered] = useAtom(renderedAtom)
   const [total, setTotal] = useAtom(totalAtom)
   const [status, setStatus] = useAtom(statusAtom)
   const [active, setActive] = useAtom(activeQueryAtom)
   const [limit] = useAtom(limitAtom)
+  const [, setReady] = useAtom(readyAtom)
   const [, setSelected] = useAtom(selectedAtom)
   const [, setViewState] = useAtom(viewStateAtom)
 
@@ -121,32 +71,44 @@ export function useFcbData() {
     }))
   }, [setViewState])
 
-  // `frameCamera` is false for follow-camera queries: re-framing would move the
-  // camera, which would retrigger the follow query — an infinite loop.
-  const render = useCallback((features: Feature[], frameCamera = true) => {
-    if (reader === undefined || header === undefined) return
-    if (!header.crs.supported || header.crs.code === null) {
-      setStatus('CRS not supported — cannot georeference; not rendering')
+  // Sends a query to the worker and renders the meshes it returns. `frameCamera`
+  // is false for follow-camera queries (re-framing would move the camera, which
+  // would retrigger the follow query).
+  const runQuery = useCallback(async (
+    spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
+    frameCamera: boolean,
+  ) => {
+    const seq = ++requestSeq
+    const q = { ...spec, limit, offset: 0 }
+    setStatus('querying…')
+    const r = await callWorker({ type: 'query', id: ++msgId, ...q })
+    if (seq !== requestSeq) return
+    if (r.type === 'error') {
+      if (!r.aborted) setStatus(`query failed: ${r.message}`)
       return
     }
-    const { out, skipped } = buildRenderedFeatures(reader, header, features)
-    setRendered(out)
+    if (r.type !== 'result') return
+    const out: RenderedFeature[] = r.features.map((f) => ({
+      id: f.id,
+      centroidLngLat: f.centroidLngLat,
+      mesh: { positions: f.positions, normals: f.normals, indices: f.indices },
+      attributes: f.attributes,
+      info: f.info,
+    }))
+    setActive(q); setTotal(r.total); setRendered(out)
     if (frameCamera) frameToFeatures(out)
-    setStatus(`${out.length} rendered${skipped ? `, ${skipped} skipped` : ''}`)
-  }, [reader, header, setRendered, frameToFeatures, setStatus])
+    const more = r.total !== undefined && r.total > out.length ? ` of ${r.total}` : ''
+    setStatus(`${out.length} rendered${more}`)
+  }, [limit, setActive, setTotal, setRendered, setStatus, frameToFeatures])
 
-  // Opening a file also RENDERS it: without a first query the map shows only
-  // the basemap and the file looks "not displayed". Renders the first `limit`
-  // features so the model appears on load; the follow-camera default then
-  // refines to the viewport as the camera moves.
-  const onOpened = useCallback(async (r: FcbReader, seq: number) => {
-    const model = headerModel(r.header)
-    setReader(r)
-    setHeader(model)
+  // Opening a file also renders it: the map otherwise shows only the basemap.
+  const onOpened = useCallback((h: HeaderModel) => {
+    setHeader(h)
+    setReady(true)
     setSelected(undefined)
-    if (model.crs.supported && model.crs.code !== null && model.extent) {
-      const code = model.crs.code
-      const [minX, minY, , maxX, maxY] = model.extent
+    if (h.crs.supported && h.crs.code !== null && h.extent) {
+      const code = h.crs.code
+      const [minX, minY, , maxX, maxY] = h.extent
       const corners: [number, number][] = (
         [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]] as [number, number][]
       ).map((c) => forward(code, c))
@@ -162,113 +124,70 @@ export function useFcbData() {
         ),
       }))
     }
-    if (!model.crs.supported || model.crs.code === null) {
+    if (!h.crs.supported || h.crs.code === null) {
       setRendered([]); setTotal(undefined); setActive(undefined)
       setStatus('file opened — CRS not supported, cannot georeference/render')
       return
     }
-    setStatus('rendering features…')
-    const spec = { limit, offset: 0, signal: freshSignal() }
-    try {
-      const { features, total: t } = await runQuery(r, spec)
-      if (seq !== requestSeq) return
-      const { out, skipped } = buildRenderedFeatures(r, model, features)
-      setRendered(out)
-      setTotal(t)
-      setActive({ limit, offset: 0 })
-      frameToFeatures(out)
-      const more = t !== undefined && t > out.length ? ` of ${t}` : ''
-      setStatus(`${out.length} rendered${skipped ? `, ${skipped} skipped` : ''}${more}`)
-    } catch (e) {
-      if (spec.signal.aborted || seq !== requestSeq) return
-      setStatus(`file opened, but rendering failed: ${describeError(e)}`)
-    }
-  }, [limit, setReader, setHeader, setRendered, setTotal, setSelected, setActive,
-      setViewState, setStatus, frameToFeatures])
+    void runQuery({}, true) // auto-render the first page (whole dataset, capped by limit)
+  }, [setHeader, setReady, setSelected, setViewState, setRendered, setTotal, setActive, setStatus, runQuery])
 
   const openUrl = useCallback(async (url: string) => {
     const seq = ++requestSeq
-    setStatus(`opening ${url} ...`)
-    try {
-      const r = await openFromUrl(url)
-      if (seq !== requestSeq) return
-      await onOpened(r, seq)
-    } catch (e) {
-      if (seq !== requestSeq) return
-      setStatus(`failed to open URL: ${describeError(e)}`)
-    }
-  }, [onOpened, setStatus])
+    setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
+    setStatus(`opening ${url} …`)
+    const r = await callWorker({ type: 'open', id: ++msgId, url })
+    if (seq !== requestSeq) return
+    if (r.type === 'opened') onOpened(r.header)
+    else if (r.type === 'error') setStatus(`failed to open URL: ${r.message}`)
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setStatus])
 
   const openFile = useCallback(async (file: File) => {
     const seq = ++requestSeq
-    setStatus(`opening ${file.name} ...`)
-    try {
-      const r = await openFromBlob(file)
-      if (seq !== requestSeq) return
-      await onOpened(r, seq)
-    } catch (e) {
-      if (seq !== requestSeq) return
-      setStatus(`failed to open file: ${describeError(e)}`)
-    }
-  }, [onOpened, setStatus])
+    setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
+    setStatus(`opening ${file.name} …`)
+    const buffer = await file.arrayBuffer()
+    const r = await callWorker({ type: 'open', id: ++msgId, buffer }, [buffer])
+    if (seq !== requestSeq) return
+    if (r.type === 'opened') onOpened(r.header)
+    else if (r.type === 'error') setStatus(`failed to open file: ${r.message}`)
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setStatus])
 
-  const query = useCallback(async (
-    spec: { bboxSource?: [number, number, number, number]
-            where?: AttrCondition[] },
+  const query = useCallback((
+    spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
   ) => {
-    if (reader === undefined) return
-    const seq = ++requestSeq
-    const signal = freshSignal()
-    const q = { ...spec, limit, offset: 0 }
     setSelected(undefined)
-    setStatus('querying...')
-    try {
-      const { features, total: t } = await runQuery(reader, { ...q, signal })
-      if (seq !== requestSeq) return
-      setActive(q); setTotal(t); render(features)
-    } catch (e) {
-      if (signal.aborted || seq !== requestSeq) return
-      setStatus(`query failed: ${describeError(e)}`)
-    }
-  }, [reader, limit, render, setActive, setSelected, setStatus, setTotal])
+    void runQuery(spec, true)
+  }, [runQuery, setSelected])
 
-  // Follow-camera: query the current viewport bbox (source CRS) without moving
-  // the camera. Aborts any in-flight request so rapid camera moves don't pile up.
-  const queryViewport = useCallback(async (
+  // Follow-camera: query the viewport bbox without moving the camera.
+  const queryViewport = useCallback((
     bounds: [number, number, number, number], where?: AttrCondition[],
   ) => {
-    if (reader === undefined || header === undefined) return
-    if (!header.crs.supported || header.crs.code === null) return
-    const seq = ++requestSeq
-    const signal = freshSignal()
+    if (header === undefined || !header.crs.supported || header.crs.code === null) return
     const bboxSource = bboxToSource(header.crs.code, bounds[0], bounds[1], bounds[2], bounds[3])
-    const q = { bboxSource, where, limit, offset: 0 }
-    try {
-      const { features, total: t } = await runQuery(reader, { ...q, signal })
-      if (seq !== requestSeq) return
-      setActive(q); setTotal(t); render(features, false)
-    } catch (e) {
-      if (signal.aborted || seq !== requestSeq) return
-      setStatus(`view query failed: ${describeError(e)}`)
-    }
-  }, [reader, header, limit, render, setActive, setStatus, setTotal])
+    void runQuery({ bboxSource, where }, false)
+  }, [header, runQuery])
 
-  const loadNext = useCallback(async () => {
-    if (reader === undefined || active === undefined) return
+  const loadNext = useCallback(() => {
+    if (active === undefined) return
+    setSelected(undefined)
     const seq = ++requestSeq
-    const signal = freshSignal()
     const q = { ...active, offset: active.offset + active.limit }
-    setSelected(undefined) // the current page (and its selection) is about to be replaced
-    setStatus('loading next batch...')
-    try {
-      const { features, total: t } = await runQuery(reader, { ...q, signal })
+    setStatus('loading next batch…')
+    void callWorker({ type: 'query', id: ++msgId, ...q }).then((r) => {
       if (seq !== requestSeq) return
-      setActive(q); setTotal(t); render(features) // replaces the rendered set with the next page
-    } catch (e) {
-      if (signal.aborted || seq !== requestSeq) return
-      setStatus(`load failed: ${describeError(e)}`)
-    }
-  }, [reader, active, render, setActive, setSelected, setStatus, setTotal])
+      if (r.type === 'error') { if (!r.aborted) setStatus(`load failed: ${r.message}`); return }
+      if (r.type !== 'result') return
+      const out: RenderedFeature[] = r.features.map((f) => ({
+        id: f.id, centroidLngLat: f.centroidLngLat,
+        mesh: { positions: f.positions, normals: f.normals, indices: f.indices },
+        attributes: f.attributes, info: f.info,
+      }))
+      setActive(q); setTotal(r.total); setRendered(out); frameToFeatures(out)
+      setStatus(`${out.length} rendered${r.total !== undefined ? ` of ${r.total}` : ''}`)
+    })
+  }, [active, setSelected, setActive, setTotal, setRendered, setStatus, frameToFeatures])
 
   return { openUrl, openFile, query, queryViewport, loadNext, status, header,
            rendered, total,
