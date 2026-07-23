@@ -19,7 +19,16 @@ const DEBOUNCE_MS = 350
 // that padded area, so small pans/zooms within it don't refetch. Because the
 // pad is a fraction of the current span, the move threshold scales with zoom
 // (a small absolute move matters when zoomed in, not when zoomed out).
-const PAD = 0.5
+// The visible area is computed from the real (tilted) camera, so it is already
+// generous; a small pad keeps the fetched set close to what is on screen while
+// still absorbing minor pans. At 0.15 the query covers the whole visible area
+// with the same overshoot the old (mis-positioned) pitch-0 box had.
+const PAD = 0.15
+
+// A tilted camera's far corners run toward the horizon. Clamp each corner to
+// this multiple of the flat span away from the view centre so one steep glance
+// cannot turn into a whole-dataset query.
+const MAX_DIST = 1.5
 
 // When the last result was TRUNCATED by the limit we hold only some of the
 // features in the fetched area, so being inside it proves nothing — the
@@ -43,6 +52,39 @@ function pad(b: Bounds): Bounds {
 }
 
 interface LastQuery { padded: Bounds; center: [number, number]; span: number }
+
+/** The ground area the camera can actually see. A pitch-0 rectangle is NOT it:
+ *  at pitch 45 the visible trapezoid covers ~1.6x the north-south extent and is
+ *  shifted away from the viewer, so querying the flat rectangle leaves the far
+ *  part of the screen unfetched. Unprojects the four screen corners at the real
+ *  pitch instead, clamping each toward the centre so a near-horizon corner
+ *  cannot blow the bbox up. Falls back to the flat bounds if a corner does not
+ *  land on the ground. */
+function visibleBounds(
+  vs: { longitude: number; latitude: number; zoom: number; pitch: number; bearing: number },
+  width: number, height: number,
+): Bounds {
+  const flat = new WebMercatorViewport({ ...vs, pitch: 0, width, height })
+  const fb = flat.getBounds() as Bounds
+  const flatSpan = Math.max(fb[2] - fb[0], fb[3] - fb[1])
+  const maxD = flatSpan * MAX_DIST
+  const tilt = new WebMercatorViewport({ ...vs, width, height })
+  const corners: [number, number][] = [[0, 0], [width, 0], [width, height], [0, height]]
+  const pts: [number, number][] = []
+  for (const c of corners) {
+    const g = tilt.unproject(c) as [number, number]
+    if (!Number.isFinite(g[0]) || !Number.isFinite(g[1])) return fb
+    const dx = g[0] - vs.longitude
+    const dy = g[1] - vs.latitude
+    const d = Math.hypot(dx, dy)
+    pts.push(d > maxD && d > 0
+      ? [vs.longitude + (dx * maxD) / d, vs.latitude + (dy * maxD) / d]
+      : g)
+  }
+  const lngs = pts.map((p) => p[0])
+  const lats = pts.map((p) => p[1])
+  return [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)]
+}
 
 /** When the spatial mode is `follow`, re-queries the current viewport (plus any
  *  attribute filter) as the camera moves — debounced, and only when the view
@@ -79,11 +121,7 @@ export function useCameraFollow(): void {
     if (width === 0 || height === 0) return
     const timer = setTimeout(() => {
       try {
-        // Bounds from a pitch-0 projection of the same centre/zoom: a tilted
-        // view's getBounds() extends to the horizon, which would query the
-        // whole dataset regardless of zoom.
-        const vp = new WebMercatorViewport({ ...viewState, pitch: 0, width, height })
-        const b = vp.getBounds() as Bounds
+        const b = visibleBounds(viewState, width, height)
         const center: [number, number] = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]
         const span = Math.max(b[2] - b[0], b[3] - b[1])
         const lq = last.current
