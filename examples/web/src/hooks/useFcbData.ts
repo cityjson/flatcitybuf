@@ -180,8 +180,8 @@ export function useFcbData() {
   ) => {
     if (header === undefined || !header.crs.supported || header.crs.code === null) return
     const bboxSource = bboxToSource(header.crs.code, bounds[0], bounds[1], bounds[2], bounds[3])
-    // Show the fetched region only once it commits, so the outline always
-    // matches the features currently on screen.
+    // Show the fetched region (inset inside the view) only once it commits, so
+    // the outline always matches the features currently on screen.
     void runQuery({ bboxSource, where }, false).then((ok) => {
       if (ok) setFetchBbox(bounds)
     })

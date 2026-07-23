@@ -57,8 +57,8 @@ export const readyAtom = atom<boolean>(false)
  *  it never blocks input, so the user can keep panning while data arrives. */
 export const loadingAtom = atom<boolean>(false)
 
-/** The lng/lat bbox actually sent to the last follow-camera query (the visible
- *  area plus its pad). Drawn on the map so the fetched region is visible rather
+/** The lng/lat bbox actually sent to the last follow-camera query (inset inside
+ *  the visible area). Drawn on the map so the fetched region is visible rather
  *  than something you have to infer. Undefined when the current results did not
  *  come from a camera-derived bbox. */
 export const fetchBboxAtom = atom<[number, number, number, number] | undefined>(undefined)

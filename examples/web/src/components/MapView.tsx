@@ -80,7 +80,7 @@ export function MapView() {
 
   // Rectangle outlines drawn over the meshes:
   //  - `fetch-bbox` (blue) is the area the last follow query actually asked
-  //    for — the visible area plus its pad — so the fetch region is visible
+  //    for — inset inside the visible area — so the fetch region is visible
   //    rather than something you have to infer.
   //  - `draw-bbox` (orange) is the rectangle the user drew.
   const layers = useMemo(() => {
@@ -176,7 +176,7 @@ export function MapView() {
             className="inline-block h-0 w-4 border-t-2"
             style={{ borderColor: 'rgb(30,120,255)' }}
           />
-          fetched area (visible + pad)
+          fetched area (inset in view)
         </div>
       )}
     </DeckGL>
