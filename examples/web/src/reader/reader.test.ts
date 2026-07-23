@@ -155,9 +155,12 @@ describe('runQuery pagination', () => {
     expect(page2.total).toBe(full.total)
 
     // Results are a stable-ordered prefix of the unpaged result.
-    for (let i = 0; i < 5; i++) {
-      expect(page1.features[i]?.id).toBe(full.features[i]?.id)
-    }
-    expect(page2.features[0]?.id).toBe(full.features[5]?.id)
+    const page1Ids = page1.features.map((f) => f.id)
+    const page2Ids = page2.features.map((f) => f.id)
+    const fullIds = full.features.map((f) => f.id)
+    expect(page1Ids).toHaveLength(5)
+    expect(page2Ids).toHaveLength(5)
+    expect(page1Ids).toEqual(fullIds.slice(0, 5))
+    expect(page2Ids).toEqual(fullIds.slice(5, 10))
   })
 })
