@@ -1,7 +1,7 @@
 // src/components/QueryPanel.tsx
 import type { AttrCondition, Operator } from '@cityjson/flatcitybuf'
 import { useAtom } from 'jotai'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { bboxToSource } from '../crs/index'
 import { useDrawBbox } from '../hooks/useDrawBbox'
 import { useFcbData } from '../hooks/useFcbData'
@@ -20,6 +20,10 @@ export function QueryPanel() {
   const [limit, setLimit] = useState(200)
   const [err, setErr] = useState('')
 
+  useEffect(() => {
+    setField('')
+  }, [header])
+
   if (header === undefined) return null
   const cols = header.columns
   const queryable = header.queryable
@@ -32,6 +36,10 @@ export function QueryPanel() {
     }
     let where: AttrCondition[] | undefined
     if (field !== '') {
+      if (!queryable.some((q) => q.name === field)) {
+        setErr('field is not queryable (not an indexed, supported column)')
+        return
+      }
       const col = cols.find((c) => c.name === field)
       if (col === undefined) { setErr('unknown field'); return }
       try {
