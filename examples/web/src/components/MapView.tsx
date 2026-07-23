@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Map } from 'react-map-gl/maplibre'
 import { useCameraFollow } from '../hooks/useCameraFollow'
 import { useDrawBbox } from '../hooks/useDrawBbox'
+import { BuildingLayer } from '../render/BuildingLayer'
+import { mergeFeatures } from '../render/mergeFeatures'
 import {
   colorByAtom, fetchBboxAtom, followTooFarAtom, loadingAtom, renderedAtom,
   selectedAtom, spatialModeAtom, viewStateAtom,
@@ -44,18 +46,6 @@ function useDelayed(flag: boolean, ms: number): boolean {
   return shown
 }
 
-/** Colours a feature by a numeric attribute, if `colorBy` is set and numeric;
- *  otherwise a steel blue. */
-function featureColor(f: RenderedFeature, colorBy: string | undefined): [number, number, number] {
-  if (colorBy !== undefined) {
-    const v = f.attributes[colorBy]
-    if (typeof v === 'number') {
-      const t = Math.max(0, Math.min(1, (v % 100) / 100))
-      return [Math.round(50 + 200 * t), Math.round(120 * (1 - t) + 60), 180]
-    }
-  }
-  return [70, 130, 180]
-}
 
 export function MapView() {
   const rendered = useAtomValue(renderedAtom)
@@ -80,32 +70,41 @@ export function MapView() {
   // In follow-camera mode, re-query the viewport (throttled) as the map moves.
   useCameraFollow()
 
-  // Mesh layers are memoised on their own inputs so rubber-banding a bbox
-  // (which changes `bbox` on every mouse-move) does not rebuild all N feature
-  // layers — only the cheap outline layer below is recreated.
-  const meshLayers = useMemo(
-    () => rendered.map((f) => new SimpleMeshLayer<RenderedFeature>({
-      id: `feat-${f.id}`,
-      data: [f],
+  // All buildings in ONE layer: a single merged mesh with per-vertex colour and
+  // a per-vertex feature id for picking. Rebuilt only when the result set or the
+  // colour-by column changes (selection is a separate highlight layer, so a
+  // click doesn't rebuild the whole mesh).
+  const buildingLayer = useMemo(() => {
+    if (rendered.length === 0) return null
+    return new BuildingLayer({
+      id: 'buildings',
+      mesh: mergeFeatures(rendered, colorBy),
+      features: rendered,
+      pickable: true,
+    })
+  }, [rendered, colorBy])
+
+  // The selected building, redrawn on top in orange. One layer for one feature,
+  // so highlighting is cheap and never rebuilds the merged mesh.
+  const highlightLayer = useMemo(() => {
+    if (selected === undefined) return null
+    return new SimpleMeshLayer<RenderedFeature>({
+      id: 'selected',
+      data: [selected],
       mesh: {
         attributes: {
-          positions: { value: f.mesh.positions, size: 3 },
-          normals: { value: f.mesh.normals, size: 3 },
+          positions: { value: selected.mesh.positions, size: 3 },
+          normals: { value: selected.mesh.normals, size: 3 },
         },
-        indices: { value: f.mesh.indices, size: 1 },
+        indices: { value: selected.mesh.indices, size: 1 },
       },
       coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-      coordinateOrigin: [f.centroidLngLat[0], f.centroidLngLat[1], 0],
+      coordinateOrigin: [selected.centroidLngLat[0], selected.centroidLngLat[1], 0],
       getPosition: () => [0, 0, 0],
-      getColor: () => {
-        const c = featureColor(f, colorBy)
-        return f.id === selected?.id ? [255, 160, 0] : c
-      },
-      pickable: true,
-      updateTriggers: { getColor: [colorBy, selected?.id] },
-    })),
-    [rendered, colorBy, selected],
-  )
+      getColor: [255, 160, 0],
+      pickable: false,
+    })
+  }, [selected])
 
   // Rectangle outlines drawn over the meshes:
   //  - `fetch-bbox` (blue) is the area the last follow query actually asked
@@ -144,8 +143,8 @@ export function MapView() {
         pickable: false,
       }))
     }
-    return extra.length === 0 ? meshLayers : [...meshLayers, ...extra]
-  }, [meshLayers, bbox, fetchBbox])
+    return [buildingLayer, highlightLayer, ...extra].filter((l) => l !== null)
+  }, [buildingLayer, highlightLayer, bbox, fetchBbox])
 
   return (
     <DeckGL
