@@ -19,10 +19,18 @@ body.
 A new subcommand `fcb inspect <source>` where `<source>` is a local path **or**
 an HTTP(S) URL. It opens a full-screen TUI with three tabs:
 
-- **Metadata** — bounds, geometry type, column count, spatial-index R-tree node
-  size, dimension flags (M/Z/T/TM), and the full CRS block (code, name,
-  authority, code string, WKT/description). Sourced from `Header`,
+- **Metadata** — title/identifier (when present), FCB version, features count,
+  column count, bounds (geographical extent min/max + width×height×depth),
+  reference date, spatial-index R-tree node size, attribute-index count,
+  transform (scale/translate), and the CRS block. Sourced from `Header`,
   `geographical_extent`, `transform`, and `ReferenceSystem`.
+
+  **The CRS block shows only what the FCB header actually stores:** authority,
+  code (rendered `AUTHORITY:CODE`, e.g. `EPSG:4326`), version, and code string.
+  FCB's `ReferenceSystem` has **no** CRS name, WKT, or description fields, and
+  the header has **no** geometry-type or M/Z/T/TM dimension flags (those are
+  per-object, not header-level). The fgbdump screenshots show FlatGeobuf fields
+  that do not exist in FCB; we do not invent them.
 - **Columns** — a scrollable table with columns: Name / Type / Description /
   Nullable / Primary Key / Unique. Backed by the `Column` accessors
   (`name`, `type_`, `description`, `nullable`, `primary_key`, `unique`).
@@ -108,9 +116,11 @@ exits non-zero, rather than emitting escape sequences into a pipe.
 
 `map.rs` holds pure, unit-testable functions:
 
-- **CRS gate:** treat the dataset as geographic when the extent lies within
-  lon/lat bounds and/or the `ReferenceSystem` code is a known geographic EPSG
-  (e.g. 4326, 4979). Otherwise render the projected-CRS fallback note.
+- **CRS gate:** treat the dataset as geographic when the `ReferenceSystem` code
+  is a known geographic EPSG (e.g. 4326, 4979) **and** the extent lies within
+  lon/lat bounds (`|lon| ≤ 180`, `|lat| ≤ 90`). If there is no reference system,
+  fall back to the extent-bounds check alone. Otherwise render the projected-CRS
+  fallback note.
 - **Projection:** equirectangular. `lon ∈ [-180, 180] → x`,
   `lat ∈ [90, -90] → y`, mapped onto a braille canvas sized to the panel. Plot
   the embedded coastline points first, then draw the file's extent as a green
