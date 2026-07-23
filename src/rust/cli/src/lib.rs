@@ -3,6 +3,7 @@
 //! This library exposes the merger and reader modules for integration testing.
 //! The main CLI binary is in main.rs.
 
+pub mod inspect;
 pub mod merger;
 pub mod reader;
 
@@ -35,4 +36,7 @@ pub enum CliError {
 
     #[error("FCB core error: {0}")]
     FcbCore(#[from] Error),
+
+    #[error("inspect requires an interactive terminal; use `fcb info` for static output")]
+    NotATerminal,
 }

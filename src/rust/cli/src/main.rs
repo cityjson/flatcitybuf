@@ -111,6 +111,12 @@ enum Commands {
         #[arg(short, long)]
         input: PathBuf,
     },
+
+    /// Interactively inspect an FCB file or URL in a terminal UI
+    Inspect {
+        /// Local path or HTTP(S) URL to an FCB file
+        source: String,
+    },
 }
 
 fn get_reader(input: &str) -> Result<Box<dyn Read>, Error> {
@@ -1042,6 +1048,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Cbor { input, output } => encode_cbor(&input, &output)?,
         Commands::Bson { input, output } => encode_bson(&input, &output)?,
         Commands::Info { input } => show_info(input)?,
+        Commands::Inspect { source } => {
+            if let Err(err) = fcb_cli::inspect::run_inspect(&source) {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        }
     }
 
     Ok(())
