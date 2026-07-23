@@ -1,16 +1,16 @@
 // src/components/MapView.tsx
 import { COORDINATE_SYSTEM } from '@deck.gl/core'
+import { PolygonLayer } from '@deck.gl/layers'
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
 import { DeckGL } from '@deck.gl/react'
 import { useAtom, useAtomValue } from 'jotai'
 import { useMemo } from 'react'
 import { Map } from 'react-map-gl/maplibre'
 import { useDrawBbox } from '../hooks/useDrawBbox'
-import { colorByAtom, renderedAtom, selectedAtom } from '../store/index'
+import { colorByAtom, renderedAtom, selectedAtom, viewStateAtom } from '../store/index'
 import type { RenderedFeature } from '../store/index'
 
 const BASEMAP = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
-const INITIAL_VIEW = { longitude: 4.36, latitude: 52.0, zoom: 13, pitch: 45, bearing: 0 }
 
 /** Colours a feature by a numeric attribute, if `colorBy` is set and numeric;
  *  otherwise a steel blue. */
@@ -29,10 +29,14 @@ export function MapView() {
   const rendered = useAtomValue(renderedAtom)
   const colorBy = useAtomValue(colorByAtom)
   const [selected, setSelected] = useAtom(selectedAtom)
+  const [viewState, setViewState] = useAtom(viewStateAtom)
   const { draw, onMapClick, onMapHover, bbox } = useDrawBbox()
 
-  const layers = useMemo(() => {
-    const meshLayers = rendered.map((f) => new SimpleMeshLayer<RenderedFeature>({
+  // Mesh layers are memoised on their own inputs so rubber-banding a bbox
+  // (which changes `bbox` on every mouse-move) does not rebuild all N feature
+  // layers — only the cheap outline layer below is recreated.
+  const meshLayers = useMemo(
+    () => rendered.map((f) => new SimpleMeshLayer<RenderedFeature>({
       id: `feat-${f.id}`,
       data: [f],
       mesh: {
@@ -51,13 +55,52 @@ export function MapView() {
       },
       pickable: true,
       updateTriggers: { getColor: [colorBy, selected?.id] },
-    }))
-    return meshLayers
-  }, [rendered, colorBy, selected])
+    })),
+    [rendered, colorBy, selected],
+  )
+
+  // The drawn bounding box as a visible rectangle (orange outline, faint fill),
+  // shown while drawing and after. Without it the only feedback is a text
+  // readout, so the box is effectively invisible on the map.
+  const layers = useMemo(() => {
+    if (bbox === undefined) return meshLayers
+    const [minLng, minLat, maxLng, maxLat] = bbox
+    const ring: [number, number][] = [
+      [minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat],
+    ]
+    const bboxLayer = new PolygonLayer<[number, number][]>({
+      id: 'draw-bbox',
+      data: [ring],
+      getPolygon: (d) => d,
+      stroked: true,
+      filled: true,
+      getFillColor: [255, 140, 0, 35],
+      getLineColor: [255, 120, 0, 220],
+      getLineWidth: 2,
+      lineWidthUnits: 'pixels',
+      pickable: false,
+    })
+    return [...meshLayers, bboxLayer]
+  }, [meshLayers, bbox])
 
   return (
     <DeckGL
-      initialViewState={INITIAL_VIEW}
+      viewState={viewState}
+      onViewStateChange={(params) => {
+        // deck types this as a union (MapViewState | TransitionProps); the
+        // interaction always yields a MapViewState with these fields.
+        const vs = params.viewState as {
+          longitude: number; latitude: number; zoom: number
+          pitch?: number; bearing?: number
+        }
+        setViewState({
+          longitude: vs.longitude,
+          latitude: vs.latitude,
+          zoom: vs.zoom,
+          pitch: vs.pitch ?? 0,
+          bearing: vs.bearing ?? 0,
+        })
+      }}
       controller
       layers={layers}
       getCursor={() => (draw.active ? 'crosshair' : 'grab')}

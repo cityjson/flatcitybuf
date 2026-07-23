@@ -9,8 +9,16 @@ import {
 } from '../reader/index'
 import {
   activeQueryAtom, headerAtom, readerAtom, renderedAtom, selectedAtom,
-  statusAtom, totalAtom,
+  statusAtom, totalAtom, viewStateAtom,
 } from '../store/index'
+
+// Rough Web-Mercator zoom that frames a lng/lat span. Exact fitBounds needs the
+// live viewport size; this heuristic is good enough to bring the data on-screen,
+// clamped to sane city/building-scale bounds.
+function zoomForSpan(spanLng: number, spanLat: number): number {
+  const span = Math.max(spanLng, spanLat, 1e-4)
+  return Math.min(18, Math.max(11, Math.log2(360 / span) - 1.5))
+}
 
 // Module-level (not useRef) because useFcbData is called from multiple
 // components; a per-instance ref wouldn't see requests issued by siblings.
@@ -27,14 +35,35 @@ export function useFcbData() {
   const [status, setStatus] = useAtom(statusAtom)
   const [active, setActive] = useAtom(activeQueryAtom)
   const [, setSelected] = useAtom(selectedAtom)
+  const [, setViewState] = useAtom(viewStateAtom)
 
   const onOpened = useCallback((r: Awaited<ReturnType<typeof openFromUrl>>) => {
+    const model = headerModel(r.header)
     setReader(r)
-    setHeader(headerModel(r.header))
+    setHeader(model)
     setRendered([]); setTotal(undefined); setSelected(undefined)
     setActive(undefined)
+    // Fly the camera to the file's extent so the data is on-screen even before
+    // a query runs — the start view is otherwise hard-coded to one location.
+    if (model.crs.supported && model.crs.code !== null && model.extent) {
+      const code = model.crs.code
+      const [minX, minY, , maxX, maxY] = model.extent
+      const corners: [number, number][] = (
+        [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]] as [number, number][]
+      ).map((c) => forward(code, c))
+      const lngs = corners.map((c) => c[0])
+      const lats = corners.map((c) => c[1])
+      const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
+      const minLat = Math.min(...lats), maxLat = Math.max(...lats)
+      setViewState((v) => ({
+        ...v,
+        longitude: (minLng + maxLng) / 2,
+        latitude: (minLat + maxLat) / 2,
+        zoom: zoomForSpan(maxLng - minLng, maxLat - minLat),
+      }))
+    }
     setStatus('file opened')
-  }, [setReader, setHeader, setRendered, setTotal, setSelected, setActive, setStatus])
+  }, [setReader, setHeader, setRendered, setTotal, setSelected, setActive, setViewState, setStatus])
 
   const openUrl = useCallback(async (url: string) => {
     const seq = ++requestSeq
@@ -98,8 +127,24 @@ export function useFcbData() {
       })
     }
     setRendered(out)
+    // Frame the camera on the rendered features so a query result is always
+    // visible, wherever in the dataset it falls.
+    if (out.length > 0) {
+      let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity
+      for (const f of out) {
+        const [lng, lat] = f.centroidLngLat
+        minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng)
+        minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat)
+      }
+      setViewState((v) => ({
+        ...v,
+        longitude: (minLng + maxLng) / 2,
+        latitude: (minLat + maxLat) / 2,
+        zoom: zoomForSpan(maxLng - minLng, maxLat - minLat),
+      }))
+    }
     setStatus(`${out.length} rendered${skipped ? `, ${skipped} skipped` : ''}`)
-  }, [reader, header, setRendered, setStatus])
+  }, [reader, header, setRendered, setViewState, setStatus])
 
   const query = useCallback(async (
     spec: { bboxSource?: [number, number, number, number]

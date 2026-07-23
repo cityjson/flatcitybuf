@@ -11,6 +11,21 @@ export interface RenderedFeature {
   attributes: Record<string, unknown>
 }
 
+/** The deck.gl camera. Controlled (not `initialViewState`) so the app can fly
+ *  the camera to the loaded data — otherwise a dataset that isn't already under
+ *  the hard-coded start view renders entirely off-screen and looks empty. */
+export interface ViewState {
+  longitude: number
+  latitude: number
+  zoom: number
+  pitch: number
+  bearing: number
+}
+export const INITIAL_VIEW: ViewState = {
+  longitude: 4.36, latitude: 52.0, zoom: 13, pitch: 45, bearing: 0,
+}
+export const viewStateAtom = atom<ViewState>(INITIAL_VIEW)
+
 export const readerAtom = atom<FcbReader | undefined>(undefined)
 export const headerAtom = atom<HeaderModel | undefined>(undefined)
 export const renderedAtom = atom<RenderedFeature[]>([])
