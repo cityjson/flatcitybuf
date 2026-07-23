@@ -36,4 +36,7 @@ pub enum CliError {
 
     #[error("FCB core error: {0}")]
     FcbCore(#[from] Error),
+
+    #[error("inspect requires an interactive terminal; use `fcb info` for static output")]
+    NotATerminal,
 }
