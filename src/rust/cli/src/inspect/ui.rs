@@ -4,7 +4,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::{Canvas, Points, Rectangle};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Tabs};
 use ratatui::Frame;
 
 use crate::inspect::app::{App, Tab};
@@ -171,7 +171,9 @@ fn draw_columns(frame: &mut Frame, area: Rect, model: &InspectModel, app: &App) 
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::ALL).title(title));
-    frame.render_widget(table, area);
+    let mut state = TableState::default();
+    state.select(Some(app.column_offset));
+    frame.render_stateful_widget(table, area, &mut state);
 }
 
 fn draw_map(frame: &mut Frame, area: Rect, model: &InspectModel) {
@@ -282,5 +284,47 @@ mod tests {
         app.next_tab(); // Columns
         let text = rendered_text(&app);
         assert!(text.contains("building_height"));
+    }
+
+    fn many_columns_model(count: usize) -> InspectModel {
+        let mut model = sample_model();
+        model.columns = (0..count)
+            .map(|i| ColumnInfo {
+                name: format!("col_{i:02}"),
+                type_name: "Double".into(),
+                description: None,
+                nullable: true,
+                primary_key: false,
+                unique: false,
+            })
+            .collect();
+        model
+    }
+
+    #[test]
+    fn columns_tab_viewport_follows_selection_when_scrolled_past_visible_rows() {
+        let model = many_columns_model(40);
+        let mut app = App::new(model.columns.len());
+        app.next_tab(); // Columns
+        app.to_bottom(); // column_offset -> 39, the last column
+
+        // Short backend: only a handful of rows fit (header + block borders
+        // + tab bar leave room for a few data rows), so the plain-Table bug
+        // (always rendering from row 0) would still show early columns and
+        // never reach col_39.
+        let backend = TestBackend::new(90, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &model, &app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+
+        assert!(
+            text.contains("col_39"),
+            "expected the selected last column to be visible after scrolling to the bottom"
+        );
+        assert!(
+            !text.contains("col_00"),
+            "expected the viewport to have scrolled past the first column"
+        );
     }
 }
