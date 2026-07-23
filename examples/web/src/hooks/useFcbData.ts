@@ -12,6 +12,13 @@ import {
   statusAtom, totalAtom,
 } from '../store/index'
 
+// Module-level (not useRef) because useFcbData is called from multiple
+// components; a per-instance ref wouldn't see requests issued by siblings.
+// Bumped at the start of every open/query/loadNext call; any commit whose
+// captured `seq` no longer matches the current counter is stale and is
+// dropped instead of overwriting newer state.
+let requestSeq = 0
+
 export function useFcbData() {
   const [reader, setReader] = useAtom(readerAtom)
   const [header, setHeader] = useAtom(headerAtom)
@@ -21,7 +28,7 @@ export function useFcbData() {
   const [active, setActive] = useAtom(activeQueryAtom)
   const [, setSelected] = useAtom(selectedAtom)
 
-  const onOpened = useCallback(async (r: Awaited<ReturnType<typeof openFromUrl>>) => {
+  const onOpened = useCallback((r: Awaited<ReturnType<typeof openFromUrl>>) => {
     setReader(r)
     setHeader(headerModel(r.header))
     setRendered([]); setTotal(undefined); setSelected(undefined)
@@ -30,15 +37,29 @@ export function useFcbData() {
   }, [setReader, setHeader, setRendered, setTotal, setSelected, setActive, setStatus])
 
   const openUrl = useCallback(async (url: string) => {
+    const seq = ++requestSeq
     setStatus(`opening ${url} ...`)
-    try { await onOpened(await openFromUrl(url)) }
-    catch (e) { setStatus(`failed to open URL: ${describeError(e)}`) }
+    try {
+      const r = await openFromUrl(url)
+      if (seq !== requestSeq) return
+      onOpened(r)
+    } catch (e) {
+      if (seq !== requestSeq) return
+      setStatus(`failed to open URL: ${describeError(e)}`)
+    }
   }, [onOpened, setStatus])
 
   const openFile = useCallback(async (file: File) => {
+    const seq = ++requestSeq
     setStatus(`opening ${file.name} ...`)
-    try { await onOpened(await openFromBlob(file)) }
-    catch (e) { setStatus(`failed to open file: ${describeError(e)}`) }
+    try {
+      const r = await openFromBlob(file)
+      if (seq !== requestSeq) return
+      onOpened(r)
+    } catch (e) {
+      if (seq !== requestSeq) return
+      setStatus(`failed to open file: ${describeError(e)}`)
+    }
   }, [onOpened, setStatus])
 
   const render = useCallback((features: Feature[]) => {
@@ -70,25 +91,34 @@ export function useFcbData() {
             where?: import('@cityjson/flatcitybuf').AttrCondition[]; limit: number },
   ) => {
     if (reader === undefined) return
+    const seq = ++requestSeq
     const q = { ...spec, offset: 0 }
-    setActive(q); setSelected(undefined)
+    setSelected(undefined)
     setStatus('querying...')
     try {
       const { features, total: t } = await runQuery(reader, q)
-      setTotal(t); render(features)
-    } catch (e) { setStatus(`query failed: ${describeError(e)}`) }
+      if (seq !== requestSeq) return
+      setActive(q); setTotal(t); render(features)
+    } catch (e) {
+      if (seq !== requestSeq) return
+      setStatus(`query failed: ${describeError(e)}`)
+    }
   }, [reader, render, setActive, setSelected, setStatus, setTotal])
 
   const loadNext = useCallback(async () => {
     if (reader === undefined || active === undefined) return
+    const seq = ++requestSeq
     const q = { ...active, offset: active.offset + active.limit }
-    setActive(q)
     setStatus('loading next batch...')
     try {
-      const { features } = await runQuery(reader, q)
-      render(features) // replaces the rendered set with the next page
-    } catch (e) { setStatus(`load failed: ${describeError(e)}`) }
-  }, [reader, active, render, setActive, setStatus])
+      const { features, total: t } = await runQuery(reader, q)
+      if (seq !== requestSeq) return
+      setActive(q); setTotal(t); render(features) // replaces the rendered set with the next page
+    } catch (e) {
+      if (seq !== requestSeq) return
+      setStatus(`load failed: ${describeError(e)}`)
+    }
+  }, [reader, active, render, setActive, setStatus, setTotal])
 
   return { openUrl, openFile, query, loadNext, status, header, rendered, total,
            hasMore: total !== undefined && active !== undefined

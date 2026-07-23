@@ -1,5 +1,5 @@
 // src/store/index.ts
-import type { AttrCondition, CityJSON, FcbReader } from '@cityjson/flatcitybuf'
+import type { AttrCondition, FcbReader } from '@cityjson/flatcitybuf'
 import { atom } from 'jotai'
 import type { Mesh } from '../geometry/index'
 import type { HeaderModel } from '../reader/index'
@@ -13,11 +13,6 @@ export interface RenderedFeature {
 
 export const readerAtom = atom<FcbReader | undefined>(undefined)
 export const headerAtom = atom<HeaderModel | undefined>(undefined)
-/** The CityJSON metadata line (`toCityJSONMetadata(reader.header)`) --
- *  listed among this task's atoms but not produced by `useFcbData` itself
- *  (it derives `transform` inline per query); left here for a header/info
- *  panel to populate and read without recomputing it. */
-export const metaAtom = atom<CityJSON | undefined>(undefined)
 export const renderedAtom = atom<RenderedFeature[]>([])
 export const totalAtom = atom<number | undefined>(undefined)
 export const statusAtom = atom<string>('open a .fcb file to begin')
