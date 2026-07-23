@@ -461,8 +461,10 @@ Pure geometry: decide if a dataset is geographic, project lon/lat to canvas coor
 - Produces:
   - `pub const GEOGRAPHIC_EPSG: [i32; 3] = [4326, 4979, 4258];`
   - `pub fn is_geographic(crs: Option<&CrsInfo>, extent: &ExtentInfo) -> bool`
-  - `pub fn project(lon: f64, lat: f64, w: f64, h: f64) -> (f64, f64)` — equirectangular into `[0,w) × [0,h)`, y flipped (north at top).
   - `pub fn coastline_points() -> &'static [(f64, f64)]` — parsed once from the embedded CSV (returns `(lon, lat)`).
+
+Note: the Map tab draws with `ratatui`'s `Canvas`, whose `x_bounds`/`y_bounds`
+handle the lon/lat → cell mapping. No manual projection function is needed here.
 
 - [ ] **Step 1: Create the coastline generator script**
 
@@ -575,18 +577,6 @@ mod tests {
     }
 
     #[test]
-    fn projects_corners_to_canvas_edges() {
-        // Top-left of the world map is (-180, 90); bottom-right is (180, -90).
-        let (x0, y0) = project(-180.0, 90.0, 100.0, 50.0);
-        assert!(x0.abs() < 1e-9 && y0.abs() < 1e-9);
-        let (x1, y1) = project(180.0, -90.0, 100.0, 50.0);
-        assert!((x1 - 100.0).abs() < 1e-9 && (y1 - 50.0).abs() < 1e-9);
-        // Equator/prime meridian maps to the canvas centre.
-        let (xc, yc) = project(0.0, 0.0, 100.0, 50.0);
-        assert!((xc - 50.0).abs() < 1e-9 && (yc - 25.0).abs() < 1e-9);
-    }
-
-    #[test]
     fn coastline_points_are_within_lonlat_bounds() {
         let pts = coastline_points();
         assert!(pts.len() >= 1000, "expected a substantial coastline, got {}", pts.len());
@@ -634,14 +624,6 @@ pub fn is_geographic(crs: Option<&CrsInfo>, extent: &ExtentInfo) -> bool {
     }
 }
 
-/// Equirectangular projection into `[0,w] × [0,h]`. Longitude increases left to
-/// right; latitude is flipped so north is at the top.
-pub fn project(lon: f64, lat: f64, w: f64, h: f64) -> (f64, f64) {
-    let x = (lon + 180.0) / 360.0 * w;
-    let y = (90.0 - lat) / 180.0 * h;
-    (x, y)
-}
-
 /// Parse the embedded coastline once, skipping `#` comment and blank lines.
 pub fn coastline_points() -> &'static [(f64, f64)] {
     static POINTS: OnceLock<Vec<(f64, f64)>> = OnceLock::new();
@@ -665,7 +647,7 @@ Add `pub mod map;` to `src/rust/cli/src/inspect/mod.rs`.
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cd src/rust && cargo test -p fcb_cli inspect::map 2>&1 | tail -20`
-Expected: PASS — 5 tests pass.
+Expected: PASS — 4 tests pass.
 
 - [ ] **Step 7: Commit**
 
@@ -1100,7 +1082,7 @@ fn draw_map(frame: &mut Frame, area: Rect, model: &InspectModel) {
         return;
     }
 
-    let coast: Vec<(f64, f64)> = map::coastline_points().to_vec();
+    let coast: &'static [(f64, f64)] = map::coastline_points();
     let (min_x, min_y, max_x, max_y) =
         (extent.min[0], extent.min[1], extent.max[0], extent.max[1]);
     let canvas = Canvas::default()
@@ -1108,7 +1090,7 @@ fn draw_map(frame: &mut Frame, area: Rect, model: &InspectModel) {
         .x_bounds([-180.0, 180.0])
         .y_bounds([-90.0, 90.0])
         .paint(move |ctx| {
-            ctx.draw(&Points { coords: &coast, color: Color::Rgb(200, 90, 40) });
+            ctx.draw(&Points { coords: coast, color: Color::Rgb(200, 90, 40) });
             ctx.draw(&Rectangle {
                 x: min_x,
                 y: min_y,
@@ -1121,7 +1103,7 @@ fn draw_map(frame: &mut Frame, area: Rect, model: &InspectModel) {
 }
 ```
 
-Note: the Map canvas uses `ratatui`'s own `x_bounds`/`y_bounds` (in lon/lat), so `map::project` is exercised by unit tests and reserved for any future non-canvas rendering; drawing here delegates to the canvas coordinate system. Add `pub mod ui;` to `src/rust/cli/src/inspect/mod.rs`.
+Note: the Map canvas uses `ratatui`'s own `x_bounds`/`y_bounds` (in lon/lat), so the coastline points and extent rectangle are drawn directly in lon/lat and the canvas handles the cell mapping. Add `pub mod ui;` to `src/rust/cli/src/inspect/mod.rs`.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
