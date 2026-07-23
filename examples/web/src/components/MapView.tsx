@@ -9,7 +9,7 @@ import { Map } from 'react-map-gl/maplibre'
 import { useCameraFollow } from '../hooks/useCameraFollow'
 import { useDrawBbox } from '../hooks/useDrawBbox'
 import {
-  colorByAtom, loadingAtom, renderedAtom, selectedAtom, viewStateAtom,
+  colorByAtom, fetchBboxAtom, loadingAtom, renderedAtom, selectedAtom, viewStateAtom,
 } from '../store/index'
 import type { RenderedFeature } from '../store/index'
 
@@ -46,6 +46,7 @@ export function MapView() {
   const [selected, setSelected] = useAtom(selectedAtom)
   const [viewState, setViewState] = useAtom(viewStateAtom)
   const showLoading = useDelayed(useAtomValue(loadingAtom), 120)
+  const fetchBbox = useAtomValue(fetchBboxAtom)
   const { draw, onMapClick, onMapHover, bbox } = useDrawBbox()
   // In follow-camera mode, re-query the viewport (throttled) as the map moves.
   useCameraFollow()
@@ -77,29 +78,45 @@ export function MapView() {
     [rendered, colorBy, selected],
   )
 
-  // The drawn bounding box as a visible rectangle (orange outline, faint fill),
-  // shown while drawing and after. Without it the only feedback is a text
-  // readout, so the box is effectively invisible on the map.
+  // Rectangle outlines drawn over the meshes:
+  //  - `fetch-bbox` (blue) is the area the last follow query actually asked
+  //    for — the visible area plus its pad — so the fetch region is visible
+  //    rather than something you have to infer.
+  //  - `draw-bbox` (orange) is the rectangle the user drew.
   const layers = useMemo(() => {
-    if (bbox === undefined) return meshLayers
-    const [minLng, minLat, maxLng, maxLat] = bbox
-    const ring: [number, number][] = [
-      [minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat],
+    const ringOf = (b: [number, number, number, number]): [number, number][] => [
+      [b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]],
     ]
-    const bboxLayer = new PolygonLayer<[number, number][]>({
-      id: 'draw-bbox',
-      data: [ring],
-      getPolygon: (d) => d,
-      stroked: true,
-      filled: true,
-      getFillColor: [255, 140, 0, 35],
-      getLineColor: [255, 120, 0, 220],
-      getLineWidth: 2,
-      lineWidthUnits: 'pixels',
-      pickable: false,
-    })
-    return [...meshLayers, bboxLayer]
-  }, [meshLayers, bbox])
+    const extra: PolygonLayer<[number, number][]>[] = []
+    if (fetchBbox !== undefined) {
+      extra.push(new PolygonLayer<[number, number][]>({
+        id: 'fetch-bbox',
+        data: [ringOf(fetchBbox)],
+        getPolygon: (d) => d,
+        stroked: true,
+        filled: false,
+        getLineColor: [30, 120, 255, 200],
+        getLineWidth: 1.5,
+        lineWidthUnits: 'pixels',
+        pickable: false,
+      }))
+    }
+    if (bbox !== undefined) {
+      extra.push(new PolygonLayer<[number, number][]>({
+        id: 'draw-bbox',
+        data: [ringOf(bbox)],
+        getPolygon: (d) => d,
+        stroked: true,
+        filled: true,
+        getFillColor: [255, 140, 0, 35],
+        getLineColor: [255, 120, 0, 220],
+        getLineWidth: 2,
+        lineWidthUnits: 'pixels',
+        pickable: false,
+      }))
+    }
+    return extra.length === 0 ? meshLayers : [...meshLayers, ...extra]
+  }, [meshLayers, bbox, fetchBbox])
 
   return (
     <DeckGL
@@ -151,6 +168,15 @@ export function MapView() {
       {bbox && (
         <div className="pointer-events-none absolute top-2 left-2 rounded bg-black/60 px-2 py-1 text-xs text-white">
           bbox: {bbox.map((n) => n.toFixed(4)).join(', ')}
+        </div>
+      )}
+      {fetchBbox && (
+        <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 rounded bg-black/60 px-2 py-1 text-xs text-white">
+          <span
+            className="inline-block h-0 w-4 border-t-2"
+            style={{ borderColor: 'rgb(30,120,255)' }}
+          />
+          fetched area (visible + pad)
         </div>
       )}
     </DeckGL>

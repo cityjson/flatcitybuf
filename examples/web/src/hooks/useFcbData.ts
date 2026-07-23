@@ -80,20 +80,20 @@ export function useFcbData() {
   const runQuery = useCallback(async (
     spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
     frameCamera: boolean,
-  ) => {
+  ): Promise<boolean> => {
     const seq = ++requestSeq
     const q = { ...spec, limit, offset: 0 }
     setLoading(true)
     setStatus('querying…')
     const r = await callWorker({ type: 'query', id: ++msgId, ...q })
     // A newer request owns the indicator now — leave it on for that one.
-    if (seq !== requestSeq) return
+    if (seq !== requestSeq) return false
     setLoading(false)
     if (r.type === 'error') {
       if (!r.aborted) setStatus(`query failed: ${r.message}`)
-      return
+      return false
     }
-    if (r.type !== 'result') return
+    if (r.type !== 'result') return false
     const out: RenderedFeature[] = r.features.map((f) => ({
       id: f.id,
       centroidLngLat: f.centroidLngLat,
@@ -105,13 +105,15 @@ export function useFcbData() {
     if (frameCamera) frameToFeatures(out)
     const more = r.total !== undefined && r.total > out.length ? ` of ${r.total}` : ''
     setStatus(`${out.length} rendered${more}`)
-  }, [limit, setActive, setTotal, setRendered, setStatus, frameToFeatures])
+    return true
+  }, [limit, setActive, setTotal, setRendered, setLoading, setStatus, frameToFeatures])
 
   // Opening a file also renders it: the map otherwise shows only the basemap.
   const onOpened = useCallback((h: HeaderModel) => {
     setHeader(h)
     setReady(true)
     setSelected(undefined)
+    setFetchBbox(undefined)
     if (h.crs.supported && h.crs.code !== null && h.extent) {
       const code = h.crs.code
       const [minX, minY, , maxX, maxY] = h.extent
@@ -137,7 +139,7 @@ export function useFcbData() {
       return
     }
     void runQuery({}, true) // auto-render the first page (whole dataset, capped by limit)
-  }, [setHeader, setReady, setSelected, setViewState, setRendered, setTotal, setActive, setLoading, setStatus, runQuery])
+  }, [setHeader, setReady, setSelected, setFetchBbox, setViewState, setRendered, setTotal, setActive, setLoading, setStatus, runQuery])
 
   const openUrl = useCallback(async (url: string) => {
     const seq = ++requestSeq
@@ -168,8 +170,9 @@ export function useFcbData() {
     spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
   ) => {
     setSelected(undefined)
+    setFetchBbox(undefined) // not a camera-derived bbox — hide the outline
     void runQuery(spec, true)
-  }, [runQuery, setSelected])
+  }, [runQuery, setSelected, setFetchBbox])
 
   // Follow-camera: query the viewport bbox without moving the camera.
   const queryViewport = useCallback((
@@ -177,8 +180,12 @@ export function useFcbData() {
   ) => {
     if (header === undefined || !header.crs.supported || header.crs.code === null) return
     const bboxSource = bboxToSource(header.crs.code, bounds[0], bounds[1], bounds[2], bounds[3])
-    void runQuery({ bboxSource, where }, false)
-  }, [header, runQuery])
+    // Show the fetched region only once it commits, so the outline always
+    // matches the features currently on screen.
+    void runQuery({ bboxSource, where }, false).then((ok) => {
+      if (ok) setFetchBbox(bounds)
+    })
+  }, [header, runQuery, setFetchBbox])
 
   const loadNext = useCallback(() => {
     if (active === undefined) return
