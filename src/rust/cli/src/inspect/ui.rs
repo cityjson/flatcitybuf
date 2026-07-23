@@ -28,11 +28,7 @@ pub fn draw(frame: &mut Frame, model: &InspectModel, app: &App) {
 
 fn draw_tab_bar(frame: &mut Frame, area: Rect, app: &App) {
     let titles = ["Metadata", "Columns", "Map"];
-    let selected = match app.tab {
-        Tab::Metadata => 0,
-        Tab::Columns => 1,
-        Tab::Map => 2,
-    };
+    let selected = app.tab_index();
     let tabs = Tabs::new(titles.iter().map(|t| Line::from(*t)).collect::<Vec<_>>())
         .block(
             Block::default()
@@ -68,7 +64,7 @@ fn draw_metadata(frame: &mut Frame, area: Rect, model: &InspectModel) {
     if let Some(id) = &model.identifier {
         lines.push(kv("Identifier", id.clone()));
     }
-    lines.push(kv("FCB Version", model.version.clone()));
+    lines.push(kv("CityJSON Version", model.version.clone()));
     lines.push(kv("Features", model.features_count.to_string()));
     lines.push(kv("Columns", model.columns.len().to_string()));
     lines.push(kv(
@@ -163,11 +159,15 @@ fn draw_columns(frame: &mut Frame, area: Rect, model: &InspectModel, app: &App) 
         Constraint::Percentage(12),
         Constraint::Percentage(9),
     ];
-    let title = format!(
-        "Columns ({} of {})",
-        app.column_offset + 1,
-        model.columns.len().max(1)
-    );
+    let title = if model.columns.is_empty() {
+        "Columns (0)".to_string()
+    } else {
+        format!(
+            "Columns ({} of {})",
+            app.column_offset + 1,
+            model.columns.len()
+        )
+    };
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::ALL).title(title));
@@ -204,11 +204,16 @@ fn draw_map(frame: &mut Frame, area: Rect, model: &InspectModel) {
 
     let coast: &'static [(f64, f64)] = map::coastline_points();
     let (min_x, min_y, max_x, max_y) = (extent.min[0], extent.min[1], extent.max[0], extent.max[1]);
+    let crs_label = model
+        .crs
+        .as_ref()
+        .map(|c| c.code_label())
+        .unwrap_or_else(|| "geographic".to_string());
     let canvas = Canvas::default()
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Extent of Data (EPSG:4326)"),
+                .title(format!("Extent of Data ({crs_label})")),
         )
         .x_bounds([-180.0, 180.0])
         .y_bounds([-90.0, 90.0])
@@ -232,7 +237,7 @@ fn draw_map(frame: &mut Frame, area: Rect, model: &InspectModel) {
 mod tests {
     use super::*;
     use crate::inspect::app::App;
-    use crate::inspect::model::{ColumnInfo, InspectModel};
+    use crate::inspect::model::{ColumnInfo, CrsInfo, ExtentInfo, InspectModel};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -259,13 +264,50 @@ mod tests {
         }
     }
 
-    fn rendered_text(app: &App) -> String {
-        let model = sample_model();
+    /// Sample model with a geographic (EPSG:4326) CRS and a lon/lat extent,
+    /// so `draw_map` takes the Canvas branch.
+    fn geographic_model() -> InspectModel {
+        let mut model = sample_model();
+        model.extent = Some(ExtentInfo {
+            min: [4.0, 52.0, 0.0],
+            max: [5.0, 53.0, 10.0],
+        });
+        model.crs = Some(CrsInfo {
+            authority: Some("EPSG".into()),
+            code: 4326,
+            version: 0,
+            code_string: None,
+        });
+        model
+    }
+
+    /// Sample model with a projected (EPSG:28992) CRS and a metres extent, so
+    /// `draw_map` falls back to the "Map unavailable" message.
+    fn projected_model() -> InspectModel {
+        let mut model = sample_model();
+        model.extent = Some(ExtentInfo {
+            min: [84000.0, 447000.0, 0.0],
+            max: [85000.0, 448000.0, 10.0],
+        });
+        model.crs = Some(CrsInfo {
+            authority: Some("EPSG".into()),
+            code: 28992,
+            version: 0,
+            code_string: None,
+        });
+        model
+    }
+
+    fn render(model: &InspectModel, app: &App) -> String {
         let backend = TestBackend::new(90, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &model, app)).unwrap();
+        terminal.draw(|f| draw(f, model, app)).unwrap();
         let buf = terminal.backend().buffer().clone();
         buf.content().iter().map(|c| c.symbol()).collect()
+    }
+
+    fn rendered_text(app: &App) -> String {
+        render(&sample_model(), app)
     }
 
     #[test]
@@ -326,5 +368,26 @@ mod tests {
             !text.contains("col_00"),
             "expected the viewport to have scrolled past the first column"
         );
+    }
+
+    #[test]
+    fn map_tab_renders_canvas_for_geographic_crs() {
+        let model = geographic_model();
+        let mut app = App::new(model.columns.len());
+        app.next_tab(); // Columns
+        app.next_tab(); // Map
+        let text = render(&model, &app);
+        assert!(text.contains("Extent of Data"));
+        assert!(!text.contains("Map unavailable"));
+    }
+
+    #[test]
+    fn map_tab_shows_unavailable_message_for_projected_crs() {
+        let model = projected_model();
+        let mut app = App::new(model.columns.len());
+        app.next_tab(); // Columns
+        app.next_tab(); // Map
+        let text = render(&model, &app);
+        assert!(text.contains("Map unavailable"));
     }
 }

@@ -18,6 +18,7 @@ pub struct InspectModel {
     pub transform: Option<TransformInfo>,
 }
 
+/// Owned snapshot of one FCB column's metadata.
 #[derive(Debug, Clone)]
 pub struct ColumnInfo {
     pub name: String,
@@ -28,6 +29,7 @@ pub struct ColumnInfo {
     pub unique: bool,
 }
 
+/// Owned snapshot of the FCB header's coordinate reference system.
 #[derive(Debug, Clone)]
 pub struct CrsInfo {
     pub authority: Option<String>,
@@ -46,6 +48,7 @@ impl CrsInfo {
     }
 }
 
+/// Owned snapshot of the FCB header's geographical extent (min/max corners).
 #[derive(Debug, Clone)]
 pub struct ExtentInfo {
     pub min: [f64; 3],
@@ -63,6 +66,7 @@ impl ExtentInfo {
     }
 }
 
+/// Owned snapshot of the FCB header's coordinate scale/translate transform.
 #[derive(Debug, Clone)]
 pub struct TransformInfo {
     pub scale: [f64; 3],

@@ -9,7 +9,7 @@ pub mod ui;
 use std::io::{self, IsTerminal, Stdout};
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -45,8 +45,11 @@ impl Drop for TerminalGuard {
 }
 
 /// Apply a single key press to the app state.
-fn handle_key(app: &mut App, key: KeyCode) {
-    match key {
+fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    match key.code {
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.should_quit = true
+        }
         KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
         KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => app.next_tab(),
         KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => app.prev_tab(),
@@ -83,7 +86,7 @@ pub fn run_inspect_with_tty(source: &str, is_tty: bool) -> Result<(), CliError> 
         if event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    handle_key(&mut app, key.code);
+                    handle_key(&mut app, key);
                 }
             }
         }
@@ -111,30 +114,62 @@ mod tests {
     #[test]
     fn quit_keys_set_should_quit() {
         use crate::inspect::app::App;
-        use crossterm::event::KeyCode;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
         let mut app = App::new(3);
-        handle_key(&mut app, KeyCode::Char('q'));
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+        );
         assert!(app.should_quit);
 
         let mut app = App::new(3);
-        handle_key(&mut app, KeyCode::Esc);
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_sets_should_quit_but_plain_c_does_not() {
+        use crate::inspect::app::App;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = App::new(3);
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+        assert!(app.should_quit);
+
+        let mut app = App::new(3);
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+        );
+        assert!(!app.should_quit);
     }
 
     #[test]
     fn arrow_and_vim_keys_drive_navigation() {
         use crate::inspect::app::{App, Tab};
-        use crossterm::event::KeyCode;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
         let mut app = App::new(3);
-        handle_key(&mut app, KeyCode::Tab);
+        handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.tab, Tab::Columns);
-        handle_key(&mut app, KeyCode::Char('j'));
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+        );
         assert_eq!(app.column_offset, 1);
-        handle_key(&mut app, KeyCode::Char('k'));
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+        );
         assert_eq!(app.column_offset, 0);
-        handle_key(&mut app, KeyCode::Char('G'));
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE),
+        );
         assert_eq!(app.column_offset, 2);
     }
 }

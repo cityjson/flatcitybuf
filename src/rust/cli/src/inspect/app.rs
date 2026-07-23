@@ -28,7 +28,8 @@ impl App {
         }
     }
 
-    fn tab_index(&self) -> usize {
+    /// Position of the active tab within `TAB_ORDER`.
+    pub fn tab_index(&self) -> usize {
         TAB_ORDER.iter().position(|t| *t == self.tab).unwrap_or(0)
     }
 

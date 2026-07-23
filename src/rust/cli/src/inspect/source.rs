@@ -8,10 +8,12 @@ use fcb_core::{FcbReader, HttpFcbReader};
 use crate::inspect::model::{from_header, InspectModel};
 use crate::CliError;
 
-/// True when `source` is an `http://` or `https://` URL. A bare Windows drive
-/// letter (`C:/...`) is deliberately not treated as a scheme.
+/// True when `source` is an `http://` or `https://` URL (scheme match is
+/// case-insensitive). A bare Windows drive letter (`C:/...`) is deliberately
+/// not treated as a scheme.
 pub fn is_url(source: &str) -> bool {
-    source.starts_with("http://") || source.starts_with("https://")
+    let lower = source.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
 }
 
 /// Load an `InspectModel` from a local path or an HTTP(S) URL. Only the header
@@ -46,6 +48,12 @@ mod tests {
     fn detects_http_and_https_urls() {
         assert!(is_url("http://example.com/a.fcb"));
         assert!(is_url("https://example.com/a.fcb"));
+    }
+
+    #[test]
+    fn detects_urls_case_insensitively() {
+        assert!(is_url("HTTPS://example.com/a.fcb"));
+        assert!(is_url("Http://example.com/a.fcb"));
     }
 
     #[test]

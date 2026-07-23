@@ -1,5 +1,5 @@
-//! Pure map geometry for the inspect Map tab: geographic gate, equirectangular
-//! projection, and the embedded world coastline.
+//! Pure map geometry for the inspect Map tab: geographic gate and the
+//! embedded world coastline.
 
 use std::sync::OnceLock;
 
