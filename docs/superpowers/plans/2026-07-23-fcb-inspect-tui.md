@@ -1317,8 +1317,14 @@ Expected: PASS — all `inspect::*` tests plus the existing `verify_cli` pass; 0
 
 - [ ] **Step 6: Full build + clippy + fmt**
 
-Run: `cd src/rust && cargo build -p fcb_cli && cargo clippy -p fcb_cli --all-targets -- -D warnings && cargo fmt -p fcb_cli -- --check`
+Run: `cd src/rust && cargo build -p fcb_cli && cargo clippy -p fcb_cli --all-targets --no-deps -- -D warnings && cargo fmt -p fcb_cli -- --check`
 Expected: clean build, no clippy warnings, formatting OK. Fix any issues and re-run.
+
+Note: `--no-deps` is deliberate. The `fcb_core` crate has ~50 pre-existing clippy
+findings on the current Rust toolchain (generated FlatBuffers + `packed_rtree`/
+`static_btree`) that the repo's own `just clippy` already trips on; they are
+unrelated to this feature. `--no-deps` scopes the gate to the `fcb_cli` code this
+plan adds. Do not attempt to fix `fcb_core` lints here — that is out of scope.
 
 - [ ] **Step 7: Manual smoke test**
 
@@ -1342,7 +1348,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ## Final Verification
 
 - [ ] `cd src/rust && cargo test -p fcb_cli` — all tests pass.
-- [ ] `cd src/rust && cargo clippy -p fcb_cli --all-targets -- -D warnings` — clean.
+- [ ] `cd src/rust && cargo clippy -p fcb_cli --all-targets --no-deps -- -D warnings` — clean (scopes to fcb_cli; fcb_core has pre-existing lints, out of scope).
 - [ ] `cd src/rust && cargo fmt --check` — clean.
 - [ ] `fcb inspect <local .fcb>` opens the TUI; all three tabs render; quit restores the terminal.
 - [ ] `fcb inspect <https url to .fcb>` opens the TUI (header fetched over range requests).
