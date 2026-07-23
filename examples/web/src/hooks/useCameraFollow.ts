@@ -4,7 +4,9 @@ import type { AttrCondition } from '@cityjson/flatcitybuf'
 import { useAtomValue } from 'jotai'
 import { useEffect, useRef } from 'react'
 import type { HeaderModel } from '../reader/index'
-import { headerAtom, spatialModeAtom, viewStateAtom, whereAtom } from '../store/index'
+import {
+  headerAtom, renderedAtom, spatialModeAtom, totalAtom, viewStateAtom, whereAtom,
+} from '../store/index'
 import { useFcbData } from './useFcbData'
 
 // How long the camera must settle before a follow query fires. `viewState`
@@ -19,6 +21,14 @@ const DEBOUNCE_MS = 350
 // (a small absolute move matters when zoomed in, not when zoomed out).
 const PAD = 0.5
 
+// When the last result was TRUNCATED by the limit we hold only some of the
+// features in the fetched area, so being inside it proves nothing — the
+// buildings now on screen may never have been fetched. In that case refetch
+// once the view has moved this fraction of its span, or changed scale by this
+// factor. Both are relative to the current span, so they track zoom.
+const MOVE_FRAC = 0.25
+const SCALE_FACTOR = 1.35
+
 type Bounds = [number, number, number, number] // [west, south, east, north]
 
 function contains(outer: Bounds, inner: Bounds): boolean {
@@ -32,26 +42,34 @@ function pad(b: Bounds): Bounds {
   return [b[0] - dx, b[1] - dy, b[2] + dx, b[3] + dy]
 }
 
+interface LastQuery { padded: Bounds; center: [number, number]; span: number }
+
 /** When the spatial mode is `follow`, re-queries the current viewport (plus any
  *  attribute filter) as the camera moves — debounced, and only when the view
- *  leaves the last padded query area. Mount once (in MapView). */
+ *  has changed enough to need new data. Mount once (in MapView). */
 export function useCameraFollow(): void {
   const mode = useAtomValue(spatialModeAtom)
   const viewState = useAtomValue(viewStateAtom)
   const where = useAtomValue(whereAtom)
   const header = useAtomValue(headerAtom)
+  const total = useAtomValue(totalAtom)
+  const rendered = useAtomValue(renderedAtom)
   const { queryViewport } = useFcbData()
 
-  // The padded bbox of the last issued query, and the inputs it was for. A new
-  // file (new header) or attribute filter invalidates it (force a refetch).
-  const lastPadded = useRef<Bounds | null>(null)
+  // The limit cut the last result short, so we hold only part of what is in the
+  // fetched area — containment can no longer be trusted as coverage.
+  const truncated = total !== undefined && total > rendered.length
+
+  // The last issued query, and the inputs it was for. A new file (new header)
+  // or attribute filter invalidates it (force a refetch).
+  const last = useRef<LastQuery | null>(null)
   const lastWhere = useRef<AttrCondition[] | undefined>(undefined)
   const lastHeader = useRef<HeaderModel | undefined>(undefined)
 
   useEffect(() => {
     if (mode !== 'follow' || header === undefined) return
     if (header !== lastHeader.current || where !== lastWhere.current) {
-      lastPadded.current = null
+      last.current = null
       lastHeader.current = header
       lastWhere.current = where
     }
@@ -66,16 +84,30 @@ export function useCameraFollow(): void {
         // whole dataset regardless of zoom.
         const vp = new WebMercatorViewport({ ...viewState, pitch: 0, width, height })
         const b = vp.getBounds() as Bounds
-        // Still inside the last fetched area? The data on screen already covers
-        // it — don't refetch.
-        if (lastPadded.current !== null && contains(lastPadded.current, b)) return
+        const center: [number, number] = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]
+        const span = Math.max(b[2] - b[0], b[3] - b[1])
+        const lq = last.current
+        if (lq !== null) {
+          // Left the fetched area? Always refetch.
+          let stale = !contains(lq.padded, b)
+          if (!stale && truncated) {
+            // Inside the fetched area, but we only hold part of what is there,
+            // so zooming in or panning can reveal features we never fetched.
+            // Refetch once the view has changed enough to be worth it.
+            const moved = Math.hypot(center[0] - lq.center[0], center[1] - lq.center[1])
+            const ratio = span / lq.span
+            stale = moved > lq.span * MOVE_FRAC
+              || ratio < 1 / SCALE_FACTOR || ratio > SCALE_FACTOR
+          }
+          if (!stale) return
+        }
         const padded = pad(b)
-        lastPadded.current = padded
+        last.current = { padded, center, span }
         void queryViewport(padded, where)
       } catch {
         // viewport not constructible (degenerate size/zoom) — skip this tick
       }
     }, DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [mode, viewState, where, header, queryViewport])
+  }, [mode, viewState, where, header, truncated, queryViewport])
 }
