@@ -4,14 +4,17 @@
 //! `fcb`, which converts between CityJSON / CityJSONSeq and `.fcb`:
 //!
 //! ```text
-//! fcb ser   -i city.jsonl -o city.fcb   # CityJSONSeq -> .fcb  (-A indexes
-//!                                       # every attribute, -g writes the extent)
-//! fcb deser -i city.fcb   -o city.jsonl # .fcb -> CityJSONSeq
-//! fcb info  -i city.fcb                 # header, extent and index summary
-//! fcb inspect city.fcb                  # interactive terminal UI
-//! fcb cbor  -i city.jsonl -o city.cbor  # CityJSON -> CBOR (size comparison)
-//! fcb bson  -i city.jsonl -o city.bson  # CityJSON -> BSON (size comparison)
+//! fcb ser     city.jsonl city.fcb   # CityJSONSeq -> .fcb  (-A indexes every
+//!                                   # attribute, -g writes the extent)
+//! fcb deser   city.fcb   city.jsonl # .fcb -> CityJSONSeq
+//! fcb info    city.fcb              # header, extent and index summary
+//! fcb inspect city.fcb              # interactive terminal UI
+//! fcb cbor    city.json  city.cbor  # CityJSON -> CBOR (size comparison)
+//! fcb bson    city.json  city.bson  # CityJSON -> BSON (size comparison)
 //! ```
+//!
+//! Input and output are positional. `ser` takes any number of inputs before
+//! the output, so `fcb ser a.jsonl b.jsonl merged.fcb` merges as it converts.
 //!
 //! The modules below are `pub` so the integration tests can drive them
 //! directly; they are not a stable API. All the format work happens in

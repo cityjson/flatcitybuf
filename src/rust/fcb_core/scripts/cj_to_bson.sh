@@ -23,7 +23,7 @@ find "$dir_path" -type f -name "*.json" | while read -r file; do
   echo "=== ${file} is being converted ==="
 
   # Run the conversion command
-  cargo run -p fcb_cli bson -i "$file" -o "${base_name}.bson"
+  cargo run -p fcb_cli -- bson "$file" "${base_name}.bson"
 
   echo "conversion completed for ${file}"
   echo

@@ -335,13 +335,13 @@ cargo install fcb
 # Convert CityJSONSeq to FlatCityBuf with full indexing
 # -A option indexes all attributes
 fcb ser \
-  -i /path/to/3dbag.city.jsonl \
-  -o 3dbag_all_index.fcb \
+  /path/to/3dbag.city.jsonl \
+  3dbag_all_index.fcb \
   -A \
   --attr-branching-factor 256
 
 # Verify the generated file
-fcb info -i 3dbag_all_index.fcb
+fcb info 3dbag_all_index.fcb
 
 # Upload to cloud storage
 gsutil cp 3dbag_all_index.fcb gs://your-bucket/

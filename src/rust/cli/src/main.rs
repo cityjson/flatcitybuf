@@ -40,11 +40,10 @@ enum Commands {
     /// Convert CityJSON to FCB
     Ser {
         /// Input files (glob patterns supported, e.g., "cities/*/*.jsonl")
-        #[arg(short = 'i', long, required = true, num_args = 1..)]
+        #[arg(required = true, num_args = 1..)]
         input: Vec<String>,
 
         /// Output file (use '-' for stdout)
-        #[arg(short = 'o', long)]
         output: String,
 
         /// Comma-separated list of attributes to create index for
@@ -84,38 +83,31 @@ enum Commands {
     /// Convert FCB to CityJSON
     Deser {
         /// Input file (use '-' for stdin)
-        #[arg(short, long)]
         input: String,
 
         /// Output file (use '-' for stdout)
-        #[arg(short, long)]
         output: String,
     },
 
     /// Convert CityJSON to CBOR
     Cbor {
         /// Input file (use '-' for stdin)
-        #[arg(short, long)]
         input: String,
         /// Output file (use '-' for stdout)
-        #[arg(short, long)]
         output: String,
     },
 
     /// Convert CityJSON to BSON
     Bson {
         /// Input file (use '-' for stdin)
-        #[arg(short, long)]
         input: String,
         /// Output file (use '-' for stdout)
-        #[arg(short, long)]
         output: String,
     },
 
     /// Show info about FCB file
     Info {
         /// Input FCB file
-        #[arg(short, long)]
         input: PathBuf,
     },
 

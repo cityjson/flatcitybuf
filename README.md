@@ -159,25 +159,30 @@ from `src/ts`. See [src/ts/README.md](src/ts/README.md).
 
 Replace `cargo run -p fcb_cli --` with `fcb` in the following commands if you want to use the installed binary directly.
 
+Input and output are positional: the input comes first, the output second.
+
 ```bash
 # Basic conversion from CityJSONSeq
-fcb ser -i input.city.jsonl -o output.fcb
+fcb ser input.city.jsonl output.fcb
 
 # Convert standard CityJSON file
-fcb ser -i city.city.json -o output.fcb
+fcb ser city.city.json output.fcb
 
-# Multiple input files
-fcb ser -i file1.city.jsonl file2.city.jsonl -o merged.fcb
+# Multiple input files -- the last positional is the output
+fcb ser file1.city.jsonl file2.city.jsonl merged.fcb
 
 # Glob patterns to process all matching files
-fcb ser -i 'data/*.city.jsonl' -o output.fcb
-fcb ser -i 'cities/**/*.city.json' -o all_cities.fcb
+fcb ser 'data/*.city.jsonl' output.fcb
+fcb ser 'cities/**/*.city.json' all_cities.fcb
 
 # With spatial index and attribute index
-fcb ser -i data.city.jsonl -o data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
+fcb ser data.city.jsonl data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
+
+# Back to CityJSONSeq
+fcb deser data.fcb output.city.jsonl
 
 # Show information about the file
-fcb info -i data.fcb
+fcb info data.fcb
 ```
 
 ### 🧪 Run Benchmarks

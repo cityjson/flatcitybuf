@@ -79,18 +79,18 @@ update:
 
 # Show header, extent and index summary for a .fcb file.
 info file="fcb_core/tests/data/delft.fcb":
-    cargo run -q -p fcb_cli -- info -i {{file}}
+    cargo run -q -p fcb_cli -- info {{file}}
 
 # CityJSONSeq -> .fcb
 ser input output:
-    cargo run -q -p fcb_cli -- ser -i {{input}} -o {{output}} -A -g
+    cargo run -q -p fcb_cli -- ser {{input}} {{output}} -A -g
 
 # This is the oracle output the other readers are compared against; see
 # docs/TESTING.md §6.
 
 # .fcb -> CityJSONSeq
 deser input output:
-    cargo run -q -p fcb_cli -- deser -i {{input}} -o {{output}}
+    cargo run -q -p fcb_cli -- deser {{input}} {{output}}
 
 file-stats:
     cargo run -p fcb_core --bin stats -- -d fcb_core/benchmark_data/ -f csv

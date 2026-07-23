@@ -1188,7 +1188,7 @@ regression witness.
 
 ## 28. The CLI conflated the R-tree node size with `attr_branching_factor` — FIXED (this branch, Task 2)
 
-**Where:** `fcb_cli` write path, now `cli/src/main.rs:493-495`.
+**Where:** `fcb_cli` write path, now `cli/src/main.rs:498-500`.
 
 The R-tree `index_node_size` and the attribute B+tree `attr_branching_factor` are
 unrelated knobs, but the CLI drove the header's `index_node_size` from the
@@ -1206,7 +1206,7 @@ not match the caller's intent — again feeding finding #24.
 
 ## 29. `fcb_cli deser` broke its loop on `features_count`, truncating count-0 files — FIXED (this branch, Task 2)
 
-**Where:** `fcb_cli` deserialize path, now `cli/src/main.rs:730-733`.
+**Where:** `fcb_cli` deserialize path, now `cli/src/main.rs:735-738`.
 
 The decode loop stopped after `features_count` features. A header may legitimately
 declare `0`, which means "unknown", not "empty" (see `conformance/no_count.fcb`,

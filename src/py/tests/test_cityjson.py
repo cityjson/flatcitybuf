@@ -64,8 +64,8 @@ def test_point_of_contact_is_emitted_when_the_header_declares_one() -> None:
     # metadata.pointOfContact -- the writer/reader round trip preserves
     # it unchanged, and there is no address sub-object in the source,
     # so none is expected back either; (2) the Rust reference reader
-    # directly, via `cargo run --release -p fcb_cli -- deser -i
-    # examples/data/delft.fcb` (oracle technique), which emits the
+    # directly, via `cargo run --release -p fcb_cli -- deser
+    # examples/data/delft.fcb -` (oracle technique), which emits the
     # identical object for the header line.
     r = FcbReader.open_file(DELFT)
     cj = to_cityjson_metadata(r.header)

@@ -17,7 +17,7 @@ DELFT = Path(__file__).resolve().parents[3] / "examples" / "data" / "delft.fcb"
 
 # Expected values below were obtained two ways and cross-checked:
 #
-# 1. `cd src/rust && ./target/release/fcb info -i <file>` -- the Rust CLI,
+# 1. `cd src/rust && ./target/release/fcb info <file>` -- the Rust CLI,
 #    an oracle independent of this module, printed (rounded):
 #    features=3 (small) / 1115 (delft), version "2.0", title "3DBAG",
 #    extent min=[84501.55, 445805.03, -3.75] max=[85675.23, 446983.47,

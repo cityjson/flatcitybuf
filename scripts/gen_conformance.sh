@@ -60,7 +60,7 @@ deser_idempotent() {
   local scratch="${expected_path}.new"
 
   (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
-      deser -i "${fcb_path}" -o "${scratch}")
+      deser "${fcb_path}" "${scratch}")
 
   if [[ -f "${expected_path}" ]] && json_lines_equal "${expected_path}" "${scratch}"; then
     rm -f "${scratch}"
@@ -85,7 +85,7 @@ for src in "${INPUTS[@]}"; do
   name="$(basename "${src}" .city.jsonl)"
   echo "==> ${name}"
   (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
-      ser -A -i "${src}" -o "${OUT}/${name}.fcb")
+      ser -A "${src}" "${OUT}/${name}.fcb")
   deser_idempotent "${OUT}/${name}.fcb" "${OUT}/${name}.expected.jsonl"
 done
 
@@ -106,7 +106,7 @@ SMALL="${RUST}/fcb_core/tests/data/small.city.jsonl"
 NODE8_SRC="${INPUTS_DIR}/appearance_depths.city.jsonl"
 echo "==> appearance_depths_node8 (index_node_size = 8)"
 (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
-    ser -A --index-node-size 8 -i "${NODE8_SRC}" -o "${OUT}/appearance_depths_node8.fcb")
+    ser -A --index-node-size 8 "${NODE8_SRC}" "${OUT}/appearance_depths_node8.fcb")
 
 # features_count = 0, which means "unknown": the reader must scan to EOF.
 # The R-tree is omitted because its size is derived from the feature count,
@@ -115,7 +115,7 @@ echo "==> appearance_depths_node8 (index_node_size = 8)"
 # order -- a different order from small.expected.jsonl, hence its own file.
 echo "==> no_count (features_count = 0)"
 (cd "${RUST}" && cargo run --quiet --release -p fcb_cli -- \
-    ser -A --no-feature-count --no-spatial-index -i "${SMALL}" -o "${OUT}/no_count.fcb")
+    ser -A --no-feature-count --no-spatial-index "${SMALL}" "${OUT}/no_count.fcb")
 deser_idempotent "${OUT}/no_count.fcb" "${OUT}/no_count.expected.jsonl"
 
 echo "Class A corpus written to ${OUT}"
