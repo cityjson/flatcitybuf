@@ -5,8 +5,9 @@ import { useCallback } from 'react'
 import { bboxToSource, forward } from '../crs/index'
 import type { HeaderModel } from '../reader/index'
 import {
-  activeQueryAtom, headerAtom, limitAtom, readyAtom, type RenderedFeature,
-  renderedAtom, selectedAtom, statusAtom, totalAtom, type ViewState, viewStateAtom,
+  activeQueryAtom, headerAtom, limitAtom, loadingAtom, readyAtom,
+  type RenderedFeature, renderedAtom, selectedAtom, statusAtom, totalAtom,
+  type ViewState, viewStateAtom,
 } from '../store/index'
 import type { WorkerRequest, WorkerResponse } from '../worker/protocol'
 
@@ -52,6 +53,7 @@ export function useFcbData() {
   const [active, setActive] = useAtom(activeQueryAtom)
   const [limit] = useAtom(limitAtom)
   const [, setReady] = useAtom(readyAtom)
+  const [, setLoading] = useAtom(loadingAtom)
   const [, setSelected] = useAtom(selectedAtom)
   const [, setViewState] = useAtom(viewStateAtom)
 
@@ -80,9 +82,12 @@ export function useFcbData() {
   ) => {
     const seq = ++requestSeq
     const q = { ...spec, limit, offset: 0 }
+    setLoading(true)
     setStatus('querying…')
     const r = await callWorker({ type: 'query', id: ++msgId, ...q })
+    // A newer request owns the indicator now — leave it on for that one.
     if (seq !== requestSeq) return
+    setLoading(false)
     if (r.type === 'error') {
       if (!r.aborted) setStatus(`query failed: ${r.message}`)
       return
@@ -126,32 +131,37 @@ export function useFcbData() {
     }
     if (!h.crs.supported || h.crs.code === null) {
       setRendered([]); setTotal(undefined); setActive(undefined)
+      setLoading(false)
       setStatus('file opened — CRS not supported, cannot georeference/render')
       return
     }
     void runQuery({}, true) // auto-render the first page (whole dataset, capped by limit)
-  }, [setHeader, setReady, setSelected, setViewState, setRendered, setTotal, setActive, setStatus, runQuery])
+  }, [setHeader, setReady, setSelected, setViewState, setRendered, setTotal, setActive, setLoading, setStatus, runQuery])
 
   const openUrl = useCallback(async (url: string) => {
     const seq = ++requestSeq
     setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
+    setLoading(true)
     setStatus(`opening ${url} …`)
     const r = await callWorker({ type: 'open', id: ++msgId, url })
     if (seq !== requestSeq) return
+    // On success onOpened runs the first query, which owns the indicator until
+    // it settles; only the failure path clears it here.
     if (r.type === 'opened') onOpened(r.header)
-    else if (r.type === 'error') setStatus(`failed to open URL: ${r.message}`)
-  }, [onOpened, setReady, setRendered, setTotal, setActive, setStatus])
+    else if (r.type === 'error') { setLoading(false); setStatus(`failed to open URL: ${r.message}`) }
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setLoading, setStatus])
 
   const openFile = useCallback(async (file: File) => {
     const seq = ++requestSeq
     setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
+    setLoading(true)
     setStatus(`opening ${file.name} …`)
     const buffer = await file.arrayBuffer()
     const r = await callWorker({ type: 'open', id: ++msgId, buffer }, [buffer])
     if (seq !== requestSeq) return
     if (r.type === 'opened') onOpened(r.header)
-    else if (r.type === 'error') setStatus(`failed to open file: ${r.message}`)
-  }, [onOpened, setReady, setRendered, setTotal, setActive, setStatus])
+    else if (r.type === 'error') { setLoading(false); setStatus(`failed to open file: ${r.message}`) }
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setLoading, setStatus])
 
   const query = useCallback((
     spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
@@ -174,9 +184,11 @@ export function useFcbData() {
     setSelected(undefined)
     const seq = ++requestSeq
     const q = { ...active, offset: active.offset + active.limit }
+    setLoading(true)
     setStatus('loading next batch…')
     void callWorker({ type: 'query', id: ++msgId, ...q }).then((r) => {
       if (seq !== requestSeq) return
+      setLoading(false)
       if (r.type === 'error') { if (!r.aborted) setStatus(`load failed: ${r.message}`); return }
       if (r.type !== 'result') return
       const out: RenderedFeature[] = r.features.map((f) => ({
@@ -187,7 +199,7 @@ export function useFcbData() {
       setActive(q); setTotal(r.total); setRendered(out); frameToFeatures(out)
       setStatus(`${out.length} rendered${r.total !== undefined ? ` of ${r.total}` : ''}`)
     })
-  }, [active, setSelected, setActive, setTotal, setRendered, setStatus, frameToFeatures])
+  }, [active, setSelected, setActive, setTotal, setRendered, setLoading, setStatus, frameToFeatures])
 
   return { openUrl, openFile, query, queryViewport, loadNext, status, header,
            rendered, total,

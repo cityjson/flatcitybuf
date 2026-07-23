@@ -52,6 +52,10 @@ export const viewStateAtom = atom<ViewState>(INITIAL_VIEW)
 
 /** True once a file is open in the worker (the reader itself lives there). */
 export const readyAtom = atom<boolean>(false)
+
+/** A read (open or query) is in flight. Drives a passive loading indicator —
+ *  it never blocks input, so the user can keep panning while data arrives. */
+export const loadingAtom = atom<boolean>(false)
 export const headerAtom = atom<HeaderModel | undefined>(undefined)
 export const renderedAtom = atom<RenderedFeature[]>([])
 export const totalAtom = atom<number | undefined>(undefined)
