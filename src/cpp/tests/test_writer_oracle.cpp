@@ -304,20 +304,25 @@ TEST_CASE("oracle: to_fcb_header is byte-identical to the Rust writer's header, 
 
 TEST_CASE("oracle: build_packed_rtree is byte-identical to the Rust writer's spatial index, for "
           "a real multi-feature fixture") {
-    // `duplicate_keys.fcb` (5 features, node size 16, per fcb_inspect_header)
-    // is the first fixture in the corpus with MORE than one feature and a
-    // real spatial index, needed to exercise `hilbert_sort` reordering and
-    // `build_packed_rtree`'s bottom-up aggregation non-trivially. This test
+    // `rtree_multilevel.fcb` (20 features at distinct grid positions, node
+    // size 16, generated via the real Rust CLI like geometry_instance_
+    // interleaved/header_metadata_full were for M3/M4) forces a real
+    // 3-level tree (20 leaves -> ceil(20/16)=2 -> 1) with genuinely
+    // different bboxes -- every OTHER multi-feature fixture in the corpus
+    // (duplicate_keys, colliding_strings, ...) happens to carry IDENTICAL
+    // bboxes for every feature, which can't exercise `hilbert_sort`
+    // reordering or `build_packed_rtree`'s bottom-up aggregation at more
+    // than one level (found during the M5 codex review). This test
     // reimplements just enough of `FcbWriter::write`'s orchestration
     // (writer/mod.rs:191-225) to build realistic input -- computing each
     // feature's ACTUAL (transform-scaled) bbox, sorting, and reassigning
     // offsets from each feature's OWN encoded byte size -- without
     // exposing any of that as this milestone's own API (that's M7's job).
-    const std::string fixture = "duplicate_keys";
+    const std::string fixture = "rtree_multilevel";
     const std::string fcb_path = std::string(FCB_CONFORMANCE_DIR) + "/" + fixture + ".fcb";
     FcbReader r = FcbReader::open_file(fcb_path);
     const auto& layout = r.header().layout();
-    REQUIRE(r.header().info().features_count == 5);
+    REQUIRE(r.header().info().features_count == 20);
     REQUIRE(r.header().info().index_node_size == 16);
 
     std::vector<std::uint8_t> whole_file = read_file_bytes(fcb_path);

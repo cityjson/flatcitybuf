@@ -1,8 +1,10 @@
+#include <fcb/error.hpp>
 #include <fcb/writer/rtree_builder.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string>
 
 namespace fcb {
 
@@ -114,7 +116,21 @@ NodeItem calc_extent(const std::vector<NodeItem>& nodes) {
 
 std::vector<NodeItem> build_packed_rtree(const std::vector<NodeItem>& nodes, const NodeItem& extent,
                                          std::uint16_t node_size) {
-    const std::uint16_t branching_factor = std::clamp<std::uint16_t>(node_size, 2, 65535);
+    // Rust's `init()` ASSERTS `node_size >= 2` (a hard panic) before its own
+    // `.clamp(2, 65535)` -- that clamp only ever narrows the upper bound
+    // (65535 is already `u16::MAX`, so it's a no-op in practice); a caller
+    // passing 0 or 1 is a programming error there, not a value to silently
+    // round up. Silently clamping up here instead (as this milestone
+    // originally did) would build a real branching-factor-2 tree while
+    // whatever recorded `index_node_size` the caller intended stays 0 or 1,
+    // an index/header disagreement invisible until a reader's own layout
+    // math (which trusts the recorded node size) disagrees with these
+    // bytes. Found during the M5 codex review.
+    if (node_size < 2) {
+        throw Error(ErrorCode::IllegalHeaderSize,
+                    "rtree node_size must be >= 2, got " + std::to_string(node_size));
+    }
+    const std::uint16_t branching_factor = node_size;
     const auto level_bounds = rtree_level_bounds(nodes.size(), branching_factor);
     // `level_bounds[0]` is the LEAF level; its `.end` equals the total node
     // count, since the leaf level occupies the array's tail (mirrors Rust's

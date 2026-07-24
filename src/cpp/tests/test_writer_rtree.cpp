@@ -1,19 +1,29 @@
 #include <fcb/writer/rtree_builder.hpp>
 
+#include <algorithm>
+
 #include <doctest/doctest.h>
 
 using namespace fcb;
 
-TEST_CASE("hilbert(0, 0) is 0") { CHECK(hilbert(0, 0) == 0); }
-
-TEST_CASE("hilbert matches known values from the reference implementation") {
-    // Cross-checked against packed_rtree/mod.rs's own `hilbert` at a few
-    // hand-computed points (a curve of order 16, HILBERT_MAX = 65535).
-    CHECK(hilbert(65535, 65535) != hilbert(0, 0));
-    // The curve is a bijection on [0, 65536)^2 -> [0, 2^32): every distinct
-    // input pair maps to a distinct output.
-    CHECK(hilbert(1, 0) != hilbert(0, 1));
-    CHECK(hilbert(100, 100) != hilbert(200, 200));
+TEST_CASE("hilbert matches exact values computed by compiling and running Rust's own function") {
+    // Pinned by literally compiling `hilbert` verbatim out of
+    // packed_rtree/mod.rs (as its own standalone rustc program, not this
+    // C++ port) and running it -- an independent oracle, not just "these
+    // two C++ outputs differ from each other" (which the prior version of
+    // this test only checked, per the M5 codex review).
+    CHECK(hilbert(0, 0) == 0);
+    CHECK(hilbert(1, 0) == 1);
+    CHECK(hilbert(0, 1) == 3);
+    CHECK(hilbert(1, 1) == 2);
+    CHECK(hilbert(100, 100) == 10272);
+    CHECK(hilbert(200, 200) == 41088);
+    CHECK(hilbert(65535, 65535) == 2863311530u);
+    CHECK(hilbert(32768, 32768) == 2147483648u);
+    CHECK(hilbert(0, 65535) == 1431655765u);
+    CHECK(hilbert(65535, 0) == 4294967295u);
+    CHECK(hilbert(5, 10) == 119);
+    CHECK(hilbert(1000, 2000) == 3147584);
 }
 
 TEST_CASE("hilbert_bbox does not crash or invoke UB on a degenerate (single-feature) extent") {
@@ -134,8 +144,38 @@ TEST_CASE("build_packed_rtree matches Rust's tree_19items_roundtrip_stream_searc
     };
     REQUIRE(nodes.size() == 19);
 
+    // Tag each node with its ORIGINAL index (0..18) before sorting, so
+    // stability is actually checkable afterward -- the 12 identical big
+    // boxes (original indices 7..18) tie on Hilbert index, and only
+    // `std::stable_sort` (not `std::sort`) is contractually required to
+    // keep tied elements in their original relative order. The previous
+    // version of this test left every node's `.offset` at the same initial
+    // value, so an unstable sort that merely permuted the 12 ties would
+    // have passed it undetected (found during the M5 codex review).
+    for (std::size_t i = 0; i < nodes.size(); ++i)
+        nodes[i].offset = i;
+
     NodeItem extent = calc_extent(nodes);
     hilbert_sort(nodes, extent);
+
+    // The 5 non-identical boxes (original indices 2..6) sort by Hilbert
+    // index like anything else; the 12 identical boxes (7..18) all tie, so
+    // stability is the ONLY thing that can keep them in ascending original
+    // order in the output. Extract just their tags, in the order
+    // hilbert_sort placed them, and check that order is preserved.
+    std::vector<std::uint64_t> big_box_tags_in_sorted_order;
+    for (const auto& n : nodes)
+        if (n.min_x == 10010.0)
+            big_box_tags_in_sorted_order.push_back(n.offset);
+    REQUIRE(big_box_tags_in_sorted_order.size() == 12);
+    CHECK(std::is_sorted(big_box_tags_in_sorted_order.begin(), big_box_tags_in_sorted_order.end()));
+    CHECK(big_box_tags_in_sorted_order.front() == 7);
+    CHECK(big_box_tags_in_sorted_order.back() == 18);
+
+    // Reassign real, ascending byte-like offsets post-sort (mirrors Rust's
+    // own test: `for node in &mut nodes { node.offset = offset; offset +=
+    // size_of::<NodeItem>() as u64; }`), now that stability has already
+    // been checked via the tags above.
     for (std::size_t i = 0; i < nodes.size(); ++i)
         nodes[i].offset = i * NodeItem::kSize;
 

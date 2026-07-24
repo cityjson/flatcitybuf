@@ -13,23 +13,39 @@ namespace fcb {
 
 namespace {
 
-double read_f64_le(const std::uint8_t* p) {
-    // memcpy rather than a reinterpret_cast load: node items are packed with
-    // no padding and land at arbitrary alignments inside a fetched block.
-    double d;
-    std::memcpy(&d, p, sizeof(double));
-    return d;
-}
-
+// Byte-by-byte shift/mask assembly, not a raw memcpy of the in-memory
+// value: node items are packed with no padding and land at arbitrary
+// alignments inside a fetched block (the original reason a memcpy load was
+// used here), but a flat memcpy is ALSO only correct on a little-endian
+// host -- it silently reads/writes host-native byte order instead of the
+// wire format's little-endian one. Found during the M5 codex review (the
+// write side, added this milestone, copied the pre-existing read side's
+// bug); fixed on both sides at once, matching the explicit-shift convention
+// `key.cpp`'s `put_le`/`get_le` already use for exactly this reason.
 std::uint64_t read_u64_le(const std::uint8_t* p) {
-    std::uint64_t v;
-    std::memcpy(&v, p, sizeof(std::uint64_t));
+    std::uint64_t v = 0;
+    for (int i = 0; i < 8; ++i)
+        v |= static_cast<std::uint64_t>(p[i]) << (8 * i);
     return v;
 }
 
-void write_f64_le(std::uint8_t* p, double v) { std::memcpy(p, &v, sizeof(double)); }
+double read_f64_le(const std::uint8_t* p) {
+    const std::uint64_t bits = read_u64_le(p);
+    double d;
+    std::memcpy(&d, &bits, sizeof(d));  // reinterpret bits -> double: host-endian-agnostic
+    return d;
+}
 
-void write_u64_le(std::uint8_t* p, std::uint64_t v) { std::memcpy(p, &v, sizeof(std::uint64_t)); }
+void write_u64_le(std::uint8_t* p, std::uint64_t v) {
+    for (int i = 0; i < 8; ++i)
+        p[i] = static_cast<std::uint8_t>((v >> (8 * i)) & 0xFF);
+}
+
+void write_f64_le(std::uint8_t* p, double v) {
+    std::uint64_t bits;
+    std::memcpy(&bits, &v, sizeof(bits));  // reinterpret double -> bits: host-endian-agnostic
+    write_u64_le(p, bits);
+}
 
 }  // namespace
 

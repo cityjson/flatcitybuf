@@ -122,6 +122,15 @@ TEST_CASE("conformance: geometry_instance_interleaved") {
 // none of which single_feature/geometry_instance_interleaved carry.
 TEST_CASE("conformance: header_metadata_full") { check_case("header_metadata_full"); }
 
+// Added for the C++ writer's M5 byte-exact oracle test: every prior
+// multi-feature fixture (duplicate_keys, colliding_strings, ...) happens to
+// carry IDENTICAL bboxes for every feature, so hilbert_sort's reordering
+// and the packed R-tree's bottom-up aggregation were never exercised on
+// genuinely distinct geometry. This fixture's 20 features sit at distinct
+// grid positions and, at node_size 16, force a real 3-level tree
+// (20 leaves -> 2 -> 1), unlike every prior fixture's 2-level tree.
+TEST_CASE("conformance: rtree_multilevel") { check_case("rtree_multilevel"); }
+
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");
     CHECK(r.header().info().features_count == 1);

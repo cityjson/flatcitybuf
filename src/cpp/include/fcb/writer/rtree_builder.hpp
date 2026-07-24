@@ -41,8 +41,11 @@ NodeItem calc_extent(const std::vector<NodeItem>& nodes);
 /// every internal level above it, bottom-up) from already Hilbert-sorted
 /// leaf nodes with their FINAL byte offsets already set. Mirrors
 /// `PackedRTree::build`+`init`+`generate_nodes`
-/// (packed_rtree/mod.rs:327-397,432-451). `node_size` is clamped to
-/// `[2, 65535]`, matching Rust's own `.clamp`; `nodes` must be non-empty.
+/// (packed_rtree/mod.rs:327-397,432-451). Throws `fcb::Error` for
+/// `node_size < 2`, matching Rust's own `assert!(node_size >= 2, ...)` --
+/// its subsequent `.clamp(2, 65535)` only narrows the upper bound (a no-op
+/// for `u16`), it does not round an invalid low value up. `nodes` must be
+/// non-empty.
 std::vector<NodeItem> build_packed_rtree(const std::vector<NodeItem>& nodes, const NodeItem& extent,
                                          std::uint16_t node_size);
 
