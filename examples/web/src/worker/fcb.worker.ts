@@ -133,6 +133,7 @@ async function handleExport(msg: Extract<WorkerRequest, { type: 'export' }>): Pr
     if (msg.format === 'cityjsonseq') data = assembleCityJSONSeq(metadata, feats)
     else if (msg.format === 'cityjson') data = await convertMergedCityJSON(metadata, feats)
     else data = await convertObj(metadata, feats)
+    if (signal.aborted) { post({ type: 'error', id: msg.id, message: 'aborted', aborted: true }); return }
     const spec = FORMATS[msg.format]
     post({ type: 'export-result', id: msg.id, data, mime: spec.mime, ext: spec.ext })
   } catch (e) {
