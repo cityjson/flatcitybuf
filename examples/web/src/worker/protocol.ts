@@ -20,6 +20,8 @@ export interface QueryRequest {
   where?: AttrCondition[]
   limit: number
   offset: number
+  /** Which LoD to triangulate per object; undefined = highest available. */
+  lod?: string
 }
 export type WorkerRequest = OpenRequest | QueryRequest
 
@@ -37,6 +39,9 @@ export interface WorkerFeature {
 export interface OpenedResponse { type: 'opened'; id: number; header: HeaderModel }
 export interface ResultResponse {
   type: 'result'; id: number; total: number | undefined; features: WorkerFeature[]
+  /** The distinct LoD labels present across this result's features, for the
+   *  LoD selector. Accumulated (unioned) across queries on the main thread. */
+  lods: string[]
 }
 export interface ErrorResponse {
   type: 'error'; id: number; message: string; aborted: boolean

@@ -6,7 +6,7 @@
 // triangulation never blocks rendering.
 import { type FcbReader as FcbReaderT, FcbReader, toCityJSONMetadata } from '@cityjson/flatcitybuf'
 import { forward } from '../crs/index'
-import { buildFeatureMesh } from '../geometry/index'
+import { buildFeatureMesh, pickGeometry } from '../geometry/index'
 import { type HeaderModel, headerModel, runQuery } from '../reader/index'
 import type { FeatureInfo } from '../store/index'
 import type { WorkerFeature, WorkerRequest, WorkerResponse } from './protocol'
@@ -20,28 +20,32 @@ let reader: FcbReaderT | undefined
 let model: HeaderModel | undefined
 let controller: AbortController | null = null
 
-function highestLodGeometry(
-  obj: { geometry?: { type: string; lod?: string }[] } | undefined,
-): { type: string; lod?: string } | undefined {
-  const geoms = obj?.geometry ?? []
-  if (geoms.length === 0) return undefined
-  return geoms.reduce((best, g) =>
-    (Number(g.lod ?? -1) > Number(best.lod ?? -1) ? g : best), geoms[0])
-}
-
-/** Triangulates the query's features into transfer-ready meshes. */
+/** Triangulates the query's features into transfer-ready meshes at the given
+ *  LoD, and reports the union of LoD labels seen (for the selector). */
 function buildFeatures(
-  r: FcbReaderT, m: HeaderModel, features: Awaited<ReturnType<typeof runQuery>>['features'],
-): WorkerFeature[] {
-  if (!m.crs.supported || m.crs.code === null) return []
+  r: FcbReaderT, m: HeaderModel,
+  features: Awaited<ReturnType<typeof runQuery>>['features'],
+  lod: string | undefined,
+): { features: WorkerFeature[]; lods: string[] } {
+  if (!m.crs.supported || m.crs.code === null) return { features: [], lods: [] }
   const code = m.crs.code
   const transform = toCityJSONMetadata(r.header).transform
   const out: WorkerFeature[] = []
+  const lodSet = new Set<string>()
   for (const f of features) {
     const cj = f.toCityJSON(r.header)
-    const fm = buildFeatureMesh(cj, transform, (xy) => forward(code, xy))
+    // Record every LoD the file offers for this feature, regardless of which
+    // one we render, so the selector can list all of them.
+    for (const co of Object.values(cj.CityObjects)) {
+      for (const g of co.geometry ?? []) {
+        if (g.lod !== undefined && g.lod !== null) lodSet.add(String(g.lod))
+      }
+    }
+    const fm = buildFeatureMesh(cj, transform, (xy) => forward(code, xy), lod)
     if (fm === null) continue
     const objects = Object.values(cj.CityObjects)
+    // Attributes/type come from the richest object (in 3DBAG the Building
+    // parent), which carries the semantics.
     const primary = objects.reduce<typeof objects[number] | undefined>(
       (best, obj) => {
         const bestCount = Object.keys(best?.attributes ?? {}).length
@@ -50,7 +54,12 @@ function buildFeatures(
       },
       objects[0],
     )
-    const g = highestLodGeometry(primary)
+    // Geometry info comes from what was actually rendered at this LoD, across
+    // ALL objects (the Building parent holds only LoD 0; the geometry the user
+    // sees is the BuildingPart's solid) — so the inspector's LoD matches the
+    // mesh on screen rather than the parent's.
+    const allGeoms = objects.flatMap((o) => o.geometry ?? [])
+    const g = pickGeometry(allGeoms, lod)
     const info: FeatureInfo = {
       objectType: primary?.type,
       geometryType: g?.type,
@@ -68,7 +77,7 @@ function buildFeatures(
       attributes: primary?.attributes ?? {},
     })
   }
-  return out
+  return { features: out, lods: [...lodSet] }
 }
 
 async function handleQuery(msg: Extract<WorkerRequest, { type: 'query' }>): Promise<void> {
@@ -86,10 +95,10 @@ async function handleQuery(msg: Extract<WorkerRequest, { type: 'query' }>): Prom
       bboxSource: msg.bboxSource, where: msg.where, limit: msg.limit, offset: msg.offset, signal,
     })
     if (signal.aborted) { post({ type: 'error', id: msg.id, message: 'aborted', aborted: true }); return }
-    const built = buildFeatures(reader, model, features)
+    const { features: built, lods } = buildFeatures(reader, model, features, msg.lod)
     const transfer: Transferable[] = []
     for (const f of built) transfer.push(f.positions.buffer, f.normals.buffer, f.indices.buffer)
-    post({ type: 'result', id: msg.id, total, features: built }, transfer)
+    post({ type: 'result', id: msg.id, total, features: built, lods }, transfer)
   } catch (e) {
     post({
       type: 'error', id: msg.id,

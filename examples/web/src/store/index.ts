@@ -30,9 +30,27 @@ export const spatialModeAtom = atom<SpatialMode>('follow')
 /** Max features rendered per query (and "Load next batch" page size). */
 export const limitAtom = atom<number>(1000)
 
+/** The LoD to render, exclusive. `undefined` means "highest available" (the
+ *  default until an LoD is picked). Set from the LoD selector; changing it
+ *  re-runs the current query, since the mesh is triangulated per LoD in the
+ *  worker. */
+export const lodAtom = atom<string | undefined>(undefined)
+
+/** The distinct LoD labels discovered so far (unioned across query results),
+ *  sorted ascending. Empty until the first result arrives; drives whether the
+ *  LoD selector is shown and what options it lists. */
+export const availableLodsAtom = atom<string[]>([])
+
 /** True when follow-camera is on but the view is zoomed too far out to fetch
  *  (the area would be too large). Drives a "zoom in" hint instead of a query. */
 export const followTooFarAtom = atom<boolean>(false)
+
+/** Below this zoom, follow-camera treats the visible area as too large to fetch
+ *  (a whole city/region) and shows a "zoom in" hint instead of querying. Shared
+ *  with the open-time framing so a fresh file never lands below it — otherwise a
+ *  country-scale dataset would frame to zoom ~11 and show the hint with nothing
+ *  on screen. Higher = closer to the ground. */
+export const MIN_FETCH_ZOOM = 13
 
 /** The active attribute filter, applied on top of every spatial mode. `[]`/
  *  undefined means no attribute filter. Held in an atom (not QueryPanel local

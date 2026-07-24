@@ -26,18 +26,25 @@ npm install      # picks up ../../src/ts via a file: dependency
 npm run dev
 ```
 
-Open the printed URL and load a `.fcb` — the default 3DBAG subset URL, another
-URL, or a local file. The first buildings render as soon as the file opens (the
-camera flies to the data); then refine with a drawn bbox or an attribute query,
-and page through more with "Load next batch".
+Open the printed URL and load a `.fcb` — the default is the full 3DBAG
+(country-scale, ~10.7M features), or paste another URL / pick a local file. The
+camera frames to the data and **Follow camera** mode (the default) loads the
+visible area, re-querying as you pan and zoom; zoom in past the "get closer"
+hint to fetch. Switch the **Level of Detail** (1.2 / 1.3 / 2.2, plus LoD 0
+roofprints) to re-render at that LoD, refine with a drawn bbox or an attribute
+query, or `colour by` an attribute.
 
 ## How it works
 
-- `src/reader/` — opens the file and drives `reader.select(...)` (framework-free).
-- `src/geometry/` — triangulates CityJSON surfaces into meshes.
+- `src/worker/` — a Web Worker owns the reader; it runs `reader.select(...)`,
+  triangulates the results off the main thread, and transfers the meshes back.
+- `src/reader/` — opens the file and drives the query (framework-free).
+- `src/geometry/` — triangulates CityJSON surfaces into meshes; `pickGeometry`
+  selects which LoD to build per object.
 - `src/crs/` — reprojects EPSG:7415 ↔ WGS84 (proj4 allowlist).
-- Each returned feature becomes one deck.gl `SimpleMeshLayer` anchored at its
-  reprojected centroid.
+- `src/render/` — merges every feature into ONE deck.gl layer (a single indexed
+  mesh with per-vertex colour and feature id for picking), so there is no
+  per-feature layer and no 255-pickable-layer cap.
 
 ## Troubleshooting
 

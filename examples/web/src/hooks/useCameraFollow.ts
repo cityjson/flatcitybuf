@@ -5,7 +5,8 @@ import { useAtomValue } from 'jotai'
 import { useEffect, useRef } from 'react'
 import type { HeaderModel } from '../reader/index'
 import {
-  followTooFarAtom, headerAtom, spatialModeAtom, viewStateAtom, whereAtom,
+  followTooFarAtom, headerAtom, MIN_FETCH_ZOOM, spatialModeAtom, viewStateAtom,
+  whereAtom,
 } from '../store/index'
 import { useSetAtom } from 'jotai'
 import { useFcbData } from './useFcbData'
@@ -14,11 +15,6 @@ import { useFcbData } from './useFcbData'
 // changes on every camera frame, so the effect below reruns and resets this
 // timer each frame — the query runs only once the camera has been still.
 const DEBOUNCE_MS = 350
-
-// Below this zoom the visible area is too large to fetch (a city / region);
-// follow mode shows a "zoom in" hint instead of querying. Higher = closer to
-// the ground.
-const MIN_FETCH_ZOOM = 13
 
 // The fetched bbox is INSET this fraction of the visible span on every side, so
 // the fetch region sits strictly inside the view: nothing renders outside the
