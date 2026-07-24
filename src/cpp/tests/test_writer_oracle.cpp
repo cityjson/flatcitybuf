@@ -36,6 +36,24 @@ using nlohmann::ordered_json;
 
 namespace {
 
+/// Test-only convenience wrapper: `FcbWriter` (M8) is the streaming public
+/// API (add_feature spools to a temp file, mirroring Rust's own memory-
+/// scalable writer), but every oracle test here already has every feature
+/// as one in-memory vector, so this just loops `add_feature` -- exercising
+/// the real streaming implementation underneath, not a separate code path.
+std::vector<std::uint8_t> write_fcb(const ordered_json& cj,
+                                    const std::vector<ordered_json>& features,
+                                    const FcbWriterOptions& options,
+                                    const AttributeSchema& attr_schema,
+                                    const AttributeSchema* semantic_attr_schema) {
+    FcbWriter w(cj, options, attr_schema,
+                semantic_attr_schema ? std::optional<AttributeSchema>(*semantic_attr_schema)
+                                     : std::nullopt);
+    for (const auto& f : features)
+        w.add_feature(f);
+    return w.write();
+}
+
 std::vector<ordered_json> read_jsonl(const std::string& path) {
     std::vector<ordered_json> out;
     std::ifstream f(path);

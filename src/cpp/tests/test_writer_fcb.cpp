@@ -51,6 +51,22 @@ FcbReader open_written(const std::vector<std::uint8_t>& bytes, const std::string
     return FcbReader::open_file(tmp_path);
 }
 
+/// Convenience wrapper matching the other writer test files: loops
+/// `add_feature` over an in-memory vector, then `write()`s -- exercising
+/// the real streaming `FcbWriter` implementation, not a separate path.
+std::vector<std::uint8_t> write_fcb(const ordered_json& cj,
+                                    const std::vector<ordered_json>& features,
+                                    const FcbWriterOptions& options,
+                                    const AttributeSchema& attr_schema,
+                                    const AttributeSchema* semantic_attr_schema) {
+    FcbWriter w(cj, options, attr_schema,
+                semantic_attr_schema ? std::optional<AttributeSchema>(*semantic_attr_schema)
+                                     : std::nullopt);
+    for (const auto& f : features)
+        w.add_feature(f);
+    return w.write();
+}
+
 }  // namespace
 
 TEST_CASE("write_fcb with write_index=false writes index_node_size 0, no R-tree bytes, and leaves "
@@ -240,5 +256,86 @@ TEST_CASE("write_fcb normalizes attribute_indices request order to schema column
     REQUIRE(r.header().attr_indices().size() == 2);
     CHECK(r.header().attr_indices()[0].column_index == 0);
     CHECK(r.header().attr_indices()[1].column_index == 1);
+    std::remove(tmp.c_str());
+}
+
+TEST_CASE("FcbWriter used directly (not through the test wrapper) round-trips a feature") {
+    // Exercises the actual public API shape end to end -- constructing the
+    // class, calling add_feature per feature, then write() once -- rather
+    // than through this file's `write_fcb` convenience wrapper.
+    ordered_json cj = make_metadata();
+    AttributeSchema schema;
+    ordered_json f = make_feature("f1", ordered_json::parse(R"({"n": 7})"));
+    add_attributes(schema, f.at("CityObjects").begin().value().at("attributes"));
+
+    FcbWriterOptions options;
+    FcbWriter w(cj, options, schema, std::nullopt);
+    w.add_feature(f);
+    std::vector<std::uint8_t> bytes = w.write();
+
+    const std::string tmp = "test_writer_fcb_direct_class_usage.fcb";
+    FcbReader r = open_written(bytes, tmp);
+    CHECK(r.header().info().features_count == 1);
+    FeatureIterator it = r.select_all();
+    REQUIRE(it.next());
+    CHECK(it.current().id() == "f1");
+    CHECK_FALSE(it.next());
+    std::remove(tmp.c_str());
+}
+
+TEST_CASE("FcbWriter throws if add_feature is called after write()") {
+    ordered_json cj = make_metadata();
+    AttributeSchema schema;
+    FcbWriterOptions options;
+    FcbWriter w(cj, options, schema, std::nullopt);
+    w.add_feature(make_feature("f1", ordered_json::object()));
+    (void)w.write();
+    CHECK_THROWS_AS(w.add_feature(make_feature("f2", ordered_json::object())), Error);
+}
+
+TEST_CASE("FcbWriter throws if write() is called more than once") {
+    ordered_json cj = make_metadata();
+    AttributeSchema schema;
+    FcbWriterOptions options;
+    FcbWriter w(cj, options, schema, std::nullopt);
+    w.add_feature(make_feature("f1", ordered_json::object()));
+    (void)w.write();
+    CHECK_THROWS_AS(w.write(), Error);
+}
+
+TEST_CASE("FcbWriter streams many features through the temp file without holding them all at "
+          "once") {
+    // Not a memory-usage test (impractical to assert in-process), but a
+    // functional one: enough features that, if `add_feature` accidentally
+    // buffered everything in memory instead of spooling to disk, would
+    // still behave identically from the CALLER's side -- so this at least
+    // pins that the streaming path produces a correct, fully-decodable
+    // file at a size large enough to matter.
+    ordered_json cj = make_metadata();
+    AttributeSchema schema;
+    std::vector<ordered_json> features;
+    for (int i = 0; i < 200; ++i)
+        features.push_back(make_feature("f" + std::to_string(i), ordered_json{{"n", i}}, i % 20));
+    for (const auto& f : features)
+        add_attributes(schema, f.at("CityObjects").begin().value().at("attributes"));
+
+    FcbWriterOptions options;
+    options.attribute_indices.emplace_back("n", std::nullopt);
+    FcbWriter w(cj, options, schema, std::nullopt);
+    for (const auto& f : features)
+        w.add_feature(f);
+    std::vector<std::uint8_t> bytes = w.write();
+
+    const std::string tmp = "test_writer_fcb_many_features.fcb";
+    FcbReader r = open_written(bytes, tmp);
+    CHECK(r.header().info().features_count == 200);
+    REQUIRE(r.header().attr_indices().size() == 1);
+    CHECK(r.header().attr_indices()[0].num_unique_items == 200);
+
+    std::size_t count = 0;
+    FeatureIterator it = r.select_all();
+    while (it.next())
+        ++count;
+    CHECK(count == 200);
     std::remove(tmp.c_str());
 }
