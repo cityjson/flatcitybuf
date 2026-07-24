@@ -338,6 +338,22 @@ std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::json& at
     return out;
 }
 
+::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Column>>>
+to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema) {
+    std::vector<std::pair<std::string, std::pair<std::uint16_t, ::ColumnType>>> sorted(
+        schema.begin(), schema.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](const auto& a, const auto& b) { return a.second.first < b.second.first; });
+
+    std::vector<::flatbuffers::Offset<::Column>> columns;
+    columns.reserve(sorted.size());
+    for (const auto& [name, idx_type] : sorted) {
+        auto name_off = fbb.CreateString(name);
+        columns.push_back(CreateColumn(fbb, idx_type.first, name_off, idx_type.second));
+    }
+    return fbb.CreateVector(columns);
+}
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON

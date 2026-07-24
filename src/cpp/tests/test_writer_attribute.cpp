@@ -139,6 +139,32 @@ TEST_CASE("a schema member absent from attrs is skipped, not zero-filled") {
     CHECK(decoded[0].first == "a");
 }
 
+TEST_CASE("to_columns builds a Header whose columns round-trip through the reader") {
+    AttributeSchema schema;
+    add_attributes(schema, nlohmann::json{{"b_col", true}, {"a_col", 5}});
+
+    flatbuffers::FlatBufferBuilder fbb;
+    auto columns = to_columns(fbb, schema);
+    auto version = fbb.CreateString("1.0");
+    HeaderBuilder hb(fbb);
+    hb.add_version(version);
+    hb.add_columns(columns);
+    auto header = hb.Finish();
+    fbb.Finish(header);
+
+    const ::Header* h = flatbuffers::GetRoot<::Header>(fbb.GetBufferPointer());
+    REQUIRE(h->columns() != nullptr);
+    REQUIRE(h->columns()->size() == 2);
+    // Emitted in ascending column-index order: "a_col" is index 0 (first
+    // alphabetically among the two new names, regardless of the order
+    // written in the initializer list above), "b_col" is index 1.
+    CHECK(h->columns()->Get(0)->name()->str() == "a_col");
+    CHECK(h->columns()->Get(0)->index() == 0);
+    CHECK(h->columns()->Get(1)->name()->str() == "b_col");
+    CHECK(h->columns()->Get(1)->index() == 1);
+    CHECK(h->columns()->Get(1)->type() == ::ColumnType::Bool);
+}
+
 TEST_CASE("record layout is [u16 LE column index][value], schema-index order") {
     AttributeSchema schema;
     // Force known indices: "b" first (index 0), "a" second (index 1).

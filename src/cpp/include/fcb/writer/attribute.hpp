@@ -47,6 +47,11 @@ std::size_t attr_size(::ColumnType coltype, const nlohmann::json& colval);
 std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::json& attr,
                                                         const AttributeSchema& schema);
 
+/// Builds the `Column` vector for `Header.columns` or `CityObject.columns`,
+/// in ascending column-index order.
+::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Column>>>
+to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema);
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON
