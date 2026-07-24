@@ -15,6 +15,7 @@
 #include <fcb/cityjson.hpp>
 #include <fcb/reader.hpp>
 #include <fcb/writer/attribute.hpp>
+#include <fcb/writer/btree_builder.hpp>
 #include <fcb/writer/feature_serializer.hpp>
 #include <fcb/writer/header_serializer.hpp>
 #include <fcb/writer/rtree_builder.hpp>
@@ -395,4 +396,83 @@ TEST_CASE("oracle: build_packed_rtree is byte-identical to the Rust writer's spa
         }
     }
     CHECK(actual_rtree_bytes == expected_rtree_bytes);
+}
+
+TEST_CASE("oracle: build_static_btree is byte-identical to the Rust writer's attribute index, for "
+          "a real fixture with duplicate key values") {
+    // `duplicate_keys.fcb` (5 features, generated with `-A`/index-all-
+    // attributes -- confirmed via its own header: 2 attribute indices,
+    // branching_factor 256, matching the CLI's `-A` default of 256, NOT
+    // the crate's own DEFAULT_BRANCHING_FACTOR=16) has "grp"="same" on
+    // every feature (one unique key backed by a 5-entry payload) and
+    // "idx"=0..4 (five distinct keys, no payload at all) -- exercising
+    // both the duplicate/payload path and the plain path in one fixture.
+    // Its 5 features all share the same bbox (this is also why M5 moved
+    // ITS byte-exact oracle off this fixture, onto rtree_multilevel), so
+    // hilbert_sort is a no-op here and sorted order == input order --
+    // this test can accumulate feature byte offsets in plain input order
+    // without reimplementing the sort.
+    const std::string fixture = "duplicate_keys";
+    const std::string fcb_path = std::string(FCB_CONFORMANCE_DIR) + "/" + fixture + ".fcb";
+    FcbReader r = FcbReader::open_file(fcb_path);
+    const auto& attr_indices = r.header().attr_indices();
+    REQUIRE(attr_indices.size() == 2);
+
+    std::vector<std::uint8_t> whole_file = read_file_bytes(fcb_path);
+
+    const std::string input_path =
+        std::string(FCB_CONFORMANCE_DIR) + "/inputs/" + fixture + ".city.jsonl";
+    std::vector<ordered_json> input_lines = read_jsonl(input_path);
+    std::vector<ordered_json> all_features(input_lines.begin() + 1, input_lines.end());
+    AttributeSchema attr_schema = build_attr_schema(all_features);
+
+    // Build every feature (in input order == sorted order, per the note
+    // above), collecting each one's attribute-index entries alongside its
+    // cumulative byte offset in the features section.
+    std::vector<std::vector<BtreeEntry>> entries_by_column(attr_schema.size());
+    std::uint64_t running_offset = 0;
+    for (const auto& feature_json : all_features) {
+        flatbuffers::FlatBufferBuilder fbb;
+        auto [off, bbox] = to_fcb_city_feature(fbb, feature_json.at("id").get<std::string>(),
+                                               feature_json, attr_schema, nullptr);
+        (void)bbox;
+        fbb.FinishSizePrefixed(off);
+        const std::uint64_t feature_offset = running_offset;
+        running_offset += fbb.GetSize();
+
+        std::vector<std::string> all_column_names;
+        for (const auto& [name, unused] : attr_schema)
+            all_column_names.push_back(name);
+        auto index_entries =
+            cityfeature_to_index_entries(feature_json, attr_schema, all_column_names);
+        for (const auto& e : index_entries)
+            entries_by_column.at(e.index).push_back(BtreeEntry{e.value, feature_offset});
+    }
+
+    for (const auto& ai : attr_indices) {
+        CAPTURE(ai.column_index);
+        const KeyKind kind =
+            key_kind_for_column(r.header().info().columns.at(ai.column_index).type);
+        BuiltBtreeIndex built =
+            build_static_btree(entries_by_column.at(ai.column_index), kind, ai.branching_factor);
+        CHECK(built.num_unique_items == ai.num_unique_items);
+
+        REQUIRE(whole_file.size() >= ai.begin + ai.length);
+        std::vector<std::uint8_t> expected_bytes(whole_file.begin() + ai.begin,
+                                                 whole_file.begin() + ai.begin + ai.length);
+
+        if (built.bytes != expected_bytes) {
+            MESSAGE("actual size: " << built.bytes.size()
+                                    << " expected size: " << expected_bytes.size());
+            std::size_t n = std::min(built.bytes.size(), expected_bytes.size());
+            for (std::size_t i = 0; i < n; ++i) {
+                if (built.bytes[i] != expected_bytes[i]) {
+                    MESSAGE("first diff at byte " << i << ": actual=" << (int)built.bytes[i]
+                                                  << " expected=" << (int)expected_bytes[i]);
+                    break;
+                }
+            }
+        }
+        CHECK(built.bytes == expected_bytes);
+    }
 }

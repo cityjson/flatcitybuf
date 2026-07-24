@@ -41,7 +41,8 @@ if(FCB_WITH_JSON)
     target_sources(fcb_core_cpp PRIVATE src/writer/attribute.cpp src/writer/geom_encoder.cpp
                                         src/writer/feature_serializer.cpp
                                         src/writer/header_serializer.cpp
-                                        src/writer/rtree_builder.cpp)
+                                        src/writer/rtree_builder.cpp
+                                        src/writer/btree_builder.cpp)
 endif()
 
 if(FCB_WITH_CURL)

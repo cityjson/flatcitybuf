@@ -9,13 +9,6 @@
 
 namespace fcb {
 
-namespace {
-
-struct LevelBound {
-    std::uint64_t start;
-    std::uint64_t end;
-};
-
 /// Mirrors Stree::generate_level_bounds (stree.rs:462-497).
 ///
 /// The loop divides by `branching_factor` and stops at `n < branching_factor`
@@ -24,8 +17,8 @@ struct LevelBound {
 /// entry count per node is one less than the fan-out because each entry is a
 /// separator key, and the level loop stops as soon as a level fits in one
 /// node's worth of separators.
-std::vector<LevelBound> generate_level_bounds(std::uint64_t num_items,
-                                              std::uint16_t branching_factor) {
+std::vector<StreeLevelBound> stree_level_bounds(std::uint64_t num_items,
+                                                std::uint16_t branching_factor) {
     if (branching_factor < 2) {
         throw Error(ErrorCode::AttributeIndexNotFound,
                     "invalid branching factor " + std::to_string(branching_factor));
@@ -46,15 +39,17 @@ std::vector<LevelBound> generate_level_bounds(std::uint64_t num_items,
             break;
     }
 
-    std::vector<LevelBound> bounds;
+    std::vector<StreeLevelBound> bounds;
     bounds.reserve(level_num_nodes.size());
     std::uint64_t acc = num_nodes;
     for (std::uint64_t size : level_num_nodes) {
         acc -= size;
-        bounds.push_back(LevelBound{acc, acc + size});
+        bounds.push_back(StreeLevelBound{acc, acc + size});
     }
     return bounds;
 }
+
+namespace {
 
 /// One entry: the key then a u64 little-endian offset (entry.rs:25-52).
 struct Entry {
@@ -170,7 +165,7 @@ struct Tree {
     std::uint64_t payload_size;
     KeyKind kind;
     std::uint64_t node_size;  // branching_factor - 1
-    std::vector<LevelBound> levels;
+    std::vector<StreeLevelBound> levels;
 
     std::uint64_t leaf_start() const { return levels.front().start; }
     std::uint64_t leaf_end() const { return levels.front().end; }
@@ -352,6 +347,16 @@ std::vector<std::uint64_t> decode_payload_entry(bytes_view b) {
     return out;
 }
 
+void encode_payload_entry(std::vector<std::uint8_t>& out,
+                          const std::vector<std::uint64_t>& offsets) {
+    const std::uint32_t count = static_cast<std::uint32_t>(offsets.size());
+    for (int i = 0; i < 4; ++i)
+        out.push_back(static_cast<std::uint8_t>((count >> (8 * i)) & 0xFF));
+    for (std::uint64_t off : offsets)
+        for (int i = 0; i < 8; ++i)
+            out.push_back(static_cast<std::uint8_t>((off >> (8 * i)) & 0xFF));
+}
+
 std::vector<SearchResultItem> stree_query(RangeReader& reader, const AttrIndexInfo& index,
                                           KeyKind kind, Operator op, const KeyValue& value) {
     const std::uint64_t num_nodes = stree_num_nodes(index.num_unique_items, index.branching_factor);
@@ -367,7 +372,7 @@ std::vector<SearchResultItem> stree_query(RangeReader& reader, const AttrIndexIn
            index.length - tree_bytes,
            kind,
            static_cast<std::uint64_t>(index.branching_factor) - 1,
-           generate_level_bounds(index.num_unique_items, index.branching_factor)};
+           stree_level_bounds(index.num_unique_items, index.branching_factor)};
 
     // Fixed-width string keys are truncated, so ordering AFTER the truncation
     // point is invisible to the index: two values sharing a 50-byte prefix
