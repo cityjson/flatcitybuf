@@ -52,15 +52,33 @@ std::vector<std::uint64_t> eq_offsets(const std::vector<std::uint8_t>& bytes, Ke
 
 }  // namespace
 
-TEST_CASE("build_static_btree throws for branching_factor < 2") {
-    std::vector<BtreeEntry> entries{{KeyValue::from_i32(1), 0}};
-    CHECK_THROWS_AS(build_static_btree(entries, KeyKind::Int32, 1), Error);
-    CHECK_THROWS_AS(build_static_btree(entries, KeyKind::Int32, 0), Error);
+TEST_CASE("build_static_btree clamps branching_factor below 2 up to 2, matching Stree::build") {
+    // `Stree::build` clamps BEFORE its own `init()` gets a chance to reject
+    // a sub-2 value, so 0/1 succeed (as a branching-factor-2 tree) rather
+    // than throwing -- the OPPOSITE of the R-tree's `build_packed_rtree`,
+    // which does throw. Originally ported as a throw here by mistake;
+    // caught by the M6 codex review.
+    std::vector<BtreeEntry> entries{{KeyValue::from_i32(1), 100}, {KeyValue::from_i32(2), 200}};
+    BuiltBtreeIndex idx1 = build_static_btree(entries, KeyKind::Int32, 1);
+    CHECK(idx1.branching_factor == 2);
+    BuiltBtreeIndex idx0 = build_static_btree(entries, KeyKind::Int32, 0);
+    CHECK(idx0.branching_factor == 2);
+    CHECK(idx0.bytes == idx1.bytes);
+
+    auto found = eq_offsets(idx1.bytes, KeyKind::Int32, idx1.branching_factor,
+                            idx1.num_unique_items, KeyValue::from_i32(2));
+    REQUIRE(found.size() == 1);
+    CHECK(found[0] == 200);
 }
 
 TEST_CASE("build_static_btree throws for an empty entry list") {
     std::vector<BtreeEntry> entries;
     CHECK_THROWS_AS(build_static_btree(entries, KeyKind::Int32, 4), Error);
+}
+
+TEST_CASE("build_static_btree throws when an entry's key kind does not match the declared kind") {
+    std::vector<BtreeEntry> entries{{KeyValue::from_i32(1), 0}};
+    CHECK_THROWS_AS(build_static_btree(entries, KeyKind::Int64, 4), Error);
 }
 
 TEST_CASE("build_static_btree round-trips a single entry through the reader") {

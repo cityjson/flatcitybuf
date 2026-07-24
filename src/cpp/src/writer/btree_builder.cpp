@@ -162,18 +162,42 @@ void generate_nodes(std::vector<UniqueLeaf>& tree, const std::vector<StreeLevelB
 
 BuiltBtreeIndex build_static_btree(const std::vector<BtreeEntry>& entries, KeyKind kind,
                                    std::uint16_t branching_factor) {
-    // Same ErrorCode the read-side `stree_level_bounds`/`stree_num_nodes`
-    // already use for this exact validation (invalid branching factor /
-    // empty index) -- the failure mode is the same regardless of which
-    // side triggers it.
-    if (branching_factor < 2) {
-        throw Error(ErrorCode::AttributeIndexNotFound,
-                    "static B+tree branching factor must be >= 2, got " +
-                        std::to_string(branching_factor));
-    }
+    // `Stree::build` (stree.rs:638-640) clamps `branching_factor` to
+    // `[2, 65535]` BEFORE ever calling `init()` -- so `init()`'s own
+    // `if branching_factor < 2 { return Err(...) }` (stree.rs:451-455) is
+    // unreachable from `build`'s call path and a sub-2 value silently
+    // becomes 2, NOT an error. This is the OPPOSITE of the packed R-tree's
+    // `PackedRTree::build`, which `assert!`s (panics) on a sub-2 node size
+    // instead of pre-clamping -- a real asymmetry in Rust itself between
+    // the two builders, not a typo to "fix" into symmetry. Originally
+    // ported as a throw here (copying the R-tree's M5 behavior without
+    // re-verifying against the B+tree's OWN entry point); caught by the
+    // M6 codex review.
+    branching_factor = std::clamp<std::uint16_t>(branching_factor, 2, 65535);
+
+    // `init()`'s OTHER check -- `if self.num_leaf_nodes == 0 { return
+    // Err(...) }` -- is NOT preempted by anything in `build()`, so it DOES
+    // still throw through this call path; `num_leaf_nodes` there is
+    // `unique_leaves.len()` (post-dedup), but an empty `entries` can never
+    // produce a non-empty `unique_leaves` either way.
     if (entries.empty()) {
         throw Error(ErrorCode::AttributeIndexNotFound,
                     "cannot build a static B+tree index with no entries");
+    }
+    // Rust's `Stree<K>` is generic over ONE concrete key type `K`, so a
+    // kind mismatch is unrepresentable there; this port's `KeyValue` is a
+    // runtime-tagged union, so nothing stops a caller from mixing kinds
+    // unless checked here explicitly. `compare_keys` (used below, during
+    // sorting) throws when it's given two DIFFERENT kinds to compare
+    // against EACH OTHER, but every entry sharing one (wrong) kind that
+    // simply differs from `kind` would sail through sorting undetected and
+    // silently encode a mismatched-width blob instead. Found during the
+    // M6 codex review.
+    for (const auto& e : entries) {
+        if (e.key.kind() != kind) {
+            throw Error(ErrorCode::UnsupportedColumnType,
+                        "static B+tree: entry key kind does not match the column's declared kind");
+        }
     }
 
     auto [unique_leaves, payload_data] = group_duplicates(entries);

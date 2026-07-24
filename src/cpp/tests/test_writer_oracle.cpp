@@ -398,54 +398,97 @@ TEST_CASE("oracle: build_packed_rtree is byte-identical to the Rust writer's spa
     CHECK(actual_rtree_bytes == expected_rtree_bytes);
 }
 
-TEST_CASE("oracle: build_static_btree is byte-identical to the Rust writer's attribute index, for "
-          "a real fixture with duplicate key values") {
-    // `duplicate_keys.fcb` (5 features, generated with `-A`/index-all-
-    // attributes -- confirmed via its own header: 2 attribute indices,
-    // branching_factor 256, matching the CLI's `-A` default of 256, NOT
-    // the crate's own DEFAULT_BRANCHING_FACTOR=16) has "grp"="same" on
-    // every feature (one unique key backed by a 5-entry payload) and
-    // "idx"=0..4 (five distinct keys, no payload at all) -- exercising
-    // both the duplicate/payload path and the plain path in one fixture.
-    // Its 5 features all share the same bbox (this is also why M5 moved
-    // ITS byte-exact oracle off this fixture, onto rtree_multilevel), so
-    // hilbert_sort is a no-op here and sorted order == input order --
-    // this test can accumulate feature byte offsets in plain input order
-    // without reimplementing the sort.
-    const std::string fixture = "duplicate_keys";
+namespace {
+
+/// Byte-compares this writer's `build_static_btree` output for every
+/// attribute index `<fixture>.fcb` actually carries against the Rust
+/// writer's own bytes. Replicates just enough of `FcbWriter::write`'s
+/// orchestration (writer/mod.rs:191-247) to get feature offsets right:
+/// each feature's ACTUAL (transform-scaled) bbox is hilbert-sorted exactly
+/// like M5's R-tree oracle does, and attribute-index entries are tagged
+/// with each feature's FINAL sorted byte offset, not its input-order one --
+/// required whenever a fixture's features do NOT all share one bbox (this
+/// port's own `duplicate_keys.fcb` usage got away without this because
+/// every one of its features happens to share an identical bbox, making
+/// the sort a no-op; `btree_multilevel.fcb` does not).
+void check_attribute_index_byte_exact(const std::string& fixture) {
+    CAPTURE(fixture);
     const std::string fcb_path = std::string(FCB_CONFORMANCE_DIR) + "/" + fixture + ".fcb";
     FcbReader r = FcbReader::open_file(fcb_path);
     const auto& attr_indices = r.header().attr_indices();
-    REQUIRE(attr_indices.size() == 2);
+    REQUIRE_FALSE(attr_indices.empty());
 
     std::vector<std::uint8_t> whole_file = read_file_bytes(fcb_path);
 
     const std::string input_path =
         std::string(FCB_CONFORMANCE_DIR) + "/inputs/" + fixture + ".city.jsonl";
     std::vector<ordered_json> input_lines = read_jsonl(input_path);
+    const ordered_json& cj = input_lines[0];
     std::vector<ordered_json> all_features(input_lines.begin() + 1, input_lines.end());
     AttributeSchema attr_schema = build_attr_schema(all_features);
 
-    // Build every feature (in input order == sorted order, per the note
-    // above), collecting each one's attribute-index entries alongside its
-    // cumulative byte offset in the features section.
-    std::vector<std::vector<BtreeEntry>> entries_by_column(attr_schema.size());
-    std::uint64_t running_offset = 0;
-    for (const auto& feature_json : all_features) {
-        flatbuffers::FlatBufferBuilder fbb;
-        auto [off, bbox] = to_fcb_city_feature(fbb, feature_json.at("id").get<std::string>(),
-                                               feature_json, attr_schema, nullptr);
-        (void)bbox;
-        fbb.FinishSizePrefixed(off);
-        const std::uint64_t feature_offset = running_offset;
-        running_offset += fbb.GetSize();
+    const auto& transform = cj.at("transform");
+    const double scale_x = transform.at("scale").at(0).get<double>();
+    const double scale_y = transform.at("scale").at(1).get<double>();
+    const double translate_x = transform.at("translate").at(0).get<double>();
+    const double translate_y = transform.at("translate").at(1).get<double>();
 
-        std::vector<std::string> all_column_names;
-        for (const auto& [name, unused] : attr_schema)
-            all_column_names.push_back(name);
-        auto index_entries =
-            cityfeature_to_index_entries(feature_json, attr_schema, all_column_names);
-        for (const auto& e : index_entries)
+    std::vector<std::string> all_column_names;
+    for (const auto& [name, unused] : attr_schema)
+        all_column_names.push_back(name);
+
+    // Build every feature once, collecting its encoded size, its
+    // transform-scaled bbox (tagged with its ORIGINAL index, matching M5's
+    // oracle), and its attribute-index entries (tagged the same way, since
+    // the real byte offset isn't known until after sorting).
+    std::vector<std::uint64_t> feat_sizes(all_features.size());
+    std::vector<NodeItem> feat_nodes;
+    feat_nodes.reserve(all_features.size());
+    std::vector<std::vector<AttributeIndexEntry>> index_entries_by_feature(all_features.size());
+    for (std::size_t i = 0; i < all_features.size(); ++i) {
+        flatbuffers::FlatBufferBuilder fbb;
+        auto [off, raw_bbox] = to_fcb_city_feature(fbb, all_features[i].at("id").get<std::string>(),
+                                                   all_features[i], attr_schema, nullptr);
+        fbb.FinishSizePrefixed(off);
+        feat_sizes[i] = fbb.GetSize();
+
+        feat_nodes.push_back(NodeItem{
+            raw_bbox.min_x * scale_x + translate_x, raw_bbox.min_y * scale_y + translate_y,
+            raw_bbox.max_x * scale_x + translate_x, raw_bbox.max_y * scale_y + translate_y, i});
+        index_entries_by_feature[i] =
+            cityfeature_to_index_entries(all_features[i], attr_schema, all_column_names);
+    }
+
+    NodeItem extent = calc_extent(feat_nodes);
+    hilbert_sort(feat_nodes, extent);
+
+    // `final_offset_by_temp_id[i]` = feature `i`'s (original input order)
+    // byte position in the SORTED features section. Walking `feat_nodes`
+    // (sorted order) computes these cumulative offsets, but the entries
+    // fed to `build_static_btree` below must NOT be collected in this
+    // sorted order: Rust's `build_index_generic` (writer/attr_index.rs)
+    // iterates `attribute_index_entries: BTreeMap<usize, _>` -- keyed by
+    // each feature's ORIGINAL (pre-sort) temp id, so `.values()` walks in
+    // ORIGINAL INPUT order even though each entry's `.offset` field was
+    // separately overwritten to its final sorted position. `Stree::build`
+    // then does its OWN stable sort by key, so for a group of DUPLICATE
+    // keys, which offset ends up FIRST in the payload entry depends on
+    // ORIGINAL input order, not sorted order -- collecting entries in
+    // sorted order (as this test originally did) reorders duplicate-key
+    // payloads incorrectly, a real divergence the M6 codex review's
+    // "shallow oracle coverage" finding surfaced by prompting a fixture
+    // with actual duplicates AND a real hilbert reorder in the same file.
+    std::vector<std::uint64_t> final_offset_by_temp_id(all_features.size());
+    std::uint64_t running_offset = 0;
+    for (const auto& node : feat_nodes) {
+        final_offset_by_temp_id[node.offset] = running_offset;
+        running_offset += feat_sizes[node.offset];
+    }
+
+    std::vector<std::vector<BtreeEntry>> entries_by_column(attr_schema.size());
+    for (std::size_t temp_id = 0; temp_id < all_features.size(); ++temp_id) {
+        const std::uint64_t feature_offset = final_offset_by_temp_id[temp_id];
+        for (const auto& e : index_entries_by_feature[temp_id])
             entries_by_column.at(e.index).push_back(BtreeEntry{e.value, feature_offset});
     }
 
@@ -475,4 +518,36 @@ TEST_CASE("oracle: build_static_btree is byte-identical to the Rust writer's att
         }
         CHECK(built.bytes == expected_bytes);
     }
+}
+
+}  // namespace
+
+TEST_CASE("oracle: build_static_btree is byte-identical to the Rust writer's attribute index, for "
+          "a real fixture with duplicate key values") {
+    // `duplicate_keys.fcb` (5 features, generated with `-A`/index-all-
+    // attributes -- confirmed via its own header: 2 attribute indices,
+    // branching_factor 256, matching the CLI's `-A` default of 256, NOT
+    // the crate's own DEFAULT_BRANCHING_FACTOR=16) has "grp"="same" on
+    // every feature (one unique key backed by a 5-entry payload) and
+    // "idx"=0..4 (five distinct keys, no payload at all) -- exercising
+    // both the duplicate/payload path and the plain path in one fixture,
+    // but only ever a 2-level tree (5 and 1 unique keys respectively).
+    check_attribute_index_byte_exact("duplicate_keys");
+}
+
+TEST_CASE("oracle: build_static_btree is byte-identical to the Rust writer's attribute index, for "
+          "a real fixture forcing a 3-level tree") {
+    // `duplicate_keys.fcb`'s branching_factor (256) and unique-key counts
+    // (1, 5) never build more than a 2-level tree, so `generate_nodes`'s
+    // multi-level `parent_min_key` propagation was, until now, only ever
+    // checked against this port's OWN reader round-trip
+    // (test_writer_btree.cpp), not against real Rust-written bytes --
+    // flagged by the M6 codex review. `btree_multilevel.fcb` (20 distinct
+    // "idx" values, 15 distinct "grp" values with 6 colliding on "same",
+    // `--attr-branching-factor 4`) forces a real 3-level tree for BOTH
+    // columns at once. Its features also sit at distinct grid positions
+    // (unlike duplicate_keys' identical bboxes), so this is the first
+    // attribute-index oracle that actually needs the hilbert-sort/offset-
+    // reassignment machinery `check_attribute_index_byte_exact` provides.
+    check_attribute_index_byte_exact("btree_multilevel");
 }

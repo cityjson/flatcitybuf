@@ -37,12 +37,17 @@ struct BuiltBtreeIndex {
 
 /// Builds one column's complete attribute index blob from its
 /// `(key, offset)` entries. Every entry's `key.kind()` must be the same
-/// `kind`. Throws `fcb::Error` for `branching_factor < 2` or an empty
-/// `entries` (mirrors `Stree::init`'s `Err(Error::InvalidFormat(...))`
-/// checks, stree.rs:451-460 -- a library error, not Rust's `assert!`,
-/// since an attribute with zero indexable values is a normal condition
-/// this writer's caller (M7) is expected to skip before ever calling this,
-/// not a programmer bug to panic on).
+/// `kind`. `branching_factor` below 2 is silently clamped up to 2, matching
+/// `Stree::build` (stree.rs:638-640) exactly -- unlike the packed R-tree's
+/// `build_packed_rtree`, which THROWS for an invalid node size, `Stree::
+/// build` clamps `branching_factor` before its own `init()` ever gets a
+/// chance to reject it, so a sub-2 value never actually errors through this
+/// entry point. Throws `fcb::Error` only for an empty `entries` (mirrors
+/// `Stree::init`'s OTHER check, `Err(Error::InvalidFormat(...))` for zero
+/// leaf nodes, stree.rs:456-459 -- an attribute with zero indexable values
+/// is a normal condition this writer's caller (M7) is expected to skip
+/// before ever calling this, not a programmer bug, but Rust's own `build()`
+/// does not special-case it away either).
 BuiltBtreeIndex build_static_btree(const std::vector<BtreeEntry>& entries, KeyKind kind,
                                    std::uint16_t branching_factor);
 

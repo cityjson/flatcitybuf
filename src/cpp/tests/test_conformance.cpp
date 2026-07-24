@@ -131,6 +131,16 @@ TEST_CASE("conformance: header_metadata_full") { check_case("header_metadata_ful
 // (20 leaves -> 2 -> 1), unlike every prior fixture's 2-level tree.
 TEST_CASE("conformance: rtree_multilevel") { check_case("rtree_multilevel"); }
 
+// Added for the C++ writer's M6 byte-exact oracle test: `duplicate_keys.fcb`
+// (branching_factor 256, only 1 or 5 unique keys per column) never builds
+// more than a 2-level B+tree, so it can't exercise `generate_nodes`'s
+// multi-level `parent_min_key` propagation against REAL Rust-written bytes
+// -- only via this port's own reader round-trip. This fixture's 20 distinct
+// "idx" values and 15 distinct "grp" values (6 of which collide on "same"),
+// built with `--attr-branching-factor 4`, force a real 3-level tree for
+// BOTH columns at once (one with no duplicates, one with a payload entry).
+TEST_CASE("conformance: btree_multilevel") { check_case("btree_multilevel"); }
+
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");
     CHECK(r.header().info().features_count == 1);
