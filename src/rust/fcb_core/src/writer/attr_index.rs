@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
 use crate::fb::ColumnType;
@@ -14,7 +14,7 @@ use super::{
 
 fn build_index_generic<T, F>(
     schema_index: u16,
-    attribute_entries: &HashMap<usize, AttributeFeatureOffset>,
+    attribute_entries: &BTreeMap<usize, AttributeFeatureOffset>,
     extract: F,
     branching_factor: u16,
 ) -> Result<(Vec<u8>, AttributeIndexInfo)>
@@ -54,7 +54,7 @@ where
 pub(super) fn build_attribute_index_for_attr(
     attr_name: &str,
     schema: &AttributeSchema,
-    attribute_entries: &HashMap<usize, AttributeFeatureOffset>,
+    attribute_entries: &BTreeMap<usize, AttributeFeatureOffset>,
     branching_factor: u16,
 ) -> Result<(Vec<u8>, AttributeIndexInfo)> {
     // Look up attribute info from schema; if not found, return None

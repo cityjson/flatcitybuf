@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cjseq::GeometryType as CjGeometryType;
+use cjseq::{CityObjectType, Geometry as CjGeometry, SemanticSurfaceType, SemanticsSurface};
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     deserializer,
@@ -13,6 +13,29 @@ use std::{
     path::PathBuf,
 };
 use tempfile::NamedTempFile;
+
+/// A semantic surface's `other` is the set of members the schema does not name;
+/// they become attribute columns.
+fn add_surface_attributes(attr_schema: &mut AttributeSchema, surface: &SemanticsSurface) {
+    if surface.other.is_empty() {
+        return;
+    }
+    let other = serde_json::Value::Object(surface.other.clone().into_iter().collect());
+    attr_schema.add_attributes(&other);
+}
+
+/// `template` and `transformationMatrix` are part of the `GeometryInstance`
+/// variant, so they are read out by destructuring rather than by field access.
+fn as_instance(g: &CjGeometry) -> Option<(&Vec<usize>, usize, &[f64; 16])> {
+    match g {
+        CjGeometry::GeometryInstance {
+            boundaries,
+            template,
+            transformation_matrix,
+        } => Some((boundaries, *template, transformation_matrix)),
+        _ => None,
+    }
+}
 
 #[test]
 fn test_cityjson_serialization_cycle() -> Result<()> {
@@ -39,10 +62,21 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         let output_writer = BufWriter::new(output_file);
 
         let mut attr_schema = AttributeSchema::new();
+        // A semantic surface's extra members (`on_footprint_edge` here) need a
+        // schema of their own; without one the writer has no column to put them
+        // in and they are dropped.
+        let mut semantic_attr_schema = AttributeSchema::new();
         for feature in original_cj_seq.features.iter() {
             for (_, co) in feature.city_objects.iter() {
                 if let Some(attributes) = &co.attributes {
                     attr_schema.add_attributes(attributes);
+                }
+                for geom in co.geometry.iter().flatten() {
+                    if let Some(semantics) = geom.common().and_then(|c| c.semantics.as_ref()) {
+                        for surface in &semantics.surfaces {
+                            add_surface_attributes(&mut semantic_attr_schema, surface);
+                        }
+                    }
                 }
             }
         }
@@ -56,7 +90,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                 geographical_extent: None,
             }),
             Some(attr_schema),
-            None,
+            Some(semantic_attr_schema),
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
@@ -92,7 +126,27 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
     if let (Some(orig_meta), Some(des_meta)) =
         (&original_cj_seq.cj.metadata, &deserialized_cj.metadata)
     {
-        assert_eq!(orig_meta, des_meta)
+        // The header has a field per member the CityJSON schema names, and
+        // nowhere to put the ones it does not: `metadata.other` is dropped by
+        // the writer. Compare everything else exactly.
+        //
+        // This is not a regression -- the member never reached the writer
+        // before either, because the CityJSON model itself discarded it at
+        // parse time. Now that the model keeps it, the loss is the writer's
+        // and is visible here rather than invisible upstream.
+        //
+        // TODO: delete this whole allowance -- both the `is_empty` assert and
+        // the `clear()` -- when the header gains somewhere to put unnamed
+        // metadata members (an attributes blob, as City Objects have). At that
+        // point `assert_eq!(orig_meta, des_meta)` should hold outright, and
+        // this assertion is *expected* to be removed rather than updated.
+        let mut orig_meta = orig_meta.clone();
+        assert!(
+            des_meta.other.is_empty(),
+            "the header cannot carry unnamed metadata members, so none should come back"
+        );
+        orig_meta.other.clear();
+        assert_eq!(&orig_meta, des_meta)
     }
 
     // Compare features
@@ -102,6 +156,22 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
         .iter()
         .zip(deserialized_features.iter())
     {
+        // Still not `assert_eq!(orig_feat, des_feat)`. As of this branch exactly
+        // one thing stops it, and it is neither geometry nor semantics: a JSON
+        // `null` attribute value is dropped by the writer. `attribute.rs:111`
+        // skips null values and `attribute.rs:24` refuses to allocate a column
+        // for one, because every `ColumnType` has a fixed width and the format
+        // has no null bit. In `small.city.jsonl` that is `eindgeldigheid`,
+        // `eindregistratie`, `tijdstipeindregistratielv`, `tijdstipinactief`,
+        // `tijdstipinactieflv`, `tijdstipnietbaglv` and `b3_bouwlagen`.
+        //
+        // Everything else round-trips, including the semantic surface
+        // attributes this test used to lose -- see the semantic schema built
+        // above. Fixing the last of it means adding null support to the
+        // attribute encoding, which is a format change (a null bit or a Null
+        // column type) and a C++ port, and is out of scope here.
+        //
+        // FIXME: honour this once null attributes are encodable.
         // assert_eq!(orig_feat, des_feat);
         assert_eq!(orig_feat.thetype, des_feat.thetype);
         assert_eq!(orig_feat.id, des_feat.id);
@@ -144,7 +214,7 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
 
             // Compare type
             if orig_co.thetype != des_co.thetype {
-                println!("  type: '{}' != '{}'", orig_co.thetype, des_co.thetype);
+                println!("  type: {:?} != {:?}", orig_co.thetype, des_co.thetype);
             }
 
             // Compare children
@@ -189,24 +259,38 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                     for (i, orig_geom) in orig_geoms.iter().enumerate() {
                         let des_geom = des_geoms
                             .iter()
-                            .find(|g| g.lod == orig_geom.lod)
+                            .find(|g| g.lod() == orig_geom.lod())
                             .unwrap_or_else(|| {
                                 panic!(
                                     "No matching geometry with LOD {:?} found in deserialized data",
-                                    orig_geom.lod
+                                    orig_geom.lod()
                                 )
                             });
 
+                        // A geometry -- its type, boundaries, semantics,
+                        // material and texture -- must round-trip exactly.
+                        // This used to be a `println!` of the differences,
+                        // which is how a lost nesting level could go
+                        // unnoticed for months.
+                        //
+                        // The per-member reporting runs BEFORE the
+                        // assertion, not after it. Below the `assert_eq!`
+                        // it was unreachable -- the assertion has already
+                        // panicked by the time an inequality could be
+                        // observed. Here it prints, and then the assertion
+                        // fails the test.
                         if orig_geom != des_geom {
-                            println!("  geometry[{}] with LOD {:?} differs:", i, orig_geom.lod);
-                            if orig_geom.boundaries != des_geom.boundaries {
-                                println!("    boundaries differ:");
-                                println!("      original: {:?}", orig_geom.boundaries);
-                                println!("      deserialized: {:?}", des_geom.boundaries);
-                            }
+                            println!("  geometry[{}] with LOD {:?} differs:", i, orig_geom.lod());
+                            // `boundaries` is per-variant now, so the whole
+                            // geometry is dumped rather than that one member.
+                            println!("      original: {orig_geom:?}");
+                            println!("      deserialized: {des_geom:?}");
 
                             // Compare semantics
-                            match (&orig_geom.semantics, &des_geom.semantics) {
+                            match (
+                                &orig_geom.common().and_then(|c| c.semantics.as_ref()),
+                                &des_geom.common().and_then(|c| c.semantics.as_ref()),
+                            ) {
                                 (Some(orig_sem), Some(des_sem)) => {
                                     if orig_sem.surfaces != des_sem.surfaces {
                                         println!("    semantic surfaces differ:");
@@ -231,6 +315,11 @@ fn test_cityjson_serialization_cycle() -> Result<()> {
                                 (None, None) => {}
                             }
                         }
+
+                        assert_eq!(
+                            orig_geom, des_geom,
+                            "geometry[{i}] must round-trip unchanged"
+                        );
                     }
                 }
             } else if orig_co.geometry.is_some() != des_co.geometry.is_some() {
@@ -280,12 +369,9 @@ fn test_geometry_template_cycle() -> Result<()> {
                 // Also check attributes within semantic surfaces if applicable
                 if let Some(geoms) = &co.geometry {
                     for geom in geoms {
-                        if let Some(semantics) = &geom.semantics {
+                        if let Some(semantics) = geom.common().and_then(|c| c.semantics.as_ref()) {
                             for surface in &semantics.surfaces {
-                                // Assuming 'other' holds attributes, adjust if needed
-                                if let Some(other) = &surface.other {
-                                    attr_schema.add_attributes(other);
-                                }
+                                add_surface_attributes(&mut attr_schema, surface);
                             }
                         }
                     }
@@ -295,11 +381,9 @@ fn test_geometry_template_cycle() -> Result<()> {
         // Add attributes from header templates if they exist
         if let Some(gt) = &original_cj_seq.cj.geometry_templates {
             for template_geom in &gt.templates {
-                if let Some(semantics) = &template_geom.semantics {
+                if let Some(semantics) = template_geom.common().and_then(|c| c.semantics.as_ref()) {
                     for surface in &semantics.surfaces {
-                        if let Some(other) = &surface.other {
-                            attr_schema.add_attributes(other);
-                        }
+                        add_surface_attributes(&mut attr_schema, surface);
                     }
                 }
             }
@@ -364,8 +448,8 @@ fn test_geometry_template_cycle() -> Result<()> {
             "Template count mismatch"
         );
         assert_eq!(
-            orig_gt.vertices_templates.len(),
-            des_gt.vertices_templates.len(),
+            orig_gt.vertices_templates.as_array().map(|v| v.len()),
+            des_gt.vertices_templates.as_array().map(|v| v.len()),
             "Template vertex count mismatch"
         );
         // Deep comparison using PartialEq (ensure it's derived for GeometryTemplates and Geometry)
@@ -397,22 +481,21 @@ fn test_geometry_template_cycle() -> Result<()> {
             assert_eq!(orig_co.thetype, des_co.thetype);
 
             // Find original GeometryInstance (if any)
-            let orig_instance_geom = orig_co.geometry.as_ref().and_then(|geoms| {
-                geoms
-                    .iter()
-                    .find(|g| g.thetype == CjGeometryType::GeometryInstance)
-            });
+            let orig_instance_geom = orig_co
+                .geometry
+                .as_ref()
+                .and_then(|geoms| geoms.iter().find_map(as_instance));
 
-            if let Some(orig_instance) = orig_instance_geom {
+            if let Some((orig_boundaries, orig_template, orig_matrix)) = orig_instance_geom {
                 // Find the corresponding deserialized geometry instance
-                let des_instance_geom = des_co
+                let (des_boundaries, des_template, des_matrix) = des_co
                     .geometry
                     .as_ref()
                     .and_then(|geoms| {
-                        geoms.iter().find(|g| {
-                            g.thetype == CjGeometryType::GeometryInstance
-                                && g.template == orig_instance.template // Match by template index
-                        })
+                        geoms
+                            .iter()
+                            .filter_map(as_instance)
+                            .find(|(_, template, _)| *template == orig_template)
                     })
                     .unwrap_or_else(|| {
                         panic!(
@@ -421,24 +504,18 @@ fn test_geometry_template_cycle() -> Result<()> {
                     });
 
                 assert_eq!(
-                    des_instance_geom.thetype,
-                    CjGeometryType::GeometryInstance,
-                    "Type mismatch for instance in CO ID: {}",
-                    id
-                );
-                assert_eq!(
-                    des_instance_geom.template, orig_instance.template,
+                    des_template, orig_template,
                     "Template index mismatch for instance in CO ID: {}",
                     id
                 );
                 assert_eq!(
-                    des_instance_geom.boundaries, orig_instance.boundaries,
+                    des_boundaries, orig_boundaries,
                     "Boundaries mismatch for instance in CO ID: {}",
                     id
                 );
                 // Compare transformation matrices (floating point comparison might need tolerance)
                 assert_eq!(
-                    des_instance_geom.transformation_matrix, orig_instance.transformation_matrix,
+                    des_matrix, orig_matrix,
                     "Transformation matrix mismatch for instance in CO ID: {}",
                     id
                 );
@@ -475,10 +552,21 @@ fn test_extension_serialization_cycle() -> Result<()> {
         let output_writer = BufWriter::new(output_file);
 
         let mut attr_schema = AttributeSchema::new();
+        // A semantic surface's extra members (`on_footprint_edge` here) need a
+        // schema of their own; without one the writer has no column to put them
+        // in and they are dropped.
+        let mut semantic_attr_schema = AttributeSchema::new();
         for feature in original_cj_seq.features.iter() {
             for (_, co) in feature.city_objects.iter() {
                 if let Some(attributes) = &co.attributes {
                     attr_schema.add_attributes(attributes);
+                }
+                for geom in co.geometry.iter().flatten() {
+                    if let Some(semantics) = geom.common().and_then(|c| c.semantics.as_ref()) {
+                        for surface in &semantics.surfaces {
+                            add_surface_attributes(&mut semantic_attr_schema, surface);
+                        }
+                    }
                 }
             }
         }
@@ -492,7 +580,7 @@ fn test_extension_serialization_cycle() -> Result<()> {
                 geographical_extent: None,
             }),
             Some(attr_schema),
-            None,
+            Some(semantic_attr_schema),
         )?;
         for feature in original_cj_seq.features.iter() {
             fcb.add_feature(feature)?;
@@ -513,6 +601,10 @@ fn test_extension_serialization_cycle() -> Result<()> {
     if let (Some(orig_ext), Some(des_ext)) =
         (&original_cj_seq.cj.extensions, &deserialized_cj.extensions)
     {
+        // `extensions` is a plain CityJSON member: a map of name to
+        // `{url, version}`.
+        let orig_ext = orig_ext.as_object().expect("extensions is an object");
+        let des_ext = des_ext.as_object().expect("extensions is an object");
         assert_eq!(orig_ext.len(), des_ext.len(), "Extension count mismatch");
 
         for (name, orig_ext_data) in orig_ext {
@@ -521,12 +613,14 @@ fn test_extension_serialization_cycle() -> Result<()> {
                 .unwrap_or_else(|| panic!("Extension {name} not found in deserialized data"));
 
             assert_eq!(
-                orig_ext_data.url, des_ext_data.url,
+                orig_ext_data.get("url"),
+                des_ext_data.get("url"),
                 "URL mismatch for extension {}",
                 name
             );
             assert_eq!(
-                orig_ext_data.version, des_ext_data.version,
+                orig_ext_data.get("version"),
+                des_ext_data.get("version"),
                 "Version mismatch for extension {}",
                 name
             );
@@ -555,13 +649,14 @@ fn test_extension_serialization_cycle() -> Result<()> {
         .zip(deserialized_features.iter())
     {
         for (id, orig_co) in orig_feat.city_objects.iter() {
-            if orig_co.thetype.starts_with("+") {
+            // An Extension type is a variant now, not a `+`-prefixed string.
+            if matches!(orig_co.thetype, CityObjectType::Extension(_)) {
                 let des_co = des_feat.city_objects.get(id).unwrap_or_else(|| {
                     panic!("Extended city object {id} not found in deserialized data")
                 });
 
                 println!(
-                    "Found extended city object {} with type {}",
+                    "Found extended city object {} with type {:?}",
                     id, orig_co.thetype
                 );
                 assert_eq!(
@@ -604,11 +699,13 @@ fn test_extension_serialization_cycle() -> Result<()> {
         for (id, orig_co) in orig_feat.city_objects.iter() {
             if let Some(orig_geoms) = &orig_co.geometry {
                 for orig_geom in orig_geoms {
-                    if let Some(orig_semantics) = &orig_geom.semantics {
+                    if let Some(orig_semantics) =
+                        orig_geom.common().and_then(|c| c.semantics.as_ref())
+                    {
                         for (i, orig_surface) in orig_semantics.surfaces.iter().enumerate() {
-                            if orig_surface.thetype.starts_with("+") {
+                            if matches!(orig_surface.thetype, SemanticSurfaceType::Extension(_)) {
                                 println!(
-                                    "Found extended semantic surface: {}",
+                                    "Found extended semantic surface: {:?}",
                                     orig_surface.thetype
                                 );
 
@@ -617,17 +714,19 @@ fn test_extension_serialization_cycle() -> Result<()> {
                                 let des_geom = des_co
                                     .geometry
                                     .as_ref()
-                                    .and_then(|geoms| geoms.iter().find(|g| g.lod == orig_geom.lod))
+                                    .and_then(|geoms| {
+                                        geoms.iter().find(|g| g.lod() == orig_geom.lod())
+                                    })
                                     .unwrap_or_else(|| {
                                         panic!(
                                             "Geometry with LOD {:?} not found in deserialized data",
-                                            orig_geom.lod
+                                            orig_geom.lod()
                                         )
                                     });
 
                                 let des_semantics = des_geom
-                                    .semantics
-                                    .as_ref()
+                                    .common()
+                                    .and_then(|c| c.semantics.as_ref())
                                     .expect("Semantics not found in deserialized data");
 
                                 // Try to find the matching surface

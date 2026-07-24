@@ -31,14 +31,16 @@ cd flatcitybuf/src/rust
 cargo run -p fcb_cli -- <command> [args]
 
 # Example: convert CityJSONSeq to FCB
-cargo run -p fcb_cli -- ser -i input.city.jsonl -o output.fcb
+cargo run -p fcb_cli -- ser input.city.jsonl output.fcb
 ```
 
 ## Usage
 
 ```bash
-fcb <COMMAND> [OPTIONS]
+fcb <COMMAND> [OPTIONS] <INPUT> <OUTPUT>
 ```
+
+Input and output are positional: the input comes first, the output second.
 
 ### Commands
 
@@ -47,50 +49,54 @@ fcb <COMMAND> [OPTIONS]
 Convert CityJSON files to FlatCityBuf format with optional indexing.
 
 ```bash
-fcb ser -i INPUT -o OUTPUT [OPTIONS]
+fcb ser [OPTIONS] <INPUT>... <OUTPUT>
 ```
+
+**Arguments:**
+
+- `<INPUT>...` - Input file(s) or glob patterns (supports multiple files, use '-' for stdin)
+- `<OUTPUT>` - Output file, always the last positional (use '-' for stdout)
 
 **Options:**
 
-- `-i, --input INPUT...` - Input file(s) or glob patterns (supports multiple files, use '-' for stdin)
-- `-o, --output OUTPUT` - Output file (use '-' for stdout)
 - `-a, --attr-index ATTRIBUTES` - Comma-separated list of attributes to create index for
 - `-A, --index-all-attributes` - Index all attributes found in the dataset
-- `-s, --spatial-index` - Enable spatial indexing (default: true)
+- `-s, --no-spatial-index` - Disable the spatial index (it is written by default)
 - `--attr-branching-factor FACTOR` - Branching factor for attribute index (default: 256)
+- `--index-node-size SIZE` - Node size of the spatial R-tree index (default: 16)
 - `-b, --bbox BBOX` - Bounding box filter in format "minx,miny,maxx,maxy"
-- `-g, --ge` - Automatically calculate and set geospatial extent in header (default: true)
+- `-g, --ge` - Automatically calculate and set geospatial extent in header
 
 **Examples:**
 
 ```bash
 # basic conversion from CityJSONSeq
-fcb ser -i input.city.jsonl -o output.fcb
+fcb ser input.city.jsonl output.fcb
 
 # convert CityJSON file (standard .json format)
-fcb ser -i city.city.json -o output.fcb
+fcb ser city.city.json output.fcb
 
-# multiple input files
-fcb ser -i file1.city.jsonl file2.city.jsonl -o merged.fcb
+# multiple input files -- the last positional is the output
+fcb ser file1.city.jsonl file2.city.jsonl merged.fcb
 
 # glob patterns to process all matching files
-fcb ser -i 'data/*.city.jsonl' -o output.fcb
-fcb ser -i 'cities/**/*.city.json' -o all_cities.fcb
+fcb ser 'data/*.city.jsonl' output.fcb
+fcb ser 'cities/**/*.city.json' all_cities.fcb
 
 # with attribute indexing
-fcb ser -i delft.city.jsonl -o delft_attr.fcb \
+fcb ser delft.city.jsonl delft_attr.fcb \
   --attr-index identificatie,tijdstipregistratie,b3_is_glas_dak,b3_h_dak_50p \
   --attr-branching-factor 256
 
 # index all attributes
-fcb ser -i data.city.jsonl -o data.fcb --index-all-attributes
+fcb ser data.city.jsonl data.fcb --index-all-attributes
 
 # with bounding box filter
-fcb ser -i large_dataset.city.jsonl -o filtered.fcb \
+fcb ser large_dataset.city.jsonl filtered.fcb \
   --bbox "4.35,52.0,4.4,52.1"
 
 # from stdin to stdout
-cat input.city.jsonl | fcb ser -i - -o - > output.fcb
+cat input.city.jsonl | fcb ser - - > output.fcb
 ```
 
 #### `deser` - Deserialize FCB to CityJSON
@@ -98,22 +104,22 @@ cat input.city.jsonl | fcb ser -i - -o - > output.fcb
 Convert FlatCityBuf files back to CityJSON format.
 
 ```bash
-fcb deser -i INPUT -o OUTPUT
+fcb deser <INPUT> <OUTPUT>
 ```
 
-**Options:**
+**Arguments:**
 
-- `-i, --input INPUT` - Input FCB file (use '-' for stdin)
-- `-o, --output OUTPUT` - Output file (use '-' for stdout)
+- `<INPUT>` - Input FCB file (use '-' for stdin)
+- `<OUTPUT>` - Output file (use '-' for stdout)
 
 **Examples:**
 
 ```bash
 # basic conversion
-fcb deser -i input.fcb -o output.city.jsonl
+fcb deser input.fcb output.city.jsonl
 
 # from stdin to stdout
-cat input.fcb | fcb deser -i - -o - > output.city.jsonl
+cat input.fcb | fcb deser - - > output.city.jsonl
 ```
 
 #### `info` - Show FCB file information
@@ -121,13 +127,13 @@ cat input.fcb | fcb deser -i - -o - > output.city.jsonl
 Display metadata and statistics about an FCB file.
 
 ```bash
-fcb info -i INPUT
+fcb info <INPUT>
 ```
 
 **Example:**
 
 ```bash
-fcb info -i delft.fcb
+fcb info delft.fcb
 ```
 
 **Output includes:**
@@ -145,7 +151,7 @@ fcb info -i delft.fcb
 Convert CityJSON to Concise Binary Object Representation format.
 
 ```bash
-fcb cbor -i INPUT -o OUTPUT
+fcb cbor <INPUT> <OUTPUT>
 ```
 
 #### `bson` - Convert CityJSON to BSON
@@ -153,7 +159,7 @@ fcb cbor -i INPUT -o OUTPUT
 Convert CityJSON to Binary JSON format.
 
 ```bash
-fcb bson -i INPUT -o OUTPUT
+fcb bson <INPUT> <OUTPUT>
 ```
 
 ## Format Support
@@ -164,7 +170,7 @@ fcb bson -i INPUT -o OUTPUT
 - **CityJSON Text Sequences** (`.city.jsonl`) - Line-delimited CityJSON features
 - **FCB** (`.fcb`) - FlatCityBuf binary format
 
-> **Multi-file Support:** The `ser` command accepts multiple input files and glob patterns. When merging files with different coordinate transforms, vertices are automatically aligned to the first file's transform.
+> **Multi-file Support:** The `ser` command accepts multiple input files and glob patterns; the last positional argument is always the output. When merging files with different coordinate transforms, vertices are automatically aligned to the first file's transform.
 
 ### Output Formats
 
@@ -177,18 +183,18 @@ fcb bson -i INPUT -o OUTPUT
 
 ```bash
 # 1. convert cityjson to fcb with attribute indexing
-fcb ser -i dataset.city.jsonl -o dataset.fcb \
+fcb ser dataset.city.jsonl dataset.fcb \
   --attr-index "building_type,height,year_built" \
   --attr-branching-factor 256
 
 # 2. check file information
-fcb info -i dataset.fcb
+fcb info dataset.fcb
 
 # 3. convert back to cityjson
-fcb deser -i dataset.fcb -o output.city.jsonl
+fcb deser dataset.fcb output.city.jsonl
 
 # 4. filter by bounding box and index all attributes
-fcb ser -i large_city.city.jsonl -o filtered_city.fcb \
+fcb ser large_city.city.jsonl filtered_city.fcb \
   --bbox "4.35,52.0,4.4,52.1" \
   --index-all-attributes
 ```

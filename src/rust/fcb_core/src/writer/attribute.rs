@@ -3,10 +3,20 @@ use byteorder::{ByteOrder, LittleEndian};
 use chrono::{DateTime, Utc};
 use cjseq::CityJSONFeature;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 // Schema for attributes. The key is the attribute name, the value is a tuple of the column index and the column type.
-pub type AttributeSchema = HashMap<String, (u16, ColumnType)>;
+//
+// This is a `BTreeMap`, not a `HashMap`, on purpose. It is not load-bearing
+// for column order or column index: both `to_columns` (serializer.rs) and
+// `encode_attributes_with_schema` (below) collect the schema into a `Vec` and
+// `sort_by_key` on the stored column index before emitting anything, and the
+// column index assigned at insert time comes from `self.len()`, a count that
+// is independent of iteration order. The `BTreeMap` is defensive: it keeps
+// callers that build a schema by iterating it directly (rather than going
+// through the sorted accessors) from reintroducing `HashMap`'s randomly
+// seeded per-process order and making the writer non-reproducible.
+pub type AttributeSchema = BTreeMap<String, (u16, ColumnType)>;
 
 pub trait AttributeSchemaMethods {
     fn add_attributes(&mut self, attrs: &Value);
@@ -218,7 +228,15 @@ pub fn cityfeature_to_index_entries(
     indexing_attr: &[String],
 ) -> Vec<AttributeIndexEntry> {
     let mut index_entries = Vec::new();
-    for object in cityfeature.city_objects.values() {
+    // `city_objects` is a `HashMap` in cjseq, so iterate it in a fixed (id)
+    // order -- the entry order reaches the B+tree payload lists for duplicate
+    // keys, and a random order there is a random output file.
+    let mut object_ids: Vec<_> = cityfeature.city_objects.keys().collect();
+    object_ids.sort_unstable();
+    for object in object_ids
+        .into_iter()
+        .filter_map(|id| cityfeature.city_objects.get(id))
+    {
         if let Some(attr) = &object.attributes {
             let attr_index_entries = attribute_to_index_entries(attr, schema, indexing_attr);
             index_entries.extend(attr_index_entries);

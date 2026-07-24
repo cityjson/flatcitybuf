@@ -23,7 +23,7 @@ find "$dir_path" -type f -name "*.jsonl" | while read -r file; do
   echo "=== ${file} is being converted ==="
 
   # Run the conversion command
-  cargo run -p fcb_cli ser -i "$file" -o "${base_name}.fcb" -s false
+  cargo run -p fcb_cli -- ser "$file" "${base_name}.fcb" -s
 
   echo "conversion completed for ${file}"
   echo

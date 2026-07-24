@@ -1,0 +1,235 @@
+#include <fcb/packed_rtree.hpp>
+#include <fcb/reader.hpp>
+
+#include <algorithm>
+#include <cstring>
+#include <deque>
+#include <limits>
+#include <utility>
+
+#include "detail/checked.hpp"
+
+namespace fcb {
+
+namespace {
+
+// Byte-by-byte shift/mask assembly, not a raw memcpy of the in-memory
+// value: node items are packed with no padding and land at arbitrary
+// alignments inside a fetched block (the original reason a memcpy load was
+// used here), but a flat memcpy is ALSO only correct on a little-endian
+// host -- it silently reads/writes host-native byte order instead of the
+// wire format's little-endian one. Found during the M5 codex review (the
+// write side, added this milestone, copied the pre-existing read side's
+// bug); fixed on both sides at once, matching the explicit-shift convention
+// `key.cpp`'s `put_le`/`get_le` already use for exactly this reason.
+std::uint64_t read_u64_le(const std::uint8_t* p) {
+    std::uint64_t v = 0;
+    for (int i = 0; i < 8; ++i)
+        v |= static_cast<std::uint64_t>(p[i]) << (8 * i);
+    return v;
+}
+
+double read_f64_le(const std::uint8_t* p) {
+    const std::uint64_t bits = read_u64_le(p);
+    double d;
+    std::memcpy(&d, &bits, sizeof(d));  // reinterpret bits -> double: host-endian-agnostic
+    return d;
+}
+
+void write_u64_le(std::uint8_t* p, std::uint64_t v) {
+    for (int i = 0; i < 8; ++i)
+        p[i] = static_cast<std::uint8_t>((v >> (8 * i)) & 0xFF);
+}
+
+void write_f64_le(std::uint8_t* p, double v) {
+    std::uint64_t bits;
+    std::memcpy(&bits, &v, sizeof(bits));  // reinterpret double -> bits: host-endian-agnostic
+    write_u64_le(p, bits);
+}
+
+}  // namespace
+
+NodeItem NodeItem::decode(bytes_view b) {
+    if (b.size() < kSize) {
+        throw Error(ErrorCode::NoIndex, "short rtree node item");
+    }
+    NodeItem n{};
+    n.min_x = read_f64_le(b.data() + 0);
+    n.min_y = read_f64_le(b.data() + 8);
+    n.max_x = read_f64_le(b.data() + 16);
+    n.max_y = read_f64_le(b.data() + 24);
+    n.offset = read_u64_le(b.data() + 32);
+    return n;
+}
+
+NodeItem NodeItem::empty(std::uint64_t offset) {
+    NodeItem n{};
+    n.min_x = std::numeric_limits<double>::infinity();
+    n.min_y = std::numeric_limits<double>::infinity();
+    n.max_x = -std::numeric_limits<double>::infinity();
+    n.max_y = -std::numeric_limits<double>::infinity();
+    n.offset = offset;
+    return n;
+}
+
+void NodeItem::expand(const NodeItem& r) {
+    if (r.min_x < min_x)
+        min_x = r.min_x;
+    if (r.min_y < min_y)
+        min_y = r.min_y;
+    if (r.max_x > max_x)
+        max_x = r.max_x;
+    if (r.max_y > max_y)
+        max_y = r.max_y;
+}
+
+void NodeItem::encode(std::uint8_t* out) const {
+    write_f64_le(out + 0, min_x);
+    write_f64_le(out + 8, min_y);
+    write_f64_le(out + 16, max_x);
+    write_f64_le(out + 24, max_y);
+    write_u64_le(out + 32, offset);
+}
+
+bool NodeItem::intersects(const BBox& q) const {
+    // Strict comparisons, matching packed_rtree/mod.rs:122-134.
+    if (q.max_x < min_x)
+        return false;
+    if (q.max_y < min_y)
+        return false;
+    if (q.min_x > max_x)
+        return false;
+    if (q.min_y > max_y)
+        return false;
+    return true;
+}
+
+std::uint64_t rtree_num_nodes(std::uint64_t num_items, std::uint16_t node_size) {
+    if (node_size < 2) {
+        throw Error(ErrorCode::IllegalHeaderSize, "invalid index_node_size");
+    }
+    if (num_items == 0)
+        return 0;
+
+    std::uint64_t n = num_items;
+    std::uint64_t num_nodes = n;
+    for (;;) {
+        n = detail::ceil_div(n, node_size);
+        num_nodes = detail::checked_add(num_nodes, n, "rtree num_nodes");
+        if (n == 1)
+            break;
+    }
+    return num_nodes;
+}
+
+std::vector<LevelBound> rtree_level_bounds(std::uint64_t num_items, std::uint16_t node_size) {
+    if (node_size < 2) {
+        throw Error(ErrorCode::IllegalHeaderSize, "invalid index_node_size");
+    }
+    if (num_items == 0) {
+        throw Error(ErrorCode::NoIndex, "empty rtree");
+    }
+
+    std::vector<std::uint64_t> level_num_nodes;
+    std::uint64_t n = num_items;
+    std::uint64_t num_nodes = n;
+    level_num_nodes.push_back(n);
+    for (;;) {
+        n = detail::ceil_div(n, node_size);
+        num_nodes = detail::checked_add(num_nodes, n, "rtree num_nodes");
+        level_num_nodes.push_back(n);
+        if (n == 1)
+            break;
+    }
+
+    // Walk backwards accumulating offsets, as the Rust version does.
+    std::vector<std::uint64_t> level_offsets;
+    std::uint64_t acc = num_nodes;
+    for (std::uint64_t size : level_num_nodes) {
+        acc -= size;
+        level_offsets.push_back(acc);
+    }
+
+    std::vector<LevelBound> bounds;
+    bounds.reserve(level_num_nodes.size());
+    for (std::size_t i = 0; i < level_num_nodes.size(); ++i) {
+        bounds.push_back(LevelBound{level_offsets[i], level_offsets[i] + level_num_nodes[i]});
+    }
+    return bounds;
+}
+
+std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader, std::uint64_t index_begin,
+                                                std::uint64_t num_items, std::uint16_t node_size,
+                                                const BBox& query) {
+    std::vector<SearchResultItem> results;
+    if (num_items == 0)
+        return results;
+
+    const auto level_bounds = rtree_level_bounds(num_items, node_size);
+    const std::uint64_t num_nodes = rtree_num_nodes(num_items, node_size);
+    const std::uint64_t leaf_nodes_offset = level_bounds.front().start;
+
+    // Breadth-first, so node reads run roughly in file order.
+    std::deque<std::pair<std::uint64_t, std::size_t>> queue;
+    queue.emplace_back(0, level_bounds.size() - 1);
+
+    while (!queue.empty()) {
+        const auto [node_index, level] = queue.front();
+        queue.pop_front();
+
+        if (level >= level_bounds.size()) {
+            throw Error(ErrorCode::NoIndex, "rtree level out of range");
+        }
+        // Child indices come from the file and are hostile. Prove the node
+        // lies within the level we believe we are on BEFORE using it, and
+        // derive leaf-ness from the trusted level rather than from the
+        // index itself.
+        if (node_index < level_bounds[level].start || node_index >= level_bounds[level].end) {
+            throw Error(ErrorCode::NoIndex, "rtree node index outside its level");
+        }
+        const bool is_leaf = (level == 0);
+        const std::uint64_t end = std::min<std::uint64_t>(
+            detail::checked_add(node_index, node_size, "rtree node end"), level_bounds[level].end);
+        if (end <= node_index)
+            continue;
+
+        const std::uint64_t length = end - node_index;
+        const std::uint64_t byte_offset = detail::checked_add(
+            index_begin, detail::checked_mul(node_index, NodeItem::kSize, "rtree node offset"),
+            "rtree node base");
+        const std::uint64_t byte_len =
+            detail::checked_mul(length, NodeItem::kSize, "rtree node span");
+
+        auto block = reader.read(byte_offset, byte_len);
+        if (block.size() < byte_len) {
+            throw Error(ErrorCode::NoIndex, "truncated rtree node block");
+        }
+
+        for (std::uint64_t pos = node_index; pos < end; ++pos) {
+            const std::uint64_t slot = pos - node_index;
+            NodeItem item = NodeItem::decode(bytes_view(block).subspan(
+                static_cast<std::size_t>(slot * NodeItem::kSize), NodeItem::kSize));
+            if (!item.intersects(query))
+                continue;
+
+            if (is_leaf) {
+                results.push_back(SearchResultItem{item.offset, pos - leaf_nodes_offset});
+            } else {
+                const std::size_t child_level = level - 1;
+                if (item.offset < level_bounds[child_level].start ||
+                    item.offset >= level_bounds[child_level].end) {
+                    throw Error(ErrorCode::NoIndex, "rtree child index outside the child level");
+                }
+                queue.emplace_back(item.offset, child_level);
+            }
+        }
+    }
+
+    // Read forward through the features section.
+    std::sort(
+        results.begin(), results.end(),
+        [](const SearchResultItem& a, const SearchResultItem& b) { return a.offset < b.offset; });
+    return results;
+}
+
+}  // namespace fcb

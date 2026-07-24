@@ -1,0 +1,86 @@
+# FlatCityBuf — native TypeScript reader (@cityjson/flatcitybuf).
+#
+# Standard interface, identical in every justfile in this repo:
+#
+#     just check    # everything below, read-only
+#     just test | lint | type | build
+#     just fix      # the only recipe that rewrites source
+
+default:
+    @just --list
+
+# `build` runs last on purpose: examples/web resolves this package from dist/ via
+# a file: dependency, and the root justfile fans out in an order that relies on
+# dist/ existing by the time it reaches examples/web.
+
+# Lint + type + tests (Node and browser) + build, read-only
+check: lint type test test-browser build
+
+# npm ci
+install:
+    npm ci
+
+# test/http.test.ts spawns the shared range_server.py, so python3 must be on
+# PATH — and if the machine is busy the server can miss its 10s startup budget,
+# so do not run this concurrently with a heavy build.
+
+# Node test suite (vitest, 16 files)
+test: install
+    npx vitest run
+
+# The live-3DBAG test is skipped by the default `test` above (no
+# FCB_REMOTE_HTTP_URL); this sets it and runs only that test.
+
+# Opt-in: the live 3DBAG HTTP test (~68 GB bucket)
+test-remote: install
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" npx vitest run test/http.test.ts -t "live 3DBAG"
+
+# The ACTUAL shipping target. The globalSetup serves the corpus cross-origin so
+# the CORS failure path (which a Node fetch cannot reach, because Node does not
+# enforce CORS) is exercised. One-time setup: npx playwright install chromium
+
+# Browser test suite in real Chromium (Vitest browser mode)
+test-browser: install
+    npm run test:browser
+
+# tsc --noEmit, for both the src and test configs
+type: install
+    npx tsc --noEmit
+    npx tsc --noEmit -p tsconfig.test.json
+
+# No linter is configured for this package: there is no ESLint or Prettier setup,
+# so 'just type' (tsc, both configs) is the only static gate. This recipe exists
+# so every language exposes the same interface — wire ESLint in to make it real.
+
+# No-op: no linter configured for this package
+lint:
+    @echo "src/ts: no linter configured (no ESLint/Prettier). 'just type' is the static gate."
+
+# vite build + tsc --emitDeclarationOnly -> dist/
+build: install
+    npm run build
+
+# No-op: no formatter configured for this package
+fix:
+    @echo "src/ts: nothing to autofix (no formatter configured)."
+
+# ---------------------------------------------------------------------------
+# Extras
+# ---------------------------------------------------------------------------
+
+# Not in `check`: TypeDoc is a generator, and its output (docs/, gitignored)
+# is not a gate anything depends on. It does still WARN about public API whose
+# types are not exported -- worth reading, not worth failing CI over, so
+# treatWarningsAsErrors stays off in typedoc.json.
+
+# TypeDoc API reference for both entry points -> docs/
+docs: install
+    npm run docs
+
+# Regenerate the committed FlatBuffers bindings
+gen-fbs:
+    ../../scripts/gen_ts_fbs.sh
+
+# Remove dist/, docs/ and node_modules/
+clean:
+    rm -rf dist docs node_modules

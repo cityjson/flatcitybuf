@@ -66,7 +66,7 @@ pub(crate) fn read_fcb_as_cj(path: &str) -> Result<(u64, u64, u64)> {
         feature.city_objects.iter().for_each(|(_, co)| {
             if let Some(geometries) = &co.geometry {
                 for geometry in geometries {
-                    match geometry.thetype {
+                    match geometry.geometry_type() {
                         cjseq::GeometryType::Solid => solid_count += 1,
                         cjseq::GeometryType::MultiSurface => multi_surface_count += 1,
                         _ => other_count += 1,
@@ -108,7 +108,7 @@ fn read_cjseq(path: &str) -> Result<(u64, u64, u64)> {
             // Process geometries if they exist
             if let Some(geometries) = city_object.geometry {
                 for geometry in geometries {
-                    match geometry.thetype {
+                    match geometry.geometry_type() {
                         cjseq::GeometryType::Solid => solid_count += 1,
                         cjseq::GeometryType::MultiSurface => multi_surface_count += 1,
                         _ => other_count += 1,

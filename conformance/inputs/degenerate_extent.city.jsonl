@@ -1,0 +1,4 @@
+{"type": "CityJSON", "version": "2.0", "transform": {"scale": [0.001, 0.001, 0.001], "translate": [0.0, 0.0, 0.0]}, "CityObjects": {}, "vertices": [], "metadata": {"geographicalExtent": [0, 0, 0, 0, 0, 0]}}
+{"type": "CityJSONFeature", "id": "p0", "CityObjects": {"p0": {"type": "Building", "attributes": {"n": 0}, "geometry": [{"type": "MultiSurface", "lod": "1", "boundaries": [[[0, 1, 2, 3]]]}]}}, "vertices": [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]}
+{"type": "CityJSONFeature", "id": "p1", "CityObjects": {"p1": {"type": "Building", "attributes": {"n": 1}, "geometry": [{"type": "MultiSurface", "lod": "1", "boundaries": [[[0, 1, 2, 3]]]}]}}, "vertices": [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]}
+{"type": "CityJSONFeature", "id": "p2", "CityObjects": {"p2": {"type": "Building", "attributes": {"n": 2}, "geometry": [{"type": "MultiSurface", "lod": "1", "boundaries": [[[0, 1, 2, 3]]]}]}}, "vertices": [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]}

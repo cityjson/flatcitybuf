@@ -61,7 +61,7 @@ fn read_fcb_with_cur_cj_feature(path: &str) -> Result<(u64, u64, u64)> {
         feature.city_objects.iter().for_each(|(_, co)| {
             if let Some(geometries) = &co.geometry {
                 for geometry in geometries {
-                    match geometry.thetype {
+                    match geometry.geometry_type() {
                         cjseq::GeometryType::Solid => solid_count += 1,
                         cjseq::GeometryType::MultiSurface => multi_surface_count += 1,
                         _ => other_count += 1,

@@ -358,7 +358,7 @@ pub async fn collection_items(
             cjj.update_transform();
 
             // Convert to OBJ
-            let obj_str = cjseq::conv::obj::to_obj_string(&cjj);
+            let obj_str = fcb_core::obj::to_obj_string(&cjj);
 
             // Build Link header for pagination
             let link_header = build_link_header(

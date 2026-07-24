@@ -33,14 +33,16 @@ using json = nlohmann::json;
 //   Subsequent lines      -> feature_lines_out  (CityJSONFeature objects)
 // ---------------------------------------------------------------------------
 static void read_cityjsonseq(const fs::path& path, std::string& header_out,
-                              std::vector<std::string>& feature_lines_out) {
+                             std::vector<std::string>& feature_lines_out) {
     std::ifstream infile(path);
-    if (!infile.is_open()) throw std::runtime_error("Cannot open " + path.string());
+    if (!infile.is_open())
+        throw std::runtime_error("Cannot open " + path.string());
 
     std::string line;
     bool first = true;
     while (std::getline(infile, line)) {
-        if (line.empty()) continue;
+        if (line.empty())
+            continue;
         if (first) {
             header_out = line;
             first = false;
@@ -53,19 +55,17 @@ static void read_cityjsonseq(const fs::path& path, std::string& header_out,
 // ---------------------------------------------------------------------------
 // Helper: assert two vertex arrays carry identical integer triples
 // ---------------------------------------------------------------------------
-static void assert_vertices_equal(const json& orig, const json& deser,
-                                   const std::string& ctx) {
+static void assert_vertices_equal(const json& orig, const json& deser, const std::string& ctx) {
     if (orig.size() != deser.size()) {
-        std::cerr << "[FAIL] " << ctx << ": vertex count " << orig.size()
-                  << " vs " << deser.size() << std::endl;
+        std::cerr << "[FAIL] " << ctx << ": vertex count " << orig.size() << " vs " << deser.size()
+                  << std::endl;
         assert(false);
     }
     for (size_t v = 0; v < orig.size(); v++) {
         for (size_t ax = 0; ax < 3; ax++) {
             if (orig[v][ax] != deser[v][ax]) {
                 std::cerr << "[FAIL] " << ctx << ": vertex[" << v << "][" << ax
-                          << "] orig=" << orig[v][ax]
-                          << " deser=" << deser[v][ax] << std::endl;
+                          << "] orig=" << orig[v][ax] << " deser=" << deser[v][ax] << std::endl;
                 assert(false);
             }
         }
@@ -96,8 +96,8 @@ static void assert_feature_equal(const json& orig, const json& deser) {
     const auto& orig_cos = orig["CityObjects"];
     const auto& deser_cos = deser["CityObjects"];
     if (orig_cos.size() != deser_cos.size()) {
-        std::cerr << "[FAIL] feature '" << feat_id << "': CityObjects count "
-                  << orig_cos.size() << " vs " << deser_cos.size() << std::endl;
+        std::cerr << "[FAIL] feature '" << feat_id << "': CityObjects count " << orig_cos.size()
+                  << " vs " << deser_cos.size() << std::endl;
         assert(false);
     }
     for (auto& [co_id, orig_co] : orig_cos.items()) {
@@ -109,8 +109,8 @@ static void assert_feature_equal(const json& orig, const json& deser) {
 
         // type
         if (orig_co["type"] != deser_co["type"]) {
-            std::cerr << "[FAIL] '" << co_id << "' type: " << orig_co["type"]
-                      << " vs " << deser_co["type"] << std::endl;
+            std::cerr << "[FAIL] '" << co_id << "' type: " << orig_co["type"] << " vs "
+                      << deser_co["type"] << std::endl;
             assert(false);
         }
 
@@ -119,7 +119,8 @@ static void assert_feature_equal(const json& orig, const json& deser) {
         if (orig_co.contains("attributes")) {
             assert(deser_co.contains("attributes"));
             for (auto& [k, v] : orig_co["attributes"].items()) {
-                if (v.is_null()) continue;  // null → absent after FCB roundtrip, skip
+                if (v.is_null())
+                    continue;  // null → absent after FCB roundtrip, skip
                 if (!deser_co["attributes"].contains(k)) {
                     std::cerr << "[FAIL] attribute '" << k << "' missing in '" << co_id << "'"
                               << std::endl;
@@ -138,8 +139,8 @@ static void assert_feature_equal(const json& orig, const json& deser) {
         if (orig_co.contains("geometry") && orig_co["geometry"].is_array()) {
             assert(deser_co.contains("geometry") && deser_co["geometry"].is_array());
             if (orig_co["geometry"].size() != deser_co["geometry"].size()) {
-                std::cerr << "[FAIL] '" << co_id << "' geometry count: "
-                          << orig_co["geometry"].size() << " vs "
+                std::cerr << "[FAIL] '" << co_id
+                          << "' geometry count: " << orig_co["geometry"].size() << " vs "
                           << deser_co["geometry"].size() << std::endl;
                 assert(false);
             }
@@ -147,13 +148,13 @@ static void assert_feature_equal(const json& orig, const json& deser) {
                 const auto& og = orig_co["geometry"][g];
                 const auto& dg = deser_co["geometry"][g];
                 if (og["type"] != dg["type"]) {
-                    std::cerr << "[FAIL] '" << co_id << "' geom[" << g << "] type: "
-                              << og["type"] << " vs " << dg["type"] << std::endl;
+                    std::cerr << "[FAIL] '" << co_id << "' geom[" << g << "] type: " << og["type"]
+                              << " vs " << dg["type"] << std::endl;
                     assert(false);
                 }
                 if (og.contains("lod") && og["lod"] != dg["lod"]) {
-                    std::cerr << "[FAIL] '" << co_id << "' geom[" << g << "] lod: "
-                              << og["lod"] << " vs " << dg["lod"] << std::endl;
+                    std::cerr << "[FAIL] '" << co_id << "' geom[" << g << "] lod: " << og["lod"]
+                              << " vs " << dg["lod"] << std::endl;
                     assert(false);
                 }
             }
@@ -166,7 +167,8 @@ static void assert_feature_equal(const json& orig, const json& deser) {
 // ---------------------------------------------------------------------------
 static std::map<std::string, json> index_by_id(const std::vector<json>& features) {
     std::map<std::string, json> m;
-    for (const auto& f : features) m[f["id"].get<std::string>()] = f;
+    for (const auto& f : features)
+        m[f["id"].get<std::string>()] = f;
     return m;
 }
 
@@ -186,22 +188,24 @@ void test_cityjson_serialization_cycle(const fs::path& test_data_dir) {
     assert(!feature_lines.empty());
 
     std::vector<json> original_features;
-    for (auto& fl : feature_lines) original_features.push_back(json::parse(fl));
+    for (auto& fl : feature_lines)
+        original_features.push_back(json::parse(fl));
 
     // Write to FCB
     auto temp_fcb = test_data_dir / "temp_roundtrip.fcb";
     {
         auto writer = fcb::fcb_writer_new(header_line);
-        for (auto& fl : feature_lines) fcb::fcb_writer_add_feature(*writer, fl);
+        for (auto& fl : feature_lines)
+            fcb::fcb_writer_add_feature(*writer, fl);
         fcb::fcb_writer_write(std::move(writer), temp_fcb.string());
     }
 
     // Read back
     auto reader = fcb::fcb_reader_open(temp_fcb.string());
-    auto meta   = fcb::fcb_reader_metadata(*reader);
+    auto meta = fcb::fcb_reader_metadata(*reader);
     std::cout << "  FCB features stored: " << meta.features_count << std::endl;
-    std::cout << "  CityJSON version (from FCB header): "
-              << std::string(meta.cityjson_version) << std::endl;
+    std::cout << "  CityJSON version (from FCB header): " << std::string(meta.cityjson_version)
+              << std::endl;
 
     auto iter = fcb::fcb_reader_select_all(std::move(reader));
     std::vector<json> deserialized_features;
@@ -222,14 +226,13 @@ void test_cityjson_serialization_cycle(const fs::path& test_data_dir) {
     for (const auto& orig : original_features) {
         const std::string id = orig["id"].get<std::string>();
         if (deser_map.find(id) == deser_map.end()) {
-            std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output" << std::endl;
+            std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output"
+                      << std::endl;
             assert(false);
         }
         assert_feature_equal(orig, deser_map.at(id));
-        std::cout << "  ✓ Feature '" << id
-                  << "' — vertices=" << orig["vertices"].size()
-                  << " CityObjects=" << orig["CityObjects"].size()
-                  << std::endl;
+        std::cout << "  ✓ Feature '" << id << "' — vertices=" << orig["vertices"].size()
+                  << " CityObjects=" << orig["CityObjects"].size() << std::endl;
     }
 
     fs::remove(temp_fcb);
@@ -255,20 +258,22 @@ void test_geometry_template_cycle(const fs::path& test_data_dir) {
     assert(!feature_lines.empty());
 
     std::vector<json> original_features;
-    for (auto& fl : feature_lines) original_features.push_back(json::parse(fl));
+    for (auto& fl : feature_lines)
+        original_features.push_back(json::parse(fl));
 
     // Write to FCB
     auto temp_fcb = test_data_dir / "temp_geom_templates.fcb";
     {
         auto writer = fcb::fcb_writer_new(header_line);
-        for (auto& fl : feature_lines) fcb::fcb_writer_add_feature(*writer, fl);
+        for (auto& fl : feature_lines)
+            fcb::fcb_writer_add_feature(*writer, fl);
         fcb::fcb_writer_write(std::move(writer), temp_fcb.string());
     }
 
     // Read back
     auto reader = fcb::fcb_reader_open(temp_fcb.string());
-    auto meta   = fcb::fcb_reader_metadata(*reader);
-    auto iter   = fcb::fcb_reader_select_all(std::move(reader));
+    auto meta = fcb::fcb_reader_metadata(*reader);
+    auto iter = fcb::fcb_reader_select_all(std::move(reader));
 
     std::vector<json> deserialized_features;
     while (fcb::fcb_iterator_next(*iter)) {
@@ -284,7 +289,8 @@ void test_geometry_template_cycle(const fs::path& test_data_dir) {
         for (const auto& orig : original_features) {
             const std::string id = orig["id"].get<std::string>();
             if (deser_map.find(id) == deser_map.end()) {
-                std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output" << std::endl;
+                std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output"
+                          << std::endl;
                 assert(false);
             }
             assert_feature_equal(orig, deser_map.at(id));
@@ -322,20 +328,22 @@ void test_extension_serialization_cycle(const fs::path& test_data_dir) {
     assert(!feature_lines.empty());
 
     std::vector<json> original_features;
-    for (auto& fl : feature_lines) original_features.push_back(json::parse(fl));
+    for (auto& fl : feature_lines)
+        original_features.push_back(json::parse(fl));
 
     // Write to FCB
     auto temp_fcb = test_data_dir / "temp_extensions.fcb";
     {
         auto writer = fcb::fcb_writer_new(header_line);
-        for (auto& fl : feature_lines) fcb::fcb_writer_add_feature(*writer, fl);
+        for (auto& fl : feature_lines)
+            fcb::fcb_writer_add_feature(*writer, fl);
         fcb::fcb_writer_write(std::move(writer), temp_fcb.string());
     }
 
     // Read back
     auto reader = fcb::fcb_reader_open(temp_fcb.string());
-    auto meta   = fcb::fcb_reader_metadata(*reader);
-    auto iter   = fcb::fcb_reader_select_all(std::move(reader));
+    auto meta = fcb::fcb_reader_metadata(*reader);
+    auto iter = fcb::fcb_reader_select_all(std::move(reader));
 
     std::vector<json> deserialized_features;
     while (fcb::fcb_iterator_next(*iter)) {
@@ -352,7 +360,8 @@ void test_extension_serialization_cycle(const fs::path& test_data_dir) {
         for (const auto& orig : original_features) {
             const std::string id = orig["id"].get<std::string>();
             if (deser_map.find(id) == deser_map.end()) {
-                std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output" << std::endl;
+                std::cerr << "[FAIL] feature '" << id << "' missing in deserialized output"
+                          << std::endl;
                 assert(false);
             }
             assert_feature_equal(orig, deser_map.at(id));
@@ -366,14 +375,14 @@ void test_extension_serialization_cycle(const fs::path& test_data_dir) {
         json cj_header = json::parse(std::string(meta.metadata_json));
         assert(cj_header.contains("extensions"));
 
-        const auto& orig_ext  = header_cj["extensions"];
+        const auto& orig_ext = header_cj["extensions"];
         const auto& deser_ext = cj_header["extensions"];
         assert(orig_ext.size() == deser_ext.size());
         std::cout << "  ✓ Extension count matches: " << deser_ext.size() << std::endl;
 
         for (auto& [key, value] : orig_ext.items()) {
             assert(deser_ext.contains(key));
-            assert(deser_ext[key]["url"]     == value["url"]);
+            assert(deser_ext[key]["url"] == value["url"]);
             assert(deser_ext[key]["version"] == value["version"]);
             std::cout << "  ✓ Extension '" << key << "' preserved" << std::endl;
         }
@@ -396,7 +405,8 @@ int main(int argc, char* argv[]) {
         test_data_dir = argv[1];
     } else {
         test_data_dir = "../build/tests/data";
-        if (!fs::exists(test_data_dir)) test_data_dir = "../../rust/fcb_core/tests/data";
+        if (!fs::exists(test_data_dir))
+            test_data_dir = "../../rust/fcb_core/tests/data";
     }
 
     if (!fs::exists(test_data_dir)) {

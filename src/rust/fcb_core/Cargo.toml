@@ -20,6 +20,13 @@ categories = ["encoding", "data-structures", "science::geo"]
 default = ["http"]
 http = ["http-range-client", "bytes", "reqwest"]
 
+# docs.rs builds with every feature on, and with `--cfg docsrs` so that the
+# `#![cfg_attr(docsrs, feature(doc_cfg))]` in src/lib.rs takes effect and
+# feature-gated items are labelled. The cfg is inert on stable.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 
 [dependencies]
 bytes = { workspace = true, optional = true }

@@ -1,111 +1,63 @@
 name: Publish NPM Package
 
+# Publishes the pure TypeScript reader at src/ts to npm.
+#
+# The version is read from src/ts/package.json ONLY -- the single committed
+# source of the npm name, version and metadata. This workflow never bumps or
+# regenerates it: to release, commit a version bump to package.json and push a
+# matching `npm-v<version>` tag (or trigger the workflow manually). There is no
+# wasm build here -- no wasm-pack, no wasm32-unknown-unknown target, no artifact
+# copying -- because the package is plain TypeScript compiled by `npm run build`.
+
 on:
+  push:
+    tags:
+      - "npm-v*"
   workflow_dispatch:
-    inputs:
-      version_bump:
-        description: "Version bump type"
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/ts
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GA_TOKEN }}
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Install wasm-pack
+      - name: Typecheck and test before publishing
+        # ci-ts.yml gates the source on every push, but a tag can be pushed on
+        # any commit; re-running the checks here makes it impossible to publish
+        # a package whose behaviour regressed. The Node suite is ~2s.
         run: |
-          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          npm run typecheck
+          npx vitest run
 
-      - name: Configure git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "actions[bot]@github.com"
+      - name: Build the package
+        run: npm run build
 
-      - name: Build WASM
+      - name: Verify the artifact before publishing
         run: |
-          cd src/rust/wasm
-          wasm-pack build --target web --no-pack
-          cp -r ./pkg/* ../../ts/
-
-      - name: Update package.json with custom name and bump version
-        run: |
-          cd src/ts
-          # First, update package.json with custom metadata
-          node -e "
-          const fs = require('fs');
-          const genPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const customPkg = {
-              \"name\": \"@cityjson\/flatcitybuf\",
-              \"type\": \"module\",
-              \"version\": \"0.1.2\",
-              \"description\": \"FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers.\",
-              \"author\": {
-                \"name\": \"Hidemichi Baba\",
-                \"email\": \"baba.papa1120.ba@gmail.com\"
-              },
-              \"license\": \"MIT\",
-              \"repository\": {
-                \"type\": \"git\",
-                \"url\": \"https://github.com/cityjson/flatcitybuf\"
-              },
-              \"homepage\": \"https://github.com/cityjson/flatcitybuf\",
-              \"bugs\": {
-                \"url\": \"https://github.com/cityjson/flatcitybuf/issues\"
-              },
-              \"keywords\": [
-                \"cityjson\",
-                \"flatbuffers\",
-                \"wasm\",
-                \"geospatial\",
-                \"3d-city-models\"
-              ],
-              \"files\": genPkg.files || [
-                \"fcb_wasm_bg.wasm\",
-                \"fcb_wasm.js\",
-                \"fcb_wasm.d.ts\"
-              ],
-              \"main\": genPkg.main,
-              \"types\": genPkg.types,
-              \"sideEffects\": genPkg.sideEffects || [
-                \"./snippets/*\"
-              ]
-            };
-          fs.writeFileSync('package.json', JSON.stringify(customPkg, null, 2));
-          "
-          # Then bump the version
-          npm version ${{ github.event.inputs.version_bump }} --no-git-tag-version
-
-      - name: Commit version bump
-        run: |
-          git add .
-          git commit -m "chore: bump npm version (${{ github.event.inputs.version_bump }})"
-          git push
+          # Inspect exactly what would be published. `files` in package.json
+          # restricts the tarball to `dist`, so this must list the built
+          # dist/*.js and dist/*.d.ts and nothing from src or test.
+          npm pack --dry-run
+          # The entry points named in package.json `exports` must exist in the
+          # build output, or consumers get an unresolvable import.
+          for f in dist/index.js dist/index.d.ts dist/io/node.js dist/io/node.d.ts; do
+            [[ -s "$f" ]] || { echo "missing or empty build output: $f"; exit 1; }
+          done
 
       - name: Publish to NPM
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          cd src/ts
-          npm publish --access public
+        run: npm publish --access public

@@ -1,3 +1,10 @@
+//! `fcb` — the FlatCityBuf command-line tool.
+//!
+//! Argument parsing and subcommand dispatch. The conversions themselves are
+//! [`fcb_core`]; the shared helpers (multi-file merging, input sniffing, the
+//! `inspect` terminal UI) are [`fcb_cli`]. Run `fcb --help` for the full
+//! interface, or see the [`fcb_cli`] crate docs for a summary.
+
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use clap::{ArgAction, Parser, Subcommand};
 use console::{style, Term};
@@ -33,11 +40,10 @@ enum Commands {
     /// Convert CityJSON to FCB
     Ser {
         /// Input files (glob patterns supported, e.g., "cities/*/*.jsonl")
-        #[arg(short = 'i', long, required = true, num_args = 1..)]
+        #[arg(required = true, num_args = 1..)]
         input: Vec<String>,
 
         /// Output file (use '-' for stdout)
-        #[arg(short = 'o', long)]
         output: String,
 
         /// Comma-separated list of attributes to create index for
@@ -56,6 +62,15 @@ enum Commands {
         #[arg(long)]
         attr_branching_factor: Option<u16>,
 
+        /// Node size of the spatial R-tree index (default 16)
+        #[arg(long)]
+        index_node_size: Option<u16>,
+
+        /// Write a features_count of 0, which means "unknown" and forces
+        /// readers to scan to EOF. Conformance fixtures only.
+        #[arg(long, action = ArgAction::SetTrue)]
+        no_feature_count: bool,
+
         /// Bounding box filter in format "minx,miny,maxx,maxy"
         #[arg(short = 'b', long)]
         bbox: Option<String>,
@@ -68,39 +83,38 @@ enum Commands {
     /// Convert FCB to CityJSON
     Deser {
         /// Input file (use '-' for stdin)
-        #[arg(short, long)]
         input: String,
 
         /// Output file (use '-' for stdout)
-        #[arg(short, long)]
         output: String,
     },
 
     /// Convert CityJSON to CBOR
     Cbor {
         /// Input file (use '-' for stdin)
-        #[arg(short, long)]
         input: String,
         /// Output file (use '-' for stdout)
-        #[arg(short, long)]
         output: String,
     },
 
     /// Convert CityJSON to BSON
     Bson {
         /// Input file (use '-' for stdin)
-        #[arg(short, long)]
         input: String,
         /// Output file (use '-' for stdout)
-        #[arg(short, long)]
         output: String,
     },
 
     /// Show info about FCB file
     Info {
         /// Input FCB file
-        #[arg(short, long)]
         input: PathBuf,
+    },
+
+    /// Interactively inspect an FCB file or URL in a terminal UI
+    Inspect {
+        /// Local path or HTTP(S) URL to an FCB file
+        source: String,
     },
 }
 
@@ -123,6 +137,8 @@ struct SerializeOptions {
     index_all_attributes: bool,
     no_spatial_index: bool,
     attr_branching_factor: Option<u16>,
+    index_node_size: Option<u16>,
+    no_feature_count: bool,
     bbox: Option<String>,
     ge: bool,
 }
@@ -342,7 +358,15 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         let mut schema = AttributeSchema::new();
         // Limit to max 1000 features for schema building to have faster build time
         for feature in filtered_features.iter().take(1000) {
-            for (_, co) in feature.city_objects.iter() {
+            // Sorted, because `add_attributes` assigns each new attribute the
+            // next free column index -- so a `HashMap`'s random iteration order
+            // would hand the same input different column numbers on every run.
+            let mut ids: Vec<&String> = feature.city_objects.keys().collect();
+            ids.sort_unstable();
+            for co in ids
+                .into_iter()
+                .filter_map(|id| feature.city_objects.get(id))
+            {
                 if let Some(attributes) = &co.attributes {
                     schema.add_attributes(attributes);
                 }
@@ -375,13 +399,25 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
     let semantic_attr_schema = {
         let mut schema = AttributeSchema::new();
         for feature in filtered_features.iter() {
-            for (_, co) in feature.city_objects.iter() {
+            // Sorted for the same reason as the attribute schema above.
+            let mut ids: Vec<&String> = feature.city_objects.keys().collect();
+            ids.sort_unstable();
+            for co in ids
+                .into_iter()
+                .filter_map(|id| feature.city_objects.get(id))
+            {
                 if let Some(geometry) = &co.geometry {
                     for geom in geometry.iter() {
-                        if let Some(semantics) = geom.semantics.as_ref() {
+                        if let Some(semantics) = geom.common().and_then(|c| c.semantics.as_ref()) {
                             for sem_obj in semantics.surfaces.iter() {
-                                if let Some(other) = &sem_obj.other {
-                                    schema.add_attributes(other);
+                                // A semantic surface's `other` holds the
+                                // members the schema does not name; they
+                                // become attribute columns.
+                                if !sem_obj.other.is_empty() {
+                                    let other = serde_json::Value::Object(
+                                        sem_obj.other.clone().into_iter().collect(),
+                                    );
+                                    schema.add_attributes(&other);
                                 }
                             }
                         }
@@ -454,8 +490,14 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
 
     let header_options = HeaderWriterOptions {
         write_index: !options.no_spatial_index,
-        feature_count: filtered_features.len() as u64,
-        index_node_size: options.attr_branching_factor.unwrap_or(16),
+        feature_count: if options.no_feature_count {
+            0
+        } else {
+            filtered_features.len() as u64
+        },
+        // The R-tree node size, NOT the attribute B+tree branching factor:
+        // they are unrelated knobs and were previously driven by one flag.
+        index_node_size: options.index_node_size.unwrap_or(16),
         attribute_indices: attr_index_vec.clone(),
         geographical_extent: geo_extent,
     };
@@ -684,17 +726,15 @@ fn deserialize(input: &str, output: &str) -> Result<(), Error> {
     // Write header
     writeln!(writer, "{}", serde_json::to_string(&cj)?)?;
 
-    // Write features
-    let feat_count = header.features_count();
-    let mut feat_num = 0;
-    while let Ok(Some(feat_buf)) = fcb_reader.next() {
+    // Write features. The iterator stops at the declared feature count, or at
+    // EOF when the header declares 0, which means "unknown". Breaking here on
+    // `features_count` instead truncated such a file to a single feature.
+    // `?` on the iterator, not `while let Ok(..)`: swallowing the error made a
+    // mid-file decode failure indistinguishable from a clean end of stream, so
+    // a count-0 file could be truncated to a short, wrong output and still exit 0.
+    while let Some(feat_buf) = fcb_reader.next()? {
         let feature = feat_buf.cur_cj_feature()?;
         writeln!(writer, "{}", serde_json::to_string(&feature)?)?;
-
-        feat_num += 1;
-        if feat_num >= feat_count {
-            break;
-        }
     }
 
     if output != "-" {
@@ -985,6 +1025,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             index_all_attributes,
             no_spatial_index,
             attr_branching_factor,
+            index_node_size,
+            no_feature_count,
             bbox,
             ge,
         } => serialize(
@@ -995,6 +1037,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 index_all_attributes,
                 no_spatial_index,
                 attr_branching_factor,
+                index_node_size,
+                no_feature_count,
                 bbox,
                 ge,
             },
@@ -1003,6 +1047,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Cbor { input, output } => encode_cbor(&input, &output)?,
         Commands::Bson { input, output } => encode_bson(&input, &output)?,
         Commands::Info { input } => show_info(input)?,
+        Commands::Inspect { source } => {
+            if let Err(err) = fcb_cli::inspect::run_inspect(&source) {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        }
     }
 
     Ok(())

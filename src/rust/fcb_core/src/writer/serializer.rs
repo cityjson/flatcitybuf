@@ -16,14 +16,13 @@ use crate::{
     TransformationMatrix,
 };
 use cjseq::{
-    Appearance as CjAppearance, Boundaries as CjBoundaries, CityJSON, CityJSONFeature,
-    CityObject as CjCityObject, Geometry as CjGeometry, GeometryType as CjGeometryType,
-    PointOfContact as CjPointOfContact, ReferenceSystem as CjReferenceSystem,
-    TextFormat as CjTextFormat, TextType as CjTextType, Transform as CjTransform,
+    Appearance as CjAppearance, BorderColor as CjBorderColor, CityJSON, CityJSONFeature,
+    CityObject as CjCityObject, CityObjectType as CjCityObjectType, Geometry as CjGeometry,
+    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
+    ReferenceSystem as CjReferenceSystem, SemanticSurfaceType as CjSemanticSurfaceType,
+    TextureFormat as CjTextureFormat, TextureType as CjTextureType, Transform as CjTransform,
     WrapMode as CjWrapMode,
 };
-
-use cjseq::ExtensionFile as CjExtensionFile;
 
 use crate::packed_rtree::NodeItem;
 use flatbuffers::FlatBufferBuilder;
@@ -83,22 +82,28 @@ pub(super) fn to_fcb_header<'a>(
         }
     };
 
-    // Handle extensions, if present
-    let extensions = if let Some(extensions) = &cj.extensions {
-        let mut extension_files = Vec::new();
-        for (name, ext) in extensions.iter() {
-            let extension_file = ext.fetch_extension_file(name.clone())?;
-            extension_files.push(extension_file);
-        }
-
-        let extensions = extension_files
-            .iter()
-            .map(|ext| to_extension(fbb, ext))
-            .collect::<Result<Vec<_>>>()?;
-        Some(fbb.create_vector(&extensions))
-    } else {
-        None
-    };
+    // Handle extensions, if present. `extensions` is the CityJSON member
+    // itself: a map of extension name to `{url, version}`. Only that reference
+    // is written; the schema document it points at is not fetched, so writing
+    // a file never makes a network request.
+    let extensions = cj
+        .extensions
+        .as_ref()
+        .and_then(|e| e.as_object())
+        .map(|extensions| {
+            let extensions = extensions
+                .iter()
+                .map(|(name, ext)| {
+                    let url = ext.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+                    let version = ext
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    to_extension(fbb, name, url, version)
+                })
+                .collect::<Vec<_>>();
+            fbb.create_vector(&extensions)
+        });
 
     // Use the geographical_extent from the HeaderWriterOptions if provided
     let geographical_extent_from_options = header_options
@@ -269,16 +274,18 @@ pub(super) fn to_reference_system<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     ref_system: &CjReferenceSystem,
 ) -> flatbuffers::WIPOffset<ReferenceSystem<'a>> {
-    let authority = Some(fbb.create_string(&ref_system.authority));
+    // A `referenceSystem` need not have the three-element OGC shape at all —
+    // the schema constrains only its prefix — so each accessor is fallible.
+    let authority = Some(fbb.create_string(ref_system.authority().unwrap_or_default()));
 
-    let version = ref_system.version.parse::<i32>().unwrap_or_else(|e| {
-        println!("failed to parse version: {e}");
-        0
-    });
-    let code = ref_system.code.parse::<i32>().unwrap_or_else(|e| {
-        println!("failed to parse code: {e}");
-        0
-    });
+    let version = ref_system
+        .version()
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(0);
+    let code = ref_system
+        .code()
+        .and_then(|c| c.parse::<i32>().ok())
+        .unwrap_or(0);
 
     let code_string = None; // TODO: implement code_string
 
@@ -320,20 +327,32 @@ fn to_point_of_contact<'a>(
     let poc_phone = poc.phone.as_ref().map(|p| fbb.create_string(p));
     let poc_email = Some(fbb.create_string(&poc.email_address));
     let poc_website = poc.website.as_ref().map(|w| fbb.create_string(w));
-    let poc_address_thoroughfare_number = poc
-        .address
-        .as_ref()
-        .map(|a| fbb.create_string(&a.thoroughfare_number.to_string()));
-    let poc_address_thoroughfare_name = poc
-        .address
-        .as_ref()
-        .map(|a| fbb.create_string(&a.thoroughfare_name));
-    let poc_address_locality = poc.address.as_ref().map(|a| fbb.create_string(&a.locality));
-    let poc_address_postcode = poc
-        .address
-        .as_ref()
-        .map(|a| fbb.create_string(&a.postal_code));
-    let poc_address_country = poc.address.as_ref().map(|a| fbb.create_string(&a.country));
+    // `metadata.schema.json` types `address` as a bare object with no named
+    // members ("any properties can be used, to accommodate the different ways
+    // addresses are structured in different countries", § 5.3), so each of the
+    // header's fixed address fields is looked up by name and may be absent.
+    // A number spelled as a JSON number rather than a string is kept verbatim.
+    let address_member = |key: &str| -> Option<String> {
+        let members = &poc.address.as_ref()?.members;
+        let value = members.get(key)?;
+        match value {
+            Value::String(s) => Some(s.clone()),
+            Value::Null => None,
+            other => Some(other.to_string()),
+        }
+    };
+    // The spec's own examples spell the postcode `postcode`; the schema's
+    // CityJSON 1.x examples used `postalCode`. Accept either.
+    let address_either = |a: &str, b: &str| address_member(a).or_else(|| address_member(b));
+
+    let poc_address_thoroughfare_number =
+        address_member("thoroughfareNumber").map(|v| fbb.create_string(&v));
+    let poc_address_thoroughfare_name =
+        address_member("thoroughfareName").map(|v| fbb.create_string(&v));
+    let poc_address_locality = address_member("locality").map(|v| fbb.create_string(&v));
+    let poc_address_postcode =
+        address_either("postcode", "postalCode").map(|v| fbb.create_string(&v));
+    let poc_address_country = address_member("country").map(|v| fbb.create_string(&v));
     FcbPointOfContact {
         poc_contact_name,
         poc_contact_type,
@@ -349,53 +368,32 @@ fn to_point_of_contact<'a>(
     }
 }
 
-/// Converts the ExtensionSchema to a FlatBuffers Extension table
+/// Writes one entry of the CityJSON `extensions` member into the header.
 ///
-/// # Arguments
-///
-/// * `fbb` - FlatBuffers builder instance
-/// * `extension` - Extension file
-///
-/// # Returns
-///
-/// * `flatbuffers::WIPOffset<Extension<'a>>` - Extension table
+/// Only the reference is written — the name, the URL of the extension schema
+/// and the version, which is all `extensions` contains. The schema document
+/// itself is not fetched: doing so made writing a file depend on the network
+/// (and on the extension host still being up), and nothing in this crate reads
+/// the embedded schema back.
 pub fn to_extension<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
-    extension: &CjExtensionFile,
-) -> Result<flatbuffers::WIPOffset<Extension<'a>>> {
-    let name = fbb.create_string(&extension.name);
-    let description = fbb.create_string(&extension.description);
-    let url = fbb.create_string(&extension.url);
-    let version = fbb.create_string(&extension.version);
-    let version_cityjson = fbb.create_string(&extension.version_city_json);
+    name: &str,
+    url: &str,
+    version: &str,
+) -> flatbuffers::WIPOffset<Extension<'a>> {
+    let name = fbb.create_string(name);
+    let url = fbb.create_string(url);
+    let version = fbb.create_string(version);
 
-    // Stringified JSON for extension components
-    let extra_attributes = serde_json::to_string(&extension.extra_attributes)?;
-    let extra_attributes = fbb.create_string(&extra_attributes);
-
-    let extra_city_objects = serde_json::to_string(&extension.extra_city_objects)?;
-    let extra_city_objects = fbb.create_string(&extra_city_objects);
-
-    let extra_root_properties = serde_json::to_string(&extension.extra_root_properties)?;
-    let extra_root_properties = fbb.create_string(&extra_root_properties);
-
-    let extra_semantic_surfaces = serde_json::to_string(&extension.extra_semantic_surfaces)?;
-    let extra_semantic_surfaces = fbb.create_string(&extra_semantic_surfaces);
-
-    Ok(Extension::create(
+    Extension::create(
         fbb,
         &ExtensionArgs {
             name: Some(name),
-            description: Some(description),
             url: Some(url),
             version: Some(version),
-            version_cityjson: Some(version_cityjson),
-            extra_attributes: Some(extra_attributes),
-            extra_city_objects: Some(extra_city_objects),
-            extra_root_properties: Some(extra_root_properties),
-            extra_semantic_surfaces: Some(extra_semantic_surfaces),
+            ..Default::default()
         },
-    ))
+    )
 }
 
 /// -----------------------------------
@@ -417,9 +415,15 @@ pub(super) fn to_fcb_city_feature<'a>(
     semantic_attr_schema: Option<&AttributeSchema>,
 ) -> (flatbuffers::WIPOffset<CityFeature<'a>>, NodeItem) {
     let id = Some(fbb.create_string(id));
-    let city_objects: Vec<_> = city_feature
-        .city_objects
-        .iter()
+    // cjseq stores `city_objects` in a `HashMap`, whose iteration order is
+    // randomly seeded per process. Emitting the objects in that order made the
+    // same input serialise to different bytes on every run; sort by id so the
+    // feature payload is reproducible.
+    let mut object_ids: Vec<&String> = city_feature.city_objects.keys().collect();
+    object_ids.sort_unstable();
+    let city_objects: Vec<_> = object_ids
+        .into_iter()
+        .filter_map(|id| city_feature.city_objects.get(id).map(|co| (id, co)))
         .map(|(id, co)| to_city_object(fbb, id, co, attr_schema, semantic_attr_schema))
         .collect();
     let objects = Some(fbb.create_vector(&city_objects));
@@ -484,12 +488,57 @@ pub(super) fn to_fcb_city_feature<'a>(
     )
 }
 
+/// The FlatCityBuf tag for a CityJSON `wrapMode`.
+///
+/// Exhaustive by construction: there is no `_` arm, so a spelling added to
+/// `cjseq::WrapMode` -- which mirrors `appearance.schema.json`'s five --
+/// stops this crate from compiling until it is mapped here. This replaces a
+/// table lookup keyed on a *string*, whose fallback turned a mis-spelling into
+/// a valid-looking default: that is how a texture written
+/// `"wrapMode": "wrap"` came back as `"None"` and survived until the C++
+/// conformance corpus caught it.
+pub(crate) fn fb_wrap_mode(w: CjWrapMode) -> WrapMode {
+    match w {
+        CjWrapMode::None => WrapMode::None,
+        CjWrapMode::Wrap => WrapMode::Wrap,
+        CjWrapMode::Mirror => WrapMode::Mirror,
+        CjWrapMode::Clamp => WrapMode::Clamp,
+        CjWrapMode::Border => WrapMode::Border,
+    }
+}
+
+/// The FlatCityBuf tag for a CityJSON `textureType`. Exhaustive, as above.
+pub(crate) fn fb_texture_type(t: CjTextureType) -> TextureType {
+    match t {
+        CjTextureType::Unknown => TextureType::Unknown,
+        CjTextureType::Specific => TextureType::Specific,
+        CjTextureType::Typical => TextureType::Typical,
+    }
+}
+
+/// The FlatCityBuf tag for a CityJSON texture `type`. Exhaustive, as above.
+///
+/// `type` is optional in `appearance.schema.json` (the `Texture` object has no
+/// `required` keyword at all) but mandatory in `header.fbs`, whose default is
+/// `PNG`. An absent `type` therefore comes back as `"PNG"`; that lossiness
+/// predates this change and is fixed only by changing the schema, which would
+/// break the C++ reader.
+pub(crate) fn fb_texture_format(f: Option<CjTextureFormat>) -> TextureFormat {
+    match f {
+        Some(CjTextureFormat::PNG) | None => TextureFormat::PNG,
+        Some(CjTextureFormat::JPG) => TextureFormat::JPG,
+    }
+}
+
 pub(super) fn to_appearance<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     appearance: &CjAppearance,
 ) -> flatbuffers::WIPOffset<Appearance<'a>> {
     // Handle appearance if present
 
+    // `appearance.materials` and `appearance.textures` are typed by cjseq
+    // straight from `appearance.schema.json`, so every member here is read off
+    // a field rather than looked up by name in a `serde_json::Value`.
     let materials = appearance.materials.as_ref().map(|materials| {
         let material_offsets: Vec<_> = materials
             .iter()
@@ -520,31 +569,20 @@ pub(super) fn to_appearance<'a>(
         let texture_offsets: Vec<_> = textures
             .iter()
             .map(|t| {
-                let image = fbb.create_string(&t.image);
-                let border_color = t.border_color.map(|c| fbb.create_vector(&c));
-                let texture_format = match t.texture_format {
-                    CjTextFormat::Png => TextureFormat::PNG,
-                    CjTextFormat::Jpg => TextureFormat::JPG,
-                };
-                let wrap_mode = t.wrap_mode.as_ref().map(|w| match w {
-                    CjWrapMode::None => WrapMode::None,
-                    CjWrapMode::Wrap => WrapMode::Wrap,
-                    CjWrapMode::Mirror => WrapMode::Mirror,
-                    CjWrapMode::Clamp => WrapMode::Clamp,
-                    CjWrapMode::Border => WrapMode::Border,
-                });
-                let texture_type = t.texture_type.as_ref().map(|t| match t {
-                    CjTextType::Unknown => TextureType::Unknown,
-                    CjTextType::Specific => TextureType::Specific,
-                    CjTextType::Typical => TextureType::Typical,
+                // `image` is optional in CityJSON but mandatory in the `.fbs`,
+                // so an absent one is written as the empty string.
+                let image = fbb.create_string(t.image.as_deref().unwrap_or_default());
+                let border_color = t.border_color.as_ref().map(|c| match c {
+                    CjBorderColor::Rgb(c) => fbb.create_vector(c),
+                    CjBorderColor::Rgba(c) => fbb.create_vector(c),
                 });
                 Texture::create(
                     fbb,
                     &TextureArgs {
-                        type_: texture_format,
+                        type_: fb_texture_format(t.thetype),
                         image: Some(image),
-                        wrap_mode,
-                        texture_type,
+                        wrap_mode: t.wrap_mode.map(fb_wrap_mode),
+                        texture_type: t.texture_type.map(fb_texture_type),
                         border_color,
                     },
                 )
@@ -605,12 +643,12 @@ pub(super) fn to_city_object<'a>(
     let geographical_extent = co.geographical_extent.as_ref().map(to_geographical_extent);
     let geometry_without_instances = co.geometry.as_ref().map(|gs| {
         gs.iter()
-            .filter(|g| g.thetype != CjGeometryType::GeometryInstance)
+            .filter(|g| g.geometry_type() != CjGeometryType::GeometryInstance)
             .collect::<Vec<_>>()
     });
     let geometry_instances = co.geometry.as_ref().map(|gs| {
         gs.iter()
-            .filter(|g| g.thetype == CjGeometryType::GeometryInstance)
+            .filter(|g| g.geometry_type() == CjGeometryType::GeometryInstance)
             .collect::<Vec<_>>()
     });
     let geometries = {
@@ -655,10 +693,13 @@ pub(super) fn to_city_object<'a>(
     };
 
     let children_roles = {
-        let children_roles_strings = co
-            .children_roles
-            .as_ref()
-            .map(|c| c.iter().map(|r| fbb.create_string(r)).collect::<Vec<_>>());
+        // An unspecified role is `null` in CityJSON; the header has no way to
+        // spell that, so it is written as the empty string.
+        let children_roles_strings = co.children_roles.as_ref().map(|c| {
+            c.iter()
+                .map(|r| fbb.create_string(r.as_deref().unwrap_or_default()))
+                .collect::<Vec<_>>()
+        });
         children_roles_strings.map(|c| fbb.create_vector(&c))
     };
 
@@ -688,62 +729,66 @@ pub(super) fn to_city_object<'a>(
     )
 }
 
-/// Converts CityJSON object type to FlatBuffers enum
+/// Converts a CityJSON City Object type to the FlatBuffers enum.
 ///
-/// # Arguments
+/// An Extension type has no tag of its own: it becomes `ExtensionObject` plus
+/// the CityJSON name verbatim (leading `+` included) in `extension_type`.
 ///
-/// * `co_type` - String representation of CityJSON object type
-pub(super) fn to_co_type(co_type: &str) -> (CityObjectType, Option<String>) {
-    // If it starts with a '+', it's an extension type
-    let extension_type = if co_type.starts_with('+') {
-        Some(co_type.to_string())
-    } else {
-        None
-    };
-
-    let obj_type = if extension_type.is_some() {
-        // If an extension type, use ExtensionObject
-        CityObjectType::ExtensionObject
-    } else {
-        match co_type {
-            "Bridge" => CityObjectType::Bridge,
-            "BridgePart" => CityObjectType::BridgePart,
-            "BridgeInstallation" => CityObjectType::BridgeInstallation,
-            "BridgeConstructiveElement" => CityObjectType::BridgeConstructiveElement,
-            "BridgeRoom" => CityObjectType::BridgeRoom,
-            "BridgeFurniture" => CityObjectType::BridgeFurniture,
-            "Building" => CityObjectType::Building,
-            "BuildingPart" => CityObjectType::BuildingPart,
-            "BuildingInstallation" => CityObjectType::BuildingInstallation,
-            "BuildingConstructiveElement" => CityObjectType::BuildingConstructiveElement,
-            "BuildingFurniture" => CityObjectType::BuildingFurniture,
-            "BuildingStorey" => CityObjectType::BuildingStorey,
-            "BuildingRoom" => CityObjectType::BuildingRoom,
-            "BuildingUnit" => CityObjectType::BuildingUnit,
-            "CityFurniture" => CityObjectType::CityFurniture,
-            "CityObjectGroup" => CityObjectType::CityObjectGroup,
-            "LandUse" => CityObjectType::LandUse,
-            "OtherConstruction" => CityObjectType::OtherConstruction,
-            "PlantCover" => CityObjectType::PlantCover,
-            "SolitaryVegetationObject" => CityObjectType::SolitaryVegetationObject,
-            "TINRelief" => CityObjectType::TINRelief,
-            "Road" => CityObjectType::Road,
-            "Railway" => CityObjectType::Railway,
-            "Waterway" => CityObjectType::Waterway,
-            "TransportSquare" => CityObjectType::TransportSquare,
-            "Tunnel" => CityObjectType::Tunnel,
-            "TunnelPart" => CityObjectType::TunnelPart,
-            "TunnelInstallation" => CityObjectType::TunnelInstallation,
-            "TunnelConstructiveElement" => CityObjectType::TunnelConstructiveElement,
-            "TunnelHollowSpace" => CityObjectType::TunnelHollowSpace,
-            "TunnelFurniture" => CityObjectType::TunnelFurniture,
-            "WaterBody" => CityObjectType::WaterBody,
-            "GenericCityObject" => CityObjectType::GenericCityObject,
-            _ => CityObjectType::GenericCityObject,
+/// The known names are associated `const`s on `CityObjectType`, not enum
+/// variants, so this matches on `*co_type` rather than on the reference — a
+/// `const` pattern against a `&CityObjectType` is `E0308`, and rustc's fix-it
+/// suggestion silently turns the arm into a catch-all binding.
+///
+/// There is deliberately no `_` arm: listing every known const plus `Extension`
+/// *is* exhaustive, so a name added to `KnownCityObjectType` upstream fails to
+/// compile here rather than silently becoming a `GenericCityObject`.
+pub(super) fn to_co_type(co_type: &CjCityObjectType) -> (CityObjectType, Option<String>) {
+    match *co_type {
+        CjCityObjectType::Bridge => (CityObjectType::Bridge, None),
+        CjCityObjectType::BridgePart => (CityObjectType::BridgePart, None),
+        CjCityObjectType::BridgeInstallation => (CityObjectType::BridgeInstallation, None),
+        CjCityObjectType::BridgeConstructiveElement => {
+            (CityObjectType::BridgeConstructiveElement, None)
         }
-    };
-
-    (obj_type, extension_type)
+        CjCityObjectType::BridgeRoom => (CityObjectType::BridgeRoom, None),
+        CjCityObjectType::BridgeFurniture => (CityObjectType::BridgeFurniture, None),
+        CjCityObjectType::Building => (CityObjectType::Building, None),
+        CjCityObjectType::BuildingPart => (CityObjectType::BuildingPart, None),
+        CjCityObjectType::BuildingInstallation => (CityObjectType::BuildingInstallation, None),
+        CjCityObjectType::BuildingConstructiveElement => {
+            (CityObjectType::BuildingConstructiveElement, None)
+        }
+        CjCityObjectType::BuildingFurniture => (CityObjectType::BuildingFurniture, None),
+        CjCityObjectType::BuildingStorey => (CityObjectType::BuildingStorey, None),
+        CjCityObjectType::BuildingRoom => (CityObjectType::BuildingRoom, None),
+        CjCityObjectType::BuildingUnit => (CityObjectType::BuildingUnit, None),
+        CjCityObjectType::CityFurniture => (CityObjectType::CityFurniture, None),
+        CjCityObjectType::CityObjectGroup => (CityObjectType::CityObjectGroup, None),
+        CjCityObjectType::GenericCityObject => (CityObjectType::GenericCityObject, None),
+        CjCityObjectType::LandUse => (CityObjectType::LandUse, None),
+        CjCityObjectType::OtherConstruction => (CityObjectType::OtherConstruction, None),
+        CjCityObjectType::PlantCover => (CityObjectType::PlantCover, None),
+        CjCityObjectType::SolitaryVegetationObject => {
+            (CityObjectType::SolitaryVegetationObject, None)
+        }
+        CjCityObjectType::TINRelief => (CityObjectType::TINRelief, None),
+        CjCityObjectType::Road => (CityObjectType::Road, None),
+        CjCityObjectType::Railway => (CityObjectType::Railway, None),
+        CjCityObjectType::Waterway => (CityObjectType::Waterway, None),
+        CjCityObjectType::TransportSquare => (CityObjectType::TransportSquare, None),
+        CjCityObjectType::Tunnel => (CityObjectType::Tunnel, None),
+        CjCityObjectType::TunnelPart => (CityObjectType::TunnelPart, None),
+        CjCityObjectType::TunnelInstallation => (CityObjectType::TunnelInstallation, None),
+        CjCityObjectType::TunnelConstructiveElement => {
+            (CityObjectType::TunnelConstructiveElement, None)
+        }
+        CjCityObjectType::TunnelHollowSpace => (CityObjectType::TunnelHollowSpace, None),
+        CjCityObjectType::TunnelFurniture => (CityObjectType::TunnelFurniture, None),
+        CjCityObjectType::WaterBody => (CityObjectType::WaterBody, None),
+        CjCityObjectType::Extension(ref name) => {
+            (CityObjectType::ExtensionObject, Some(name.clone()))
+        }
+    }
 }
 
 /// Converts CityJSON geometry type to FlatBuffers enum
@@ -760,49 +805,81 @@ pub(super) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
         CjGeometryType::Solid => GeometryType::Solid,
         CjGeometryType::MultiSolid => GeometryType::MultiSolid,
         CjGeometryType::CompositeSolid => GeometryType::CompositeSolid,
-        _ => GeometryType::Solid,
+        CjGeometryType::GeometryInstance => GeometryType::GeometryInstance,
     }
 }
 
-/// Converts CityJSON semantic surface type to FlatBuffers enum
-///
-/// # Arguments
-///
-/// * `ss_type` - String representation of semantic surface type
-pub(super) fn to_semantic_surface_type(ss_type: &str) -> (SemanticSurfaceType, Option<String>) {
-    // Handle extension types (starting with +)
-    if ss_type.starts_with('+') {
-        return (
-            SemanticSurfaceType::ExtraSemanticSurface,
-            Some(ss_type.to_string()),
-        );
+/// A semantic surface type as FlatCityBuf stores it: the enum tag, plus the
+/// CityJSON name verbatim when the tag is `ExtraSemanticSurface`, which has no
+/// spelling of its own.
+pub(super) struct FcbSemanticSurfaceType {
+    pub(super) type_: SemanticSurfaceType,
+    pub(super) extension_type: Option<String>,
+}
+
+impl FcbSemanticSurfaceType {
+    fn known(type_: SemanticSurfaceType) -> Self {
+        FcbSemanticSurfaceType {
+            type_,
+            extension_type: None,
+        }
     }
+}
 
-    // Handle standard surface types
-    let surface_type = match ss_type {
-        "RoofSurface" => SemanticSurfaceType::RoofSurface,
-        "GroundSurface" => SemanticSurfaceType::GroundSurface,
-        "WallSurface" => SemanticSurfaceType::WallSurface,
-        "ClosureSurface" => SemanticSurfaceType::ClosureSurface,
-        "OuterCeilingSurface" => SemanticSurfaceType::OuterCeilingSurface,
-        "OuterFloorSurface" => SemanticSurfaceType::OuterFloorSurface,
-        "Window" => SemanticSurfaceType::Window,
-        "Door" => SemanticSurfaceType::Door,
-        "InteriorWallSurface" => SemanticSurfaceType::InteriorWallSurface,
-        "CeilingSurface" => SemanticSurfaceType::CeilingSurface,
-        "FloorSurface" => SemanticSurfaceType::FloorSurface,
-        "WaterSurface" => SemanticSurfaceType::WaterSurface,
-        "WaterGroundSurface" => SemanticSurfaceType::WaterGroundSurface,
-        "WaterClosureSurface" => SemanticSurfaceType::WaterClosureSurface,
-        "TrafficArea" => SemanticSurfaceType::TrafficArea,
-        "AuxiliaryTrafficArea" => SemanticSurfaceType::AuxiliaryTrafficArea,
-        "TransportationMarking" => SemanticSurfaceType::TransportationMarking,
-        "TransportationHole" => SemanticSurfaceType::TransportationHole,
-        _ => SemanticSurfaceType::ExtraSemanticSurface,
-    };
-
-    // Standard types don't have extension_type
-    (surface_type, None)
+/// Converts a CityJSON semantic surface type to the FlatBuffers enum.
+///
+/// As with [`to_co_type`], the match is on the value rather than the reference:
+/// the known names are associated `const`s, and a `const` pattern against a
+/// reference is `E0308`. Listing every one of them is what makes this
+/// exhaustive — adding a name to `KnownSemanticSurfaceType` upstream will fail
+/// to compile here rather than silently decay to `ExtraSemanticSurface`.
+impl From<&CjSemanticSurfaceType> for FcbSemanticSurfaceType {
+    fn from(ss_type: &CjSemanticSurfaceType) -> Self {
+        match *ss_type {
+            CjSemanticSurfaceType::RoofSurface => Self::known(SemanticSurfaceType::RoofSurface),
+            CjSemanticSurfaceType::GroundSurface => Self::known(SemanticSurfaceType::GroundSurface),
+            CjSemanticSurfaceType::WallSurface => Self::known(SemanticSurfaceType::WallSurface),
+            CjSemanticSurfaceType::ClosureSurface => {
+                Self::known(SemanticSurfaceType::ClosureSurface)
+            }
+            CjSemanticSurfaceType::OuterCeilingSurface => {
+                Self::known(SemanticSurfaceType::OuterCeilingSurface)
+            }
+            CjSemanticSurfaceType::OuterFloorSurface => {
+                Self::known(SemanticSurfaceType::OuterFloorSurface)
+            }
+            CjSemanticSurfaceType::Window => Self::known(SemanticSurfaceType::Window),
+            CjSemanticSurfaceType::Door => Self::known(SemanticSurfaceType::Door),
+            CjSemanticSurfaceType::InteriorWallSurface => {
+                Self::known(SemanticSurfaceType::InteriorWallSurface)
+            }
+            CjSemanticSurfaceType::CeilingSurface => {
+                Self::known(SemanticSurfaceType::CeilingSurface)
+            }
+            CjSemanticSurfaceType::FloorSurface => Self::known(SemanticSurfaceType::FloorSurface),
+            CjSemanticSurfaceType::WaterSurface => Self::known(SemanticSurfaceType::WaterSurface),
+            CjSemanticSurfaceType::WaterGroundSurface => {
+                Self::known(SemanticSurfaceType::WaterGroundSurface)
+            }
+            CjSemanticSurfaceType::WaterClosureSurface => {
+                Self::known(SemanticSurfaceType::WaterClosureSurface)
+            }
+            CjSemanticSurfaceType::TrafficArea => Self::known(SemanticSurfaceType::TrafficArea),
+            CjSemanticSurfaceType::AuxiliaryTrafficArea => {
+                Self::known(SemanticSurfaceType::AuxiliaryTrafficArea)
+            }
+            CjSemanticSurfaceType::TransportationMarking => {
+                Self::known(SemanticSurfaceType::TransportationMarking)
+            }
+            CjSemanticSurfaceType::TransportationHole => {
+                Self::known(SemanticSurfaceType::TransportationHole)
+            }
+            CjSemanticSurfaceType::Extension(ref name) => FcbSemanticSurfaceType {
+                type_: SemanticSurfaceType::ExtraSemanticSurface,
+                extension_type: Some(name.clone()),
+            },
+        }
+    }
 }
 
 /// Converts CityJSON geometry to FlatBuffers format
@@ -816,15 +893,10 @@ pub(crate) fn to_geometry<'a>(
     geometry: &CjGeometry,
     semantic_attr_schema: Option<&AttributeSchema>,
 ) -> flatbuffers::WIPOffset<Geometry<'a>> {
-    let type_ = to_geom_type(&geometry.thetype);
-    let lod = geometry.lod.as_ref().map(|lod| fbb.create_string(lod));
+    let type_ = to_geom_type(&geometry.geometry_type());
+    let lod = geometry.lod().map(|lod| fbb.create_string(lod));
 
-    let encoded = encode(
-        &geometry.boundaries,
-        geometry.semantics.as_ref(),
-        geometry.texture.as_ref(),
-        geometry.material.as_ref(),
-    );
+    let encoded = encode(geometry);
     let GMBoundaries {
         solids,
         shells,
@@ -847,16 +919,23 @@ pub(crate) fn to_geometry<'a>(
             let semantics_objects = surface
                 .iter()
                 .map(|s| {
-                    let children = s.children.as_ref().map(|c| fbb.create_vector(c));
+                    let children = s.children.as_ref().map(|c| {
+                        let c = c.iter().map(|&i| i as u32).collect::<Vec<_>>();
+                        fbb.create_vector(&c)
+                    });
 
-                    let (type_, extension_type) = to_semantic_surface_type(&s.thetype);
+                    let FcbSemanticSurfaceType {
+                        type_,
+                        extension_type,
+                    } = FcbSemanticSurfaceType::from(&s.thetype);
                     let extension_type = extension_type.map(|s| fbb.create_string(&s));
-                    let attributes = if let Some(other) = &s.other {
-                        semantic_attr_schema.as_ref().map(|schema| {
-                            fbb.create_vector(&encode_attributes_with_schema(other, schema))
-                        })
-                    } else {
+                    let attributes = if s.other.is_empty() {
                         None
+                    } else {
+                        let other = Value::Object(s.other.clone().into_iter().collect());
+                        semantic_attr_schema.as_ref().map(|schema| {
+                            fbb.create_vector(&encode_attributes_with_schema(&other, schema))
+                        })
                     };
                     SemanticObject::create(
                         fbb,
@@ -865,7 +944,7 @@ pub(crate) fn to_geometry<'a>(
                             extension_type,
                             attributes,
                             children,
-                            parent: s.parent,
+                            parent: s.parent.map(|p| p as u32),
                         },
                     )
                 })
@@ -873,7 +952,10 @@ pub(crate) fn to_geometry<'a>(
 
             (
                 Some(fbb.create_vector(&semantics_objects)),
-                Some(fbb.create_vector(&values)),
+                // Absent, not empty, for `"values": null` -- which is valid
+                // CityJSON (required-but-nullable) and is not the same thing as
+                // an empty array.
+                values.map(|values| fbb.create_vector(&values)),
             )
         });
 
@@ -899,6 +981,8 @@ pub(crate) fn to_geometry<'a>(
                     let theme = Some(fbb.create_string(&v.theme));
                     let solids = Some(fbb.create_vector(&v.solids));
                     let shells = Some(fbb.create_vector(&v.shells));
+                    // Present-but-empty, so that `"values": []` stays distinct
+                    // from the absent vector written for `"values": null`.
                     let vertices = Some(fbb.create_vector(&v.vertices));
                     let value = None;
                     MaterialMapping::create(
@@ -912,6 +996,17 @@ pub(crate) fn to_geometry<'a>(
                         },
                     )
                 }
+                // `"values": null`: a theme, and no arrays at all.
+                GMMaterialMapping::NullValues(theme) => {
+                    let theme = Some(fbb.create_string(theme));
+                    MaterialMapping::create(
+                        fbb,
+                        &MaterialMappingArgs {
+                            theme,
+                            ..Default::default()
+                        },
+                    )
+                }
             })
             .collect::<Vec<_>>();
         fbb.create_vector(&mappings)
@@ -922,11 +1017,19 @@ pub(crate) fn to_geometry<'a>(
             .iter()
             .map(|t| {
                 let theme = Some(fbb.create_string(&t.theme));
-                let solids = Some(fbb.create_vector(&t.solids));
-                let shells = Some(fbb.create_vector(&t.shells));
-                let surfaces = Some(fbb.create_vector(&t.surfaces));
-                let strings = Some(fbb.create_vector(&t.strings));
-                let vertices = Some(fbb.create_vector(&t.vertices));
+                // A theme with no `values` member carries no arrays at all, so
+                // that it stays distinct from one whose `values` is empty.
+                let (solids, shells, surfaces, strings, vertices) = if t.has_values {
+                    (
+                        Some(fbb.create_vector(&t.solids)),
+                        Some(fbb.create_vector(&t.shells)),
+                        Some(fbb.create_vector(&t.surfaces)),
+                        Some(fbb.create_vector(&t.strings)),
+                        Some(fbb.create_vector(&t.vertices)),
+                    )
+                } else {
+                    (None, None, None, None, None)
+                };
                 TextureMapping::create(
                     fbb,
                     &TextureMappingArgs {
@@ -965,27 +1068,29 @@ pub(super) fn to_geometry_instance<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     geometry: &CjGeometry,
 ) -> flatbuffers::WIPOffset<GeometryInstance<'a>> {
-    if geometry.template.is_none() || geometry.transformation_matrix.is_none() {
-        panic!("Geometry instance must have a template and transformation matrix.");
-    }
-    if let CjBoundaries::Nested(_) = &geometry.boundaries {
-        panic!("Nested boundaries are not valid for geometry instances. "); //TODO: don't use panic, instead, return Result type
-    }
+    // `template`, `transformationMatrix` and single-index boundaries are part
+    // of the `GeometryInstance` variant's type, so there is nothing to check
+    // at runtime beyond having been handed the right variant.
+    let CjGeometry::GeometryInstance {
+        boundaries,
+        template,
+        transformation_matrix: m,
+    } = geometry
+    else {
+        panic!(
+            "to_geometry_instance was given a {:?}",
+            geometry.geometry_type()
+        );
+        //TODO: don't use panic, instead, return Result type
+    };
 
-    let template = geometry.template.unwrap_or(0) as u32;
-    let boundaries = match &geometry.boundaries {
-        CjBoundaries::Indices(indices) => Some(fbb.create_vector(indices)), //This expect the given CityJSON has only one vertex index.
-        CjBoundaries::Nested(_) => {
-            panic!("Nested boundaries are not valid for geometry instances. "); //TODO: don't use panic, instead, return Result type
-        }
-    };
-    let transformation = {
-        let m = geometry.transformation_matrix.unwrap();
-        Some(TransformationMatrix::new(
-            m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13],
-            m[14], m[15],
-        ))
-    };
+    let template = *template as u32;
+    let indices = boundaries.iter().map(|&i| i as u32).collect::<Vec<_>>();
+    let boundaries = Some(fbb.create_vector(&indices));
+    let transformation = Some(TransformationMatrix::new(
+        m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13],
+        m[14], m[15],
+    ));
     GeometryInstance::create(
         fbb,
         &GeometryInstanceArgs {
@@ -996,14 +1101,26 @@ pub(super) fn to_geometry_instance<'a>(
     )
 }
 
+/// `geometry-templates.vertices-templates` is an untyped `Value` in CityJSON;
+/// anything that is not a 3-element array of numbers is not a vertex and is
+/// skipped rather than guessed at.
 pub(super) fn to_templates_vertices<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
-    vertices: &[[f64; 3]],
+    vertices: &Value,
 ) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, DoubleVertex>> {
     let vertices_vec = vertices
-        .iter()
-        .map(|v| DoubleVertex::new(v[0], v[1], v[2]))
-        .collect::<Vec<_>>();
+        .as_array()
+        .map(|vs| {
+            vs.iter()
+                .filter_map(|v| {
+                    let v = v.as_array()?;
+                    let coords: Vec<f64> = v.iter().filter_map(|c| c.as_f64()).collect();
+                    let [x, y, z]: [f64; 3] = coords.try_into().ok()?;
+                    Some(DoubleVertex::new(x, y, z))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     fbb.create_vector(&vertices_vec)
 }
 
@@ -1147,9 +1264,15 @@ mod tests {
                     .as_ref()
                     .unwrap()
                     .iter()
-                    .find(|g| g.lod == fb_geometry.lod().map(|lod| lod.to_string()))
+                    .find(|g| g.lod() == fb_geometry.lod())
                     .unwrap();
-                assert_eq!(cj_geometry.thetype, fb_geometry.type_().to_cj());
+                assert_eq!(
+                    cj_geometry.geometry_type(),
+                    fb_geometry
+                        .type_()
+                        .to_cj()
+                        .expect("a written geometry has a known type")
+                );
             }
 
             if let Some(parents) = cjco.parents.as_ref() {
@@ -1194,6 +1317,93 @@ mod tests {
                 );
             }
         }
+
+        Ok(())
+    }
+
+    /// `metadata.schema.json` types `pointOfContact.address` as a bare object
+    /// with no named members, so BOTH `postcode` (the spec's own examples) and
+    /// `postalCode` (CityJSON 1.x's) are schema-valid spellings and the writer
+    /// accepts either. The header has one fixed slot for them, so the reader
+    /// has to pick one spelling to write back, and it picks `postcode`.
+    ///
+    /// That means a document spelling it `postalCode` round-trips RENAMED --
+    /// a deliberate normalisation, not a loss, and the same shape of choice as
+    /// the texture `image` empty-vs-absent one. Pinned here so that changing
+    /// either half of it is a test failure rather than a silent behaviour
+    /// change for anyone diffing input against output.
+    #[test]
+    fn either_postcode_spelling_is_accepted_and_both_come_back_as_postcode() -> Result<()> {
+        let address_after_round_trip = |address: serde_json::Value| -> Result<cjseq::Address> {
+            let cj: CityJSON = serde_json::from_value(serde_json::json!({
+                "type": "CityJSON",
+                "version": "2.0",
+                "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]},
+                "CityObjects": {},
+                "vertices": [],
+                "metadata": {
+                    "pointOfContact": {
+                        "contactName": "A Person",
+                        "emailAddress": "a@example.org",
+                        "address": address
+                    }
+                }
+            }))?;
+
+            let mut fbb = FlatBufferBuilder::new();
+            let header = to_fcb_header(
+                &mut fbb,
+                &cj,
+                HeaderWriterOptions {
+                    write_index: false,
+                    feature_count: 0,
+                    index_node_size: 16,
+                    attribute_indices: None,
+                    geographical_extent: None,
+                },
+                &AttributeSchema::new(),
+                None,
+                None,
+            )?;
+            fbb.finish(header, None);
+            let buf = fbb.finished_data().to_vec();
+            let header = flatbuffers::root::<crate::fb::Header>(&buf).unwrap();
+            Ok(crate::reader::deserializer::to_cj_address(&header)
+                .expect("the address has a postcode, so it is not empty"))
+        };
+
+        for spelling in ["postcode", "postalCode"] {
+            let address = address_after_round_trip(serde_json::json!({
+                "locality": "Delft",
+                spelling: "2628 CN"
+            }))?;
+            assert_eq!(
+                address.members.get("postcode"),
+                Some(&serde_json::json!("2628 CN")),
+                "`{spelling}` must be accepted and written back as `postcode`"
+            );
+            assert_eq!(
+                address.members.get("postalCode"),
+                None,
+                "the header has one postcode slot; `postalCode` is not also emitted"
+            );
+            //-- the neighbouring member is untouched by the normalisation
+            assert_eq!(
+                address.members.get("locality"),
+                Some(&serde_json::json!("Delft"))
+            );
+        }
+
+        //-- and `postcode` wins when a document carries both, matching the
+        //-- `.or_else()` order in `address_either`
+        let address = address_after_round_trip(serde_json::json!({
+            "postcode": "2628 CN",
+            "postalCode": "1234 AB"
+        }))?;
+        assert_eq!(
+            address.members.get("postcode"),
+            Some(&serde_json::json!("2628 CN"))
+        );
 
         Ok(())
     }

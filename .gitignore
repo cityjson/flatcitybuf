@@ -53,6 +53,12 @@ __pycache__/
 *.env
 *.venv
 *.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# `just docs` output (src/py/justfile): pdoc renders it from the package's own
+# docstrings, so it is derived, not source. Anchored so the repo's own tracked
+# docs/ tree is unaffected.
+/src/py/docs/
 
 temp/
 data/
@@ -65,6 +71,16 @@ src/rust/fcb_core/tests/data/*.json
 *.fcb
 
 !examples/**/*.fcb
+
+# The conformance corpus IS committed: it is the shared oracle for four
+# readers, the TypeScript CI has no Rust toolchain to regenerate it, and
+# pinning the bytes is the point. `.fcb` bytes are pinned exactly (the writer
+# is byte-reproducible). `.expected.jsonl` is pinned only up to JSON equality:
+# the reader emits `CityObjects` and appearance theme maps from `HashMap`s
+# whose iteration order varies per process, so two honest runs of `deser` over
+# the same `.fcb` can differ byte-for-byte without differing in meaning. See
+# scripts/gen_conformance.sh, which regenerates these files idempotently.
+!conformance/*.fcb
 .cursor/mcp.json
 
 *.plist
@@ -76,3 +92,7 @@ flamegraph*
 build/
 
 .claude/settings.local.json
+.claude/worktrees/
+
+# subagent-driven-development scratch (briefs, reports, review packages)
+.superpowers/

@@ -1,5 +1,8 @@
 name: Publish Crate
 
+# Publishes fcb_core then fcb_cli to crates.io. fcb_api is a workspace member
+# but is not published (it is the axum server, deployed by deploy-api.yml).
+
 on:
   workflow_dispatch:
     inputs:
@@ -22,11 +25,28 @@ jobs:
           token: ${{ secrets.GA_TOKEN }}
           fetch-depth: 0
 
+      # actions-rs/* was archived by its maintainer and warns on every run;
+      # dtolnay/rust-toolchain is the maintained replacement and is what the
+      # CI workflows already use.
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
+          components: rustfmt, clippy
+
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      # A tag or manual dispatch can land on any commit, so re-run the gate
+      # here rather than trusting that CI happened to pass on this SHA. This
+      # mirrors what publish-npm.yml already does, and is what stops a
+      # regression from reaching crates.io -- where versions cannot be
+      # replaced, only yanked.
+      - name: Verify before publishing
+        working-directory: src/rust
+        run: just check
 
       - name: Install cargo-workspaces
         run: cargo install cargo-workspaces
@@ -37,9 +57,10 @@ jobs:
           git config --global user.email "actions[bot]@github.com"
 
       - name: Bump version
+        working-directory: src/rust
         run: |
-          cd src/rust
-          cargo workspaces version --all --yes --force="fcb*" --no-individual-tags ${{ github.event.inputs.version_bump }}
+          cargo workspaces version --all --yes --force="fcb*" \
+            --no-individual-tags ${{ github.event.inputs.version_bump }}
 
       - name: Configure cargo for publishing
         run: |
@@ -50,14 +71,25 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        working-directory: src/rust
         run: |
-          cd src/rust
-          # Publish fcb_core first since fcb_cli depends on it
-          cd fcb_core
-          cargo publish --allow-dirty
-          cd ..
-          # Wait a bit for crates.io to index the new version
-          sleep 30
-          # Now publish fcb_cli
-          cd cli
-          cargo publish --allow-dirty
+          # fcb_core first: fcb_cli depends on it, and crates.io must have
+          # indexed the new version before the dependent can resolve it.
+          # --allow-dirty is required because the version bump above leaves
+          # the tree modified.
+          (cd fcb_core && cargo publish --allow-dirty)
+
+          # Poll the index instead of sleeping a fixed 30s, which was a guess
+          # that either wasted time or was not long enough.
+          VERSION=$(grep "^version" fcb_core/Cargo.toml | head -1 | cut -d'"' -f2)
+          for i in $(seq 1 60); do
+            if curl -sSf "https://crates.io/api/v1/crates/fcb_core/${VERSION}" \
+                 -H "User-Agent: flatcitybuf-ci" > /dev/null 2>&1; then
+              echo "fcb_core ${VERSION} is indexed"
+              break
+            fi
+            echo "waiting for crates.io to index fcb_core ${VERSION} ($i/60)"
+            sleep 5
+          done
+
+          (cd cli && cargo publish --allow-dirty)

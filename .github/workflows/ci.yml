@@ -1,31 +1,40 @@
-name: CI
+name: CI (Rust + C++)
+
+# Rust and C++ live together here because they share the conformance corpus:
+# the Rust reader PRODUCES conformance/*.expected.jsonl and the C++ reader is
+# checked against it, so a corpus change must re-run both.
+#
+# Python and TypeScript have their own workflows (ci-python.yml, ci-ts.yml).
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "src/rust/**"
       - "src/cpp/**"
+      - "conformance/**"
+      - "justfile"
       - ".github/workflows/ci.yml"
 
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "src/rust/**"
       - "src/cpp/**"
+      - "conformance/**"
+      - "justfile"
       - ".github/workflows/ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
-  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Check
+  rust:
+    name: Rust
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -48,24 +57,24 @@ jobs:
           workspaces: src/rust
           shared-key: "fcb-rust-ci"
 
-      - name: Add wasm target
-        run: rustup target add wasm32-unknown-unknown
-
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Check Rust crates
-        run: just check-common
+      # lint + type + test + build. Read-only: `just fix` is the only recipe
+      # that rewrites source, and it is never called here.
+      - name: just check
+        run: just check
 
-      - name: Check WASM
-        run: just check-wasm
-
-  check-python:
-    name: Check Python
-    runs-on: ubuntu-latest
+  cpp:
+    name: C++ (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     defaults:
       run:
-        working-directory: src/rust
+        working-directory: src/cpp
 
     steps:
       - uses: actions/checkout@v4
@@ -73,53 +82,29 @@ jobs:
       - name: Install just task runner
         uses: taiki-e/install-action@just
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install system dependencies (Linux)
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
+          sudo apt-get install -y cmake libflatbuffers-dev nlohmann-json3-dev \
+                                  doctest-dev libcurl4-openssl-dev
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install flatbuffers nlohmann-json doctest
 
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src/rust
-          shared-key: "fcb-python-ci"
+      # lint (clang-format --dry-run --Werror) + build + test + test-http.
+      #
+      # test-http matters specifically: the HTTP adapter builds into its own
+      # tree, and its tests SKIP unless FCB_TEST_HTTP_URL is set -- which only
+      # `just test-http` does, by starting the range-capable server. Before
+      # this ran in CI every HTTP test silently skipped, which is how a stale
+      # hardcoded fixture size survived in test_http.cpp.
+      - name: just check
+        run: just check
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Check Python package
-        run: just check-py
-
-  check-cpp-roundtrip:
-    name: Check C++ Roundtrip Tests
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-    defaults:
-      run:
-        working-directory: src/cpp
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake nlohmann-json3-dev pkg-config libssl-dev
-
-      - name: Build and run roundtrip tests
-        run: |
-          mkdir -p build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
-          make -j$(nproc) fcb_roundtrip_comprehensive
-
-      - name: Run C++ roundtrip test
-        run: |
-          ./build/fcb_roundtrip_comprehensive ../rust/fcb_core/tests/data
+      # Separate from `check` because it is slow: the default build must link
+      # neither curl nor a TLS stack, and the suite must be clean under
+      # ASan/UBSan.
+      - name: Hardening (no curl/TLS symbols, ASan/UBSan)
+        run: just harden

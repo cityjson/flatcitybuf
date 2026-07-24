@@ -1,0 +1,68 @@
+# FlatCityBuf — browser viewer (React + deck.gl) on the native TS reader.
+#
+# Standard interface, identical in every justfile in this repo:
+#
+#     just check    # everything below, read-only
+#     just test | lint | type | build
+#     just fix      # the only recipe that rewrites source
+#
+# PREREQUISITE: @cityjson/flatcitybuf is a `file:../../src/ts` dependency and
+# is resolved from that package's dist/ output, so src/ts must be built first:
+#
+#     cd ../../src/ts && just build
+#
+# The root justfile's fan-out order (…, src/ts, examples/web) guarantees this.
+
+default:
+    @just --list
+
+# Type check + tests + build, read-only
+check: type test build
+
+# npm install (resolves @cityjson/flatcitybuf from ../../src/ts/dist)
+install:
+    npm install
+
+# vitest run (crs, geometry, reader)
+test: install
+    npm test
+
+# tsc --noEmit
+type: install
+    npx tsc --noEmit
+
+# vite build
+build: install
+    npm run build
+
+# No-op: no linter configured (see src/ts/justfile)
+lint:
+    @echo "examples/web: no linter configured. 'just type' is the static gate."
+
+# No-op: no formatter configured
+fix:
+    @echo "examples/web: nothing to autofix (no formatter configured)."
+
+# This is a demo application, not a published library: it exposes no API to
+# document. The recipe exists so the root justfile's `just docs` fan-out has
+# the same verb available in every directory.
+
+# No-op: an application, not a documented library
+docs:
+    @echo "examples/web: no API docs (demo application, not a published package)."
+
+# ---------------------------------------------------------------------------
+# Extras
+# ---------------------------------------------------------------------------
+
+# Start the Vite dev server, then walk through docs/TESTING.md §7.3
+dev: install
+    npm run dev
+
+# Serve the production build locally
+preview: build
+    npm run preview
+
+# Remove dist/ and node_modules/
+clean:
+    rm -rf dist node_modules

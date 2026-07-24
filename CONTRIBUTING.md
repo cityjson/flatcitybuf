@@ -35,7 +35,7 @@ Before contributing, ensure you have:
 
 - **Rust toolchain** (1.83.0 or later)
 - **Git** for version control
-- **wasm-pack** (for WebAssembly development)
+- **Node.js** ≥ 22.12 (for the TypeScript reader in `src/ts`)
 - **cargo-watch** (for development workflow)
 - **cargo-audit** (for security checks)
 
@@ -67,7 +67,7 @@ Before contributing, ensure you have:
 
    ```bash
    # Build all crates
-   cargo build --workspace --all-features --exclude fcb_wasm --release
+   cargo build --workspace --all-features --exclude fcb_py --release
 
    # Run tests
    cargo test --workspace

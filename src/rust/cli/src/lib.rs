@@ -1,8 +1,30 @@
-//! FCB CLI Library
+//! Support library for `fcb`, the FlatCityBuf command-line tool.
 //!
-//! This library exposes the merger and reader modules for integration testing.
-//! The main CLI binary is in main.rs.
+//! The binary itself lives in `src/main.rs`; installing this crate gives you
+//! `fcb`, which converts between CityJSON / CityJSONSeq and `.fcb`:
+//!
+//! ```text
+//! fcb ser     city.jsonl city.fcb   # CityJSONSeq -> .fcb  (-A indexes every
+//!                                   # attribute, -g writes the extent)
+//! fcb deser   city.fcb   city.jsonl # .fcb -> CityJSONSeq
+//! fcb info    city.fcb              # header, extent and index summary
+//! fcb inspect city.fcb              # interactive terminal UI
+//! fcb cbor    city.json  city.cbor  # CityJSON -> CBOR (size comparison)
+//! fcb bson    city.json  city.bson  # CityJSON -> BSON (size comparison)
+//! ```
+//!
+//! Input and output are positional. `ser` takes any number of inputs before
+//! the output, so `fcb ser a.jsonl b.jsonl merged.fcb` merges as it converts.
+//!
+//! The modules below are `pub` so the integration tests can drive them
+//! directly; they are not a stable API. All the format work happens in
+//! [`fcb_core`].
+//!
+//! `fcb ser` is what produces the oracle files the C++, Python and TypeScript
+//! readers are validated against, so its output is load-bearing for the whole
+//! repository.
 
+pub mod inspect;
 pub mod merger;
 pub mod reader;
 
@@ -35,4 +57,7 @@ pub enum CliError {
 
     #[error("FCB core error: {0}")]
     FcbCore(#[from] Error),
+
+    #[error("inspect requires an interactive terminal; use `fcb info` for static output")]
+    NotATerminal,
 }

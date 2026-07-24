@@ -1,0 +1,578 @@
+/** The reader facade -- ports `fcb::FcbReader` and `fcb::FeatureIterator`
+ *  (src/cpp/src/reader.cpp), themselves a port of `fcb_core::FcbReader`
+ *  (src/rust/fcb_core/src/reader/mod.rs). */
+import { toCityJSONFeature, toCityJSONMetadata } from './cityjson/index.js'
+import type { Int64Policy } from './cityjson/index.js'
+import type { CityJSON, CityJSONFeature } from './cityjson/types.js'
+import { ErrorCode, FcbError } from './errors.js'
+import { FEATURE_SIZE_PREFIX, readFeature } from './feature/index.js'
+import type { Feature } from './feature/index.js'
+import { readHeader } from './header/index.js'
+import type { HeaderView } from './header/index.js'
+import { BlobRangeReader } from './io/blob.js'
+import { DEFAULT_FETCH_SIZE, FetchRangeReader, OPEN_PREFETCH_SIZE } from './io/fetch.js'
+import type { FetchRangeReaderOpts } from './io/fetch.js'
+import { BufferedRangeReader, BytesRangeReader } from './io/range-reader.js'
+import type { RangeReader, ReadOpts } from './io/range-reader.js'
+import { queryToBBox, searchNearest, searchRtree, validateNearestPoint } from './packed-rtree/index.js'
+import type { SearchResultItem, SpatialQuery } from './packed-rtree/index.js'
+import { postFilterCandidates, requiresPostFilter } from './post-filter.js'
+import { intersectHits, searchAttributes } from './static-btree/index.js'
+
+/** A cursor over features. `featuresCount` is `undefined` when the header
+ *  does not know it: the format writes 0 for UNKNOWN, not for empty, so it
+ *  must never be reported as a count of zero. */
+export interface FeatureCursor extends AsyncIterable<Feature> {
+  /** TOTAL number of features this query matched, unaffected by
+   *  `limit`/`offset` -- it is the size of the answer, not of the page you are
+   *  about to iterate. For a filtered query it is the post-filtered match
+   *  count, never the candidate count. `undefined` means the file declares an
+   *  unknown feature count (a stored 0) and the query did not go through an
+   *  index, so no total is knowable without a full scan. */
+  readonly featuresCount: number | undefined
+}
+
+/** Comparison operators for an attribute condition: equal, not equal, greater
+ *  than, greater or equal, less than, less or equal. Spelled in the same
+ *  capitalised names the Rust reader and the FlatCityBuf query syntax use.
+ *
+ *  Declared HERE, in the R-tree task, even though nothing consumes them until
+ *  the attribute-index task: `SelectOptions.where` has to reference them, so
+ *  the alternative is a `SelectOptions` whose shape changes later. The
+ *  attribute task imports these rather than redeclaring them. */
+export type Operator = 'Eq' | 'Ne' | 'Gt' | 'Ge' | 'Lt' | 'Le'
+
+/** One attribute predicate. `value` is `unknown` because the admissible type
+ *  depends on the column's declared type, which is only known once the header
+ *  has been read. */
+export interface AttrCondition {
+  /** Column name, as it appears in `reader.header.info.columns`. An unknown
+   *  name, or a known one the writer did not index, throws
+   *  `AttributeIndexNotFound`: this reader queries indices, it never falls back
+   *  to a scan. `Json` and `Binary` columns throw `UnsupportedColumnType`. */
+  field: string
+  operator: Operator
+  /** Compared against the column's values. The admissible JS type follows the
+   *  column's `ColumnType`: `number` (integral) for the integer types,
+   *  `number` for `Float`/`Double`, `boolean` for `Bool`, `string` for
+   *  `String`, `bigint` or an integral `number` for `Long`/`ULong`, and either
+   *  a `DateTimeKey` or a `Date` for `DateTime` -- a `Date` is widened
+   *  losslessly, but only a `DateTimeKey` can express sub-millisecond
+   *  precision. Anything else throws `InvalidArgument` before any I/O. */
+  value: unknown
+}
+
+/** What to select. Every field is optional; `select()` with no options is
+ *  `selectAll()`.
+ *
+ *  `limit`/`offset` apply AFTER the search, over the sorted result list --
+ *  they page the answer, they do not change it. `featuresCount` on the
+ *  returned cursor therefore reports the TOTAL number of matches (or the
+ *  file's total, for an unfiltered select), regardless of paging. */
+export interface SelectOptions {
+  /** Spatial filter, answered from the packed Hilbert R-tree:
+   *  `{ kind: 'bbox', value: [minX, minY, maxX, maxY] }`,
+   *  `{ kind: 'point', value: [x, y] }`, or
+   *  `{ kind: 'nearest', value: [x, y] }` (at most one feature).
+   *  A file with no spatial index throws `NoIndex`. */
+  spatial?: SpatialQuery
+  /** Attribute predicates, each answered from that column's static B+tree and
+   *  AND-intersected with the others. Matching is EXISTENTIAL over a feature's
+   *  CityObjects: the feature matches if any one of its objects does. An empty
+   *  array is treated as no filter at all. */
+  where?: AttrCondition[]
+  /** At most this many features are iterated. Applied to the sorted result
+   *  list, so it pages the answer without changing it -- the cursor's
+   *  `featuresCount` still reports the total. Omitted means no cap; `0` yields
+   *  nothing. */
+  limit?: number
+  /** How many matches to skip before the first one iterated. On an indexed
+   *  query the skipped features are never read (the exception is a `String`
+   *  condition, where every candidate has to be read once to be post-filtered
+   *  before the list can be paged at all). Defaults to 0. */
+  offset?: number
+  /** Cancels the query. Threaded into the actual in-flight reads -- the index
+   *  traversal and each feature read -- not merely held on this facade, and
+   *  re-checked between features, so aborting a cursor that has already
+   *  yielded stops the reads that have not happened yet. */
+  signal?: AbortSignal
+  /** Byte size at or below which a `nearest` query fetches the WHOLE R-tree in
+   *  one read and walks it in memory, instead of streaming a read per node
+   *  range. Defaults to `WHOLE_INDEX_THRESHOLD` (256 KB). Only `nearest` reads
+   *  it. Overridable chiefly so tests can force the streaming path -- every
+   *  corpus index is below the default, so without lowering it the best-first
+   *  traversal would never execute and the fast path would mask any bug in
+   *  it. */
+  wholeIndexThreshold?: number
+}
+
+/** Sources that hold an OS resource expose `close`; in-memory ones do not.
+ *  Duck-typed rather than made part of the RangeReader interface so a test
+ *  double or a future source is not forced to implement a no-op. */
+interface Closeable {
+  close(): Promise<void> | void
+}
+
+function asCloseable(reader: RangeReader): Closeable | undefined {
+  const maybe = reader as Partial<Closeable>
+  return typeof maybe.close === 'function' ? (maybe as Closeable) : undefined
+}
+
+/** Walks the feature section from `featureBegin` to EOF.
+ *
+ *  A NATIVE async generator, deliberately. The language queues a `next()`
+ *  that arrives while a previous one is still pending and resumes the body
+ *  only once the earlier call settles, so two overlapping `next()` calls
+ *  cannot interleave their updates to `at`. That removes the need for a
+ *  hand-rolled in-flight flag and for any reentrancy error path: there is
+ *  nothing left for one to detect.
+ *
+ *  The scan runs to EOF rather than to `featuresCount`, because 0 means
+ *  UNKNOWN (conformance/no_count.fcb declares 0 and holds three features).
+ *  A declared non-zero count is still used, but only as a lower bound to
+ *  catch a truncated file -- reaching EOF early is a cut-off file, not a
+ *  clean end of iteration (reader.cpp:168-179).
+ *
+ *  `opts` is forwarded to every `readFeature` call, so an `AbortSignal`
+ *  reaches the actual in-flight reads: the next iteration's `readFeature`
+ *  rejects via `checkAborted` as soon as the signal fires, rather than the
+ *  scan running to completion regardless. */
+async function* scan(
+  reader: RangeReader,
+  header: HeaderView,
+  opts?: ReadOpts,
+): AsyncGenerator<Feature, void, undefined> {
+  const total = reader.size()
+  const declared = header.info.featuresCount
+  const columns = header.info.columns
+  let at = header.layout.featureBegin
+  let produced = 0
+
+  while (at + FEATURE_SIZE_PREFIX <= total) {
+    const { feature, next } = await readFeature(
+      reader,
+      at,
+      columns,
+      header.layout.featureBegin,
+      opts,
+    )
+    at = next
+    produced++
+    yield feature
+  }
+
+  if (declared !== 0 && produced < declared) {
+    throw new FcbError(
+      ErrorCode.IoError,
+      `truncated feature section: header declares ${declared} features, found ${produced}`,
+    )
+  }
+}
+
+/** Reads exactly the features the index pointed at, in the order the search
+ *  returned them (ascending offset, so the feature section is read forwards).
+ *
+ *  `hit.offset` is relative to `featureBegin` -- the leaf meaning of a
+ *  NodeItem's `offset` field. The signal is re-checked between features:
+ *  cancelling a cursor that has already produced its first feature has to
+ *  stop the reads that have not happened yet. */
+async function* readHits(
+  reader: RangeReader,
+  header: HeaderView,
+  hits: readonly SearchResultItem[],
+  opts: ReadOpts | undefined,
+): AsyncGenerator<Feature, void, undefined> {
+  const featureBegin = header.layout.featureBegin
+  for (const hit of hits) {
+    if (opts?.signal?.aborted) {
+      throw new FcbError(ErrorCode.IoError, 'iteration aborted')
+    }
+    const { feature } = await readFeature(
+      reader,
+      featureBegin + hit.offset,
+      header.info.columns,
+      featureBegin,
+      opts,
+    )
+    yield feature
+  }
+}
+
+/** Drops the candidates that do not survive `postFilterCandidates`, keeping
+ *  the input order (ascending offset).
+ *
+ *  Every candidate is READ here and read AGAIN by `readHits` when the caller
+ *  iterates -- the same two-pass shape as reader.cpp:396-436, which walks a
+ *  `probe` iterator and then hands a fresh one to the caller. It is what
+ *  makes `featuresCount` a match count: the total is not knowable without
+ *  decoding every candidate, and a caller who only takes the first page still
+ *  gets a correct total. The waste is bounded by the CANDIDATE set, not by
+ *  the file. */
+async function verifyHits(
+  reader: RangeReader,
+  header: HeaderView,
+  hits: readonly SearchResultItem[],
+  conditions: readonly AttrCondition[],
+  opts: ReadOpts | undefined,
+): Promise<SearchResultItem[]> {
+  const out: SearchResultItem[] = []
+  let at = 0
+  for await (const feature of readHits(reader, header, hits, opts)) {
+    // `readHits` walks `hits` in order, so the i-th feature it yields is
+    // hits[i]; `at` is incremented for every candidate, kept or not.
+    const hit = hits[at++]!
+    if (postFilterCandidates(feature, header, conditions)) out.push(hit)
+  }
+  return out
+}
+
+/** Skips `offset` items then yields at most `limit`. Used only on the
+ *  unfiltered scan; a spatial result set is a materialised array and is paged
+ *  by slicing it, so the skipped features are never read at all. */
+async function* paginate<T>(
+  src: AsyncIterable<T>,
+  offset: number,
+  limit: number | undefined,
+): AsyncGenerator<T, void, undefined> {
+  if (limit === 0) return
+  let seen = 0
+  let produced = 0
+  for await (const value of src) {
+    if (seen++ < offset) continue
+    yield value
+    produced++
+    if (limit !== undefined && produced >= limit) return
+  }
+}
+
+/** `limit`/`offset` must be non-negative integers. Checked before anything
+ *  else so a bad argument costs no I/O. */
+function validatePageArg(value: number | undefined, what: string): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isInteger(value) || value < 0) {
+    throw new FcbError(
+      ErrorCode.InvalidArgument,
+      `invalid ${what}: ${value} (must be a non-negative integer)`,
+    )
+  }
+  return value
+}
+
+/** The reader facade: open an `.fcb` resource once, then answer queries
+ *  against it.
+ *
+ *  Construct one with the static factory that matches the source --
+ *  {@link FcbReader.fromUrl} (HTTP range requests), {@link FcbReader.fromBlob}
+ *  (a browser `Blob`/`File`), {@link FcbReader.fromBytes} (an in-memory
+ *  buffer), {@link FcbReader.fromReader} (any {@link RangeReader}) -- or
+ *  `fromFile(path)` from the package's separate `"./node"` subpath, which is
+ *  where the `node:fs` source lives so the package root never imports `node:*`.
+ *  All of them are async because all of them read and validate the header up
+ *  front.
+ *
+ *  Opening reads the header and nothing else -- `fromUrl` costs exactly one
+ *  HTTP request. {@link FcbReader.select} then reads the index it needs and
+ *  only the features that matched, so a bbox query over a remote file fetches
+ *  a few index pages plus those features, never the whole file.
+ *
+ *  ```ts
+ *  const reader = await FcbReader.fromUrl('https://example.com/city.fcb')
+ *  const hits = await reader.select({
+ *    spatial: { kind: 'bbox', value: [minX, minY, maxX, maxY] },
+ *    where: [{ field: 'b3_h_dak_50p', operator: 'Gt', value: 20 }],
+ *  })
+ *  console.log(hits.featuresCount)      // total matches, not the page size
+ *  for await (const feature of hits) {
+ *    console.log(toCityJSONFeature(feature, reader.header))
+ *  }
+ *  ```
+ *
+ *  Call {@link FcbReader.close} (or use `await using`) when the source holds an
+ *  OS resource -- `fromFile` does; the in-memory, `Blob` and `fetch` sources
+ *  have nothing to release. Either way the reader is spent afterwards: a
+ *  further `select` or `selectAll` throws. */
+export class FcbReader {
+  private readonly reader: RangeReader
+  private readonly headerView: HeaderView
+  private closed = false
+
+  private constructor(reader: RangeReader, headerView: HeaderView) {
+    this.reader = reader
+    this.headerView = headerView
+  }
+
+  /** The primitive every other constructor and every later feature builds on
+   *  (Task 11's `fromUrl`, Task 12's `select`, the request-log tests).
+   *
+   *  The reader is used EXACTLY as given -- no buffering decorator is
+   *  inserted here. Caching is a property of the source, not of the facade:
+   *  wrapping unconditionally would hide how many requests a scan really
+   *  makes, which is precisely what the HTTP work needs to be able to see and
+   *  tune. A caller over a chatty transport composes
+   *  `new BufferedRangeReader(source)` itself.
+   *
+   *  A sequential scan through the resulting cursor issues TWO `read` calls
+   *  per feature, not one: `readFeature` (src/feature/index.ts) reads the
+   *  4-byte size prefix, then re-reads those same 4 bytes as part of a second,
+   *  `4 + len`-byte read for the body. See `readFeature`'s docstring for why.
+   *  This reader does nothing to hide that -- a request-count assertion
+   *  against `reader.reads.length` should expect `2 * featuresCount` (plus
+   *  the header's own reads), not `featuresCount`. `fromFile` inherits this
+   *  as-is: `FileRangeReader` has no internal buffering, so a sequential scan
+   *  costs two `pread` syscalls per feature. Callers for whom request count
+   *  matters -- HTTP chief among them -- should wrap their source in
+   *  `new BufferedRangeReader(source)` before calling `fromReader`, exactly as
+   *  the paragraph above already says for caching in general. */
+  static async fromReader(reader: RangeReader): Promise<FcbReader> {
+    return new FcbReader(reader, await readHeader(reader))
+  }
+
+  /** Reads an `.fcb` file already in memory. The bytes are COPIED (see
+   *  {@link BytesRangeReader}), so the caller may afterwards mutate the array
+   *  or transfer its `ArrayBuffer` to a worker without corrupting an open
+   *  reader. Nothing to close. */
+  static async fromBytes(bytes: Uint8Array): Promise<FcbReader> {
+    return FcbReader.fromReader(new BytesRangeReader(bytes))
+  }
+
+  /** Reads an `.fcb` file from a `Blob` -- or a `File`, which extends it, so
+   *  this is the entry point for an `<input type="file">` or a drag-and-drop
+   *  upload. Backed by `Blob.slice()`, so only the ranges a query actually
+   *  needs are ever materialised. Nothing to close. */
+  static async fromBlob(blob: Blob): Promise<FcbReader> {
+    return FcbReader.fromReader(new BlobRangeReader(blob))
+  }
+
+  /** Opens a remote `.fcb` file over `fetch`, with strict validation of the
+   *  server's Range support (see `io/fetch.ts`).
+   *
+   *  Unlike `fromReader`, this DOES wrap the source in a
+   *  `BufferedRangeReader` -- `fromReader`'s docstring explains why it
+   *  itself does not (matching the C++ reference, and leaving request
+   *  counting visible to callers who need it), and says a chatty transport
+   *  should compose one. HTTP is exactly that transport: without buffering,
+   *  the two `read()` calls `readFeature` makes per feature (a 4-byte size
+   *  prefix, then a `4 + len` body read that re-reads those same 4 bytes)
+   *  would each become a separate HTTP request.
+   *
+   *  The buffer starts at `OPEN_PREFETCH_SIZE` so its first miss -- forced
+   *  by `readHeader`'s very first `read()` call -- asks the underlying
+   *  `FetchRangeReader` for EXACTLY the window that reader already cached
+   *  during `open()` (`io/fetch.ts`'s `prefetch`), which is why opening
+   *  costs one physical request rather than two. Once the header is parsed,
+   *  the window is widened to `fetchSize` (`DEFAULT_FETCH_SIZE`, 1 MB,
+   *  unless overridden) for the feature scan that follows -- mirrors
+   *  `http_reader/mod.rs`'s own reset of `min_req_size` after `_open`. */
+  static async fromUrl(url: string, opts?: FetchRangeReaderOpts): Promise<FcbReader> {
+    const source = await FetchRangeReader.open(url, opts)
+    const buffered = new BufferedRangeReader(source, OPEN_PREFETCH_SIZE)
+    const reader = await FcbReader.fromReader(buffered)
+    buffered.setMinRequestSize(opts?.fetchSize ?? DEFAULT_FETCH_SIZE)
+    return reader
+  }
+
+  /** The parsed file header, read once when the reader was constructed:
+   *  `info` (owned metadata -- version, transform, geographical extent, the
+   *  attribute columns and which of them are indexed), `layout` (byte offsets
+   *  of the R-tree, the attribute indices and the feature section) and `raw`
+   *  (the FlatBuffers table, for the few fields `info` does not surface).
+   *  Pass it to {@link toCityJSONMetadata} for the CityJSON `metadata`
+   *  object. */
+  get header(): HeaderView {
+    return this.headerView
+  }
+
+  /** Every feature in the file, in stored order. Async because later
+   *  selection modes (spatial, attribute) must read an index before they can
+   *  produce their first feature; `selectAll` has nothing to read, so it
+   *  resolves immediately, but the signature is shared.
+   *
+   *  Takes `ReadOpts` directly (rather than a `SelectOptions`-shaped object)
+   *  because it has nothing else to validate -- no spatial query, no paging
+   *  -- so the only thing worth threading is the signal, straight into
+   *  `scan`'s reads. */
+  async selectAll(opts?: ReadOpts): Promise<FeatureCursor> {
+    if (this.closed) {
+      throw new FcbError(ErrorCode.IoError, 'selectAll on a closed FcbReader')
+    }
+    const gen = scan(this.reader, this.headerView, opts)
+    const declared = this.headerView.info.featuresCount
+    return {
+      featuresCount: declared === 0 ? undefined : declared,
+      [Symbol.asyncIterator]: () => gen,
+    }
+  }
+
+  /** The general query entry point: a spatial filter, paging, or both.
+   *
+   *  Order of operations, and it matters:
+   *   1. Validate every argument -- `limit`, `offset`, and the query geometry
+   *      -- BEFORE touching the reader, so a caller mistake never costs a
+   *      request.
+   *   2. Run the search. A spatial query descends the packed R-tree with the
+   *      header's OWN `index_node_size`; a hardcoded 16 mis-traverses any file
+   *      written with another node size. An attribute query descends one
+   *      static B+tree per condition. For a `String` column the B+tree
+   *      answers with CANDIDATES, because its keys are truncated to 50 bytes.
+   *   3. POST-FILTER those candidates against each feature's decoded,
+   *      untruncated attributes (`postFilterCandidates`). This is what turns
+   *      candidates into answers, and its position in this list is the whole
+   *      point: it runs after the intersection and BEFORE step 4.
+   *   4. Count, then page the sorted result list. `featuresCount` reports the
+   *      total MATCH count -- post-filtered, not the candidate count -- and
+   *      is unaffected by `limit`/`offset`.
+   *
+   *  A `where` and a `spatial` given together are AND-intersected on feature
+   *  offset: both index searches return their hits sorted ascending and
+   *  de-duplicated, so the intersection is a sorted merge. `nearest` with
+   *  `where` is refused outright (`UnsupportedQueryCombination`).
+   *
+   *  The `signal` is threaded into the actual reads on BOTH paths, not merely
+   *  held here: into the R-tree traversal and each hit's feature read when
+   *  `spatial` is given, and into `scan`'s per-feature reads (re-checked
+   *  between features) when it is not. A signal that only lived on this
+   *  facade would cancel nothing -- the reads are where the in-flight work
+   *  is.
+   *
+   *  @throws `FcbError` with `code` `UnsupportedQueryCombination` when
+   *  `spatial.kind` is `'nearest'` and a non-empty `where` is also given;
+   *  `NoIndex` when a spatial query is run against a file that carries no
+   *  R-tree; `AttributeIndexNotFound` when a `where` names a column that does
+   *  not exist or that the writer did not index; `UnsupportedColumnType` for a
+   *  `where` on a `Json` or `Binary` column; `InvalidArgument` for a negative
+   *  or non-integral `limit`/`offset`, a malformed query geometry, or a
+   *  `value` whose type does not match its column. */
+  async select(opts?: SelectOptions): Promise<FeatureCursor> {
+    if (this.closed) {
+      throw new FcbError(ErrorCode.IoError, 'select on a closed FcbReader')
+    }
+
+    const limit = validatePageArg(opts?.limit, 'limit')
+    const offset = validatePageArg(opts?.offset, 'offset') ?? 0
+    const where = opts?.where !== undefined && opts.where.length > 0 ? opts.where : undefined
+
+    // Checked BEFORE queryToBBox, which rejects `nearest` on its own grounds
+    // ("not implemented"): a caller who asked for both deserves to be told
+    // which COMBINATION is refused, not merely that one half is missing. A
+    // k-nearest search is a ranked, bounded walk, so intersecting it with an
+    // attribute set is not "search then filter" -- the k would have to be
+    // re-expanded until k survivors are found. Task 16 owns that decision.
+    if (opts?.spatial?.kind === 'nearest' && where !== undefined) {
+      throw new FcbError(
+        ErrorCode.UnsupportedQueryCombination,
+        'nearest cannot be combined with an attribute filter',
+      )
+    }
+
+    // Validates the geometry before any I/O, so a bad argument never costs a
+    // request. `nearest` is a ranked walk, not a rectangle, so it validates
+    // its point directly rather than lowering to a bbox.
+    if (opts?.spatial !== undefined) {
+      if (opts.spatial.kind === 'nearest') validateNearestPoint(opts.spatial.value)
+      else queryToBBox(opts.spatial)
+    }
+
+    const readOpts: ReadOpts | undefined =
+      opts?.signal === undefined ? undefined : { signal: opts.signal }
+    const info = this.headerView.info
+
+    if (opts?.spatial !== undefined || where !== undefined) {
+      let hits: SearchResultItem[] | undefined
+      if (opts?.spatial !== undefined) {
+        if (this.headerView.layout.rtreeSize === 0) {
+          throw new FcbError(ErrorCode.NoIndex, 'file has no spatial index')
+        }
+        if (opts.spatial.kind === 'nearest') {
+          // Ranked nearest-centroid walk: returns at most one hit. Threads the
+          // header's OWN index_node_size and the overridable whole-index
+          // threshold; `nearest` cannot be combined with `where` (refused
+          // above), so its result is never intersected.
+          const [px, py] = opts.spatial.value
+          hits = await searchNearest(
+            this.reader,
+            this.headerView.layout.rtreeBegin,
+            this.headerView.layout.rtreeSize,
+            info.featuresCount,
+            info.indexNodeSize,
+            px,
+            py,
+            opts.wholeIndexThreshold,
+            readOpts,
+          )
+        } else {
+          hits = await searchRtree(
+            this.reader,
+            this.headerView.layout.rtreeBegin,
+            info.featuresCount,
+            info.indexNodeSize,
+            opts.spatial,
+            readOpts,
+          )
+        }
+      }
+      if (where !== undefined) {
+        // Attribute hits are already sorted ascending by offset and
+        // de-duplicated, which is what `intersectHits` (a sorted merge)
+        // requires of both sides; `searchRtree` sorts its own the same way.
+        const attr = await searchAttributes(this.reader, this.headerView, where, readOpts)
+        hits = hits === undefined ? attr : intersectHits(hits, attr)
+      }
+      let all = hits ?? []
+      // Step 3: POST-FILTER, and it happens HERE -- after the intersection,
+      // before `all.length` is read as `featuresCount` and before `slice`
+      // pages it. A `String` column's index keys are truncated to 50 bytes
+      // and zero-padded, so its hits are candidates; verifying them any later
+      // would report candidate counts as match counts and page a list that
+      // still holds non-matches. Not gated on the query's length either --
+      // see post-filter.ts for why `'a'` collides just as `'k'*50+'alpha'`
+      // does. Skipped entirely when no condition targets such a column, which
+      // is the common case and costs no reads.
+      if (where !== undefined && all.length > 0 && requiresPostFilter(this.headerView, where)) {
+        all = await verifyHits(this.reader, this.headerView, all, where, readOpts)
+      }
+      const page = limit === undefined ? all.slice(offset) : all.slice(offset, offset + limit)
+      const gen = readHits(this.reader, this.headerView, page, readOpts)
+      return {
+        featuresCount: all.length,
+        [Symbol.asyncIterator]: () => gen,
+      }
+    }
+
+    const declared = info.featuresCount
+    const gen = paginate(scan(this.reader, this.headerView, readOpts), offset, limit)
+    return {
+      // 0 means UNKNOWN, never "empty" -- same rule as selectAll.
+      featuresCount: declared === 0 ? undefined : declared,
+      [Symbol.asyncIterator]: () => gen,
+    }
+  }
+
+  /** The whole file as a CityJSONSeq stream: the metadata line first, then
+   *  one line per feature, in stored order.
+   *
+   *  An async generator rather than an array, for the same reason `selectAll`
+   *  is a cursor: a city model does not have to fit in memory, and a caller
+   *  writing `.jsonl` wants to emit each line as it arrives. Callers who do
+   *  want it all can `Array.fromAsync`. */
+  async *cityjson(opts?: Int64Policy): AsyncGenerator<CityJSON | CityJSONFeature, void, undefined> {
+    yield toCityJSONMetadata(this.headerView, opts)
+    for await (const feature of await this.selectAll()) {
+      yield toCityJSONFeature(feature, this.headerView, opts)
+    }
+  }
+
+  /** Releases the underlying reader if it holds an OS resource -- `fromFile`
+   *  opens a `node:fs` handle that has to stay open for later queries and so
+   *  cannot be closed inside `fromFile`. Idempotent, and a no-op that
+   *  resolves immediately for in-memory sources. */
+  async close(): Promise<void> {
+    if (this.closed) return
+    this.closed = true
+    await asCloseable(this.reader)?.close()
+  }
+
+  /** Lets callers write `await using r = await fromFile(path)`. */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close()
+  }
+}

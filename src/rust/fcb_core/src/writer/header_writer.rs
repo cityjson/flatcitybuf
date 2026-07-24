@@ -84,12 +84,14 @@ impl<'a> HeaderWriter<'a> {
         semantic_attr_schema: Option<AttributeSchema>,
     ) -> HeaderWriter<'a> {
         let fbb = FlatBufferBuilder::new();
-        let index_node_size = if options.write_index {
-            PackedRTree::DEFAULT_NODE_SIZE
-        } else {
-            0
-        };
-        options.index_node_size = index_node_size;
+        // `index_node_size` is the caller's; only `write_index: false` may
+        // override it, and then only to 0, which is how the header says "no
+        // R-tree". Forcing DEFAULT_NODE_SIZE here made the field write-only
+        // and every file's node size 16, so no reader could be tested
+        // against a non-default one.
+        if !options.write_index {
+            options.index_node_size = 0;
+        }
         HeaderWriter {
             fbb,
             cj,

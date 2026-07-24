@@ -1,0 +1,229 @@
+import { spawn, type ChildProcess } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { FcbError } from '../src/errors.js'
+import { FetchRangeReader } from '../src/io/fetch.js'
+import { FcbReader } from '../src/reader.js'
+
+// `__dirname` does not exist under ESM (this package is "type": "module");
+// the port-wide convention is `import.meta.dirname`, as in every other test
+// file under test/ (sources.test.ts, header.test.ts, conformance.test.ts,
+// features.test.ts, generated.test.ts). The task brief's test spelled this
+// `__dirname` -- adapted here, nothing else about the brief's test changed.
+const CORPUS = resolve(import.meta.dirname, '../../../conformance')
+const SERVER = resolve(import.meta.dirname, '../../cpp/tests/range_server.py')
+let proc: ChildProcess
+let base: string
+
+beforeAll(async () => {
+  proc = spawn('python3', [SERVER, CORPUS])
+  base = await new Promise<string>((ok, reject) => {
+    // A bare `spawn` + `on('data')` with no other listeners hangs forever if
+    // python3 is missing or the server dies before printing a port: the
+    // promise simply never settles. Fail fast instead.
+    const timer = setTimeout(
+      () => reject(new Error('range_server.py did not print a port within 10s')), 10_000)
+    const settle = (fn: () => void) => { clearTimeout(timer); fn() }
+    proc.once('error', (err) => settle(() => reject(err)))
+    proc.once('exit', (code) =>
+      settle(() => reject(new Error(`range_server.py exited early (code ${code})`))))
+    proc.stdout!.on('data', (d: Buffer) => {
+      const m = /(\d+)/.exec(d.toString())
+      if (m) settle(() => ok(`http://127.0.0.1:${m[1]}`))
+    })
+  })
+})
+
+// SIGKILL the server and AWAIT its exit. A fire-and-forget `proc.kill()` let
+// vitest proceed to teardown while the child -- and undici's pooled HTTP/1.1
+// keep-alive sockets to it (the server sets `protocol_version = "HTTP/1.1"`)
+// -- were still open. Those open handles kept the node process alive until
+// vitest's ~10-minute forced-exit fallback, so `npx vitest run` appeared to
+// hang for ~11 minutes even though every test had already passed in seconds.
+// Killing the server closes its sockets, which RSTs the client sockets and
+// unrefs the event loop, so the run exits promptly.
+afterAll(async () => {
+  if (proc === undefined || proc.exitCode !== null || proc.signalCode !== null) return
+  await new Promise<void>((done) => {
+    proc.once('exit', () => done())
+    proc.kill('SIGKILL')
+  })
+})
+
+describe('FetchRangeReader', () => {
+  it('learns its size from Content-Range at open', async () => {
+    const r = await FetchRangeReader.open(`${base}/small.fcb`)
+    expect(r.size()).toBe(readFileSync(resolve(CORPUS, 'small.fcb')).length)
+  })
+
+  it('serves the same bytes as the local reader', async () => {
+    const local = new Uint8Array(readFileSync(resolve(CORPUS, 'small.fcb')))
+    const r = await FetchRangeReader.open(`${base}/small.fcb`)
+    expect(Array.from(await r.read(8, 16))).toEqual(Array.from(local.subarray(8, 24)))
+  })
+
+  it('THROWS when the server ignores Range and returns 200', async () => {
+    // The wasm client accepts this and every later offset reads garbage.
+    await expect(FetchRangeReader.open(`${base}/small.fcb?ignore_range=1`))
+      .rejects.toThrow(FcbError)
+  })
+
+  it('throws on a malformed Content-Range', async () => {
+    await expect(FetchRangeReader.open(`${base}/small.fcb?bad_range=1`))
+      .rejects.toThrow(FcbError)
+  })
+
+  it('throws when the server returns a DIFFERENT range than requested', async () => {
+    // Indistinguishable from success unless the start/end are checked.
+    await expect(FetchRangeReader.open(`${base}/small.fcb?wrong_offset=1`))
+      .rejects.toThrow(FcbError)
+  })
+
+  it('aborts in-flight requests when the signal fires', async () => {
+    const ac = new AbortController()
+    const r = await FetchRangeReader.open(`${base}/small.fcb`)
+    ac.abort()
+    await expect(r.read(0, 16, { signal: ac.signal })).rejects.toThrow()
+  })
+
+  // The test above only proves the ALREADY-aborted case (Task 5's
+  // BufferedRangeReader-style `checkAborted` alone would pass it). The
+  // task brief for this reader specifically calls out that nothing
+  // upstream re-checks mid-flight, so THIS reader's `fetch()` call must
+  // itself observe the signal. Proven here with a `fetch` stub that never
+  // settles on its own -- it only rejects when the signal it was given
+  // fires -- so a passing test can only mean the signal actually reached
+  // the underlying `fetch()` call while the request was in flight.
+  it('really wires the signal into fetch -- rejects on a MID-FLIGHT abort, not just an already-aborted one', async () => {
+    const ac = new AbortController()
+    let sawSignal: AbortSignal | undefined
+    const stub: typeof fetch = (_url, init) => {
+      sawSignal = init?.signal as AbortSignal | undefined
+      return new Promise((_resolve, reject) => {
+        sawSignal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted by test stub', 'AbortError'))
+        })
+      })
+    }
+
+    const opening = FetchRangeReader.open(`${base}/small.fcb`, { fetch: stub, signal: ac.signal })
+    // The signal is not aborted when the request is issued -- only after,
+    // while `opening` is still pending -- so this is a genuine mid-flight
+    // abort, not the already-aborted-at-entry shortcut.
+    expect(ac.signal.aborted).toBe(false)
+    ac.abort()
+    await expect(opening).rejects.toThrow(FcbError)
+    expect(sawSignal).toBeDefined()
+  })
+})
+
+describe('FcbReader.fromUrl', () => {
+  it('scans a remote file to the same CityJSON as the local one', async () => {
+    const remote = await FcbReader.fromUrl(`${base}/small.fcb`)
+    const local = await FcbReader.fromBytes(
+      new Uint8Array(readFileSync(resolve(CORPUS, 'small.fcb'))))
+    const ids = async (r: FcbReader) => {
+      const out: string[] = []
+      for await (const f of await r.selectAll()) out.push(f.id)
+      return out
+    }
+    expect(await ids(remote)).toEqual(await ids(local))
+  })
+
+  it('opens with ONE request, not one per section', async () => {
+    // The 12944-byte prefetch buys magic + header + the top 3 rtree levels.
+    let calls = 0
+    const counting: typeof fetch = (...args) => { calls++; return fetch(...args) }
+    await FcbReader.fromUrl(`${base}/small.fcb`, { fetch: counting })
+    expect(calls).toBe(1)
+  })
+
+  // The test above only proves the OPEN is cheap -- it would pass identically
+  // if `fromUrl` never wrapped its source in a `BufferedRangeReader` at all,
+  // because every read `readHeader` issues already lands inside
+  // `FetchRangeReader`'s own one-time `open()` prefetch (io/fetch.ts's
+  // `prefetch`, exactly `OPEN_PREFETCH_SIZE` = 12944 bytes). What the wrap
+  // actually buys is cheap READS: without it, `readFeature`
+  // (src/feature/index.ts) issues two `read()` calls per feature -- a 4-byte
+  // size prefix, then a `4 + len` body read that re-reads those same 4 bytes
+  // -- and each one that misses the prefetch window becomes its own HTTP
+  // request. This test scans the whole file and counts requests, so a
+  // regression that drops the wrap (or breaks `setMinRequestSize`) shows up
+  // here even though the open test above stays green.
+  it('scans the whole file with a BOUNDED number of requests, not two per feature', async () => {
+    // small.fcb is 20358 bytes; `readHeader` puts featureBegin at 7054, well
+    // inside the 12944-byte open prefetch, so parsing the header costs zero
+    // extra requests (confirmed by the test above). The scan then walks 3
+    // features forward from byte 7054 entirely inside that same buffered
+    // window -- until one feature's read finally crosses byte 12944. That
+    // MISS triggers exactly one more inner read, sized to at least
+    // `minRequestSize` (reset to `DEFAULT_FETCH_SIZE`, 1 MB, once the header
+    // is parsed) but capped at `size() - offset`; since everything left in
+    // the 20358-byte file is well under 1 MB, that single over-fetch swallows
+    // the rest of the file in one request. So a full scan costs exactly 2
+    // physical requests: the `open()` prefetch, and that one overflow fetch
+    // (measured directly: `bytes=0-12943` then `bytes=10966-20357`).
+    //
+    // Without the `BufferedRangeReader` wrap, the same scan costs 4 requests
+    // over this file (measured by deliberately removing the wrap from
+    // `fromUrl`): the open prefetch still absorbs the header's own reads
+    // (`FetchRangeReader`'s prefetch cache does that on its own), but each of
+    // the two `read()` calls per feature that falls outside the prefetch
+    // window becomes its own physical request instead of sharing one
+    // over-fetch. `toBe(2)`, not a loose upper bound, is what actually fails
+    // if the wrap regresses.
+    let calls = 0
+    const counting: typeof fetch = (...args) => { calls++; return fetch(...args) }
+    const r = await FcbReader.fromUrl(`${base}/small.fcb`, { fetch: counting })
+    const ids: string[] = []
+    for await (const f of await r.selectAll()) ids.push(f.id)
+    expect(ids.length).toBe(3)
+    expect(calls).toBe(2)
+  })
+})
+
+// ---------------------------------------------------- live remote (opt-in) ---
+//
+// The published 3DBAG file (~68 GB, EPSG:28992), read over real cross-origin
+// HTTP range requests. SKIPPED unless FCB_REMOTE_HTTP_URL is set, so `npx
+// vitest run` never touches the network or downloads 68 GB. Enable it with
+// `just test-remote` (which sets the env var), or point it at any
+// current-format file.
+//
+// The expected values were cross-checked across the Rust, C++, Python and
+// TypeScript readers on 2026-07-23; all four agree. Update all four suites in
+// lock-step if the file is regenerated (this one, http.test.cpp,
+// test_http.py, http.rs).
+const REMOTE_URL = process.env.FCB_REMOTE_HTTP_URL ?? ''
+const REMOTE_FEATURES_COUNT = 10_771_547
+// ~1 km box over central Amsterdam: [minX, minY, maxX, maxY].
+const REMOTE_BBOX: [number, number, number, number] = [120_000, 486_000, 121_000, 487_000]
+const REMOTE_BBOX_COUNT = 2762
+
+describe.skipIf(!REMOTE_URL)('live 3DBAG over HTTP', () => {
+  it('opens, reports the feature count, and queries a bbox with bounded requests', async () => {
+    // A real fetch counter: proves the 68 GB body is never downloaded.
+    let calls = 0
+    const counting: typeof fetch = (...args) => { calls++; return fetch(...args) }
+
+    // Opening must succeed (the header verifies -> the file is in the
+    // post-alignment-fix format) and cost a handful of requests, not a scan.
+    const reader = await FcbReader.fromUrl(REMOTE_URL, { fetch: counting })
+    expect(reader.header.info.featuresCount).toBe(REMOTE_FEATURES_COUNT)
+    const openCalls = calls
+    expect(openCalls).toBeLessThanOrEqual(4)
+
+    const cursor = await reader.select({
+      spatial: { kind: 'bbox', value: REMOTE_BBOX },
+    })
+    // Exact, and identical to what Rust, C++ and Python return for this box.
+    expect(cursor.featuresCount).toBe(REMOTE_BBOX_COUNT)
+
+    // The bbox query is more requests than the open, but still a small,
+    // bounded number -- never one-per-feature and never the whole file.
+    const queryCalls = calls - openCalls
+    expect(queryCalls).toBeGreaterThan(0)
+    expect(queryCalls).toBeLessThan(200)
+  }, 60_000)
+})

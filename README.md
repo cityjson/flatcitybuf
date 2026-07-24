@@ -52,7 +52,7 @@ Traditional CityJSON formats face significant challenges in large-scale urban ap
 | **☁️ Cloud Optimized**    | HTTP range requests for partial data retrieval            |
 | **🗺️ Spatial Indexing**   | Packed R-tree for lightning-fast spatial queries          |
 | **🔍 Attribute Indexing** | Static B+Tree for instant attribute-based filtering       |
-| **🌐 Multi-platform**     | Rust core with WASM bindings for web applications         |
+| **🌐 Multi-platform**     | Rust core plus a pure TypeScript reader for the browser and Node.js |
 
 ---
 
@@ -79,7 +79,7 @@ FlatCityBuf delivers **10-20× faster** data retrieval compared to CityJSONTextS
 flatcitybuf/
 ├── 📦 fcb_core/          # Core library for reading/writing FlatCityBuf
 ├── 🛠️ fcb_cli/           # Command-line interface and tools
-├── 🌐 fcb_wasm/         # WebAssembly bindings for browsers
+├── 🌐 src/ts/           # Pure TypeScript reader (browser + Node.js)
 ├── 📚 docs/             # Documentation and examples
 └── 🧪 examples/         # Usage examples and tutorials
 ```
@@ -90,16 +90,16 @@ flatcitybuf/
 - **Serialization**: FlatBuffers schema with custom optimizations
 - **Spatial Index**: Packed R-tree for efficient range queries
 - **Attribute Index**: Static B+Tree for attribute indexing
-- **Web Support**: WebAssembly bindings via wasm-pack
+- **Web Support**: Pure TypeScript reader (`@cityjson/flatcitybuf`), no WebAssembly
 - **CLI**: Comprehensive command-line tools
 
 ### Language Bindings
 
 FlatCityBuf provides bindings for multiple languages:
 
-- **[Python](src/rust/fcb_py/README.md)** – Read and query FlatCityBuf files from Python
+- **[Python](src/py/README.md)** – Pure-Python reader, no compiled dependency (`pip install flatcitybuf`)
 - **[C++](src/cpp/README.md)** – Native C++ bindings via CXX bridge
-- **[WebAssembly](src/rust/wasm/README.md)** – Use FlatCityBuf in the browser or Node.js
+- **[TypeScript](src/ts/README.md)** – Pure TypeScript reader for the browser or Node.js (`@cityjson/flatcitybuf`)
 
 ---
 
@@ -108,7 +108,7 @@ FlatCityBuf provides bindings for multiple languages:
 ### Prerequisites
 
 - **Rust toolchain** (1.83.0 or later)
-- **wasm-pack** (for WebAssembly builds)
+- **Node.js** ≥ 22.12 (for the TypeScript reader in `src/ts`)
 
 ### 📦 Installation
 
@@ -146,11 +146,12 @@ git clone https://github.com/HideBa/flatcitybuf.git
 cd flatcitybuf/src/rust
 
 # Build the core library and CLI
-cargo build --workspace --all-features --exclude fcb_wasm --release
-
-# Build WebAssembly module (optional)
-cd wasm && wasm-pack build --target web --release --out-dir ../../ts
+cargo build --workspace --all-features --exclude fcb_py --release
 ```
+
+The browser/Node.js reader is a separate pure TypeScript package in `src/ts`
+(published as `@cityjson/flatcitybuf`); build it with `npm ci && npm run build`
+from `src/ts`. See [src/ts/README.md](src/ts/README.md).
 
 ### 🛠️ CLI Usage
 
@@ -158,25 +159,30 @@ cd wasm && wasm-pack build --target web --release --out-dir ../../ts
 
 Replace `cargo run -p fcb_cli --` with `fcb` in the following commands if you want to use the installed binary directly.
 
+Input and output are positional: the input comes first, the output second.
+
 ```bash
 # Basic conversion from CityJSONSeq
-fcb ser -i input.city.jsonl -o output.fcb
+fcb ser input.city.jsonl output.fcb
 
 # Convert standard CityJSON file
-fcb ser -i city.city.json -o output.fcb
+fcb ser city.city.json output.fcb
 
-# Multiple input files
-fcb ser -i file1.city.jsonl file2.city.jsonl -o merged.fcb
+# Multiple input files -- the last positional is the output
+fcb ser file1.city.jsonl file2.city.jsonl merged.fcb
 
 # Glob patterns to process all matching files
-fcb ser -i 'data/*.city.jsonl' -o output.fcb
-fcb ser -i 'cities/**/*.city.json' -o all_cities.fcb
+fcb ser 'data/*.city.jsonl' output.fcb
+fcb ser 'cities/**/*.city.json' all_cities.fcb
 
 # With spatial index and attribute index
-fcb ser -i data.city.jsonl -o data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
+fcb ser data.city.jsonl data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
+
+# Back to CityJSONSeq
+fcb deser data.fcb output.city.jsonl
 
 # Show information about the file
-fcb info -i data.fcb
+fcb info data.fcb
 ```
 
 ### 🧪 Run Benchmarks

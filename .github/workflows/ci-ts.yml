@@ -1,0 +1,93 @@
+name: CI (TypeScript)
+
+# Covers both the reader package (src/ts) and the web example that consumes it
+# (examples/web) -- the example resolves @cityjson/flatcitybuf from
+# ../../src/ts through a `file:` dependency, so a change to the reader can
+# break the example and nothing else would catch it.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "src/ts/**"
+      - "examples/web/**"
+      - "src/cpp/tests/range_server.py"
+      - "conformance/**"
+      - ".github/workflows/ci-ts.yml"
+
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "src/ts/**"
+      - "examples/web/**"
+      - "src/cpp/tests/range_server.py"
+      - "conformance/**"
+      - ".github/workflows/ci-ts.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    defaults:
+      run:
+        working-directory: src/ts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # test/http.test.ts spawns src/cpp/tests/range_server.py, so python3 has
+      # to be present even for the Node suite.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # lint + type + test + test-browser + build. Chromium is installed below
+      # so the browser project can run in the same job.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: just check
+        run: just check
+
+  # Separate job: the example is a downstream consumer of src/ts, and it needs
+  # the reader BUILT (its dist/) before `npm install` can resolve the `file:`
+  # dependency. Nothing checked this before -- examples/web had no CI at all.
+  web-example:
+    name: Web example
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the reader package (examples/web resolves its dist/)
+        run: just build
+        working-directory: src/ts
+
+      - name: just check
+        run: just check
+        working-directory: examples/web

@@ -1,140 +1,101 @@
-# Installing Pre-built C++ Bindings
+# Installing the FlatCityBuf C++ library
 
-Pre-built binaries for FlatCityBuf C++ bindings are available on [GitHub Releases](https://github.com/cityjson/flatcitybuf/releases).
+A native C++17 reader. **No Rust toolchain, no CXX bridge, no TLS dependency.**
 
-## Available Platforms
+## Dependencies
 
-| Platform          | Asset                          | Archive   |
-| ----------------- | ------------------------------ | --------- |
-| Linux (x86_64)    | `fcb_cpp-linux-x86_64.tar.gz`  | `.tar.gz` |
-| Linux (aarch64)   | `fcb_cpp-linux-aarch64.tar.gz` | `.tar.gz` |
-| macOS (x86_64)    | `fcb_cpp-macos-x86_64.tar.gz`  | `.tar.gz` |
-| macOS (aarch64)   | `fcb_cpp-macos-aarch64.tar.gz` | `.tar.gz` |
-| Windows (x86_64)  | `fcb_cpp-windows-x86_64.zip`   | `.zip`    |
+| Dependency | Required? | Why |
+|---|---|---|
+| `flatbuffers` | yes | the on-disk format |
+| `nlohmann-json` | `FCB_WITH_JSON=ON` (default) | CityJSON emission |
+| `libcurl` | `FCB_WITH_CURL=ON` (default **OFF**) | HTTP range requests |
+| `doctest` | `FCB_BUILD_TESTS=ON` (default) | tests only, never installed |
 
-## Package Contents
-
-Each release package contains:
-
-```text
-├── libfcb_cpp.a      # Static library (Rust-compiled core)
-├── lib.rs.h          # CXX bridge generated header (type definitions)
-├── lib.rs.cc         # CXX bridge generated source (must be compiled with your code)
-└── fcb.h             # High-level API header with Doxygen documentation
-```
-
-## Installation Steps
-
-### Linux / macOS
+The default build links **neither curl nor any TLS library** — CI asserts
+this. When you do enable the HTTP adapter, libcurl brings its own platform
+TLS (Schannel / SecureTransport / system OpenSSL), so this library still never
+link-depends on a TLS stack.
 
 ```bash
-# Detect your platform and download the matching archive
-ARCH=$(uname -m)
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-
-if [[ "$OS" == "darwin" ]]; then
-  ASSET="fcb_cpp-macos-${ARCH}.tar.gz"
-else
-  # Map x86_64 / aarch64 directly to asset names
-  ASSET="fcb_cpp-linux-${ARCH}.tar.gz"
-fi
-
-curl -LO "https://github.com/cityjson/flatcitybuf/releases/latest/download/${ASSET}"
-
-# Create install directory and extract
-mkdir -p fcb_cpp
-tar -xzf "${ASSET}" -C fcb_cpp
-
-# Option A: Copy to your project's third-party directory
-cp -r fcb_cpp /path/to/your/project/third_party/
-
-# Option B: Install system-wide (requires sudo)
-sudo mkdir -p /usr/local/include/fcb
-sudo cp fcb_cpp/lib.rs.h fcb_cpp/fcb.h /usr/local/include/fcb/
-sudo cp fcb_cpp/libfcb_cpp.a /usr/local/lib/
+# macOS
+brew install flatbuffers nlohmann-json doctest
+# Debian / Ubuntu
+sudo apt-get install libflatbuffers-dev nlohmann-json3-dev doctest-dev
 ```
 
-### Windows
+## Build and install
 
-```powershell
-# Download and extract
-Invoke-WebRequest -Uri "https://github.com/cityjson/flatcitybuf/releases/latest/download/fcb_cpp-windows-x86_64.zip" -OutFile "fcb_cpp-windows-x86_64.zip"
-Expand-Archive -Path fcb_cpp-windows-x86_64.zip -DestinationPath fcb_cpp
+```bash
+cd src/cpp
+cmake -B build -S .
+cmake --build build
+cmake --install build --prefix /your/prefix
 ```
 
-## Using in Your Project
+Useful options: `-DFCB_WITH_CURL=ON` (HTTP), `-DFCB_WITH_JSON=OFF` (drop
+CityJSON emission and the nlohmann dependency), `-DFCB_BUILD_TESTS=OFF`,
+`-DFCB_BUILD_EXAMPLES=OFF`.
 
-### CMake Integration
+## Use from CMake
 
 ```cmake
-cmake_minimum_required(VERSION 3.16)
-project(my_app LANGUAGES CXX)
-set(CMAKE_CXX_STANDARD 17)
-
-# Path to extracted FlatCityBuf bindings
-set(FCB_DIR ${CMAKE_SOURCE_DIR}/fcb_cpp)
-
-add_executable(my_app main.cpp ${FCB_DIR}/lib.rs.cc)
-target_include_directories(my_app PRIVATE ${FCB_DIR})
-target_link_libraries(my_app ${FCB_DIR}/libfcb_cpp.a)
-
-# Platform-specific dependencies
-if(APPLE)
-    target_link_libraries(my_app
-        "-framework Security"
-        "-framework CoreFoundation"
-        "-framework SystemConfiguration"
-    )
-elseif(WIN32)
-    target_link_libraries(my_app
-        ws2_32
-        userenv
-        bcrypt
-        ntdll
-    )
-elseif(UNIX)
-    find_package(OpenSSL REQUIRED)
-    target_link_libraries(my_app
-        OpenSSL::SSL
-        OpenSSL::Crypto
-        pthread dl m
-    )
-endif()
+find_package(flatcitybuf CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE flatcitybuf::flatcitybuf)
 ```
 
-### Makefile Integration
+That is the whole integration. There is no generated bridge source to compile
+alongside your code, unlike the retired FFI bindings.
 
-```makefile
-CXX       = g++
-CXXFLAGS  = -std=c++17 -I./fcb_cpp
-LDFLAGS   = ./fcb_cpp/libfcb_cpp.a -lpthread -ldl -lm
+## Reading a file
 
-# Platform-specific dependencies
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-    LDFLAGS += -framework Security -framework CoreFoundation -framework SystemConfiguration
-else ifeq ($(UNAME_S),Linux)
-    LDFLAGS += -lssl -lcrypto
-endif
+```cpp
+#include <fcb/reader.hpp>
+#include <fcb/cityjson.hpp>
 
-my_app: main.cpp ./fcb_cpp/lib.rs.cc
-    $(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+fcb::FcbReader r = fcb::FcbReader::open_file("city.fcb");
+auto it = r.select_bbox({84500, 445800, 85000, 446500});
+while (it.next()) {
+    std::cout << fcb::to_cityjson_feature(it.current(), r.header()).dump() << "\n";
+}
 ```
 
-## Version Compatibility
+## Reading over HTTP
 
-Pre-built binaries are built with:
+Build with `-DFCB_WITH_CURL=ON`:
 
-- **Rust**: stable toolchain (1.70+)
-- **C++**: C++17 standard
-- **CMake**: 3.16+
+```cpp
+#include <fcb/http/curl_range_reader.hpp>
 
-> **Linux prerequisite:** OpenSSL development libraries are required at link time. Install with:
-> ```bash
-> sudo apt-get install libssl-dev   # Debian/Ubuntu
-> sudo dnf install openssl-devel    # Fedora/RHEL
-> ```
+auto transport = std::make_shared<fcb::CurlRangeReader>("https://example.org/city.fcb");
+fcb::FcbReader r = fcb::FcbReader::open(transport);
+auto it = r.select_bbox({84500, 445800, 85000, 446500});
+```
 
-## Building from Source
+Only the intersecting features are fetched, not the whole file.
 
-If pre-built binaries don't meet your needs, see [README.md](README.md) for instructions on building from source.
+## Bringing your own transport
+
+`fcb::RangeReader` is the extension point — implement it to read from an
+engine VFS, an object store, memory, or anything else:
+
+```cpp
+class MyReader : public fcb::RangeReader {
+    std::uint64_t total_size() override { ... }
+    std::vector<std::uint8_t> read(std::uint64_t offset, std::uint64_t length) override { ... }
+    // Optionally override read_batch() to pipeline or multiplex.
+};
+```
+
+The interface is deliberately **synchronous**: batching, not asynchrony, is the
+concurrency primitive. A blocking interface is trivially wrapped by whatever
+threading model your application already has, whereas an imposed async runtime
+is not. Read the contract comment in `include/fcb/range_reader.hpp` before
+implementing — short reads, error reporting, ordering and representation
+stability are all specified there.
+
+## Not implemented
+
+- **Writing.** Producing `.fcb` files still requires the Rust CLI.
+- **Appearance** (texture and material mappings) is not decoded. Everything
+  else — attributes, geometry, semantics, geometry templates, extents,
+  relationships — is.

@@ -1,154 +1,121 @@
 cmake_minimum_required(VERSION 3.16)
-project(fcb_cpp VERSION 0.1.0 LANGUAGES CXX)
+project(flatcitybuf VERSION 0.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Find cxxbridge CLI tool
-find_program(CXXBRIDGE cxxbridge)
-if(NOT CXXBRIDGE)
-    message(STATUS "cxxbridge not found, installing via cargo...")
-    execute_process(
-        COMMAND cargo install cxxbridge-cmd
-        RESULT_VARIABLE CXXBRIDGE_INSTALL_RESULT
-    )
-    find_program(CXXBRIDGE cxxbridge REQUIRED)
+option(FCB_WITH_JSON   "Build the CityJSON conversion component" ON)
+option(FCB_WITH_CURL   "Build the libcurl HTTP range reader"     OFF)
+option(FCB_BUILD_TESTS "Build tests"                             ON)
+option(FCB_BUILD_EXAMPLES "Build example programs"               ON)
+
+find_package(flatbuffers CONFIG REQUIRED)
+
+add_library(fcb_core_cpp STATIC
+    src/layout.cpp
+    src/range_reader.cpp
+    src/header.cpp
+    src/reader.cpp
+    src/packed_rtree.cpp
+    src/key.cpp
+    src/attribute.cpp
+    src/geometry.cpp
+    src/cityjson.cpp
+    src/stree.cpp
+)
+
+target_include_directories(fcb_core_cpp PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_include_directories(fcb_core_cpp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(fcb_core_cpp PUBLIC flatbuffers::flatbuffers)
+
+if(FCB_WITH_JSON)
+    find_package(nlohmann_json 3.2.0 CONFIG REQUIRED)
+    target_link_libraries(fcb_core_cpp PUBLIC nlohmann_json::nlohmann_json)
+    target_compile_definitions(fcb_core_cpp PUBLIC FCB_WITH_JSON=1)
+    target_sources(fcb_core_cpp PRIVATE src/writer/attribute.cpp src/writer/geom_encoder.cpp
+                                        src/writer/feature_serializer.cpp
+                                        src/writer/header_serializer.cpp
+                                        src/writer/rtree_builder.cpp
+                                        src/writer/btree_builder.cpp
+                                        src/writer/fcb_writer.cpp)
 endif()
 
-# Configuration
-set(RUST_LIB_DIR ${CMAKE_SOURCE_DIR}/../rust)
-set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
-file(MAKE_DIRECTORY ${GENERATED_DIR})
-
-# Platform-specific Rust static library name
-if(WIN32)
-    set(RUST_LIB_NAME fcb_cpp.lib)
-else()
-    set(RUST_LIB_NAME libfcb_cpp.a)
-endif()
-set(RUST_LIB_PATH ${RUST_LIB_DIR}/target/release/${RUST_LIB_NAME})
-
-# Build Rust static library (without http feature to avoid OpenSSL dependency)
-add_custom_command(
-    OUTPUT ${RUST_LIB_PATH}
-    COMMAND cargo build --release -p fcb_cpp --no-default-features
-    WORKING_DIRECTORY ${RUST_LIB_DIR}
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/reader.rs
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/writer.rs
-    COMMENT "Building Rust fcb_cpp library (without http feature)"
-)
-
-add_custom_target(rust_library DEPENDS ${RUST_LIB_PATH})
-
-# Generate C++ bridge code
-add_custom_command(
-    OUTPUT ${GENERATED_DIR}/lib.rs.h
-    COMMAND ${CXXBRIDGE} ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs --header > ${GENERATED_DIR}/lib.rs.h
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs
-    COMMENT "Generating C++ header from CXX bridge"
-)
-
-add_custom_command(
-    OUTPUT ${GENERATED_DIR}/lib.rs.cc
-    COMMAND ${CXXBRIDGE} ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs > ${GENERATED_DIR}/lib.rs.cc
-    DEPENDS ${RUST_LIB_DIR}/fcb_cpp/src/lib.rs
-    COMMENT "Generating C++ source from CXX bridge"
-)
-
-# Create fcb library
-add_library(fcb STATIC
-    ${GENERATED_DIR}/lib.rs.cc
-)
-
-add_dependencies(fcb rust_library)
-
-target_include_directories(fcb PUBLIC
-    ${GENERATED_DIR}
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-target_link_libraries(fcb
-    ${RUST_LIB_PATH}
-)
-
-# Windows-specific system libraries needed by Rust
-if(WIN32)
-    target_link_libraries(fcb
-        ws2_32
-        userenv
-        bcrypt
-        ntdll
-    )
+if(FCB_WITH_CURL)
+    find_package(CURL REQUIRED)
+    target_sources(fcb_core_cpp PRIVATE src/http/curl_range_reader.cpp)
+    target_link_libraries(fcb_core_cpp PUBLIC CURL::libcurl)
+    target_compile_definitions(fcb_core_cpp PUBLIC FCB_WITH_CURL=1)
 endif()
 
-# Platform-specific linking
-if(APPLE)
-    target_link_libraries(fcb
-        "-framework Security"
-        "-framework CoreFoundation"
-        "-framework SystemConfiguration"
-    )
-elseif(UNIX)
-    # Linux: link against OpenSSL if the Rust library was built with http feature
-    find_package(OpenSSL)
-    if(OPENSSL_FOUND)
-        target_link_libraries(fcb OpenSSL::SSL OpenSSL::Crypto)
-        message(STATUS "Linking with OpenSSL: ${OPENSSL_VERSION}")
+if(FCB_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+if(FCB_BUILD_EXAMPLES)
+    # Each example is one self-contained .cpp covering one capability; see
+    # examples/README.md. read_features and query_attributes need the CityJSON
+    # component for nlohmann::json rendering, so they are gated on it.
+    add_executable(fcb_read_local examples/read_local.cpp)
+    target_link_libraries(fcb_read_local PRIVATE fcb_core_cpp)
+
+    add_executable(fcb_read_http examples/read_http.cpp)
+    target_link_libraries(fcb_read_http PRIVATE fcb_core_cpp)
+
+    add_executable(fcb_inspect_header examples/inspect_header.cpp)
+    target_link_libraries(fcb_inspect_header PRIVATE fcb_core_cpp)
+
+    add_executable(fcb_query_attributes examples/query_attributes.cpp)
+    target_link_libraries(fcb_query_attributes PRIVATE fcb_core_cpp)
+
+    add_executable(fcb_custom_reader examples/custom_reader.cpp)
+    target_link_libraries(fcb_custom_reader PRIVATE fcb_core_cpp)
+
+    if(FCB_WITH_JSON)
+        add_executable(fcb_read_features examples/read_features.cpp)
+        target_link_libraries(fcb_read_features PRIVATE fcb_core_cpp)
+
+        add_executable(fcb_to_cityjson examples/to_cityjson.cpp)
+        target_link_libraries(fcb_to_cityjson PRIVATE fcb_core_cpp)
+
+        add_executable(fcb_write_cityjson examples/write_cityjson.cpp)
+        target_link_libraries(fcb_write_cityjson PRIVATE fcb_core_cpp)
     endif()
 endif()
 
-# Find nlohmann/json (required for comprehensive_example)
-find_package(nlohmann_json 3.2.0 QUIET)
-if(NOT nlohmann_json_FOUND)
-    message(WARNING "nlohmann/json not found - comprehensive_example requires it")
-    message(STATUS "Install with: brew install nlohmann-json")
-endif()
+# ------------------------------------------------------------- install ---
 
-# Example executables
-add_executable(fcb_example examples/example.cpp ${GENERATED_DIR}/lib.rs.h)
-target_link_libraries(fcb_example fcb)
-target_include_directories(fcb_example PRIVATE ${GENERATED_DIR})
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
+add_library(flatcitybuf::flatcitybuf ALIAS fcb_core_cpp)
+set_target_properties(fcb_core_cpp PROPERTIES EXPORT_NAME flatcitybuf)
 
-# Roundtrip test (encode CityJSONSeq -> FCB -> read back)
-add_executable(fcb_roundtrip_test examples/roundtrip_test.cpp ${GENERATED_DIR}/lib.rs.h)
-target_link_libraries(fcb_roundtrip_test fcb)
-target_include_directories(fcb_roundtrip_test PRIVATE ${GENERATED_DIR})
+install(TARGETS fcb_core_cpp EXPORT flatcitybufTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-# Targets requiring nlohmann/json
-if(nlohmann_json_FOUND)
-    # Local file operations example (no HTTP dependencies)
-    add_executable(local_fcb_example examples/local_fcb_example.cpp ${GENERATED_DIR}/lib.rs.h)
-    target_link_libraries(local_fcb_example fcb nlohmann_json::nlohmann_json)
-    target_include_directories(local_fcb_example PRIVATE ${GENERATED_DIR})
+# Public headers, including generated/, which already lives under include/
+# so the same include path works in-tree and installed.
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-    add_executable(fcb_comprehensive_example examples/comprehensive_example.cpp ${GENERATED_DIR}/lib.rs.h)
-    target_link_libraries(fcb_comprehensive_example fcb nlohmann_json::nlohmann_json)
-    target_include_directories(fcb_comprehensive_example PRIVATE ${GENERATED_DIR})
+install(EXPORT flatcitybufTargets
+        NAMESPACE flatcitybuf::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flatcitybuf)
 
-    # Comprehensive roundtrip tests (tests/ directory)
-    add_executable(fcb_roundtrip_comprehensive tests/roundtrip_test.cpp ${GENERATED_DIR}/lib.rs.h)
-    target_link_libraries(fcb_roundtrip_comprehensive fcb nlohmann_json::nlohmann_json)
-    target_include_directories(fcb_roundtrip_comprehensive PRIVATE ${GENERATED_DIR})
-else()
-    message(STATUS "Skipping local_fcb_example, fcb_comprehensive_example, and fcb_roundtrip_comprehensive (nlohmann_json not found)")
-endif()
-
-# Install targets
-install(TARGETS fcb ARCHIVE DESTINATION lib)
-install(FILES ${GENERATED_DIR}/lib.rs.h DESTINATION include/fcb)
-
-# Documentation (Doxygen)
-find_package(Doxygen QUIET)
-if(DOXYGEN_FOUND)
-    add_custom_target(docs
-        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Doxyfile
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        COMMENT "Generating API documentation with Doxygen"
-        DEPENDS ${GENERATED_DIR}/lib.rs.h
-    )
-    message(STATUS "Doxygen found - 'make docs' available")
-else()
-    message(STATUS "Doxygen not found - install with 'brew install doxygen' for docs")
-endif()
+configure_package_config_file(
+    cmake/flatcitybufConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/flatcitybufConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flatcitybuf)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/flatcitybufConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/flatcitybufConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/flatcitybufConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flatcitybuf)

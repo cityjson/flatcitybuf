@@ -1,0 +1,47 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "@cityjson/flatcitybuf",
+  "readme": "README.md",
+
+  // One entry point per package.json `exports` subpath: "." -> src/index.ts,
+  // "./node" -> src/io/node.ts. "resolve" (the default) documents exactly what
+  // each entry point EXPORTS, which is the published surface -- "expand" would
+  // walk every file under src/ instead, including the traversal internals that
+  // src/index.ts deliberately keeps unexported.
+  "entryPoints": ["src/index.ts", "src/io/node.ts"],
+  "entryPointStrategy": "resolve",
+  "tsconfig": "tsconfig.json",
+
+  // src/ts/docs/ is gitignored and is NOT in package.json `files` (which is
+  // ["dist"]), so generated docs are never published to npm.
+  "out": "docs",
+
+  // src/generated/ is machine-generated flatc output and internal -- EXCEPT
+  // column-type.ts: src/index.ts re-exports `ColumnType` on purpose, because
+  // `ColumnInfo.type` is spelled in it and a caller building a query needs the
+  // enum by name. A bare "src/generated/**" silently drops `ColumnType` from
+  // the docs, so the extglob keeps that one file.
+  "exclude": ["src/generated/!(column-type).ts", "test/**", "dist/**"],
+  "excludeExternals": true,
+  "excludeInternal": true,
+  "excludePrivate": true,
+
+  // The three raw FlatBuffers tables handed out by the `raw` / `rawObject()` /
+  // `rawFeature()` escape hatches. Generated flatc output, deliberately kept
+  // out of the published surface; documenting them would bury the real API
+  // under the generated one.
+  "intentionallyNotExported": [
+    "src/generated/header.ts:Header",
+    "src/generated/city-object.ts:CityObject",
+    "src/generated/city-feature.ts:CityFeature"
+  ],
+
+  "githubPages": false,
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "rewrittenLink": true,
+    "notDocumented": false,
+    "unusedMergeModuleWith": true
+  }
+}

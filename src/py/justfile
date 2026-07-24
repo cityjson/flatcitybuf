@@ -1,0 +1,99 @@
+# FlatCityBuf — pure-Python reader (py3-none-any, no compiled dependency).
+#
+# Standard interface, identical in every justfile in this repo:
+#
+#     just check    # everything below, read-only
+#     just test | lint | type | build
+#     just fix      # the only recipe that rewrites source
+
+default:
+    @just --list
+
+# `test-no-numpy` runs LAST and restores numpy afterwards, so the environment is
+# left in the state src/py/README.md documents for development.
+
+# Lint + mypy + tests, in both optional-dependency states, read-only
+check: lint type test test-no-numpy
+
+# Every recipe below depends on this, so a fresh clone works with no manual
+# setup step.
+
+# Install/refresh the dev environment (numpy included)
+sync:
+    uv sync --extra dev --extra numpy
+
+# pytest
+test: sync
+    uv run pytest
+
+# The live-3DBAG test is skipped by the default `test` above (no
+# FCB_REMOTE_HTTP_URL); this sets it and runs only that test.
+
+# Opt-in: the live 3DBAG HTTP test (~68 GB bucket)
+test-remote: sync
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" uv run pytest tests/test_http.py -k remote -v
+
+# ruff check + ruff format --check
+lint: sync
+    uv run ruff check .
+    uv run ruff format --check .
+
+# mypy --strict
+type: sync
+    uv run mypy
+
+# There is nothing to compile; building the wheel is the closest analogue.
+# Kept so the interface is uniform across languages.
+
+# Build the py3-none-any wheel
+build: sync
+    uv build
+
+# ruff check --fix + ruff format — MUTATES the working tree
+fix: sync
+    uv run ruff check --fix .
+    uv run ruff format .
+
+# ---------------------------------------------------------------------------
+# Extras
+# ---------------------------------------------------------------------------
+
+# numpy is a genuine optional extra: every code path has a working pure-Python
+# fallback, and BOTH states must be verified — otherwise whichever one happens to
+# be installed is the only one ever exercised. This mirrors CI's two passes.
+# Expect `251 passed, 4 skipped` here (numpy-parity tests importorskip), against
+# `255 passed` with numpy present.
+
+# Re-run mypy + pytest with numpy uninstalled, then restore it
+test-no-numpy:
+    uv sync --extra dev
+    uv run mypy
+    uv run pytest
+    uv sync --extra dev --extra numpy
+
+# Run the benchmark suite (timing-sensitive; excluded from the default run)
+bench: sync
+    uv run pytest -m benchmark
+
+# pdoc imports the package and renders ONE page from `flatcitybuf/__init__.py`'s
+# `__all__` -- the same list README.md calls the public API -- so
+# `flatcitybuf/generated` and every internal module drop out on their own, with
+# no docs/ scaffold or exclude list to keep in step with the code.
+#
+# Deliberately NOT `docs: sync`, for the same reason `test-no-numpy` above is
+# not: it needs an extra set of its own, so depending on `sync` would sync twice
+# and thrash pdoc in and out of the venv on every run. The single sync it does
+# is a SUPERSET of `sync`'s, so it never uninstalls the test/lint toolchain, and
+# `test-no-numpy` is unaffected either way — that recipe drops to `--extra dev`
+# (dropping pdoc along with numpy) and restores `--extra dev --extra numpy`
+# regardless, still ending in the state README.md documents for development.
+# Output is gitignored.
+
+# Generate the HTML API reference into docs/api (pdoc)
+docs:
+    uv sync --extra dev --extra numpy --extra docs
+    uv run pdoc flatcitybuf -o docs/api
+
+# Regenerate the committed FlatBuffers bindings
+gen-fbs:
+    ../../scripts/gen_python_fbs.sh

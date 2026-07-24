@@ -12,22 +12,9 @@ on:
           - minor
           - major
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
-
 jobs:
-  bump-version:
+  publish:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/rust/fcb_py
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -35,85 +22,101 @@ jobs:
           token: ${{ secrets.GA_TOKEN }}
           fetch-depth: 0
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: pip install toml
 
       - name: Configure git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "actions[bot]@github.com"
 
-      - name: Bump version in pyproject.toml
-        id: version
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      # A manual dispatch can land on any commit, so re-run the gate here
+      # rather than trusting that CI happened to pass on this SHA. `just
+      # check` covers ruff, mypy --strict and pytest in BOTH the numpy and
+      # numpy-less states. PyPI versions cannot be replaced once uploaded,
+      # only yanked. publish-npm.yml has always done this; this workflow
+      # published without running a single test.
+      - name: Verify before publishing
+        working-directory: src/py
+        run: just check
+
+      - name: Install build tooling
+        run: pip install build twine
+
+      - name: Bump version
+        id: bump
+        working-directory: src/py
+        env:
+          BUMP: ${{ github.event.inputs.version_bump }}
         run: |
-          python -c "
-          import toml
-          import sys
+          # pyproject.toml is the single source of the package name, version
+          # and metadata. It is edited in place -- never regenerated here,
+          # so the workflow cannot drift from what is committed.
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
 
-          # Read current pyproject.toml
-          with open('pyproject.toml', 'r') as f:
-              data = toml.load(f)
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text()
+          match = re.search(r'(?m)^version = "(\d+)\.(\d+)\.(\d+)"$', text)
+          if match is None:
+              raise SystemExit('could not find version = "X.Y.Z" in pyproject.toml')
 
-          current_version = data['project']['version']
-          major, minor, patch = map(int, current_version.split('.'))
-
-          bump_type = '${{ github.event.inputs.version_bump }}'
-          if bump_type == 'major':
-              major += 1
-              minor = 0
-              patch = 0
-          elif bump_type == 'minor':
-              minor += 1
-              patch = 0
-          elif bump_type == 'patch':
+          major, minor, patch = (int(part) for part in match.groups())
+          bump = os.environ["BUMP"]
+          if bump == "major":
+              major, minor, patch = major + 1, 0, 0
+          elif bump == "minor":
+              minor, patch = minor + 1, 0
+          elif bump == "patch":
               patch += 1
           else:
-              print(f'Invalid bump type: {bump_type}')
-              sys.exit(1)
+              raise SystemExit(f"invalid bump type: {bump}")
 
-          new_version = f'{major}.{minor}.{patch}'
-          data['project']['version'] = new_version
+          new_version = f"{major}.{minor}.{patch}"
+          new_text = (
+              text[: match.start()] + f'version = "{new_version}"' + text[match.end() :]
+          )
+          path.write_text(new_text)
 
-          # Write back to file
-          with open('pyproject.toml', 'w') as f:
-              toml.dump(data, f)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"version={new_version}\n")
+          PY
 
-          print(f'Bumped version from {current_version} to {new_version}')
-          print(f'::set-output name=version::{new_version}')
-          "
+      - name: Build the wheel and sdist
+        working-directory: src/py
+        run: python -m build
 
-      - name: Commit version bump
+      - name: Verify the artifact before publishing
+        working-directory: src/py
         run: |
-          cd ../../..
-          git add .
-          git commit -m "chore: bump python version (${{ github.event.inputs.version_bump }})"
-          git push
-
-  publish:
-    name: Publish to PyPI
-    runs-on: ${{ matrix.os }}
-    needs: bump-version
-    strategy:
-      matrix:
-        os: [macos-latest, windows-latest]
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main # Get the updated version
+          twine check dist/*
+          # Fails the run rather than publishing a platform-specific wheel:
+          # this package has no compiled extension, so the only correct
+          # wheel tag is py3-none-any.
+          ls dist/*-py3-none-any.whl
 
       - name: Publish to PyPI
-        uses: PyO3/maturin-action@v1
+        working-directory: src/py
         env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        with:
-          command: publish
-          args: --non-interactive --skip-existing
-          working-directory: src/rust/fcb_py
-          manylinux: auto
-          sccache: "true"
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: twine upload dist/*
+
+      - name: Commit the version bump
+        run: |
+          # Only pyproject.toml moves. dist/ is build output, not tracked.
+          git add src/py/pyproject.toml
+          git commit -m "chore: release python v${{ steps.bump.outputs.version }}"
+          git tag "python-v${{ steps.bump.outputs.version }}"
+          git push
+          git push --tags

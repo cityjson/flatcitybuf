@@ -455,8 +455,9 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     );
                     multi_index.add_index(col.name().to_string(), index);
                 }
+                // Byte is stored as u8 by the writer; see reader/attr_query.rs.
                 ColumnType::Byte => {
-                    let index = HttpIndex::<i8>::new(
+                    let index = HttpIndex::<u8>::new(
                         attr_info.num_unique_items() as usize,
                         attr_info.branching_factor(),
                         index_begin,

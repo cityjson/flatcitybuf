@@ -444,8 +444,20 @@ impl<K: Key> Stree<K> {
 
     // branching_factor is the number of children per node, it'll be B and node_size is B-1
     fn init(&mut self, branching_factor: u16) -> Result<()> {
-        assert!(branching_factor >= 2, "Branching factor must be at least 2");
-        assert!(self.num_leaf_nodes > 0, "Cannot create empty tree");
+        // Return errors rather than panicking: this is library code, and an
+        // attribute with no indexable values is a normal condition when
+        // indexing every column of a heterogeneous dataset -- the writer
+        // skips such columns rather than aborting the whole file.
+        if branching_factor < 2 {
+            return Err(Error::InvalidFormat(format!(
+                "branching factor must be at least 2, got {branching_factor}"
+            )));
+        }
+        if self.num_leaf_nodes == 0 {
+            return Err(Error::InvalidFormat(
+                "cannot build an attribute index with no entries".to_string(),
+            ));
+        }
         self.branching_factor = branching_factor.clamp(2u16, 65535u16);
         self.level_bounds =
             Stree::<K>::generate_level_bounds(self.num_leaf_nodes, self.branching_factor);
@@ -765,7 +777,22 @@ impl<K: Key> Stree<K> {
                     node_items.binary_search_by(|item| item.key.cmp(&search_entry.key));
                 match search_result {
                     Ok(index) => {
-                        queue.push_back((node_items[index].offset as usize + node_size, level - 1));
+                        // Separator entries with no right sibling carry
+                        // K::max_value() as a sentinel whose offset ALREADY
+                        // points at the last child group, so adding node_size
+                        // walks off the end of the level -- an inverted slice
+                        // here, a usize underflow in the streaming path. Any
+                        // query whose key equals the type maximum triggers it;
+                        // Eq(true) on a bool column is enough. Clamping back to
+                        // the entry's own offset is a no-op for ordinary keys.
+                        let child = node_items[index].offset as usize + node_size;
+                        let child_end = self.level_bounds[level - 1].end;
+                        let child = if child >= child_end {
+                            node_items[index].offset as usize
+                        } else {
+                            child
+                        };
+                        queue.push_back((child, level - 1));
                     }
                     Err(index) => {
                         if index == 0 {
@@ -862,7 +889,22 @@ impl<K: Key> Stree<K> {
                     node_items.binary_search_by(|item: &Entry<K>| item.key.cmp(&search_entry.key));
                 match search_result {
                     Ok(index) => {
-                        queue.push_back((node_items[index].offset as usize + node_size, level - 1));
+                        // Separator entries with no right sibling carry
+                        // K::max_value() as a sentinel whose offset ALREADY
+                        // points at the last child group, so adding node_size
+                        // walks off the end of the level -- an inverted slice
+                        // here, a usize underflow in the streaming path. Any
+                        // query whose key equals the type maximum triggers it;
+                        // Eq(true) on a bool column is enough. Clamping back to
+                        // the entry's own offset is a no-op for ordinary keys.
+                        let child = node_items[index].offset as usize + node_size;
+                        let child_end = level_bounds[level - 1].end;
+                        let child = if child >= child_end {
+                            node_items[index].offset as usize
+                        } else {
+                            child
+                        };
+                        queue.push_back((child, level - 1));
                     }
                     Err(index) => {
                         if index == 0 {
@@ -951,7 +993,14 @@ impl<K: Key> Stree<K> {
 
         // Calculate the actual range within the leaf level
         let start_idx = max(lower_idx, leaf_start);
-        let end_idx = min(upper_idx + node_size, leaf_end);
+        // Widened by an extra node. find_partition descends LEFT on an exact
+        // hit, so when `upper` is itself a separator key its matching leaf
+        // entry sits at exactly upper_idx + node_size -- one past the old
+        // scan end -- and was silently dropped, making the inclusive upper
+        // bound exclusive for roughly 1-in-branching_factor of keys.
+        // Widening is safe: the loop below filters `lower <= key <= upper`,
+        // so at most one extra node is read.
+        let end_idx = min(upper_idx + 2 * node_size, leaf_end);
 
         // Process all leaf nodes from lower to upper bound
         let mut current_idx = start_idx;
@@ -1035,7 +1084,14 @@ impl<K: Key> Stree<K> {
 
         // Calculate the actual range within the leaf level
         let start_idx = max(lower_idx, leaf_start);
-        let end_idx = min(upper_idx + node_size, leaf_end);
+        // Widened by an extra node. find_partition descends LEFT on an exact
+        // hit, so when `upper` is itself a separator key its matching leaf
+        // entry sits at exactly upper_idx + node_size -- one past the old
+        // scan end -- and was silently dropped, making the inclusive upper
+        // bound exclusive for roughly 1-in-branching_factor of keys.
+        // Widening is safe: the loop below filters `lower <= key <= upper`,
+        // so at most one extra node is read.
+        let end_idx = min(upper_idx + 2 * node_size, leaf_end);
 
         let index_base: u64 = data.stream_position()?;
 
@@ -1617,7 +1673,14 @@ impl<K: Key> Stree<K> {
 
         // Calculate the actual range within the leaf level
         let start_idx = max(lower_idx, leaf_start);
-        let end_idx = min(upper_idx + node_size, leaf_end);
+        // Widened by an extra node. find_partition descends LEFT on an exact
+        // hit, so when `upper` is itself a separator key its matching leaf
+        // entry sits at exactly upper_idx + node_size -- one past the old
+        // scan end -- and was silently dropped, making the inclusive upper
+        // bound exclusive for roughly 1-in-branching_factor of keys.
+        // Widening is safe: the loop below filters `lower <= key <= upper`,
+        // so at most one extra node is read.
+        let end_idx = min(upper_idx + 2 * node_size, leaf_end);
 
         // Collect payload references instead of immediately resolving them
         let mut payload_refs = Vec::new();
@@ -1943,10 +2006,14 @@ mod tests {
         }
         let tree = Stree::build(&nodes, 4)?;
 
-        // Test 1: Full range search
+        // Test 1: Full range search.
+        // find_range is inclusive at both ends, so keys 0..=18 is 19 items.
+        // This previously asserted 18 -- the comment was right and the
+        // assertion was wrong. Key 18 is a level-1 separator, and because
+        // find_partition descends left on an exact hit, its leaf entry sat
+        // one node past the old scan end and was silently dropped.
         let list = tree.find_range(0, 18)?;
-        // The test expects to find exactly 19 items with indices 0-18
-        assert_eq!(list.len(), 18);
+        assert_eq!(list.len(), 19);
 
         // Update the test to check each found item's key instead
         let keys: Vec<i64> = list
@@ -2028,6 +2095,66 @@ mod tests {
         let list = tree.find_range(10, 5)?;
         assert_eq!(list.len(), 0);
 
+        Ok(())
+    }
+
+    /// Regression: an exact query for the maximum value of the key type.
+    ///
+    /// Separator entries with no right sibling carry K::max_value() as a
+    /// sentinel whose offset already points at the last child group, so the
+    /// `Ok(i) => offset + node_size` right-descent used to overshoot the
+    /// level and panic on an inverted slice. bool is the smallest type that
+    /// exhibits it, since `true` IS bool::max_value().
+    #[test]
+    fn test_find_exact_on_max_valued_key() -> Result<()> {
+        let nodes: Vec<Entry<bool>> = (0..8)
+            .map(|i| Entry {
+                key: i % 2 == 0,
+                offset: (i * 10) as u64,
+            })
+            .collect();
+        let tree = Stree::build(&nodes, 4)?;
+
+        // Must not panic, and must find the true-keyed entries.
+        let list = tree.find_exact(true)?;
+        assert!(!list.is_empty(), "Eq(true) found nothing");
+
+        let list = tree.find_exact(false)?;
+        assert!(!list.is_empty(), "Eq(false) found nothing");
+        Ok(())
+    }
+
+    /// Regression: an inclusive upper bound that is also a separator key.
+    ///
+    /// With branching_factor 4 the level-1 separators fall on keys that start
+    /// a subtree. find_partition descends LEFT on an exact hit, so the leaf
+    /// entry for such a key sits at exactly upper_idx + node_size. The scan
+    /// end used to stop one node short and drop it, making the inclusive
+    /// bound silently exclusive for roughly 1-in-branching_factor of keys.
+    #[test]
+    fn test_range_upper_bound_on_separator_key() -> Result<()> {
+        let nodes: Vec<Entry<i64>> = (0..19)
+            .map(|i| Entry {
+                key: i as i64,
+                offset: (i * 100) as u64,
+            })
+            .collect();
+        let tree = Stree::build(&nodes, 4)?;
+
+        // Every upper bound must include its own key.
+        for upper in 0..19i64 {
+            let list = tree.find_range(0, upper)?;
+            let keys: Vec<i64> = list.iter().map(|r| (r.offset / 100) as i64).collect();
+            assert!(
+                keys.contains(&upper),
+                "find_range(0, {upper}) dropped its inclusive upper bound; got {keys:?}"
+            );
+            assert_eq!(
+                list.len(),
+                (upper + 1) as usize,
+                "find_range(0, {upper}) returned the wrong count"
+            );
+        }
         Ok(())
     }
 

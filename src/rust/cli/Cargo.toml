@@ -7,6 +7,9 @@ license = "MIT"
 repository = "https://github.com/HideBa/flatcitybuf"
 description = "FlatCityBuf is a library for reading and writing CityJSON with FlatBuffers."
 
+[package.metadata.docs.rs]
+all-features = true
+
 [[bin]]
 name = "fcb"
 path = "src/main.rs"
@@ -28,6 +31,9 @@ thiserror = { workspace = true }
 indicatif = { workspace = true }
 console = { workspace = true }
 glob = "0.3"
+tokio = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
