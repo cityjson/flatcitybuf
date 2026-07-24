@@ -141,7 +141,9 @@ mod http {
         // so this is bounded regardless of the 68 GB body. Exact, and
         // identical to what C++, Python and TypeScript return for this box.
         let (minx, miny, maxx, maxy) = REMOTE_BBOX;
-        let iter = reader.select_query(Query::BBox(minx, miny, maxx, maxy)).await?;
+        let iter = reader
+            .select_query(Query::BBox(minx, miny, maxx, maxy))
+            .await?;
         assert_eq!(iter.features_count(), Some(REMOTE_BBOX_COUNT));
         Ok(())
     }

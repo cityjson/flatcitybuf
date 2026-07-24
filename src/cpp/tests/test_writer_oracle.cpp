@@ -16,6 +16,7 @@
 #include <fcb/reader.hpp>
 #include <fcb/writer/attribute.hpp>
 #include <fcb/writer/btree_builder.hpp>
+#include <fcb/writer/fcb_writer.hpp>
 #include <fcb/writer/feature_serializer.hpp>
 #include <fcb/writer/header_serializer.hpp>
 #include <fcb/writer/rtree_builder.hpp>
@@ -34,6 +35,24 @@ using namespace fcb;
 using nlohmann::ordered_json;
 
 namespace {
+
+/// Test-only convenience wrapper: `FcbWriter` (M8) is the streaming public
+/// API (add_feature spools to a temp file, mirroring Rust's own memory-
+/// scalable writer), but every oracle test here already has every feature
+/// as one in-memory vector, so this just loops `add_feature` -- exercising
+/// the real streaming implementation underneath, not a separate code path.
+std::vector<std::uint8_t> write_fcb(const ordered_json& cj,
+                                    const std::vector<ordered_json>& features,
+                                    const FcbWriterOptions& options,
+                                    const AttributeSchema& attr_schema,
+                                    const AttributeSchema* semantic_attr_schema) {
+    FcbWriter w(cj, options, attr_schema,
+                semantic_attr_schema ? std::optional<AttributeSchema>(*semantic_attr_schema)
+                                     : std::nullopt);
+    for (const auto& f : features)
+        w.add_feature(f);
+    return w.write();
+}
 
 std::vector<ordered_json> read_jsonl(const std::string& path) {
     std::vector<ordered_json> out;
@@ -550,4 +569,116 @@ TEST_CASE("oracle: build_static_btree is byte-identical to the Rust writer's att
     // attribute-index oracle that actually needs the hilbert-sort/offset-
     // reassignment machinery `check_attribute_index_byte_exact` provides.
     check_attribute_index_byte_exact("btree_multilevel");
+}
+
+namespace {
+
+/// Byte-compares `write_fcb`'s ENTIRE output for `<fixture>.city.jsonl`
+/// against the real Rust-written `<fixture>.fcb`, byte for byte, start to
+/// end -- the strongest check in the whole writer, subsuming every
+/// per-section oracle above it. Options are read back from the real
+/// file's own header (feature count, node size, which columns carry an
+/// attribute index and at what branching factor) rather than hardcoded,
+/// so this test can't silently drift from what the fixture actually is.
+void check_whole_file_byte_exact(const std::string& fixture) {
+    CAPTURE(fixture);
+    const std::string fcb_path = std::string(FCB_CONFORMANCE_DIR) + "/" + fixture + ".fcb";
+    FcbReader r = FcbReader::open_file(fcb_path);
+    const std::vector<std::uint8_t> expected = read_file_bytes(fcb_path);
+
+    const std::string input_path =
+        std::string(FCB_CONFORMANCE_DIR) + "/inputs/" + fixture + ".city.jsonl";
+    std::vector<ordered_json> input_lines = read_jsonl(input_path);
+    const ordered_json& cj = input_lines[0];
+    std::vector<ordered_json> features(input_lines.begin() + 1, input_lines.end());
+    AttributeSchema attr_schema = build_attr_schema(features);
+
+    FcbWriterOptions options;
+    options.write_index = r.header().info().index_node_size > 0;
+    options.index_node_size = r.header().info().index_node_size;
+    for (const auto& ai : r.header().attr_indices())
+        options.attribute_indices.emplace_back(r.header().info().columns.at(ai.column_index).name,
+                                               ai.branching_factor);
+
+    std::vector<std::uint8_t> actual = write_fcb(cj, features, options, attr_schema, nullptr);
+
+    if (actual != expected) {
+        MESSAGE("actual size: " << actual.size() << " expected size: " << expected.size());
+        std::size_t n = std::min(actual.size(), expected.size());
+        for (std::size_t i = 0; i < n; ++i) {
+            if (actual[i] != expected[i]) {
+                MESSAGE("first diff at byte " << i << ": actual=" << (int)actual[i]
+                                              << " expected=" << (int)expected[i]);
+                break;
+            }
+        }
+    }
+    CHECK(actual == expected);
+
+    // The bytes this writer produces must also decode correctly through
+    // the existing, already-conformant reader -- independent of the
+    // byte-exact check above, and the strongest form of the project
+    // owner's explicit cross-reader requirement: a file this writer
+    // produces must be readable by both implementations.
+    const std::string tmp_path = "test_writer_oracle_whole_file.fcb";
+    {
+        std::ofstream out(tmp_path, std::ios::binary);
+        REQUIRE_MESSAGE(out.good(), "cannot create " << tmp_path);
+        out.write(reinterpret_cast<const char*>(actual.data()),
+                  static_cast<std::streamsize>(actual.size()));
+    }
+    FcbReader r2 = FcbReader::open_file(tmp_path);
+    CHECK(r2.header().info().features_count == features.size());
+    std::size_t decoded_count = 0;
+    FeatureIterator it = r2.select_all();
+    while (it.next())
+        ++decoded_count;
+    std::remove(tmp_path.c_str());
+    CHECK(decoded_count == features.size());
+}
+
+}  // namespace
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for single_feature") {
+    // 1 feature, R-tree (node size 16), 2 attribute indices (branching
+    // factor 256, matching `-A`'s default) -- the smallest fixture that
+    // still exercises both index kinds together in the full pipeline.
+    check_whole_file_byte_exact("single_feature");
+}
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for "
+          "geometry_instance_interleaved") {
+    // 1 feature, R-tree, geometry-templates, NO attribute index -- exercises
+    // the header's templates/templates_vertices path end to end and the
+    // "no attribute index at all" branch (attr_index_info empty -> nullptr).
+    check_whole_file_byte_exact("geometry_instance_interleaved");
+}
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for header_metadata_full") {
+    // 1 feature, full optional header metadata (referenceSystem, poc,
+    // extensions, ...), R-tree, no attribute index.
+    check_whole_file_byte_exact("header_metadata_full");
+}
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for duplicate_keys") {
+    // 5 features sharing one bbox (hilbert_sort is a no-op), 2 attribute
+    // indices at branching factor 256, one column with a 5-entry payload.
+    check_whole_file_byte_exact("duplicate_keys");
+}
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for rtree_multilevel") {
+    // 20 features at distinct grid positions -- hilbert_sort genuinely
+    // reorders them; no attribute index. The strongest end-to-end check of
+    // the R-tree path specifically (real 3-level tree, real reordering).
+    check_whole_file_byte_exact("rtree_multilevel");
+}
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for btree_multilevel") {
+    // 20 features at distinct grid positions AND 2 attribute indices at
+    // branching factor 4 (real 3-level trees, one column with duplicates)
+    // -- the single strongest test in the whole writer: every milestone's
+    // hardest case (hilbert reordering, multi-level R-tree, multi-level
+    // B+tree with a payload entry, and the original-vs-sorted-order trap
+    // this milestone's own oracle test surfaced) all in one real file.
+    check_whole_file_byte_exact("btree_multilevel");
 }

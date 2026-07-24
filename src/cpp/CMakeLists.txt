@@ -42,7 +42,8 @@ if(FCB_WITH_JSON)
                                         src/writer/feature_serializer.cpp
                                         src/writer/header_serializer.cpp
                                         src/writer/rtree_builder.cpp
-                                        src/writer/btree_builder.cpp)
+                                        src/writer/btree_builder.cpp
+                                        src/writer/fcb_writer.cpp)
 endif()
 
 if(FCB_WITH_CURL)
@@ -82,6 +83,9 @@ if(FCB_BUILD_EXAMPLES)
 
         add_executable(fcb_to_cityjson examples/to_cityjson.cpp)
         target_link_libraries(fcb_to_cityjson PRIVATE fcb_core_cpp)
+
+        add_executable(fcb_write_cityjson examples/write_cityjson.cpp)
+        target_link_libraries(fcb_write_cityjson PRIVATE fcb_core_cpp)
     endif()
 endif()
 

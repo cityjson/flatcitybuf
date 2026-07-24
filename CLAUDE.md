@@ -14,14 +14,17 @@ The repo holds **four independent reader implementations of the same format**:
 | Implementation | Location | Status |
 |---|---|---|
 | **Rust** — the origin, and the **authoritative oracle** | `src/rust/fcb_core` | reader + writer |
-| C++ | `src/cpp` | reader, conformant |
+| C++ | `src/cpp` | reader + writer, conformant |
 | Python (pure, `py3-none-any`) | `src/py` | reader, conformant |
 | TypeScript | `src/ts` | reader, **in progress** |
 
-Only Rust writes files. The other three are from-scratch ports with **no FFI** —
-they parse the bytes directly. When two implementations disagree, **Rust is
-right by definition**, and the disagreement is a defect in the other one until
-proven otherwise.
+Rust and C++ write files; Python and TypeScript are read-only. All four are
+from-scratch ports with **no FFI** — they parse (and, for Rust/C++, produce)
+the bytes directly. When two implementations disagree, **Rust is right by
+definition**, and the disagreement is a defect in the other one until proven
+otherwise — the C++ writer's own test suite enforces this by comparing its
+output against real Rust-written files byte-for-byte
+(`src/cpp/tests/test_writer_oracle.cpp`), not just by decoding correctly.
 
 `conformance/` is the shared oracle corpus: hand-authored inputs, the `.fcb`
 binaries, and `.expected.jsonl` holding *the Rust reader's own output* for each.

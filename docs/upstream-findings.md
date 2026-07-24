@@ -1227,3 +1227,51 @@ emitted only the metadata line and dropped every feature, exiting `0` as if it h
 succeeded. The native reader's `scan` has the same EOF-not-count semantics
 (`src/ts/src/reader.ts`), covered by the `no_count` conformance case in
 `src/ts/test/conformance.test.ts`.
+
+## 30. `serde_json` loses 1 ULP parsing certain `Double` attribute values — NOT FIXED, `fcb_cli` ingestion only
+
+**Where:** not `fcb_core` at all — `serde_json` 1.0.133's own JSON-number-to-`f64`
+parser, exercised wherever the CLI (or any Rust caller) deserializes CityJSON
+text into a `serde_json::Value` before handing attribute/extent doubles to the
+writer.
+
+**Found by:** the new C++ writer's value-exact round-trip check (write
+`examples/data/delft.city.jsonl` with `fcb_write_cityjson`, `deser` the result
+back with the Rust CLI, diff against `deser`-ing the checked-in
+`examples/data/delft.fcb`). 7 of 1115 features disagreed, always by exactly 1
+ULP on a `Double` value:
+
+```
+$ fcb_write_cityjson delft.city.jsonl delft_cpp.fcb   # C++ writer
+$ cargo run -p fcb_cli -- ser   delft.city.jsonl delft_rust.fcb -A -g   # same input, fresh Rust writer
+$ cargo run -p fcb_cli -- deser delft_cpp.fcb  delft_cpp.jsonl
+$ cargo run -p fcb_cli -- deser delft_rust.fcb delft_rust.jsonl
+# delft_cpp.jsonl:  "b3_volume_lod12": 20.652481079101562   <- matches the original input text exactly
+# delft_rust.jsonl: "b3_volume_lod12": 20.65248107910156    <- 1 ULP below (bits 0x...ffffffff vs 0x...00000000)
+```
+
+Isolated to `serde_json` itself, independent of `fcb_core`:
+
+```rust
+let s = "20.652481079101562";
+s.parse::<f64>().unwrap().to_bits();                          // 0x4034a70900000000 — correctly rounded
+serde_json::from_str::<serde_json::Value>(s)
+    .unwrap().as_f64().unwrap().to_bits();                     // 0x4034a708ffffffff — 1 ULP low
+```
+
+Rust's own `str::parse::<f64>` and nlohmann::json (what the C++ writer uses)
+both produce the IEEE‑754 correctly-rounded double for this decimal string;
+`serde_json`'s number parser does not, for certain decimal strings landing near
+a rounding boundary. This reproduced identically whether the fresh Rust-written
+file was built with the CLI's own `ser -A -g` — so it is not specific to how
+`delft.fcb` was originally generated, and not something the writer/reader
+format logic controls at all.
+
+**Consequences:** negligible in practice (~1e-16 relative error, well under any
+real query threshold or display precision), but it means a `Double` attribute's
+bytes are not always byte-identical between a Rust-CLI-written file and a
+C++-writer-written file for the *same* input JSON text — the C++ writer is
+incidentally *more* faithful to the source text here, not less. Not fixed:
+changing `serde_json`'s float parsing is outside this port's scope, and
+"correctly-rounded" is the behavior worth keeping, not replicating the
+imprecision.
