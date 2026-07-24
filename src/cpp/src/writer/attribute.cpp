@@ -116,8 +116,16 @@ Rfc3339Result parse_rfc3339(const std::string& s) {
 
     const std::int64_t days =
         days_from_civil(year, static_cast<unsigned>(month), static_cast<unsigned>(day));
+    // A leap second (:60) is chrono's `NaiveTime` convention: it occupies the
+    // SAME epoch second as :59, flagged by adding 1_000_000_000 to the
+    // nanosecond field, rather than rolling over into the next minute. Rolling
+    // over (as a naive `+ second` would) both produces the wrong epoch second
+    // and can wrap a leap second at day's end onto the NEXT day's midnight.
+    const int second_for_epoch = (second == 60) ? 59 : second;
+    if (second == 60)
+        nanos += 1'000'000'000u;
     r.ok = true;
-    r.seconds = days * 86400 + hour * 3600 + minute * 60 + second - offset_seconds;
+    r.seconds = days * 86400 + hour * 3600 + minute * 60 + second_for_epoch - offset_seconds;
     r.nanos = nanos;
     return r;
 }
@@ -132,8 +140,18 @@ std::optional<::ColumnType> guess_type(const nlohmann::json& value) {
             return ::ColumnType::Double;
         if (value.is_number_unsigned())
             return ::ColumnType::ULong;
-        if (value.is_number_integer())
-            return ::ColumnType::Long;
+        if (value.is_number_integer()) {
+            // serde_json::Number splits PosInt/NegInt by the VALUE's sign,
+            // regardless of the Rust literal's own signed/unsigned type. A
+            // C++ value built via `nlohmann::json(5)` (as opposed to parsed
+            // from JSON text with no leading '-') lands in nlohmann's signed
+            // `number_integer_t` bucket even though 5 is non-negative, so
+            // this must also decide by value, not by which nlohmann bucket
+            // it landed in, to stay oracle-compatible for callers that
+            // construct JSON directly rather than parsing it.
+            const std::int64_t i = value.get<std::int64_t>();
+            return i < 0 ? ::ColumnType::Long : ::ColumnType::ULong;
+        }
         return ::ColumnType::ULong;
     }
     if (value.is_string())
@@ -203,7 +221,13 @@ std::string as_str_or_empty(const nlohmann::json& v) {
 
 void add_attributes(AttributeSchema& schema, const nlohmann::json& attrs) {
     if (!attrs.is_object()) {
-        schema.emplace(
+        // Rust's `BTreeMap::insert` here ALWAYS overwrites -- even a "json"
+        // column that already exists gets reassigned a new index equal to
+        // the map's current size, which can orphan whatever previously held
+        // that index. That is a real quirk of the oracle, not a bug to
+        // paper over: `insert_or_assign` (not the no-op-on-existing-key
+        // `emplace`) is what reproduces it exactly.
+        schema.insert_or_assign(
             "json", std::make_pair(static_cast<std::uint16_t>(schema.size()), ::ColumnType::Json));
         return;
     }

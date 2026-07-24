@@ -68,6 +68,32 @@ TEST_CASE("a non-object attrs value becomes a single json column") {
     CHECK(schema.at("json").second == ::ColumnType::Json);
 }
 
+TEST_CASE("a repeated non-object attrs value reassigns the json column's index") {
+    // Mirrors Rust's `BTreeMap::insert`, which always overwrites -- even a
+    // "json" entry that already exists is given a NEW index equal to the
+    // map's current size. A real quirk of the oracle (see M1's codex
+    // review), not something to paper over with a no-op-on-existing-key
+    // `emplace`.
+    AttributeSchema schema;
+    add_attributes(schema, nlohmann::json{{"a", true}});    // "a" takes index 0
+    add_attributes(schema, nlohmann::json::array({1, 2}));  // "json" takes index 1
+    CHECK(schema.at("json").first == 1);
+    add_attributes(schema, nlohmann::json::array({3, 4}));  // "json" is reassigned to index 2
+    CHECK(schema.at("json").first == 2);
+    CHECK(schema.size() == 2);  // still only "a" and "json" -- no new key added
+}
+
+TEST_CASE("integer type guessing decides by value sign, not by nlohmann's own number tag") {
+    // A JSON value BUILT via a C++ initializer-list literal (as opposed to
+    // parsed from text) can land in nlohmann's signed `number_integer_t`
+    // bucket even when non-negative -- `guess_type` must still classify by
+    // the value's actual sign to stay oracle-compatible with serde_json's
+    // sign-based PosInt/NegInt split (see M1's codex review).
+    AttributeSchema schema;
+    add_attributes(schema, nlohmann::json{{"five", 5}});
+    CHECK(schema.at("five").second == ::ColumnType::ULong);
+}
+
 TEST_CASE("integer type guessing follows sign and magnitude") {
     AttributeSchema schema;
     add_attributes(schema, nlohmann::json::parse(R"({"neg": -1, "pos": 1})"));
@@ -205,6 +231,31 @@ TEST_CASE("attribute_to_index_entries parses DateTime strings, falling back to e
     REQUIRE(entries.size() == 2);
     for (auto& e : entries)
         CHECK(e.value.kind() == KeyKind::DateTime);
+
+    // "ts" decodes to its real epoch second (computed independently, not
+    // via this same parser); "bad_ts" falls back to epoch 0, matching
+    // Rust's `DateTime::<Utc>::from_timestamp(0, 0)` fallback.
+    CHECK(compare_keys(entries[0].value, KeyValue::from_datetime(1286972964, 0)) == 0);
+    CHECK(compare_keys(entries[1].value, KeyValue::from_datetime(0, 0)) == 0);
+}
+
+TEST_CASE(
+    "a leap second occupies the SAME epoch second as :59, flagged via nanos, not rolled over") {
+    // 2016-12-31T23:59:60Z was a real UTC leap second. Chrono's NaiveTime
+    // stores a leap second at second 59 with 1_000_000_000 added to the
+    // nanosecond field, rather than rolling over to the next minute -- a
+    // naive `+ 60` would both land on the wrong epoch second and, for a
+    // leap second at day's end, wrap onto the NEXT day's midnight (see M1's
+    // codex review).
+    AttributeSchema schema;
+    schema.emplace("ts", std::make_pair(0, ::ColumnType::DateTime));
+    nlohmann::json attrs = {{"ts", "2016-12-31T23:59:60Z"}};
+
+    auto entries = attribute_to_index_entries(attrs, schema, {"ts"});
+    REQUIRE(entries.size() == 1);
+    // 1483228799 == 2016-12-31T23:59:59Z, computed independently (Python's
+    // datetime), NOT via this same RFC3339 parser.
+    CHECK(compare_keys(entries[0].value, KeyValue::from_datetime(1483228799, 1'000'000'000)) == 0);
 }
 
 TEST_CASE("cityfeature_to_index_entries visits CityObjects in ascending id order") {
@@ -222,8 +273,12 @@ TEST_CASE("cityfeature_to_index_entries visits CityObjects in ascending id order
 
     auto entries = cityfeature_to_index_entries(feature, schema, {"n"});
     REQUIRE(entries.size() == 2);
-    // "a_obj" sorts before "z_obj", so its value (2) comes first.
-    CHECK(entries[0].value.kind() == KeyKind::UInt64);
+    // "a_obj" sorts before "z_obj", so ITS value (2), not z_obj's (1), comes
+    // first -- checked against the actual value, not just its KeyKind, so a
+    // regression that visited objects in JSON-key order (z_obj first) would
+    // still be caught even though both objects share the same column type.
+    CHECK(compare_keys(entries[0].value, KeyValue::from_u64(2)) == 0);
+    CHECK(compare_keys(entries[1].value, KeyValue::from_u64(1)) == 0);
 }
 
 TEST_CASE("cityfeature_to_index_entries skips objects with no attributes") {
