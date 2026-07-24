@@ -1,10 +1,11 @@
 # FlatCityBuf web viewer
 
 A browser viewer for [FlatCityBuf](../../README.md) built on the native
-TypeScript reader `@cityjson/flatcitybuf` — no WASM, no server component. It
-opens a `.fcb` over HTTP range requests or from a local file, runs bounding-box
-and attribute queries, and renders the returned 3D buildings on a MapLibre
-basemap with deck.gl.
+TypeScript reader `@cityjson/flatcitybuf` — no server component, and reading
+is pure TypeScript with no WASM. It opens a `.fcb` over HTTP range requests or
+from a local file, runs bounding-box and attribute queries, and renders the
+returned 3D buildings on a MapLibre basemap with deck.gl. Query results can
+also be exported to CityJSON, CityJSONSeq, or OBJ (see [Export](#export)).
 
 > Supersedes the archived `cityjson/flatcitybuf-web-prototype`, which used the
 > old WASM binding.
@@ -33,6 +34,30 @@ visible area, re-querying as you pan and zoom; zoom in past the "get closer"
 hint to fetch. Switch the **Level of Detail** (1.2 / 1.3 / 2.2, plus LoD 0
 roofprints) to re-render at that LoD, refine with a drawn bbox or an attribute
 query, or `colour by` an attribute.
+
+## Export
+
+Downloads the **current query result** — exactly the features currently
+rendered (the page described by the active query, up to the render limit),
+not the whole dataset. For the default full-3DBAG file that's the difference
+between what's on screen and 10.7M features.
+
+Pick a format with the selector, then **Download**:
+
+- **CityJSON** — every rendered feature merged into a single `.city.json`.
+- **CityJSONSeq** — `.city.jsonl`: one metadata line, then one line per
+  feature.
+- **OBJ** — a triangulated Wavefront `.obj` mesh. Includes every LoD present
+  in the data (for 3DBAG that's LoD 0, 1.2, 1.3, and 2.2 all in the same
+  file), because the converter triangulates all geometries, not just the
+  currently-rendered LoD.
+
+Conversion runs entirely in the browser. CityJSONSeq is assembled in pure
+TypeScript; the merged CityJSON and OBJ conversions reuse the prebuilt
+`fcb_wasm` WebAssembly binding (vendored under `src/wasm/`), lazy-loaded on
+first use — the ~4 MB `.wasm` is only fetched the first time you export
+CityJSON or OBJ. The download filename derives from the open file/URL's
+basename, e.g. `3dbag_all_index.city.json`.
 
 ## How it works
 
