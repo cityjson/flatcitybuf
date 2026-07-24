@@ -6,6 +6,8 @@
 // triangulation never blocks rendering.
 import { type FcbReader as FcbReaderT, FcbReader, toCityJSONMetadata } from '@cityjson/flatcitybuf'
 import { forward } from '../crs/index'
+import { assembleCityJSONSeq, FORMATS } from '../export/index'
+import { convertMergedCityJSON, convertObj } from '../export/wasm'
 import { buildFeatureMesh, pickGeometry } from '../geometry/index'
 import { type HeaderModel, headerModel, runQuery } from '../reader/index'
 import type { FeatureInfo } from '../store/index'
@@ -19,6 +21,7 @@ function post(msg: WorkerResponse, transfer: Transferable[] = []): void {
 let reader: FcbReaderT | undefined
 let model: HeaderModel | undefined
 let controller: AbortController | null = null
+let exportController: AbortController | null = null
 
 /** Triangulates the query's features into transfer-ready meshes at the given
  *  LoD, and reports the union of LoD labels seen (for the selector). */
@@ -108,6 +111,39 @@ async function handleQuery(msg: Extract<WorkerRequest, { type: 'query' }>): Prom
   }
 }
 
+async function handleExport(msg: Extract<WorkerRequest, { type: 'export' }>): Promise<void> {
+  if (reader === undefined || model === undefined) {
+    post({ type: 'error', id: msg.id, message: 'no file open', aborted: false })
+    return
+  }
+  // A newer export aborts this one, but never the live render query.
+  exportController?.abort()
+  const my = new AbortController()
+  exportController = my
+  const signal = my.signal
+  try {
+    const { features } = await runQuery(reader, {
+      bboxSource: msg.bboxSource, where: msg.where,
+      limit: msg.limit, offset: msg.offset, signal,
+    })
+    if (signal.aborted) { post({ type: 'error', id: msg.id, message: 'aborted', aborted: true }); return }
+    const metadata = toCityJSONMetadata(reader.header)
+    const feats = features.map((f) => f.toCityJSON(reader!.header))
+    let data: string
+    if (msg.format === 'cityjsonseq') data = assembleCityJSONSeq(metadata, feats)
+    else if (msg.format === 'cityjson') data = await convertMergedCityJSON(metadata, feats)
+    else data = await convertObj(metadata, feats)
+    const spec = FORMATS[msg.format]
+    post({ type: 'export-result', id: msg.id, data, mime: spec.mime, ext: spec.ext })
+  } catch (e) {
+    post({
+      type: 'error', id: msg.id,
+      message: e instanceof Error ? e.message : String(e),
+      aborted: signal.aborted,
+    })
+  }
+}
+
 ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data
   if (msg.type === 'open') {
@@ -122,5 +158,6 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     }
     return
   }
+  if (msg.type === 'export') { await handleExport(msg); return }
   await handleQuery(msg)
 }
