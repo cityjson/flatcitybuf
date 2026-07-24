@@ -31,6 +31,42 @@ interface Triangle {
  *  an absolute residual that floating-point cancellation can blow past. */
 const DEGEN_TOL = 1e-7
 
+/** Picks one geometry from a CityObject's list. With `lod` set, returns the
+ *  geometry whose LoD matches exactly (string-compared, so numeric and
+ *  "2.2"-style labels agree with the discovered set) or `undefined` if the
+ *  object has no geometry at that LoD — so an exclusive LoD selection shows
+ *  *only* that LoD and objects lacking it are skipped, not silently rendered at
+ *  a different LoD. With `lod` undefined (the pre-selection default), returns
+ *  the highest LoD; unlabelled LoDs sort last. */
+export function pickGeometry<G extends { lod?: string }>(
+  geoms: G[], lod?: string,
+): G | undefined {
+  if (geoms.length === 0) return undefined
+  if (lod !== undefined) return geoms.find((g) => String(g.lod) === lod)
+  return geoms.reduce((best, g) =>
+    (Number(g.lod ?? -1) > Number(best.lod ?? -1) ? g : best), geoms[0])
+}
+
+/** The highest LoD label present across a feature's objects, or undefined when
+ *  no geometry is LoD-labelled. The default view renders exclusively at this
+ *  LoD so it shows a single level (e.g. just LoD 2.2) rather than each object's
+ *  own highest mixed together (a Building's LoD 0 roofprint *under* a
+ *  BuildingPart's LoD 2.2 solid). */
+export function featureMaxLod(
+  objects: { geometry?: { lod?: string }[] }[],
+): string | undefined {
+  let best: string | undefined
+  let bestNum = -Infinity
+  for (const co of objects) {
+    for (const g of co.geometry ?? []) {
+      if (g.lod === undefined || g.lod === null) continue
+      const n = Number(g.lod)
+      if (Number.isFinite(n) && n > bestNum) { bestNum = n; best = String(g.lod) }
+    }
+  }
+  return best
+}
+
 /** Flattens MultiSurface/Solid/MultiSolid nesting to a flat list of surfaces.
  *  A ring is an array whose first element is a number (vertex index); a surface
  *  is an array whose first element is a ring. */
@@ -198,12 +234,14 @@ function triangulateSurface(surface: Surface, world: number[][]): Triangle[] {
  *  Vertices become `(X - cx, Y - cy, Z)` metres; the centroid is reprojected
  *  once to `[lng, lat]`. Flat per-face normals (vertices are split per
  *  triangle -- no smoothing across hard edges, and each triangle gets its
- *  own geometric normal rather than a shared per-surface one). Returns null
- *  if no triangles survive. */
+ *  own geometric normal rather than a shared per-surface one). `lod` selects
+ *  which LoD to triangulate per object (see pickGeometry); undefined = highest.
+ *  Returns null if no triangles survive. */
 export function buildFeatureMesh(
   feature: CityJSONFeature,
   transform: Transform,
   reproject: (xy: [number, number]) => [number, number],
+  lod?: string,
 ): FeatureMesh | null {
   const [sx, sy, sz] = transform.scale
   const [tx, ty, tz] = transform.translate
@@ -223,12 +261,14 @@ export function buildFeatureMesh(
   const positions: number[] = []
   const normals: number[] = []
   const indices: number[] = []
-  for (const co of Object.values(feature.CityObjects)) {
-    const geoms = co.geometry ?? []
-    if (geoms.length === 0) continue
-    // Highest available LoD (numeric compare; unlabeled sorts last).
-    const chosen = geoms.reduce((best, g) =>
-      (Number(g.lod ?? -1) > Number(best.lod ?? -1) ? g : best), geoms[0])
+  const objects = Object.values(feature.CityObjects)
+  // Render one LoD exclusively: the requested one, or — for the default — this
+  // feature's highest, so objects lacking that LoD are skipped rather than
+  // drawn at some other level (see featureMaxLod).
+  const effectiveLod = lod ?? featureMaxLod(objects)
+  for (const co of objects) {
+    const chosen = pickGeometry(co.geometry ?? [], effectiveLod)
+    if (chosen === undefined) continue
     for (const surface of collectSurfaces(chosen.boundaries)) {
       for (const { tri: [a, b, c], normal } of triangulateSurface(surface, world)) {
         for (const wi of [a, b, c]) {

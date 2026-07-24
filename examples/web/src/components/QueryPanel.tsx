@@ -9,6 +9,14 @@ import { coerceAttrValue } from '../reader/index'
 import {
   colorByAtom, limitAtom, type SpatialMode, spatialModeAtom, whereAtom,
 } from '../store/index'
+import { PrimaryButton, SectionHeading } from './ui'
+
+const INPUT =
+  'rounded border border-cj-charcoal/20 px-1 py-1 text-xs '
+  + 'focus:border-cj-purple focus:outline-none focus:ring-1 focus:ring-cj-purple'
+const SECONDARY_BTN =
+  'rounded border border-cj-charcoal/20 px-2 py-1 text-xs text-cj-charcoal '
+  + 'transition-colors hover:border-cj-purple hover:text-cj-purple'
 
 const OPERATORS: Operator[] = ['Eq', 'Ne', 'Gt', 'Ge', 'Lt', 'Le']
 const MODES: { value: SpatialMode; label: string; hint: string }[] = [
@@ -18,7 +26,8 @@ const MODES: { value: SpatialMode; label: string; hint: string }[] = [
 ]
 
 export function QueryPanel() {
-  const { header, query, loadNext, total, rendered, hasMore } = useFcbData()
+  const { header, query, loadNext, applyLod, total, rendered, hasMore, lod,
+    availableLods } = useFcbData()
   const { draw, start, clear, bbox } = useDrawBbox()
   const [colorBy, setColorBy] = useAtom(colorByAtom)
   const [mode, setMode] = useAtom(spatialModeAtom)
@@ -72,77 +81,104 @@ export function QueryPanel() {
     void query({ bboxSource, where })
   }
 
+  // The LoD shown as selected: the explicit choice, else the highest known.
+  const activeLod = lod ?? availableLods[availableLods.length - 1]
+
   return (
     <section className="space-y-3 text-sm">
-      <h2 className="text-sm font-semibold">3. Query</h2>
+      <SectionHeading>3. Query</SectionHeading>
 
-      <fieldset className="rounded border p-2 space-y-1">
-        <legend className="px-1 text-xs font-semibold opacity-70">Spatial</legend>
+      <fieldset className="space-y-1 rounded border border-cj-charcoal/15 p-2">
+        <legend className="px-1 text-xs font-semibold text-cj-charcoal-soft">Spatial</legend>
         {MODES.map((m) => (
           <label key={m.value} className="flex items-start gap-2 text-xs">
-            <input type="radio" name="spatial-mode" className="mt-0.5"
+            <input type="radio" name="spatial-mode" className="mt-0.5 accent-cj-purple"
               checked={mode === m.value} onChange={() => changeMode(m.value)} />
             <span>
               <span className="font-medium">{m.label}</span>
-              <span className="block opacity-60">{m.hint}</span>
+              <span className="block text-cj-charcoal-soft">{m.hint}</span>
             </span>
           </label>
         ))}
         {mode === 'bbox' && (
           <div className="flex items-center gap-2 pt-1">
-            <button className="rounded border px-2 py-1 text-xs"
+            <button className={SECONDARY_BTN}
               onClick={() => (draw.active ? clear() : start())}>
               {draw.active ? 'cancel draw' : 'draw bbox'}
             </button>
-            <span className="text-xs opacity-70">{bbox ? 'bbox set' : 'no bbox'}</span>
+            <span className="text-xs text-cj-charcoal-soft">{bbox ? 'bbox set' : 'no bbox'}</span>
           </div>
         )}
       </fieldset>
 
-      <fieldset className="rounded border p-2 space-y-1">
-        <legend className="px-1 text-xs font-semibold opacity-70">
+      {/* Exclusive LoD selector — appears once the data reveals its LoDs. */}
+      {availableLods.length > 0 && (
+        <fieldset className="space-y-1 rounded border border-cj-charcoal/15 p-2">
+          <legend className="px-1 text-xs font-semibold text-cj-charcoal-soft">
+            Level of Detail
+          </legend>
+          <div className="flex flex-wrap gap-1">
+            {availableLods.map((l) => {
+              const on = activeLod === l
+              return (
+                <button key={l} type="button" onClick={() => applyLod(l)}
+                  aria-pressed={on}
+                  className={
+                    'rounded border px-2 py-1 text-xs transition-colors '
+                    + (on
+                      ? 'border-cj-gold bg-cj-gold-soft font-semibold text-cj-charcoal'
+                      : 'border-cj-charcoal/20 text-cj-charcoal-soft hover:border-cj-gold')
+                  }>
+                  LoD {l}
+                </button>
+              )
+            })}
+          </div>
+        </fieldset>
+      )}
+
+      <fieldset className="space-y-1 rounded border border-cj-charcoal/15 p-2">
+        <legend className="px-1 text-xs font-semibold text-cj-charcoal-soft">
           Attribute (optional)
         </legend>
         <div className="grid grid-cols-3 gap-1">
-          <select className="rounded border px-1 py-1 text-xs"
+          <select className={INPUT}
             value={field} onChange={(e) => setField(e.target.value)}>
             <option value="">(no attribute)</option>
             {queryable.map((c) => (
               <option key={c.name} value={c.name}>{c.name} ({c.typeName})</option>
             ))}
           </select>
-          <select className="rounded border px-1 py-1 text-xs"
+          <select className={INPUT}
             value={op} onChange={(e) => setOp(e.target.value as Operator)}>
             {OPERATORS.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
-          <input className="rounded border px-1 py-1 text-xs" value={value}
+          <input className={INPUT} value={value}
             onChange={(e) => setValue(e.target.value)} placeholder="value" />
         </div>
       </fieldset>
 
       <div className="flex items-center gap-2 text-xs">
         <label>limit</label>
-        <input type="number" min={1} className="w-20 rounded border px-1 py-1"
+        <input type="number" min={1} className={`w-20 ${INPUT}`}
           value={limit}
           onChange={(e) => setLimit(Math.max(1, Number(e.target.value) || 1))} />
-        <button className="rounded border px-3 py-1 font-medium" onClick={run}>
-          Run query
-        </button>
+        <PrimaryButton onClick={run}>Run query</PrimaryButton>
       </div>
       {mode === 'follow' && (
-        <p className="text-xs opacity-60">
+        <p className="text-xs text-cj-charcoal-soft">
           Following the camera — pan/zoom the map to load the visible area.
         </p>
       )}
 
       {hasMore && (
-        <button className="rounded border px-2 py-1 text-xs"
+        <button className={SECONDARY_BTN}
           onClick={() => void loadNext()}>Load next batch</button>
       )}
 
       <div className="flex items-center gap-2 text-xs">
         <label>colour by</label>
-        <select className="rounded border px-1 py-1"
+        <select className={INPUT}
           value={colorBy ?? ''}
           onChange={(e) => setColorBy(e.target.value || undefined)}>
           <option value="">(uniform)</option>
@@ -151,7 +187,7 @@ export function QueryPanel() {
       </div>
 
       {err && <p className="text-xs text-red-600">{err}</p>}
-      <p className="text-xs opacity-70">
+      <p className="text-xs text-cj-charcoal-soft">
         showing {rendered.length}{total !== undefined ? ` of ${total}` : ''}
       </p>
     </section>

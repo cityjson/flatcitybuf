@@ -101,7 +101,7 @@ export function MapView() {
       coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
       coordinateOrigin: [selected.centroidLngLat[0], selected.centroidLngLat[1], 0],
       getPosition: () => [0, 0, 0],
-      getColor: [255, 160, 0],
+      getColor: [245, 170, 0], // CityJSON gold
       pickable: false,
     })
   }, [selected])
@@ -123,7 +123,7 @@ export function MapView() {
         getPolygon: (d) => d,
         stroked: true,
         filled: false,
-        getLineColor: [30, 120, 255, 200],
+        getLineColor: [100, 73, 214, 220], // CityJSON purple
         getLineWidth: 1.5,
         lineWidthUnits: 'pixels',
         pickable: false,
@@ -136,8 +136,8 @@ export function MapView() {
         getPolygon: (d) => d,
         stroked: true,
         filled: true,
-        getFillColor: [255, 140, 0, 35],
-        getLineColor: [255, 120, 0, 220],
+        getFillColor: [245, 170, 0, 40], // CityJSON gold
+        getLineColor: [245, 170, 0, 230],
         getLineWidth: 2,
         lineWidthUnits: 'pixels',
         pickable: false,
@@ -189,7 +189,7 @@ export function MapView() {
           aria-live="polite"
           className="pointer-events-none absolute top-2 right-2 flex items-center gap-2 rounded-full bg-black/70 px-3 py-1 text-xs text-white shadow"
         >
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-cj-gold" />
           loading features…
         </div>
       )}
@@ -202,7 +202,7 @@ export function MapView() {
         <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 rounded bg-black/60 px-2 py-1 text-xs text-white">
           <span
             className="inline-block h-0 w-4 border-t-2"
-            style={{ borderColor: 'rgb(30,120,255)' }}
+            style={{ borderColor: 'rgb(100,73,214)' }}
           />
           fetched area (inset in view)
         </div>

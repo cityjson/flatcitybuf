@@ -1,12 +1,13 @@
 // src/hooks/useFcbData.ts
 import type { AttrCondition } from '@cityjson/flatcitybuf'
-import { useAtom } from 'jotai'
+import { useAtom, useStore } from 'jotai'
 import { useCallback } from 'react'
 import { bboxToSource, forward } from '../crs/index'
 import type { HeaderModel } from '../reader/index'
 import {
-  activeQueryAtom, fetchBboxAtom, headerAtom, limitAtom, loadingAtom, readyAtom,
-  type RenderedFeature, renderedAtom, selectedAtom, statusAtom, totalAtom,
+  activeQueryAtom, availableLodsAtom, fetchBboxAtom, headerAtom, limitAtom,
+  loadingAtom, lodAtom, MIN_FETCH_ZOOM, readyAtom, type RenderedFeature,
+  renderedAtom, selectedAtom, spatialModeAtom, statusAtom, totalAtom,
   type ViewState, viewStateAtom,
 } from '../store/index'
 import type { WorkerRequest, WorkerResponse } from '../worker/protocol'
@@ -52,11 +53,28 @@ export function useFcbData() {
   const [status, setStatus] = useAtom(statusAtom)
   const [active, setActive] = useAtom(activeQueryAtom)
   const [limit] = useAtom(limitAtom)
+  const [lod, setLod] = useAtom(lodAtom)
+  const [availableLods, setAvailableLods] = useAtom(availableLodsAtom)
   const [, setReady] = useAtom(readyAtom)
   const [, setLoading] = useAtom(loadingAtom)
   const [, setFetchBbox] = useAtom(fetchBboxAtom)
   const [, setSelected] = useAtom(selectedAtom)
   const [, setViewState] = useAtom(viewStateAtom)
+  // Read `lod`/`mode` from the store at call time (not via closures): an open is
+  // async, and the file may be reset or the mode switched while it is in flight.
+  const store = useStore()
+
+  // Union the LoDs seen in a result into the discovered set. The selection is
+  // NOT pinned here: `lodAtom` stays undefined ("auto = highest") until the user
+  // picks one, so the default keeps tracking the highest as discovery grows.
+  const mergeLods = useCallback((lods: string[]) => {
+    if (lods.length === 0) return
+    setAvailableLods((prev) => {
+      const s = new Set(prev)
+      for (const l of lods) s.add(l)
+      return [...s].sort((a, b) => Number(a) - Number(b))
+    })
+  }, [setAvailableLods])
 
   const frameToFeatures = useCallback((out: RenderedFeature[]) => {
     if (out.length === 0) return
@@ -78,14 +96,20 @@ export function useFcbData() {
   // is false for follow-camera queries (re-framing would move the camera, which
   // would retrigger the follow query).
   const runQuery = useCallback(async (
-    spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
+    spec: {
+      bboxSource?: [number, number, number, number]
+      where?: AttrCondition[]
+      /** Override the current LoD selection (used when applying a new LoD). */
+      lod?: string
+    },
     frameCamera: boolean,
   ): Promise<boolean> => {
     const seq = ++requestSeq
-    const q = { ...spec, limit, offset: 0 }
+    const useLod = spec.lod ?? store.get(lodAtom)
+    const q = { bboxSource: spec.bboxSource, where: spec.where, limit, offset: 0 }
     setLoading(true)
     setStatus('querying…')
-    const r = await callWorker({ type: 'query', id: ++msgId, ...q })
+    const r = await callWorker({ type: 'query', id: ++msgId, ...q, lod: useLod })
     // A newer request owns the indicator now — leave it on for that one.
     if (seq !== requestSeq) return false
     setLoading(false)
@@ -94,6 +118,7 @@ export function useFcbData() {
       return false
     }
     if (r.type !== 'result') return false
+    mergeLods(r.lods)
     const out: RenderedFeature[] = r.features.map((f) => ({
       id: f.id,
       centroidLngLat: f.centroidLngLat,
@@ -106,7 +131,7 @@ export function useFcbData() {
     const more = r.total !== undefined && r.total > out.length ? ` of ${r.total}` : ''
     setStatus(`${out.length} rendered${more}`)
     return true
-  }, [limit, setActive, setTotal, setRendered, setLoading, setStatus, frameToFeatures])
+  }, [limit, store, mergeLods, setActive, setTotal, setRendered, setLoading, setStatus, frameToFeatures])
 
   // Opening a file also renders it: the map otherwise shows only the basemap.
   const onOpened = useCallback((h: HeaderModel) => {
@@ -126,10 +151,14 @@ export function useFcbData() {
         ...v,
         longitude: (Math.min(...lngs) + Math.max(...lngs)) / 2,
         latitude: (Math.min(...lats) + Math.max(...lats)) / 2,
-        zoom: zoomForSpan(
+        // Never land below the fetch gate: a country-scale extent fits at ~zoom
+        // 11, which follow mode treats as "too far" and shows the zoom-in hint
+        // with nothing on screen. Clamping up puts us at a fetchable zoom on the
+        // extent centre, and follow then loads that viewport.
+        zoom: Math.max(MIN_FETCH_ZOOM, zoomForSpan(
           Math.max(...lngs) - Math.min(...lngs),
           Math.max(...lats) - Math.min(...lats),
-        ),
+        )),
       }))
     }
     if (!h.crs.supported || h.crs.code === null) {
@@ -138,12 +167,22 @@ export function useFcbData() {
       setStatus('file opened — CRS not supported, cannot georeference/render')
       return
     }
+    // In follow mode (the default) the camera-follow effect fetches the framed
+    // viewport itself, so skip the whole-dataset first page — for a 10M-feature
+    // file it would be an arbitrary, spatially-scattered slice. Other modes
+    // render the first page up front. Read the mode from the store, since it may
+    // have changed while the (async) open was in flight.
+    if (store.get(spatialModeAtom) === 'follow') {
+      setStatus('following camera — loading the visible area…')
+      return
+    }
     void runQuery({}, true) // auto-render the first page (whole dataset, capped by limit)
-  }, [setHeader, setReady, setSelected, setFetchBbox, setViewState, setRendered, setTotal, setActive, setLoading, setStatus, runQuery])
+  }, [store, setHeader, setReady, setSelected, setFetchBbox, setViewState, setRendered, setTotal, setActive, setLoading, setStatus, runQuery])
 
   const openUrl = useCallback(async (url: string) => {
     const seq = ++requestSeq
     setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
+    setAvailableLods([]); setLod(undefined) // a new file has its own LoD set
     setLoading(true)
     setStatus(`opening ${url} …`)
     const r = await callWorker({ type: 'open', id: ++msgId, url })
@@ -152,11 +191,12 @@ export function useFcbData() {
     // it settles; only the failure path clears it here.
     if (r.type === 'opened') onOpened(r.header)
     else if (r.type === 'error') { setLoading(false); setStatus(`failed to open URL: ${r.message}`) }
-  }, [onOpened, setReady, setRendered, setTotal, setActive, setLoading, setStatus])
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus])
 
   const openFile = useCallback(async (file: File) => {
     const seq = ++requestSeq
     setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
+    setAvailableLods([]); setLod(undefined) // a new file has its own LoD set
     setLoading(true)
     setStatus(`opening ${file.name} …`)
     const buffer = await file.arrayBuffer()
@@ -164,7 +204,7 @@ export function useFcbData() {
     if (seq !== requestSeq) return
     if (r.type === 'opened') onOpened(r.header)
     else if (r.type === 'error') { setLoading(false); setStatus(`failed to open file: ${r.message}`) }
-  }, [onOpened, setReady, setRendered, setTotal, setActive, setLoading, setStatus])
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus])
 
   const query = useCallback((
     spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
@@ -194,11 +234,12 @@ export function useFcbData() {
     const q = { ...active, offset: active.offset + active.limit }
     setLoading(true)
     setStatus('loading next batch…')
-    void callWorker({ type: 'query', id: ++msgId, ...q }).then((r) => {
+    void callWorker({ type: 'query', id: ++msgId, ...q, lod }).then((r) => {
       if (seq !== requestSeq) return
       setLoading(false)
       if (r.type === 'error') { if (!r.aborted) setStatus(`load failed: ${r.message}`); return }
       if (r.type !== 'result') return
+      mergeLods(r.lods)
       const out: RenderedFeature[] = r.features.map((f) => ({
         id: f.id, centroidLngLat: f.centroidLngLat,
         mesh: { positions: f.positions, normals: f.normals, indices: f.indices },
@@ -207,10 +248,20 @@ export function useFcbData() {
       setActive(q); setTotal(r.total); setRendered(out); frameToFeatures(out)
       setStatus(`${out.length} rendered${r.total !== undefined ? ` of ${r.total}` : ''}`)
     })
-  }, [active, setSelected, setActive, setTotal, setRendered, setLoading, setStatus, frameToFeatures])
+  }, [active, lod, mergeLods, setSelected, setActive, setTotal, setRendered, setLoading, setStatus, frameToFeatures])
 
-  return { openUrl, openFile, query, queryViewport, loadNext, status, header,
-           rendered, total,
+  // Switch the rendered LoD: remember the choice and re-run the current query
+  // at that LoD (the mesh is triangulated per LoD in the worker, so this needs
+  // a re-fetch). No camera move, so the view — and any follow outline — holds.
+  const applyLod = useCallback((newLod: string) => {
+    setLod(newLod)
+    setSelected(undefined) // the selected feature's mesh is from the old LoD
+    if (active === undefined) return
+    void runQuery({ bboxSource: active.bboxSource, where: active.where, lod: newLod }, false)
+  }, [active, runQuery, setLod, setSelected])
+
+  return { openUrl, openFile, query, queryViewport, loadNext, applyLod, status,
+           header, rendered, total, lod, availableLods,
            hasMore: total !== undefined && active !== undefined
              && active.offset + active.limit < total }
 }
