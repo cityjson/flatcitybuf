@@ -1,3 +1,4 @@
+import { ExportPanel } from './components/ExportPanel'
 import { HeaderPanel } from './components/HeaderPanel'
 import { MapView } from './components/MapView'
 import { QueryPanel } from './components/QueryPanel'
@@ -18,12 +19,13 @@ export function App() {
             <h1 className="text-base font-bold">FlatCityBuf viewer</h1>
           </div>
           <p className="text-xs text-cj-charcoal-soft">
-            Native TypeScript reader (@cityjson/flatcitybuf) — no WASM, no server.
+            Native TypeScript reader (@cityjson/flatcitybuf) — no server; format export runs in-browser via WASM.
           </p>
         </header>
         <SourcePanel />
         <HeaderPanel />
         <QueryPanel />
+        <ExportPanel />
       </aside>
       <main className="relative flex-1">
         <MapView />
