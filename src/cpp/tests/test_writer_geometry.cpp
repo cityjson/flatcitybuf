@@ -456,6 +456,7 @@ TEST_CASE("shape sniffing, not GeometryKind, decides values depth -- matching Ru
     // GeometryKind-dispatch is caught immediately.
     auto geometry = nlohmann::json::parse(R"({
         "type": "Solid",
+        "lod": "1",
         "boundaries": [[[[0, 1, 2]], [[3, 4, 5]]]],
         "semantics": {"surfaces": [], "values": [null]},
         "material": {"m": {"values": [null]}},
@@ -477,6 +478,25 @@ TEST_CASE("shape sniffing, not GeometryKind, decides values depth -- matching Ru
     REQUIRE(encoded.textures->size() == 1);
     CHECK((*encoded.textures)[0].shells == std::vector<std::uint32_t>{0});
     CHECK((*encoded.textures)[0].solids.empty());
+}
+
+TEST_CASE("sniffing resolves one level of empty-array nesting the same way serde would") {
+    // `[[]]` cannot fit rank 1 (its element IS an array), so it must be read
+    // one level deeper -- for material/semantics that's rank 2 (a single
+    // shell with zero surfaces); for texture, `[[]]` still fits the
+    // SHALLOWEST variant (rank 1: one surface with zero rings), since
+    // texture's ranks are offset by 2 array levels from a bare ring.
+    auto material = encode_material(nlohmann::json::parse(R"({"m": {"values": [[]]}})"));
+    REQUIRE(material.size() == 1);
+    CHECK(material[0].solids == std::vector<std::uint32_t>{1});
+    CHECK(material[0].shells == std::vector<std::uint32_t>{0});
+    CHECK(material[0].vertices.empty());
+
+    auto texture = encode_texture(nlohmann::json::parse(R"({"t": {"values": [[]]}})"));
+    REQUIRE(texture.size() == 1);
+    CHECK(texture[0].surfaces == std::vector<std::uint32_t>{0});
+    CHECK(texture[0].shells == std::vector<std::uint32_t>{1});
+    CHECK(texture[0].solids.empty());
 }
 
 TEST_CASE("geometry_kind_from_name maps every known CityJSON type string") {

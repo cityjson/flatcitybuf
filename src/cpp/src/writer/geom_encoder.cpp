@@ -106,6 +106,16 @@ void push_textured_shell(const nlohmann::json& shell, TextureMapping& m) {
 // would be read at a different depth by shape alone than by geometry type.
 // Sniffing here, rather than keying on GeometryKind, is what keeps this port
 // byte-compatible with Rust on those files too.
+//
+// Known, deliberately unhandled gap (found in the M2 codex review's
+// follow-up pass): a leaf here is accepted as long as it is not an array,
+// but Rust's leaf type is `Option<usize>`, so a NEGATIVE integer (e.g.
+// `semantics.values: [-1]`) fails every variant in Rust -- the whole
+// CityJSON document fails to parse before ever reaching this code -- while
+// this sniffs it as rank 1 and silently encodes it as NULL. No real
+// encoder emits a negative semantic/material/UV index, so this is not
+// fixed: doing so would mean threading non-negativity checks through every
+// leaf of every rank, for a case with no realistic input.
 // ---------------------------------------------------------------------------
 
 /// True if `arr` fits the semantics/material shape at `rank` -- 1: a flat
