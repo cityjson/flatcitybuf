@@ -1,17 +1,23 @@
 name: API documentation
 
-# Builds the API reference for all four implementations and publishes them as
-# one site on GitHub Pages:
+# Builds the API reference for all four implementations, plus the browser demo
+# (examples/web), and publishes them as one site on GitHub Pages. A repo has
+# exactly one Pages deployment target, so everything that lands on Pages has
+# to be assembled and deployed together here -- a second, independent
+# actions/deploy-pages workflow would just race this one and clobber whichever
+# deployed last.
 #
 #   /            landing page
 #   /rust/       rustdoc      (cargo doc)          -- also on docs.rs
 #   /cpp/        doxygen
 #   /python/     pdoc
 #   /typescript/ typedoc
+#   /demo/       examples/web (vite build)         -- live browser viewer
 #
 # Each language owns its own generator behind the same `just docs` verb, so
 # this workflow never encodes a per-language command -- only where the output
-# lands.
+# lands. The demo is built explicitly below (`just build`, not `just docs`)
+# since it is an application, not documentation.
 #
 # Called by release.yml (which passes release_tag, so the site is also
 # attached to the release as a tarball), and runnable on its own.
@@ -31,6 +37,7 @@ on:
       - "src/cpp/include/**"
       - "src/cpp/Doxyfile"
       - "src/ts/typedoc.json"
+      - "examples/web/**"
       - ".github/workflows/docs.yml"
 
 concurrency:
@@ -80,9 +87,20 @@ jobs:
           node-version: "22"
 
       # One verb, every language. examples/web is a no-op (an application, not
-      # a documented package).
+      # a documented package) -- it is built separately below.
       - name: just docs
         run: just docs
+
+      # examples/web resolves @cityjson/flatcitybuf from src/ts/dist via a
+      # file: dependency, so the reader has to be built first (same order the
+      # root justfile's DIRS fan-out uses).
+      - name: Build the reader package (the demo resolves its dist/)
+        run: just build
+        working-directory: src/ts
+
+      - name: Build the web demo
+        run: just build
+        working-directory: examples/web
 
       # Output locations are per-generator and are NOT unified by the
       # justfiles, so they are mapped here -- the one place that needs to know.
@@ -94,6 +112,7 @@ jobs:
           cp -r src/cpp/docs/html    site/cpp
           cp -r src/py/docs/api      site/python
           cp -r src/ts/docs          site/typescript
+          cp -r examples/web/dist    site/demo
 
           # rustdoc emits no root index.html when several crates are built, so
           # point at the crate a visitor actually wants.
@@ -131,6 +150,10 @@ jobs:
                CityJSON in FlatBuffers, with a packed Hilbert R-tree, a static
                B+tree attribute index, and HTTP range reads.</p>
             <ul>
+              <li><a href="demo/">Live demo — browser viewer</a>
+                  <small>Open a .fcb over HTTP range requests (or a local file), run
+                  spatial and attribute queries, and render the result with deck.gl.
+                  React on the native TypeScript reader — no WASM, no server.</small></li>
               <li><a href="rust/">Rust — fcb_core</a>
                   <small>Reader and writer. The reference implementation, and the
                   oracle the other three are validated against. Also on docs.rs.</small></li>

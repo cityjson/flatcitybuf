@@ -7,6 +7,10 @@ from a local file, runs bounding-box and attribute queries, and renders the
 returned 3D buildings on a MapLibre basemap with deck.gl. Query results can
 also be exported to CityJSON, CityJSONSeq, or OBJ (see [Export](#export)).
 
+**Live at [cityjson.github.io/flatcitybuf/demo](https://cityjson.github.io/flatcitybuf/demo/)**
+— rebuilt and deployed on every push to `main` (see
+[`.github/workflows/docs.yml`](../../.github/workflows/docs.yml)).
+
 > Supersedes the archived `cityjson/flatcitybuf-web-prototype`, which used the
 > old WASM binding.
 
