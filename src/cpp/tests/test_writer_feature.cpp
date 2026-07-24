@@ -337,6 +337,26 @@ TEST_CASE("to_city_object: no attributes key at all leaves the field absent") {
     CHECK(fb_co->columns() == nullptr);
 }
 
+TEST_CASE(
+    "to_city_object: children_roles (CityObjectGroup) round-trips, null becomes empty string") {
+    // The cjseq field is `children_roles` (snake_case), NOT the camelCase
+    // "childrenRoles" this originally guessed -- corrected during the M3
+    // codex review, which cross-checked the actual cjseq2 source.
+    auto co = nlohmann::ordered_json::parse(
+        R"({"type": "CityObjectGroup", "children": ["a", "b"],
+            "children_roles": ["parent", null]})");
+    flatbuffers::FlatBufferBuilder fbb;
+    AttributeSchema schema;
+    auto off = to_city_object(fbb, "group-1", co, schema, nullptr);
+    fbb.Finish(off);
+    const ::CityObject* fb_co = flatbuffers::GetRoot<::CityObject>(fbb.GetBufferPointer());
+
+    REQUIRE(fb_co->children_roles() != nullptr);
+    REQUIRE(fb_co->children_roles()->size() == 2);
+    CHECK(fb_co->children_roles()->Get(0)->str() == "parent");
+    CHECK(fb_co->children_roles()->Get(1)->str() == "");  // null role -> empty string
+}
+
 TEST_CASE("to_fcb_city_feature: objects visited in ascending id order, vertices, bbox") {
     auto feature = nlohmann::ordered_json::parse(R"({
         "type": "CityJSONFeature",

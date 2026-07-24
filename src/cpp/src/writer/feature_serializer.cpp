@@ -85,9 +85,13 @@ to_semantic_object(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::ordere
                    const AttributeSchema* semantic_attr_schema) {
     auto [type_, extension_type_name] =
         semantic_surface_type_from_name(surface.at("type").get<std::string>());
-    auto extension_type =
-        extension_type_name ? std::optional(fbb.CreateString(*extension_type_name)) : std::nullopt;
 
+    // Builder call order matches Rust's `to_geometry` semantic-object arm
+    // (writer/serializer.rs:920-949) exactly: `children` is created BEFORE
+    // `extension_type`. FlatBuffers builder calls are side-effecting (each
+    // appends to the buffer), so this order is part of the wire format, not
+    // just source-code style -- it must be sequenced with separate named
+    // locals, never left to argument-evaluation order.
     std::optional<::flatbuffers::Offset<::flatbuffers::Vector<std::uint32_t>>> children;
     if (auto it = surface.find("children"); it != surface.end() && it->is_array()) {
         std::vector<std::uint32_t> c;
@@ -95,6 +99,9 @@ to_semantic_object(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::ordere
             c.push_back(v.get<std::uint32_t>());
         children = fbb.CreateVector(c);
     }
+
+    auto extension_type =
+        extension_type_name ? std::optional(fbb.CreateString(*extension_type_name)) : std::nullopt;
 
     ::flatbuffers::Optional<std::uint32_t> parent = ::flatbuffers::nullopt;
     if (auto it = surface.find("parent"); it != surface.end() && !it->is_null())
@@ -139,28 +146,37 @@ SurfaceType semantic_surface_type_from_name(const std::string& name) {
     if (auto it = appearance.find("materials"); it != appearance.end() && it->is_array()) {
         std::vector<::flatbuffers::Offset<::Material>> materials;
         for (const auto& m : *it) {
+            // Builder call order matches Rust's `to_appearance` material arm
+            // (writer/serializer.rs:542-566) exactly: name, then
+            // diffuse/emissive/specular color IN THAT ORDER, each a
+            // separate sequenced statement -- C++ does not specify
+            // function-argument evaluation order, so these side-effecting
+            // `fbb.CreateVector`/`CreateString` calls must never be written
+            // as inline call arguments.
             auto name = fbb.CreateString(m.at("name").get<std::string>());
+            auto diffuse_color = to_color(fbb, m, "diffuseColor");
+            auto emissive_color = to_color(fbb, m, "emissiveColor");
+            auto specular_color = to_color(fbb, m, "specularColor");
+
             auto ambient = m.find("ambientIntensity");
             auto shininess = m.find("shininess");
             auto transparency = m.find("transparency");
             auto is_smooth = m.find("isSmooth");
-            materials.push_back(
-                CreateMaterial(fbb, name,
-                               ambient != m.end() && !ambient->is_null()
-                                   ? ::flatbuffers::Optional<double>(ambient->get<double>())
-                                   : ::flatbuffers::nullopt,
-                               to_color(fbb, m, "diffuseColor").value_or(0),
-                               to_color(fbb, m, "emissiveColor").value_or(0),
-                               to_color(fbb, m, "specularColor").value_or(0),
-                               shininess != m.end() && !shininess->is_null()
-                                   ? ::flatbuffers::Optional<double>(shininess->get<double>())
-                                   : ::flatbuffers::nullopt,
-                               transparency != m.end() && !transparency->is_null()
-                                   ? ::flatbuffers::Optional<double>(transparency->get<double>())
-                                   : ::flatbuffers::nullopt,
-                               is_smooth != m.end() && !is_smooth->is_null()
-                                   ? ::flatbuffers::Optional<bool>(is_smooth->get<bool>())
-                                   : ::flatbuffers::nullopt));
+            materials.push_back(CreateMaterial(
+                fbb, name,
+                ambient != m.end() && !ambient->is_null()
+                    ? ::flatbuffers::Optional<double>(ambient->get<double>())
+                    : ::flatbuffers::nullopt,
+                diffuse_color.value_or(0), emissive_color.value_or(0), specular_color.value_or(0),
+                shininess != m.end() && !shininess->is_null()
+                    ? ::flatbuffers::Optional<double>(shininess->get<double>())
+                    : ::flatbuffers::nullopt,
+                transparency != m.end() && !transparency->is_null()
+                    ? ::flatbuffers::Optional<double>(transparency->get<double>())
+                    : ::flatbuffers::nullopt,
+                is_smooth != m.end() && !is_smooth->is_null()
+                    ? ::flatbuffers::Optional<bool>(is_smooth->get<bool>())
+                    : ::flatbuffers::nullopt));
         }
         materials_off = fbb.CreateVector(materials);
     }
@@ -204,8 +220,13 @@ SurfaceType semantic_surface_type_from_name(const std::string& name) {
                     texture_type = ::TextureType::Typical;
             }
 
+            // Builder call order matches Rust's texture arm
+            // (writer/serializer.rs:579-599): `image` (already a separate
+            // statement above), then `border_color`, sequenced explicitly
+            // for the same reason as the material loop above.
+            auto border_color = to_color(fbb, t, "borderColor");
             textures.push_back(CreateTexture(fbb, format, image, wrap_mode, texture_type,
-                                             to_color(fbb, t, "borderColor").value_or(0)));
+                                             border_color.value_or(0)));
         }
         textures_off = fbb.CreateVector(textures);
     }
@@ -275,14 +296,22 @@ SurfaceType semantic_surface_type_from_name(const std::string& name) {
                     mappings.push_back(CreateMaterialMapping(
                         fbb, theme, 0, 0, 0, ::flatbuffers::Optional<std::uint32_t>(m.value)));
                     break;
-                case fcb::MaterialMapping::Kind::Values:
+                case fcb::MaterialMapping::Kind::Values: {
                     // Present-but-empty: created unconditionally, even when
                     // a level genuinely has zero entries, so `[]` stays
-                    // distinct from an absent field.
-                    mappings.push_back(CreateMaterialMapping(
-                        fbb, theme, fbb.CreateVector(m.solids), fbb.CreateVector(m.shells),
-                        fbb.CreateVector(m.vertices), ::flatbuffers::nullopt));
+                    // distinct from an absent field. Order (solids, shells,
+                    // vertices) matches Rust's `GMMaterialMapping::Values`
+                    // arm (writer/serializer.rs:966-978) exactly, as three
+                    // separately sequenced statements -- see the
+                    // to_semantic_object note on why this cannot be inline
+                    // call arguments.
+                    auto solids = fbb.CreateVector(m.solids);
+                    auto shells = fbb.CreateVector(m.shells);
+                    auto vertices = fbb.CreateVector(m.vertices);
+                    mappings.push_back(CreateMaterialMapping(fbb, theme, solids, shells, vertices,
+                                                             ::flatbuffers::nullopt));
                     break;
+                }
                 case fcb::MaterialMapping::Kind::NullValues:
                     mappings.push_back(
                         CreateMaterialMapping(fbb, theme, 0, 0, 0, ::flatbuffers::nullopt));
@@ -301,11 +330,17 @@ SurfaceType semantic_surface_type_from_name(const std::string& name) {
             auto theme = fbb.CreateString(t.theme);
             if (t.has_values) {
                 // As with material Values: all five arrays are created
-                // unconditionally, even where empty.
-                mappings.push_back(CreateTextureMapping(
-                    fbb, theme, fbb.CreateVector(t.solids), fbb.CreateVector(t.shells),
-                    fbb.CreateVector(t.surfaces), fbb.CreateVector(t.strings),
-                    fbb.CreateVector(t.vertices)));
+                // unconditionally, even where empty. Order (solids, shells,
+                // surfaces, strings, vertices) matches Rust's texture arm
+                // (writer/serializer.rs:1022-1029) exactly, as five
+                // separately sequenced statements.
+                auto solids = fbb.CreateVector(t.solids);
+                auto shells = fbb.CreateVector(t.shells);
+                auto surfaces = fbb.CreateVector(t.surfaces);
+                auto strings = fbb.CreateVector(t.strings);
+                auto vertices = fbb.CreateVector(t.vertices);
+                mappings.push_back(
+                    CreateTextureMapping(fbb, theme, solids, shells, surfaces, strings, vertices));
             } else {
                 mappings.push_back(CreateTextureMapping(fbb, theme, 0, 0, 0, 0, 0));
             }
@@ -406,19 +441,39 @@ FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb,
         ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::GeometryInstance>>>>
         geometry_instances_off;
     if (auto git = co.find("geometry"); git != co.end() && git->is_array()) {
+        // TWO FULL PASSES, matching Rust's `to_city_object` exactly
+        // (writer/serializer.rs:644-670): it filters "geometry" into a
+        // non-instance list and an instance list FIRST, builds every
+        // non-instance table AND CREATES THEIR VECTOR, and ONLY THEN builds
+        // every instance table and creates ITS vector. A single interleaved
+        // pass (building each entry as visited, in original array order)
+        // produces a DIFFERENT physical child allocation order in the
+        // FlatBuffer whenever instances and non-instances are interleaved in
+        // the source. Just as importantly, the "geoms" vector must be
+        // CREATED before any `to_geometry_instance` call runs, not after
+        // both loops finish -- Rust creates it immediately once the
+        // non-instance loop's `.collect()` completes, so every
+        // `fbb.CreateVector`/`CreateString` call inside `to_geometry_instance`
+        // happens strictly AFTER it on the Rust side too. The two orderings
+        // are not observably different by DECODED content, only by byte
+        // layout, so no functional test catches a regression here; only a
+        // byte-exact oracle over a file with interleaved geometry does (see
+        // test_writer_oracle.cpp's "interleaved geometry" case, which
+        // caught exactly this once already).
         std::vector<::flatbuffers::Offset<::Geometry>> geoms;
+        for (const auto& g : *git)
+            if (g.at("type").get<std::string>() != "GeometryInstance")
+                geoms.push_back(to_geometry(fbb, g, semantic_attr_schema));
+        geometry_off = fbb.CreateVector(geoms);
+
         std::vector<::flatbuffers::Offset<::GeometryInstance>> instances;
-        for (const auto& g : *git) {
+        for (const auto& g : *git)
             if (g.at("type").get<std::string>() == "GeometryInstance")
                 instances.push_back(to_geometry_instance(fbb, g));
-            else
-                geoms.push_back(to_geometry(fbb, g, semantic_attr_schema));
-        }
         // Both created -- even empty -- whenever "geometry" is present at
         // all, matching Rust's Option<Vec<_>> filtered from ONE Option: it
         // is the presence of the key, not either resulting list's own
         // emptiness, that decides presence on the wire.
-        geometry_off = fbb.CreateVector(geoms);
         geometry_instances_off = fbb.CreateVector(instances);
     }
 
@@ -442,14 +497,18 @@ FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb,
         children_off = fbb.CreateVector(c);
     }
 
-    // "childrenRoles" (CityObjectGroup only): an unspecified role is `null`
-    // in CityJSON; the header has no way to spell that, so it is written
-    // as the empty string, mirroring the equivalent handling for
-    // point-of-contact strings elsewhere in this writer.
+    // "children_roles" (CityObjectGroup only; the cjseq field is
+    // `children_roles`, snake_case like the FlatBuffers field itself, NOT
+    // camelCase -- confirmed against the cjseq2 source during the M3 codex
+    // review, correcting an earlier unverified guess of "childrenRoles").
+    // An unspecified role is `null` in CityJSON; the header has no way to
+    // spell that, so it is written as the empty string, mirroring the
+    // equivalent handling for point-of-contact strings elsewhere in this
+    // writer.
     std::optional<
         ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>>>
         children_roles_off;
-    if (auto it = co.find("childrenRoles"); it != co.end() && it->is_array()) {
+    if (auto it = co.find("children_roles"); it != co.end() && it->is_array()) {
         std::vector<::flatbuffers::Offset<::flatbuffers::String>> r;
         for (const auto& role : *it)
             r.push_back(

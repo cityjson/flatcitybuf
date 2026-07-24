@@ -72,14 +72,19 @@ AttributeSchema build_attr_schema(const std::vector<ordered_json>& features) {
     return schema;
 }
 
-std::pair<std::vector<std::uint8_t>, ordered_json> build_single_feature() {
+/// Builds the Nth (0-indexed) CityJSONFeature line of
+/// `conformance/inputs/<fixture>.city.jsonl` with this writer, returning
+/// its size-prefixed bytes alongside the source feature JSON.
+std::pair<std::vector<std::uint8_t>, ordered_json>
+build_feature_from_fixture(const std::string& fixture, std::size_t feature_index = 0) {
     const std::string input_path =
-        std::string(FCB_CONFORMANCE_DIR) + "/inputs/single_feature.city.jsonl";
+        std::string(FCB_CONFORMANCE_DIR) + "/inputs/" + fixture + ".city.jsonl";
     std::vector<ordered_json> input_lines = read_jsonl(input_path);
-    REQUIRE(input_lines.size() == 2);  // metadata line + one feature line
-    const ordered_json& feature_json = input_lines[1];
+    REQUIRE(input_lines.size() > feature_index + 1);  // metadata line + features
+    const ordered_json& feature_json = input_lines[feature_index + 1];
 
-    AttributeSchema attr_schema = build_attr_schema({feature_json});
+    std::vector<ordered_json> all_features(input_lines.begin() + 1, input_lines.end());
+    AttributeSchema attr_schema = build_attr_schema(all_features);
 
     flatbuffers::FlatBufferBuilder fbb;
     auto [off, bbox] = to_fcb_city_feature(fbb, feature_json.at("id").get<std::string>(),
@@ -92,13 +97,20 @@ std::pair<std::vector<std::uint8_t>, ordered_json> build_single_feature() {
         feature_json};
 }
 
-}  // namespace
+std::pair<std::vector<std::uint8_t>, ordered_json> build_single_feature() {
+    return build_feature_from_fixture("single_feature");
+}
 
-TEST_CASE("oracle: to_fcb_city_feature is byte-identical to the Rust writer's output") {
-    const std::string fcb_path = std::string(FCB_CONFORMANCE_DIR) + "/single_feature.fcb";
+/// Byte-compares this writer's output for `<fixture>.city.jsonl`'s feature
+/// `feature_index` against the corresponding slice of the real Rust-written
+/// `<fixture>.fcb` (sliced via the header's own computed layout, never a
+/// hardcoded offset -- the fixture may carry a spatial index, since it is
+/// unaffected by whether one exists).
+void check_feature_byte_exact(const std::string& fixture, std::size_t feature_index = 0) {
+    CAPTURE(fixture);
+    const std::string fcb_path = std::string(FCB_CONFORMANCE_DIR) + "/" + fixture + ".fcb";
 
     FcbReader r = FcbReader::open_file(fcb_path);
-    REQUIRE(r.header().info().features_count == 1);
     const auto feature_begin = r.header().layout().feature_begin;
 
     std::vector<std::uint8_t> whole_file = read_file_bytes(fcb_path);
@@ -106,7 +118,7 @@ TEST_CASE("oracle: to_fcb_city_feature is byte-identical to the Rust writer's ou
     std::vector<std::uint8_t> expected_feature_bytes(whole_file.begin() + feature_begin,
                                                      whole_file.end());
 
-    auto [actual_feature_bytes, feature_json] = build_single_feature();
+    auto [actual_feature_bytes, feature_json] = build_feature_from_fixture(fixture, feature_index);
     (void)feature_json;
     if (actual_feature_bytes != expected_feature_bytes) {
         MESSAGE("actual size: " << actual_feature_bytes.size()
@@ -121,6 +133,24 @@ TEST_CASE("oracle: to_fcb_city_feature is byte-identical to the Rust writer's ou
         }
     }
     CHECK(actual_feature_bytes == expected_feature_bytes);
+}
+
+}  // namespace
+
+TEST_CASE("oracle: to_fcb_city_feature is byte-identical to the Rust writer's output") {
+    check_feature_byte_exact("single_feature");
+}
+
+TEST_CASE("oracle: interleaved geometry and GeometryInstance byte-match Rust's two-pass order") {
+    // Found during the M3 codex review: C++ originally built each CityObject
+    // geometry entry in ONE interleaved pass (as encountered in the source
+    // array), while Rust's to_city_object does two full passes -- every
+    // non-instance geometry, in order, THEN every instance, in order
+    // (writer/serializer.rs:644-670). The two produce identical DECODED
+    // content but different FlatBuffer byte layouts whenever a CityObject's
+    // "geometry" array interleaves instances with non-instances, which no
+    // single-geometry fixture (like single_feature) can catch.
+    check_feature_byte_exact("geometry_instance_interleaved");
 }
 
 TEST_CASE("oracle: the bytes this writer produces decode correctly through the existing reader") {

@@ -101,6 +101,18 @@ TEST_CASE("conformance: appearance_depths") { check_case("appearance_depths"); }
 // metadata line (defect 2). Its absence from this list is why both defects
 // shipped undetected.
 TEST_CASE("conformance: geom_decoder_edges") { check_case("geom_decoder_edges"); }
+// A CityObject with geometry AND a GeometryInstance interleaved in the
+// source order. The reference writer always emits every non-instance
+// geometry before every instance (two separate passes over the input,
+// filtered), so the decoded order is [MultiSurface, MultiSurface,
+// GeometryInstance] even though the source interleaves them as [MultiSurface,
+// GeometryInstance, MultiSurface] -- added for the C++ writer's byte-exact
+// oracle tests (test_writer_oracle.cpp), which need a fixture exercising
+// this reordering; also exercises the reader decoding geometry and
+// geometry_instances together on one object, which no prior fixture did.
+TEST_CASE("conformance: geometry_instance_interleaved") {
+    check_case("geometry_instance_interleaved");
+}
 
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");
