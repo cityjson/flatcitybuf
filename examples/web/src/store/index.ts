@@ -49,8 +49,9 @@ export const followTooFarAtom = atom<boolean>(false)
  *  (a whole city/region) and shows a "zoom in" hint instead of querying. Shared
  *  with the open-time framing so a fresh file never lands below it — otherwise a
  *  country-scale dataset would frame to zoom ~11 and show the hint with nothing
- *  on screen. Higher = closer to the ground. */
-export const MIN_FETCH_ZOOM = 13
+ *  on screen. Higher = closer to the ground; set to a street/neighbourhood zoom
+ *  so the visible area stays close to what the per-query feature limit covers. */
+export const MIN_FETCH_ZOOM = 15
 
 /** The active attribute filter, applied on top of every spatial mode. `[]`/
  *  undefined means no attribute filter. Held in an atom (not QueryPanel local

@@ -1,5 +1,5 @@
 // src/components/SourcePanel.tsx
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useFcbData } from '../hooks/useFcbData'
 import { PrimaryButton, SectionHeading } from './ui'
 
@@ -13,6 +13,15 @@ const INPUT =
 export function SourcePanel() {
   const { openUrl, openFile, status } = useFcbData()
   const [url, setUrl] = useState(DEFAULT_URL)
+  // Auto-load the default dataset once on mount, so the map shows buildings on
+  // first paint instead of waiting for a click. The ref guards against React
+  // StrictMode's double-invoke (and openUrl identity changing).
+  const autoLoaded = useRef(false)
+  useEffect(() => {
+    if (autoLoaded.current) return
+    autoLoaded.current = true
+    void openUrl(DEFAULT_URL)
+  }, [openUrl])
   return (
     <section className="space-y-2">
       <SectionHeading>1. Open a file</SectionHeading>
