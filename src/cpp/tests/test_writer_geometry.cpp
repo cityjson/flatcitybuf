@@ -149,7 +149,7 @@ TEST_CASE("encode_semantics: MultiSurface (flat, depth 1)") {
         ],
         "values": [0, 0, null, 1, 2]
     })");
-    auto encoded = encode_semantics(semantics_json, GeometryKind::MultiSurface, boundaries);
+    auto encoded = encode_semantics(semantics_json, boundaries);
     CHECK(encoded.surfaces == semantics_json.at("surfaces"));
     REQUIRE(encoded.values.has_value());
     CHECK(*encoded.values == std::vector<std::uint32_t>{0, 0, UINT32_MAX, 1, 2});
@@ -167,7 +167,7 @@ TEST_CASE("encode_semantics: a null shell expands to one null per surface (Solid
         "surfaces": [{"type": "RoofSurface"}],
         "values": [[0, 0], null]
     })");
-    auto encoded = encode_semantics(semantics_json, GeometryKind::Solid, boundaries);
+    auto encoded = encode_semantics(semantics_json, boundaries);
     REQUIRE(encoded.values.has_value());
     CHECK(*encoded.values == std::vector<std::uint32_t>{0, 0, UINT32_MAX});
     // Deliberately NOT round-tripped: a null shell does not round-trip its
@@ -190,7 +190,7 @@ TEST_CASE("encode_semantics: CompositeSolid (depth 3)") {
         "surfaces": [{"type": "RoofSurface"}, {"type": "WallSurface"}],
         "values": [[[0, 1, 1, null]], [[null, null, null]]]
     })");
-    auto encoded = encode_semantics(semantics_json, GeometryKind::CompositeSolid, boundaries);
+    auto encoded = encode_semantics(semantics_json, boundaries);
     REQUIRE(encoded.values.has_value());
     CHECK(*encoded.values ==
           std::vector<std::uint32_t>{0, 1, 1, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX});
@@ -199,14 +199,14 @@ TEST_CASE("encode_semantics: CompositeSolid (depth 3)") {
 TEST_CASE("encode_semantics: absent surfaces/null values are handled") {
     auto boundaries =
         encode_boundaries(GeometryKind::MultiSurface, nlohmann::json::parse("[[[0,1,2]]]"));
-    auto encoded = encode_semantics(nlohmann::json::parse(R"({"surfaces": [], "values": null})"),
-                                    GeometryKind::MultiSurface, boundaries);
+    auto encoded =
+        encode_semantics(nlohmann::json::parse(R"({"surfaces": [], "values": null})"), boundaries);
     CHECK_FALSE(encoded.values.has_value());
 }
 
 TEST_CASE("encode_material: a single value") {
     auto material = nlohmann::json::parse(R"({"theme1": {"value": 5}})");
-    auto encoded = encode_material(material, GeometryKind::MultiSurface);
+    auto encoded = encode_material(material);
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].kind == MaterialMapping::Kind::Value);
     CHECK(encoded[0].theme == "theme1");
@@ -215,29 +215,37 @@ TEST_CASE("encode_material: a single value") {
 
 TEST_CASE("encode_material: MultiSurface-depth values") {
     auto material = nlohmann::json::parse(R"({"theme2": {"values": [0, 1, null, 2]}})");
-    auto encoded = encode_material(material, GeometryKind::MultiSurface);
+    auto encoded = encode_material(material);
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].kind == MaterialMapping::Kind::Values);
     CHECK(encoded[0].theme == "theme2");
     CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 1, UINT32_MAX, 2});
     CHECK(encoded[0].shells.empty());
     CHECK(encoded[0].solids.empty());
+
+    auto decoded = decode_material_values(GeometryKind::MultiSurface, view(encoded[0].solids),
+                                          view(encoded[0].shells), view(encoded[0].vertices));
+    CHECK(decoded == nlohmann::json::parse("[0, 1, null, 2]"));
 }
 
 TEST_CASE("encode_material: Solid-depth values") {
     auto material = nlohmann::json::parse(R"({"theme3": {"values": [[0, 1, null], [2, 3, 4]]}})");
-    auto encoded = encode_material(material, GeometryKind::Solid);
+    auto encoded = encode_material(material);
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].theme == "theme3");
     CHECK(encoded[0].solids == std::vector<std::uint32_t>{2});  // 1 solid, 2 shells
     CHECK(encoded[0].shells == std::vector<std::uint32_t>{3, 3});
     CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 1, UINT32_MAX, 2, 3, 4});
+
+    auto decoded = decode_material_values(GeometryKind::Solid, view(encoded[0].solids),
+                                          view(encoded[0].shells), view(encoded[0].vertices));
+    CHECK(decoded == nlohmann::json::parse("[[0, 1, null], [2, 3, 4]]"));
 }
 
 TEST_CASE("encode_material: multiple themes") {
     auto material =
         nlohmann::json::parse(R"({"theme4": {"value": 7}, "theme5": {"values": [8, 9]}})");
-    auto encoded = encode_material(material, GeometryKind::MultiSurface);
+    auto encoded = encode_material(material);
     REQUIRE(encoded.size() == 2);
 
     auto find = [&](const std::string& theme) -> const MaterialMapping& {
@@ -257,24 +265,27 @@ TEST_CASE("encode_material: multiple themes") {
 TEST_CASE("encode_material: CompositeSolid-depth values") {
     auto material = nlohmann::json::parse(
         R"({"theme6": {"values": [[[0, 1, null], [2, null, null]], [[3, 4, null]]]}})");
-    auto encoded = encode_material(material, GeometryKind::CompositeSolid);
+    auto encoded = encode_material(material);
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].solids == std::vector<std::uint32_t>{2, 1});  // 2 solids: 2 shells, then 1
     CHECK(encoded[0].shells == std::vector<std::uint32_t>{3, 3, 3});
     CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 1, UINT32_MAX, 2, UINT32_MAX,
                                                             UINT32_MAX, 3, 4, UINT32_MAX});
+
+    auto decoded = decode_material_values(GeometryKind::CompositeSolid, view(encoded[0].solids),
+                                          view(encoded[0].shells), view(encoded[0].vertices));
+    CHECK(decoded == nlohmann::json::parse("[[[0, 1, null], [2, null, null]], [[3, 4, null]]]"));
 }
 
 TEST_CASE("encode_material: a null shell or solid is recorded as a null count") {
-    auto encoded = encode_material(nlohmann::json::parse(R"({"t": {"values": [[0, 1], null]}})"),
-                                   GeometryKind::Solid);
+    auto encoded = encode_material(nlohmann::json::parse(R"({"t": {"values": [[0, 1], null]}})"));
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].solids == std::vector<std::uint32_t>{2});
     CHECK(encoded[0].shells == std::vector<std::uint32_t>{2, UINT32_MAX});
     CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 1});
 
-    auto encoded2 = encode_material(nlohmann::json::parse(R"({"t": {"values": [[[0, 1]], null]}})"),
-                                    GeometryKind::CompositeSolid);
+    auto encoded2 =
+        encode_material(nlohmann::json::parse(R"({"t": {"values": [[[0, 1]], null]}})"));
     REQUIRE(encoded2.size() == 1);
     CHECK(encoded2[0].solids == std::vector<std::uint32_t>{1, UINT32_MAX});
     CHECK(encoded2[0].shells == std::vector<std::uint32_t>{2});
@@ -282,8 +293,7 @@ TEST_CASE("encode_material: a null shell or solid is recorded as a null count") 
 }
 
 TEST_CASE("encode_material: values: null is a NullValues mapping, not dropped") {
-    auto encoded = encode_material(nlohmann::json::parse(R"({"t": {"values": null}})"),
-                                   GeometryKind::MultiSurface);
+    auto encoded = encode_material(nlohmann::json::parse(R"({"t": {"values": null}})"));
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].kind == MaterialMapping::Kind::NullValues);
     CHECK(encoded[0].theme == "t");
@@ -293,7 +303,7 @@ TEST_CASE("encode_texture: MultiSurface-depth values (the shallowest a texture c
     auto texture = nlohmann::json::parse(R"({
         "t": {"values": [[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]]}
     })");
-    auto encoded = encode_texture(texture, GeometryKind::MultiSurface);
+    auto encoded = encode_texture(texture);
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].theme == "t");
     CHECK(encoded[0].has_values);
@@ -303,6 +313,12 @@ TEST_CASE("encode_texture: MultiSurface-depth values (the shallowest a texture c
     CHECK(encoded[0].surfaces == std::vector<std::uint32_t>{1, 1, 1});
     CHECK(encoded[0].shells == std::vector<std::uint32_t>{3});
     CHECK(encoded[0].solids.empty());
+
+    auto decoded = decode_texture_values(GeometryKind::MultiSurface, view(encoded[0].solids),
+                                         view(encoded[0].shells), view(encoded[0].surfaces),
+                                         view(encoded[0].strings), view(encoded[0].vertices));
+    CHECK(decoded ==
+          nlohmann::json::parse("[[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]]"));
 }
 
 TEST_CASE("encode_texture: Solid-depth values") {
@@ -312,7 +328,7 @@ TEST_CASE("encode_texture: Solid-depth values") {
             [[[3, 13, 23, 33]], [[4, 14, 24, null]]]
         ]}
     })");
-    auto encoded = encode_texture(texture, GeometryKind::Solid);
+    auto encoded = encode_texture(texture);
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].vertices ==
           std::vector<std::uint32_t>{0, 10, 20, 30, 1, 11, 21, UINT32_MAX, 2, 12, UINT32_MAX, 32,
@@ -321,6 +337,14 @@ TEST_CASE("encode_texture: Solid-depth values") {
     CHECK(encoded[0].surfaces == std::vector<std::uint32_t>{1, 1, 1, 1, 1});
     CHECK(encoded[0].shells == std::vector<std::uint32_t>{3, 2});
     CHECK(encoded[0].solids == std::vector<std::uint32_t>{2});
+
+    auto decoded = decode_texture_values(GeometryKind::Solid, view(encoded[0].solids),
+                                         view(encoded[0].shells), view(encoded[0].surfaces),
+                                         view(encoded[0].strings), view(encoded[0].vertices));
+    CHECK(decoded == nlohmann::json::parse(R"([
+        [[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]],
+        [[[3, 13, 23, 33]], [[4, 14, 24, null]]]
+    ])"));
 }
 
 TEST_CASE("encode_texture: CompositeSolid-depth values") {
@@ -333,7 +357,7 @@ TEST_CASE("encode_texture: CompositeSolid-depth values") {
             [[[[4, 14, 24]], [[5, 15, 25]]]]
         ]}
     })");
-    auto encoded = encode_texture(texture, GeometryKind::CompositeSolid);
+    auto encoded = encode_texture(texture);
     REQUIRE(encoded.size() == 1);
     CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 10, 20, 1, 11, UINT32_MAX, 2, 12, 22,
                                                             3, UINT32_MAX, 23, 4, 14, 24, 5, 15,
@@ -342,6 +366,17 @@ TEST_CASE("encode_texture: CompositeSolid-depth values") {
     CHECK(encoded[0].surfaces == std::vector<std::uint32_t>{1, 1, 1, 1, 1, 1});
     CHECK(encoded[0].shells == std::vector<std::uint32_t>{2, 2, 2});
     CHECK(encoded[0].solids == std::vector<std::uint32_t>{2, 1});
+
+    auto decoded = decode_texture_values(GeometryKind::CompositeSolid, view(encoded[0].solids),
+                                         view(encoded[0].shells), view(encoded[0].surfaces),
+                                         view(encoded[0].strings), view(encoded[0].vertices));
+    CHECK(decoded == nlohmann::json::parse(R"([
+        [
+            [[[0, 10, 20]], [[1, 11, null]]],
+            [[[2, 12, 22]], [[3, null, 23]]]
+        ],
+        [[[[4, 14, 24]], [[5, 15, 25]]]]
+    ])"));
 }
 
 TEST_CASE("encode_texture: multiple themes") {
@@ -349,7 +384,7 @@ TEST_CASE("encode_texture: multiple themes") {
         "winter": {"values": [[[0, 10, 20]]]},
         "summer": {"values": [[[1, 11, null]]]}
     })");
-    auto encoded = encode_texture(texture, GeometryKind::MultiSurface);
+    auto encoded = encode_texture(texture);
     REQUIRE(encoded.size() == 2);
 
     auto find = [&](const std::string& theme) -> const TextureMapping& {
@@ -367,8 +402,7 @@ TEST_CASE("encode_texture: multiple themes") {
 }
 
 TEST_CASE("encode_texture: a theme with no values member has_values is false") {
-    auto encoded =
-        encode_texture(nlohmann::json::parse(R"({"t": {}})"), GeometryKind::MultiSurface);
+    auto encoded = encode_texture(nlohmann::json::parse(R"({"t": {}})"));
     REQUIRE(encoded.size() == 1);
     CHECK_FALSE(encoded[0].has_values);
     CHECK(encoded[0].vertices.empty());
@@ -396,13 +430,53 @@ TEST_CASE("encode: a MultiSurface with boundaries, semantics and material all po
 }
 
 TEST_CASE("encode: a GeometryInstance yields empty arrays, not a crash") {
-    auto geometry = nlohmann::json::parse(R"({"type": "GeometryInstance", "boundaries": 5})");
+    // Schema-shaped: `boundaries` is a one-element array holding the
+    // reference vertex index (`template`/`transformationMatrix` are not
+    // read by `encode()` at all -- `to_geometry_instance`, M3, handles a
+    // GeometryInstance directly and never calls this function).
+    auto geometry = nlohmann::json::parse(R"({"type": "GeometryInstance", "boundaries": [5]})");
     auto encoded = encode(geometry);
     CHECK(encoded.boundaries.indices.empty());
     CHECK(encoded.boundaries.solids.empty());
     CHECK_FALSE(encoded.semantics.has_value());
     CHECK_FALSE(encoded.materials.has_value());
     CHECK_FALSE(encoded.textures.has_value());
+}
+
+TEST_CASE("shape sniffing, not GeometryKind, decides values depth -- matching Rust exactly even "
+          "for a cardinality-inconsistent file") {
+    // A `Solid` (one shell, two surfaces) whose semantics/material/texture
+    // `values` are all written SHALLOWER than the geometry's own depth would
+    // suggest. This is schema-valid CityJSON (the schema does not cross-
+    // check cardinality between boundaries and these arrays) but a real
+    // encoder would never actually produce it. Found during M2's codex
+    // review: dispatching on GeometryKind instead of sniffing the values
+    // shape gave a DIFFERENT (wrong) answer here than Rust's untagged-enum
+    // shape-sniffing does. Pinned here so a future regression back to
+    // GeometryKind-dispatch is caught immediately.
+    auto geometry = nlohmann::json::parse(R"({
+        "type": "Solid",
+        "boundaries": [[[[0, 1, 2]], [[3, 4, 5]]]],
+        "semantics": {"surfaces": [], "values": [null]},
+        "material": {"m": {"values": [null]}},
+        "texture": {"t": {"values": []}}
+    })");
+    auto encoded = encode(geometry);
+
+    REQUIRE(encoded.semantics.has_value());
+    REQUIRE(encoded.semantics->values.has_value());
+    CHECK(*encoded.semantics->values == std::vector<std::uint32_t>{UINT32_MAX});
+
+    REQUIRE(encoded.materials.has_value());
+    REQUIRE(encoded.materials->size() == 1);
+    CHECK((*encoded.materials)[0].vertices == std::vector<std::uint32_t>{UINT32_MAX});
+    CHECK((*encoded.materials)[0].solids.empty());
+    CHECK((*encoded.materials)[0].shells.empty());
+
+    REQUIRE(encoded.textures.has_value());
+    REQUIRE(encoded.textures->size() == 1);
+    CHECK((*encoded.textures)[0].shells == std::vector<std::uint32_t>{0});
+    CHECK((*encoded.textures)[0].solids.empty());
 }
 
 TEST_CASE("geometry_kind_from_name maps every known CityJSON type string") {

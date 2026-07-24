@@ -92,6 +92,94 @@ void push_textured_shell(const nlohmann::json& shell, TextureMapping& m) {
     m.shells.push_back(static_cast<std::uint32_t>(shell.size()));
 }
 
+// ---------------------------------------------------------------------------
+// Shape sniffing for semantics.values / material.values / texture.values.
+//
+// Rust's SemanticsValues/MaterialValues/TextureValues are `#[serde(untagged)]`
+// enums: deserialization tries each variant in DECLARATION order (shallowest
+// first) and uses the first one the JSON structurally fits. That means the
+// depth Rust actually uses is a property of the VALUES ARRAY ITSELF, not of
+// the enclosing geometry's type -- the two agree for every cardinality-
+// consistent file (which is every real file any encoder produces), but a
+// schema-valid, cardinality-INCONSISTENT file (e.g. a `Solid` whose
+// `semantics.values` is a flat one-element array instead of properly nested)
+// would be read at a different depth by shape alone than by geometry type.
+// Sniffing here, rather than keying on GeometryKind, is what keeps this port
+// byte-compatible with Rust on those files too.
+// ---------------------------------------------------------------------------
+
+/// True if `arr` fits the semantics/material shape at `rank` -- 1: a flat
+/// array of null-or-non-array; 2: an array of null-or-(rank 1); 3: an array
+/// of null-or-(rank 2). `null` is legal at every level for this hierarchy,
+/// unlike texture's.
+bool fits_nullable_rank(const nlohmann::json& arr, int rank) {
+    if (!arr.is_array())
+        return false;
+    for (const auto& el : arr) {
+        if (el.is_null())
+            continue;
+        if (rank == 1) {
+            if (el.is_array())
+                return false;
+        } else if (!fits_nullable_rank(el, rank - 1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// The shallowest rank (1, 2 or 3) `arr` fits, tried in that order -- the
+/// same order Rust's untagged enum variants are declared in, so an array
+/// readable at more than one depth resolves identically here.
+int sniff_nullable_rank(const nlohmann::json& arr) {
+    for (int rank = 1; rank <= 3; ++rank)
+        if (fits_nullable_rank(arr, rank))
+            return rank;
+    throw Error(ErrorCode::InvalidAttributeValue, "values array nests deeper than a Solid permits");
+}
+
+/// True if `v` is a valid texture ring: an array whose own elements are
+/// each null or a non-array (a UV-vertex index). Texture, unlike
+/// semantics/material, is never null at an intermediate level -- only a
+/// ring's own elements can be.
+bool is_texture_ring(const nlohmann::json& v) {
+    if (!v.is_array())
+        return false;
+    for (const auto& el : v)
+        if (!el.is_null() && el.is_array())
+            return false;
+    return true;
+}
+
+/// True if `arr` fits a texture shape `depth` levels above a ring:
+/// `depth == 0` means `arr` must itself be a ring; `depth > 0` means an
+/// array whose every element fits `depth - 1`.
+bool fits_texture_depth(const nlohmann::json& arr, int depth) {
+    if (depth == 0)
+        return is_texture_ring(arr);
+    if (!arr.is_array())
+        return false;
+    for (const auto& el : arr)
+        if (!fits_texture_depth(el, depth - 1))
+            return false;
+    return true;
+}
+
+/// The shallowest variant (1: `Surface`, a list of `TexturedSurface`; 2:
+/// `Shell`, a list of `TexturedShell`; 3: `Solid`, a list of shell-lists,
+/// one per solid) `arr` fits, tried in that order -- mirroring Rust's
+/// untagged `TextureValues` enum, declared shallowest-first. A
+/// `TexturedSurface` is 2 array levels above a bare ring (a list of
+/// rings), so variant `rank` corresponds to `fits_texture_depth(arr, rank
+/// + 1)`, not `rank` itself.
+int sniff_texture_depth(const nlohmann::json& arr) {
+    for (int rank = 1; rank <= 3; ++rank)
+        if (fits_texture_depth(arr, rank + 1))
+            return rank;
+    throw Error(ErrorCode::InvalidAttributeValue,
+                "texture values array nests deeper than a Solid permits");
+}
+
 }  // namespace
 
 GeometryKind geometry_kind_from_name(const std::string& name) {
@@ -146,8 +234,7 @@ GMBoundaries encode_boundaries(GeometryKind kind, const nlohmann::json& boundari
     return b;
 }
 
-GMSemantics encode_semantics(const nlohmann::json& semantics, GeometryKind kind,
-                             const GMBoundaries& boundaries) {
+GMSemantics encode_semantics(const nlohmann::json& semantics, const GMBoundaries& boundaries) {
     GMSemantics result;
     result.surfaces = semantics.value("surfaces", nlohmann::json::array());
 
@@ -156,16 +243,13 @@ GMSemantics encode_semantics(const nlohmann::json& semantics, GeometryKind kind,
         return result;  // values stays std::nullopt
 
     std::vector<std::uint32_t> flattened;
-    switch (kind) {
-        case GeometryKind::MultiPoint:
-        case GeometryKind::MultiLineString:
-        case GeometryKind::MultiSurface:
-        case GeometryKind::CompositeSurface:
+    switch (sniff_nullable_rank(*values_it)) {
+        case 1:
             for (const auto& v : *values_it)
                 flattened.push_back(semantics_index(v));
             break;
 
-        case GeometryKind::Solid: {
+        case 2: {
             std::size_t shell_cursor = 0;
             for (const auto& shell : *values_it)
                 push_semantics_shell(shell.is_null() ? nullptr : &shell, boundaries, shell_cursor,
@@ -173,8 +257,7 @@ GMSemantics encode_semantics(const nlohmann::json& semantics, GeometryKind kind,
             break;
         }
 
-        case GeometryKind::MultiSolid:
-        case GeometryKind::CompositeSolid: {
+        case 3: {
             std::size_t shell_cursor = 0;
             std::size_t solid_i = 0;
             for (const auto& solid : *values_it) {
@@ -192,15 +275,12 @@ GMSemantics encode_semantics(const nlohmann::json& semantics, GeometryKind kind,
             }
             break;
         }
-
-        case GeometryKind::GeometryInstance:
-            break;
     }
     result.values = std::move(flattened);
     return result;
 }
 
-std::vector<MaterialMapping> encode_material(const nlohmann::json& material, GeometryKind kind) {
+std::vector<MaterialMapping> encode_material(const nlohmann::json& material) {
     std::vector<MaterialMapping> out;
     if (!material.is_object())
         return out;
@@ -234,25 +314,21 @@ std::vector<MaterialMapping> encode_material(const nlohmann::json& material, Geo
         MaterialMapping mapping;
         mapping.kind = MaterialMapping::Kind::Values;
         mapping.theme = theme;
-        switch (kind) {
-            case GeometryKind::MultiPoint:
-            case GeometryKind::MultiLineString:
-            case GeometryKind::MultiSurface:
-            case GeometryKind::CompositeSurface:
+        switch (sniff_nullable_rank(*values_it)) {
+            case 1:
                 // One index per surface.
                 for (const auto& v : *values_it)
                     mapping.vertices.push_back(material_index(v));
                 break;
 
-            case GeometryKind::Solid:
+            case 2:
                 // A single implicit solid: one index per surface, per shell.
                 mapping.solids.push_back(static_cast<std::uint32_t>(values_it->size()));
                 for (const auto& shell : *values_it)
                     push_material_shell(shell.is_null() ? nullptr : &shell, mapping);
                 break;
 
-            case GeometryKind::MultiSolid:
-            case GeometryKind::CompositeSolid:
+            case 3:
                 for (const auto& solid : *values_it) {
                     if (solid.is_null()) {
                         mapping.solids.push_back(kNull);
@@ -263,16 +339,13 @@ std::vector<MaterialMapping> encode_material(const nlohmann::json& material, Geo
                     }
                 }
                 break;
-
-            case GeometryKind::GeometryInstance:
-                break;
         }
         out.push_back(std::move(mapping));
     }
     return out;
 }
 
-std::vector<TextureMapping> encode_texture(const nlohmann::json& texture, GeometryKind kind) {
+std::vector<TextureMapping> encode_texture(const nlohmann::json& texture) {
     std::vector<TextureMapping> out;
     if (!texture.is_object())
         return out;
@@ -284,33 +357,23 @@ std::vector<TextureMapping> encode_texture(const nlohmann::json& texture, Geomet
         auto values_it = t.find("values");
         if (values_it != t.end() && !values_it->is_null()) {
             mapping.has_values = true;
-            switch (kind) {
-                case GeometryKind::MultiPoint:
-                case GeometryKind::MultiLineString:
-                    // Forbidden by the CityJSON schema; kept only for
-                    // switch-exhaustiveness (never actually reached, since
-                    // a valid file has no texture on these types).
-                    break;
-                case GeometryKind::MultiSurface:
-                case GeometryKind::CompositeSurface:
+            switch (sniff_texture_depth(*values_it)) {
+                case 1:
                     for (const auto& surface : *values_it)
                         push_textured_surface(surface, mapping);
                     mapping.shells.push_back(static_cast<std::uint32_t>(values_it->size()));
                     break;
-                case GeometryKind::Solid:
+                case 2:
                     for (const auto& shell : *values_it)
                         push_textured_shell(shell, mapping);
                     mapping.solids.push_back(static_cast<std::uint32_t>(values_it->size()));
                     break;
-                case GeometryKind::MultiSolid:
-                case GeometryKind::CompositeSolid:
+                case 3:
                     for (const auto& solid : *values_it) {
                         for (const auto& shell : solid)
                             push_textured_shell(shell, mapping);
                         mapping.solids.push_back(static_cast<std::uint32_t>(solid.size()));
                     }
-                    break;
-                case GeometryKind::GeometryInstance:
                     break;
             }
         }
@@ -329,15 +392,15 @@ EncodedGeometry encode(const nlohmann::json& geometry) {
 
     auto semantics_it = geometry.find("semantics");
     if (semantics_it != geometry.end() && semantics_it->is_object())
-        result.semantics = encode_semantics(*semantics_it, kind, result.boundaries);
+        result.semantics = encode_semantics(*semantics_it, result.boundaries);
 
     auto material_it = geometry.find("material");
     if (material_it != geometry.end() && material_it->is_object())
-        result.materials = encode_material(*material_it, kind);
+        result.materials = encode_material(*material_it);
 
     auto texture_it = geometry.find("texture");
     if (texture_it != geometry.end() && texture_it->is_object())
-        result.textures = encode_texture(*texture_it, kind);
+        result.textures = encode_texture(*texture_it);
 
     return result;
 }
