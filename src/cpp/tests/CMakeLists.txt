@@ -14,6 +14,7 @@ add_executable(fcb_tests
     test_writer_attribute.cpp
     test_writer_geometry.cpp
     test_writer_feature.cpp
+    test_writer_header.cpp
     test_writer_oracle.cpp
     test_geometry.cpp
     test_cityjson.cpp

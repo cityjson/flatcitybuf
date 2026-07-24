@@ -16,6 +16,7 @@
 #include <fcb/reader.hpp>
 #include <fcb/writer/attribute.hpp>
 #include <fcb/writer/feature_serializer.hpp>
+#include <fcb/writer/header_serializer.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -213,4 +214,59 @@ TEST_CASE("oracle: column order is insertion order, not alphabetical, confirmed 
     CHECK(columns[3].name == "a_ulong");
     CHECK(columns[4].name == "a_string");
     CHECK(columns[5].name == "a_json");
+}
+
+TEST_CASE("oracle: to_fcb_header is byte-identical to the Rust writer's header, including "
+          "geometry-templates/templates_vertices") {
+    // `single_feature.fcb` turned out to carry an attribute index (M6, not
+    // built yet -- its `fcb_inspect_header` "queryable" markers were missed
+    // on first read of this fixture, see docs/upstream-findings.md-adjacent
+    // note below). `geometry_instance_interleaved.fcb` has none (0 of 0
+    // columns queryable) and, as a bonus, exercises `geometry-templates` /
+    // `templates_vertices`, which single_feature does not carry at all.
+    const std::string fcb_path =
+        std::string(FCB_CONFORMANCE_DIR) + "/geometry_instance_interleaved.fcb";
+    FcbReader r = FcbReader::open_file(fcb_path);
+    const auto& layout = r.header().layout();
+    REQUIRE(r.header().info().features_count == 1);
+    REQUIRE(r.header().info().index_node_size == 16);
+    REQUIRE(r.header().attr_indices().empty());
+
+    std::vector<std::uint8_t> whole_file = read_file_bytes(fcb_path);
+    constexpr std::size_t header_begin = 8 + 4;  // magic bytes + size prefix
+    REQUIRE(whole_file.size() >= layout.header_len);
+    std::vector<std::uint8_t> expected_header_bytes(whole_file.begin() + header_begin,
+                                                    whole_file.begin() + layout.header_len);
+
+    const std::string input_path =
+        std::string(FCB_CONFORMANCE_DIR) + "/inputs/geometry_instance_interleaved.city.jsonl";
+    std::vector<ordered_json> input_lines = read_jsonl(input_path);
+    const ordered_json& cj = input_lines[0];
+    std::vector<ordered_json> all_features(input_lines.begin() + 1, input_lines.end());
+    AttributeSchema attr_schema = build_attr_schema(all_features);
+    REQUIRE(attr_schema.empty());
+
+    HeaderWriterOptions options;
+    options.feature_count = 1;
+    options.index_node_size = 16;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    auto off = to_fcb_header(fbb, cj, options, attr_schema, nullptr, nullptr);
+    fbb.FinishSizePrefixed(off);
+    std::vector<std::uint8_t> actual_header_bytes(fbb.GetBufferPointer() + 4,
+                                                  fbb.GetBufferPointer() + fbb.GetSize());
+
+    if (actual_header_bytes != expected_header_bytes) {
+        MESSAGE("actual size: " << actual_header_bytes.size()
+                                << " expected size: " << expected_header_bytes.size());
+        std::size_t n = std::min(actual_header_bytes.size(), expected_header_bytes.size());
+        for (std::size_t i = 0; i < n; ++i) {
+            if (actual_header_bytes[i] != expected_header_bytes[i]) {
+                MESSAGE("first diff at byte " << i << ": actual=" << (int)actual_header_bytes[i]
+                                              << " expected=" << (int)expected_header_bytes[i]);
+                break;
+            }
+        }
+    }
+    CHECK(actual_header_bytes == expected_header_bytes);
 }
