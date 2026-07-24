@@ -58,6 +58,35 @@ struct GMSemantics {
 GMSemantics encode_semantics(const nlohmann::json& semantics, GeometryKind kind,
                              const GMBoundaries& boundaries);
 
+/// One theme's material mapping. Tagged-struct style (matching this
+/// codebase's `AttrValue` convention) rather than `std::variant`, since only
+/// one of `value`/`{solids,shells,vertices}` is meaningful per `kind`.
+/// Mirrors the `MaterialMapping` enum (writer/geom_encoder.rs).
+struct MaterialMapping {
+    enum class Kind {
+        Value,      // a single material index for the whole theme
+        Values,     // one index per surface (nested per `solids`/`shells`)
+        NullValues  // `"values": null` -- a theme with no arrays at all
+    };
+    Kind kind = Kind::Value;
+    std::string theme;
+    std::uint32_t value = 0;                              // Kind::Value
+    std::vector<std::uint32_t> solids, shells, vertices;  // Kind::Values
+};
+
+/// Flattens `material` (the CityJSON `geometry.material` object: theme name
+/// -> `{"value": N}` / `{"values": [...]}` / `{"values": null}`) at the
+/// depth `kind` implies. Themes are visited in ascending name order (`material`
+/// is a JSON object, so this is automatic given nlohmann's default ordered
+/// container -- see the AttributeSchema note in `writer/attribute.hpp` for
+/// why that already matches Rust's determinism fix for its `HashMap`
+/// source). A `null` shell or solid -- legal at every level -- is recorded as
+/// a `UINT32_MAX` count, not dropped, so it decodes back as `null` rather
+/// than an empty array. Mirrors `encode_material`
+/// (writer/geom_encoder.rs:204-284), dispatching on `kind` rather than on
+/// `values`'s own shape.
+std::vector<MaterialMapping> encode_material(const nlohmann::json& material, GeometryKind kind);
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON

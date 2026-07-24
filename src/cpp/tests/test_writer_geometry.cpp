@@ -204,6 +204,91 @@ TEST_CASE("encode_semantics: absent surfaces/null values are handled") {
     CHECK_FALSE(encoded.values.has_value());
 }
 
+TEST_CASE("encode_material: a single value") {
+    auto material = nlohmann::json::parse(R"({"theme1": {"value": 5}})");
+    auto encoded = encode_material(material, GeometryKind::MultiSurface);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].kind == MaterialMapping::Kind::Value);
+    CHECK(encoded[0].theme == "theme1");
+    CHECK(encoded[0].value == 5);
+}
+
+TEST_CASE("encode_material: MultiSurface-depth values") {
+    auto material = nlohmann::json::parse(R"({"theme2": {"values": [0, 1, null, 2]}})");
+    auto encoded = encode_material(material, GeometryKind::MultiSurface);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].kind == MaterialMapping::Kind::Values);
+    CHECK(encoded[0].theme == "theme2");
+    CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 1, UINT32_MAX, 2});
+    CHECK(encoded[0].shells.empty());
+    CHECK(encoded[0].solids.empty());
+}
+
+TEST_CASE("encode_material: Solid-depth values") {
+    auto material = nlohmann::json::parse(R"({"theme3": {"values": [[0, 1, null], [2, 3, 4]]}})");
+    auto encoded = encode_material(material, GeometryKind::Solid);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].theme == "theme3");
+    CHECK(encoded[0].solids == std::vector<std::uint32_t>{2});  // 1 solid, 2 shells
+    CHECK(encoded[0].shells == std::vector<std::uint32_t>{3, 3});
+    CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 1, UINT32_MAX, 2, 3, 4});
+}
+
+TEST_CASE("encode_material: multiple themes") {
+    auto material =
+        nlohmann::json::parse(R"({"theme4": {"value": 7}, "theme5": {"values": [8, 9]}})");
+    auto encoded = encode_material(material, GeometryKind::MultiSurface);
+    REQUIRE(encoded.size() == 2);
+
+    auto find = [&](const std::string& theme) -> const MaterialMapping& {
+        for (auto& m : encoded)
+            if (m.theme == theme)
+                return m;
+        FAIL("missing theme " << theme);
+        static MaterialMapping dummy;
+        return dummy;
+    };
+    CHECK(find("theme4").kind == MaterialMapping::Kind::Value);
+    CHECK(find("theme4").value == 7);
+    CHECK(find("theme5").kind == MaterialMapping::Kind::Values);
+    CHECK(find("theme5").vertices == std::vector<std::uint32_t>{8, 9});
+}
+
+TEST_CASE("encode_material: CompositeSolid-depth values") {
+    auto material = nlohmann::json::parse(
+        R"({"theme6": {"values": [[[0, 1, null], [2, null, null]], [[3, 4, null]]]}})");
+    auto encoded = encode_material(material, GeometryKind::CompositeSolid);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].solids == std::vector<std::uint32_t>{2, 1});  // 2 solids: 2 shells, then 1
+    CHECK(encoded[0].shells == std::vector<std::uint32_t>{3, 3, 3});
+    CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 1, UINT32_MAX, 2, UINT32_MAX,
+                                                            UINT32_MAX, 3, 4, UINT32_MAX});
+}
+
+TEST_CASE("encode_material: a null shell or solid is recorded as a null count") {
+    auto encoded = encode_material(nlohmann::json::parse(R"({"t": {"values": [[0, 1], null]}})"),
+                                   GeometryKind::Solid);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].solids == std::vector<std::uint32_t>{2});
+    CHECK(encoded[0].shells == std::vector<std::uint32_t>{2, UINT32_MAX});
+    CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 1});
+
+    auto encoded2 = encode_material(nlohmann::json::parse(R"({"t": {"values": [[[0, 1]], null]}})"),
+                                    GeometryKind::CompositeSolid);
+    REQUIRE(encoded2.size() == 1);
+    CHECK(encoded2[0].solids == std::vector<std::uint32_t>{1, UINT32_MAX});
+    CHECK(encoded2[0].shells == std::vector<std::uint32_t>{2});
+    CHECK(encoded2[0].vertices == std::vector<std::uint32_t>{0, 1});
+}
+
+TEST_CASE("encode_material: values: null is a NullValues mapping, not dropped") {
+    auto encoded = encode_material(nlohmann::json::parse(R"({"t": {"values": null}})"),
+                                   GeometryKind::MultiSurface);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].kind == MaterialMapping::Kind::NullValues);
+    CHECK(encoded[0].theme == "t");
+}
+
 TEST_CASE("geometry_kind_from_name maps every known CityJSON type string") {
     CHECK(geometry_kind_from_name("MultiPoint") == GeometryKind::MultiPoint);
     CHECK(geometry_kind_from_name("MultiLineString") == GeometryKind::MultiLineString);

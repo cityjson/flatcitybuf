@@ -57,6 +57,23 @@ void push_semantics_shell(const nlohmann::json* shell, const GMBoundaries& bound
     }
 }
 
+std::uint32_t material_index(const nlohmann::json& v) {
+    return v.is_null() ? kNull : v.get<std::uint32_t>();
+}
+
+/// Appends one shell's material indices, or (`shell == nullptr`) records a
+/// whole-null shell as a `kNull` COUNT -- unlike semantics, material has a
+/// wire encoding for this, so it is not expanded into per-surface nulls.
+void push_material_shell(const nlohmann::json* shell, MaterialMapping& mv) {
+    if (shell == nullptr) {
+        mv.shells.push_back(kNull);
+    } else {
+        mv.shells.push_back(static_cast<std::uint32_t>(shell->size()));
+        for (const auto& v : *shell)
+            mv.vertices.push_back(material_index(v));
+    }
+}
+
 }  // namespace
 
 GeometryKind geometry_kind_from_name(const std::string& name) {
@@ -163,6 +180,78 @@ GMSemantics encode_semantics(const nlohmann::json& semantics, GeometryKind kind,
     }
     result.values = std::move(flattened);
     return result;
+}
+
+std::vector<MaterialMapping> encode_material(const nlohmann::json& material, GeometryKind kind) {
+    std::vector<MaterialMapping> out;
+    if (!material.is_object())
+        return out;
+
+    // `material` is a JSON object; nlohmann's default container already
+    // iterates it in ascending key order (see the AttributeSchema note in
+    // writer/attribute.hpp), matching Rust's explicit sort of its `HashMap`
+    // source, so no extra sort is needed here.
+    for (const auto& [theme, m] : material.items()) {
+        auto value_it = m.find("value");
+        if (value_it != m.end() && !value_it->is_null()) {
+            MaterialMapping mapping;
+            mapping.kind = MaterialMapping::Kind::Value;
+            mapping.theme = theme;
+            mapping.value = value_it->get<std::uint32_t>();
+            out.push_back(std::move(mapping));
+            continue;
+        }
+
+        auto values_it = m.find("values");
+        if (values_it == m.end())
+            continue;  // neither `value` nor `values`: nothing to store
+        if (values_it->is_null()) {
+            MaterialMapping mapping;
+            mapping.kind = MaterialMapping::Kind::NullValues;
+            mapping.theme = theme;
+            out.push_back(std::move(mapping));
+            continue;
+        }
+
+        MaterialMapping mapping;
+        mapping.kind = MaterialMapping::Kind::Values;
+        mapping.theme = theme;
+        switch (kind) {
+            case GeometryKind::MultiPoint:
+            case GeometryKind::MultiLineString:
+            case GeometryKind::MultiSurface:
+            case GeometryKind::CompositeSurface:
+                // One index per surface.
+                for (const auto& v : *values_it)
+                    mapping.vertices.push_back(material_index(v));
+                break;
+
+            case GeometryKind::Solid:
+                // A single implicit solid: one index per surface, per shell.
+                mapping.solids.push_back(static_cast<std::uint32_t>(values_it->size()));
+                for (const auto& shell : *values_it)
+                    push_material_shell(shell.is_null() ? nullptr : &shell, mapping);
+                break;
+
+            case GeometryKind::MultiSolid:
+            case GeometryKind::CompositeSolid:
+                for (const auto& solid : *values_it) {
+                    if (solid.is_null()) {
+                        mapping.solids.push_back(kNull);
+                    } else {
+                        mapping.solids.push_back(static_cast<std::uint32_t>(solid.size()));
+                        for (const auto& shell : solid)
+                            push_material_shell(shell.is_null() ? nullptr : &shell, mapping);
+                    }
+                }
+                break;
+
+            case GeometryKind::GeometryInstance:
+                break;
+        }
+        out.push_back(std::move(mapping));
+    }
+    return out;
 }
 
 }  // namespace fcb
