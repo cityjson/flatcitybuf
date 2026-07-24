@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  assembleCityJSONSeq, deriveFilename, FORMATS,
+  assembleCityJSONSeq, deriveFilename, FORMATS, stringifyCityJSON,
 } from './index'
 
 describe('FORMATS registry', () => {
@@ -57,5 +57,26 @@ describe('deriveFilename', () => {
 
   it('drops URL fragments', () => {
     expect(deriveFilename('http://x/y/b.fcb#section', 'obj')).toBe('b.obj')
+  })
+})
+
+describe('stringifyCityJSON', () => {
+  it('converts nested Maps (as fcb_wasm returns) into plain-object CityJSON', () => {
+    const merged = new Map<string, unknown>([
+      ['type', 'CityJSON'],
+      ['version', '2.0'],
+      ['CityObjects', new Map([['a', new Map([['type', 'Building']])]])],
+      ['vertices', [[0, 0, 0], [1, 1, 1]]],
+    ])
+    const parsed = JSON.parse(stringifyCityJSON(merged))
+    expect(parsed.type).toBe('CityJSON')
+    expect(parsed.version).toBe('2.0')
+    expect(parsed.CityObjects.a.type).toBe('Building')
+    expect(parsed.vertices).toEqual([[0, 0, 0], [1, 1, 1]])
+  })
+
+  it('passes plain objects through unchanged', () => {
+    expect(stringifyCityJSON({ type: 'CityJSON', CityObjects: {} }))
+      .toBe('{"type":"CityJSON","CityObjects":{}}')
   })
 })

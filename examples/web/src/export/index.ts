@@ -37,3 +37,12 @@ export function deriveFilename(source: string | undefined, format: ExportFormat)
   const base = stem === '' ? 'flatcitybuf-export' : stem
   return base + FORMATS[format].ext
 }
+
+/** JSON-serialize a CityJSON value that may contain JS `Map`s. The vendored
+ *  fcb_wasm binding serializes Rust structs/maps via serde-wasm-bindgen, which
+ *  yields nested JS `Map`s rather than plain objects — and `JSON.stringify` of a
+ *  `Map` is `"{}"`. This replacer turns every `Map` into a plain object,
+ *  recursively, so the result is real CityJSON. */
+export function stringifyCityJSON(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => (v instanceof Map ? Object.fromEntries(v) : v))
+}

@@ -5,6 +5,7 @@
 // module is worker-only (it runs where the reader produces CityJSON); it is
 // not exercised by vitest.
 import init, { cjToObj, cjseqToCj } from '../wasm/fcb_wasm.js'
+import { stringifyCityJSON } from './index'
 
 let ready: Promise<unknown> | undefined
 function ensureWasm(): Promise<unknown> {
@@ -18,7 +19,7 @@ export async function convertMergedCityJSON(
   metadata: unknown, feats: unknown[],
 ): Promise<string> {
   await ensureWasm()
-  return JSON.stringify(cjseqToCj(metadata, feats))
+  return stringifyCityJSON(cjseqToCj(metadata, feats))
 }
 
 /** Triangulate the CityJSONSeq (metadata first, then features) to Wavefront
