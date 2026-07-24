@@ -12,6 +12,12 @@ describe('FORMATS registry', () => {
     expect(FORMATS.cityjsonseq.mime).toBe('application/x-ndjson')
     expect(FORMATS.obj.mime).toBe('text/plain')
   })
+
+  it('has the exact display labels', () => {
+    expect(FORMATS.cityjson.label).toBe('CityJSON')
+    expect(FORMATS.cityjsonseq.label).toBe('CityJSONSeq')
+    expect(FORMATS.obj.label).toBe('OBJ')
+  })
 })
 
 describe('assembleCityJSONSeq', () => {
@@ -19,16 +25,15 @@ describe('assembleCityJSONSeq', () => {
     const meta = { type: 'CityJSON', version: '2.0' }
     const feats = [{ type: 'CityJSONFeature', id: 'a' }, { type: 'CityJSONFeature', id: 'b' }]
     const out = assembleCityJSONSeq(meta, feats)
-    const lines = out.split('\n')
-    expect(lines).toHaveLength(3)
-    expect(JSON.parse(lines[0]).type).toBe('CityJSON')
-    expect(JSON.parse(lines[1]).id).toBe('a')
-    expect(JSON.parse(lines[2]).id).toBe('b')
+    expect(out).toBe(
+      [JSON.stringify(meta), JSON.stringify(feats[0]), JSON.stringify(feats[1])].join('\n'),
+    )
   })
 
   it('produces a single metadata line when there are no features', () => {
-    const out = assembleCityJSONSeq({ type: 'CityJSON' }, [])
-    expect(out.split('\n')).toHaveLength(1)
+    const meta = { type: 'CityJSON' }
+    const out = assembleCityJSONSeq(meta, [])
+    expect(out).toBe(JSON.stringify(meta))
   })
 })
 
@@ -48,5 +53,9 @@ describe('deriveFilename', () => {
     expect(deriveFilename('http://x/y/a.fcb?token=1', 'cityjson')).toBe('a.city.json')
     expect(deriveFilename(undefined, 'obj')).toBe('flatcitybuf-export.obj')
     expect(deriveFilename('', 'obj')).toBe('flatcitybuf-export.obj')
+  })
+
+  it('drops URL fragments', () => {
+    expect(deriveFilename('http://x/y/b.fcb#section', 'obj')).toBe('b.obj')
   })
 })
