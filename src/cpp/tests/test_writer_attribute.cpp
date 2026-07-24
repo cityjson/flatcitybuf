@@ -1,8 +1,16 @@
+#include <fcb/attribute.hpp>  // decode_attributes, the read-side inverse, used to verify round-trips
 #include <fcb/writer/attribute.hpp>
 
 #include <doctest/doctest.h>
 
 using namespace fcb;
+
+static std::vector<ColumnInfo> to_column_info(const AttributeSchema& schema) {
+    std::vector<ColumnInfo> out;
+    for (const auto& [name, idx_type] : schema)
+        out.push_back({idx_type.first, name, static_cast<std::uint8_t>(idx_type.second), true});
+    return out;
+}
 
 TEST_CASE("add_attributes assigns column indices in first-seen, alphabetical order") {
     // Parsed from JSON TEXT, not built via C++ initializer-list literals:
@@ -79,4 +87,74 @@ TEST_CASE("a full RFC3339 datetime string is detected, a bare date is not") {
     CHECK(schema.at("date_only").second == ::ColumnType::String);
     CHECK(schema.at("dt_offset").second == ::ColumnType::DateTime);
     CHECK(schema.at("dt_frac").second == ::ColumnType::DateTime);
+}
+
+TEST_CASE("encode then decode round-trips every basic column type") {
+    // Parsed from JSON text -- see the note in the first test case on why a
+    // bare C++ initializer-list literal like `{"uint", 5}` would misclassify.
+    nlohmann::json attrs = nlohmann::json::parse(R"({
+        "int": -10,
+        "uint": 5,
+        "bool": true,
+        "float": 1.5,
+        "string": "hoge"
+    })");
+    AttributeSchema schema;
+    add_attributes(schema, attrs);
+
+    auto encoded = encode_attributes_with_schema(attrs, schema);
+    CHECK_FALSE(encoded.empty());
+
+    auto decoded = decode_attributes(bytes_view(encoded), to_column_info(schema));
+    REQUIRE(decoded.size() == 5);
+
+    auto find = [&](const std::string& name) -> const AttrValue& {
+        for (auto& [n, v] : decoded)
+            if (n == name)
+                return v;
+        FAIL("missing decoded attribute: " << name);
+        static AttrValue dummy;
+        return dummy;
+    };
+    CHECK(find("int").i == -10);
+    CHECK(find("uint").u == 5);
+    CHECK(find("bool").b == true);
+    CHECK(find("float").d == doctest::Approx(1.5));
+    CHECK(find("string").s == "hoge");
+}
+
+TEST_CASE("an empty or non-object attrs value encodes to zero bytes") {
+    AttributeSchema schema;
+    add_attributes(schema, nlohmann::json{{"a", 1}});
+    CHECK(encode_attributes_with_schema(nlohmann::json::object(), schema).empty());
+    CHECK(encode_attributes_with_schema(nlohmann::json::array(), schema).empty());
+}
+
+TEST_CASE("a schema member absent from attrs is skipped, not zero-filled") {
+    AttributeSchema schema;
+    add_attributes(schema, nlohmann::json{{"a", 1}, {"b", 2}});
+    auto encoded = encode_attributes_with_schema(nlohmann::json{{"a", 7}}, schema);
+    auto decoded = decode_attributes(bytes_view(encoded), to_column_info(schema));
+    REQUIRE(decoded.size() == 1);
+    CHECK(decoded[0].first == "a");
+}
+
+TEST_CASE("record layout is [u16 LE column index][value], schema-index order") {
+    AttributeSchema schema;
+    // Force known indices: "b" first (index 0), "a" second (index 1).
+    add_attributes(schema, nlohmann::json{{"b", true}});
+    add_attributes(schema, nlohmann::json{{"a", true}});
+    REQUIRE(schema.at("b").first == 0);
+    REQUIRE(schema.at("a").first == 1);
+
+    auto encoded = encode_attributes_with_schema(nlohmann::json{{"a", true}, {"b", false}}, schema);
+    // "b" (index 0) is written before "a" (index 1), regardless of attrs's
+    // own JSON key order.
+    REQUIRE(encoded.size() == 6);  // two records of (u16 index + 1 byte bool)
+    CHECK(encoded[0] == 0);
+    CHECK(encoded[1] == 0);
+    CHECK(encoded[2] == 0);  // value for "b": false
+    CHECK(encoded[3] == 1);
+    CHECK(encoded[4] == 0);
+    CHECK(encoded[5] == 1);  // value for "a": true
 }

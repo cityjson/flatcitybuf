@@ -6,6 +6,7 @@
 #    include <cstring>
 #    include <limits>
 #    include <optional>
+#    include <type_traits>
 
 namespace fcb {
 
@@ -143,6 +144,61 @@ std::optional<::ColumnType> guess_type(const nlohmann::json& value) {
     return std::nullopt;  // null, or anything else
 }
 
+template <typename T> void put_le(std::vector<std::uint8_t>& out, std::size_t at, T v) {
+    using U = typename std::make_unsigned<T>::type;
+    const U u = static_cast<U>(v);
+    for (std::size_t i = 0; i < sizeof(T); ++i)
+        out[at + i] = static_cast<std::uint8_t>(u >> (8 * i));
+}
+
+void put_f32(std::vector<std::uint8_t>& out, std::size_t at, float f) {
+    std::uint32_t bits;
+    std::memcpy(&bits, &f, sizeof(bits));
+    put_le<std::uint32_t>(out, at, bits);
+}
+
+void put_f64(std::vector<std::uint8_t>& out, std::size_t at, double d) {
+    std::uint64_t bits;
+    std::memcpy(&bits, &d, sizeof(bits));
+    put_le<std::uint64_t>(out, at, bits);
+}
+
+// The following mirror serde_json::Value::as_i64/as_u64/as_f64/as_bool/as_str:
+// a type/range mismatch yields the fallback rather than throwing, because the
+// Rust writer being ported never throws on this path either -- a value whose
+// JSON shape drifted from the schema's remembered column type is written as
+// the type's zero value, not rejected.
+
+std::int64_t as_i64_or0(const nlohmann::json& v) {
+    if (v.is_number_unsigned()) {
+        const std::uint64_t u = v.get<std::uint64_t>();
+        return u <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
+                   ? static_cast<std::int64_t>(u)
+                   : 0;
+    }
+    if (v.is_number_integer())
+        return v.get<std::int64_t>();
+    return 0;
+}
+
+std::uint64_t as_u64_or0(const nlohmann::json& v) {
+    if (v.is_number_unsigned())
+        return v.get<std::uint64_t>();
+    if (v.is_number_integer()) {
+        const std::int64_t i = v.get<std::int64_t>();
+        return i >= 0 ? static_cast<std::uint64_t>(i) : 0;
+    }
+    return 0;
+}
+
+double as_f64_or0(const nlohmann::json& v) { return v.is_number() ? v.get<double>() : 0.0; }
+
+bool as_bool_or_false(const nlohmann::json& v) { return v.is_boolean() && v.get<bool>(); }
+
+std::string as_str_or_empty(const nlohmann::json& v) {
+    return v.is_string() ? v.get<std::string>() : std::string();
+}
+
 }  // namespace
 
 void add_attributes(AttributeSchema& schema, const nlohmann::json& attrs) {
@@ -159,6 +215,127 @@ void add_attributes(AttributeSchema& schema, const nlohmann::json& attrs) {
                            std::make_pair(static_cast<std::uint16_t>(schema.size()), *coltype));
         }
     }
+}
+
+std::size_t attr_size(::ColumnType coltype, const nlohmann::json& colval) {
+    switch (coltype) {
+        case ::ColumnType::Byte:
+            return sizeof(std::int8_t);
+        case ::ColumnType::UByte:
+            return sizeof(std::uint8_t);
+        case ::ColumnType::Bool:
+            return sizeof(std::uint8_t);
+        case ::ColumnType::Short:
+            return sizeof(std::int16_t);
+        case ::ColumnType::UShort:
+            return sizeof(std::uint16_t);
+        case ::ColumnType::Int:
+            return sizeof(std::int32_t);
+        case ::ColumnType::UInt:
+            return sizeof(std::uint32_t);
+        case ::ColumnType::Long:
+            return sizeof(std::int64_t);
+        case ::ColumnType::ULong:
+            return sizeof(std::uint64_t);
+        case ::ColumnType::Float:
+            return sizeof(float);
+        case ::ColumnType::Double:
+            return sizeof(double);
+        case ::ColumnType::String:
+        case ::ColumnType::DateTime:
+            return sizeof(std::uint32_t) + as_str_or_empty(colval).size();
+        case ::ColumnType::Json:
+            return sizeof(std::uint32_t) + colval.dump().size();
+        case ::ColumnType::Binary:
+            return sizeof(std::uint32_t) + as_str_or_empty(colval).size();
+    }
+    throw Error(ErrorCode::UnsupportedColumnType, "attr_size: unknown column type");
+}
+
+std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::json& attr,
+                                                        const AttributeSchema& schema) {
+    std::vector<std::uint8_t> out;
+    if (!attr.is_object() || attr.empty())
+        return out;
+
+    std::vector<std::pair<std::string, std::pair<std::uint16_t, ::ColumnType>>> sorted(
+        schema.begin(), schema.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](const auto& a, const auto& b) { return a.second.first < b.second.first; });
+
+    for (const auto& [name, idx_type] : sorted) {
+        const auto [index, coltype] = idx_type;
+        auto it = attr.find(name);
+        if (it == attr.end() || it->is_null())
+            continue;
+        const nlohmann::json& val = *it;
+
+        const std::size_t offset = out.size();
+        const std::size_t size = attr_size(coltype, val);
+        out.resize(offset + sizeof(std::uint16_t) + size, 0);
+        put_le<std::uint16_t>(out, offset, index);
+        const std::size_t value_offset = offset + sizeof(std::uint16_t);
+
+        switch (coltype) {
+            case ::ColumnType::Bool:
+                out[value_offset] = as_bool_or_false(val) ? 1 : 0;
+                break;
+            case ::ColumnType::Int:
+                put_le<std::int32_t>(out, value_offset, static_cast<std::int32_t>(as_i64_or0(val)));
+                break;
+            case ::ColumnType::UInt:
+                put_le<std::uint32_t>(out, value_offset,
+                                      static_cast<std::uint32_t>(as_u64_or0(val)));
+                break;
+            case ::ColumnType::Byte:
+                out[value_offset] = static_cast<std::uint8_t>(as_i64_or0(val));
+                break;
+            case ::ColumnType::UByte:
+                out[value_offset] = static_cast<std::uint8_t>(as_u64_or0(val));
+                break;
+            case ::ColumnType::Short:
+                put_le<std::int16_t>(out, value_offset, static_cast<std::int16_t>(as_i64_or0(val)));
+                break;
+            case ::ColumnType::UShort:
+                put_le<std::uint16_t>(out, value_offset,
+                                      static_cast<std::uint16_t>(as_u64_or0(val)));
+                break;
+            case ::ColumnType::Long:
+                put_le<std::int64_t>(out, value_offset, as_i64_or0(val));
+                break;
+            case ::ColumnType::ULong:
+                put_le<std::uint64_t>(out, value_offset, as_u64_or0(val));
+                break;
+            case ::ColumnType::Float:
+                put_f32(out, value_offset, static_cast<float>(as_f64_or0(val)));
+                break;
+            case ::ColumnType::Double:
+                put_f64(out, value_offset, as_f64_or0(val));
+                break;
+            case ::ColumnType::String:
+            case ::ColumnType::DateTime: {
+                const std::string s = as_str_or_empty(val);
+                put_le<std::uint32_t>(out, value_offset, static_cast<std::uint32_t>(s.size()));
+                std::memcpy(out.data() + value_offset + sizeof(std::uint32_t), s.data(), s.size());
+                break;
+            }
+            case ::ColumnType::Json: {
+                const std::string json_str = val.dump();
+                put_le<std::uint32_t>(out, value_offset,
+                                      static_cast<std::uint32_t>(json_str.size()));
+                std::memcpy(out.data() + value_offset + sizeof(std::uint32_t), json_str.data(),
+                            json_str.size());
+                break;
+            }
+            case ::ColumnType::Binary: {
+                const std::string s = as_str_or_empty(val);
+                put_le<std::uint32_t>(out, value_offset, static_cast<std::uint32_t>(s.size()));
+                std::memcpy(out.data() + value_offset + sizeof(std::uint32_t), s.data(), s.size());
+                break;
+            }
+        }
+    }
+    return out;
 }
 
 }  // namespace fcb
