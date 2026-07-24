@@ -336,3 +336,69 @@ TEST_CASE("to_city_object: no attributes key at all leaves the field absent") {
     CHECK(fb_co->attributes() == nullptr);
     CHECK(fb_co->columns() == nullptr);
 }
+
+TEST_CASE("to_fcb_city_feature: objects visited in ascending id order, vertices, bbox") {
+    auto feature = nlohmann::json::parse(R"({
+        "type": "CityJSONFeature",
+        "id": "f1",
+        "CityObjects": {
+            "z-obj": {"type": "Building"},
+            "a-obj": {"type": "BuildingPart"}
+        },
+        "vertices": [[10, 20, 0], [-5, 30, 0], [15, -8, 0]]
+    })");
+
+    AttributeSchema schema;
+    flatbuffers::FlatBufferBuilder fbb;
+    auto [off, bbox] = to_fcb_city_feature(fbb, "f1", feature, schema, nullptr);
+    fbb.FinishSizePrefixed(off);
+
+    CHECK(bbox.min_x == doctest::Approx(-5.0));
+    CHECK(bbox.max_x == doctest::Approx(15.0));
+    CHECK(bbox.min_y == doctest::Approx(-8.0));
+    CHECK(bbox.max_y == doctest::Approx(30.0));
+
+    const ::CityFeature* fb_feature =
+        flatbuffers::GetSizePrefixedRoot<::CityFeature>(fbb.GetBufferPointer());
+    CHECK(fb_feature->id()->str() == "f1");
+    REQUIRE(fb_feature->objects() != nullptr);
+    REQUIRE(fb_feature->objects()->size() == 2);
+    // "a-obj" sorts before "z-obj".
+    CHECK(fb_feature->objects()->Get(0)->id()->str() == "a-obj");
+    CHECK(fb_feature->objects()->Get(1)->id()->str() == "z-obj");
+    REQUIRE(fb_feature->vertices() != nullptr);
+    REQUIRE(fb_feature->vertices()->size() == 3);
+    CHECK(fb_feature->vertices()->Get(0)->x() == 10);
+    CHECK(fb_feature->vertices()->Get(1)->y() == 30);
+    CHECK(fb_feature->appearance() == nullptr);
+}
+
+TEST_CASE("to_fcb_city_feature: an empty vertex array yields a zeroed bbox, not garbage") {
+    auto feature = nlohmann::json::parse(
+        R"({"type": "CityJSONFeature", "id": "f2", "CityObjects": {}, "vertices": []})");
+    AttributeSchema schema;
+    flatbuffers::FlatBufferBuilder fbb;
+    auto [off, bbox] = to_fcb_city_feature(fbb, "f2", feature, schema, nullptr);
+    (void)off;
+    CHECK(bbox.min_x == doctest::Approx(0.0));
+    CHECK(bbox.max_x == doctest::Approx(0.0));
+    CHECK(bbox.min_y == doctest::Approx(0.0));
+    CHECK(bbox.max_y == doctest::Approx(0.0));
+}
+
+TEST_CASE("to_fcb_city_feature: a feature-level appearance is built when present") {
+    auto feature = nlohmann::json::parse(R"({
+        "type": "CityJSONFeature", "id": "f3", "CityObjects": {}, "vertices": [],
+        "appearance": {"materials": [{"name": "m1"}]}
+    })");
+    AttributeSchema schema;
+    flatbuffers::FlatBufferBuilder fbb;
+    auto [off, bbox] = to_fcb_city_feature(fbb, "f3", feature, schema, nullptr);
+    (void)bbox;
+    fbb.FinishSizePrefixed(off);
+    const ::CityFeature* fb_feature =
+        flatbuffers::GetSizePrefixedRoot<::CityFeature>(fbb.GetBufferPointer());
+    REQUIRE(fb_feature->appearance() != nullptr);
+    REQUIRE(fb_feature->appearance()->materials() != nullptr);
+    CHECK(fb_feature->appearance()->materials()->Get(0)->name()->str() == "m1");
+}

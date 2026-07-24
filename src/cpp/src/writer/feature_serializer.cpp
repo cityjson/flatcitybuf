@@ -4,6 +4,8 @@
 
 #    include <fcb/error.hpp>
 
+#    include <algorithm>
+
 namespace fcb {
 
 namespace {
@@ -467,6 +469,67 @@ FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb, const nlohm
                             geometry_instances_off.value_or(0), attributes_off.value_or(0),
                             columns_off.value_or(0), children_off.value_or(0),
                             children_roles_off.value_or(0), parents_off.value_or(0));
+}
+
+std::pair<::flatbuffers::Offset<::CityFeature>, NodeItem>
+to_fcb_city_feature(::flatbuffers::FlatBufferBuilder& fbb, const std::string& id,
+                    const nlohmann::json& city_feature, const AttributeSchema& attr_schema,
+                    const AttributeSchema* semantic_attr_schema) {
+    auto id_off = fbb.CreateString(id);
+
+    // `CityObjects` is a JSON object, so visited in ascending id order for
+    // reproducibility -- same determinism reasoning as
+    // cityfeature_to_index_entries (writer/attribute.hpp).
+    static const nlohmann::json kEmptyObjects = nlohmann::json::object();
+    auto co_it = city_feature.find("CityObjects");
+    const nlohmann::json& city_objects =
+        (co_it != city_feature.end() && co_it->is_object()) ? *co_it : kEmptyObjects;
+
+    std::vector<std::string> object_ids;
+    object_ids.reserve(city_objects.size());
+    for (const auto& [oid, unused] : city_objects.items())
+        object_ids.push_back(oid);
+    std::sort(object_ids.begin(), object_ids.end());
+
+    std::vector<::flatbuffers::Offset<::CityObject>> objects;
+    objects.reserve(object_ids.size());
+    for (const auto& oid : object_ids)
+        objects.push_back(
+            to_city_object(fbb, oid, city_objects.at(oid), attr_schema, semantic_attr_schema));
+    auto objects_off = fbb.CreateVector(objects);
+
+    std::vector<::Vertex> fb_vertices;
+    double min_x = 0, min_y = 0, max_x = 0, max_y = 0;
+    bool first = true;
+    if (auto it = city_feature.find("vertices"); it != city_feature.end()) {
+        fb_vertices.reserve(it->size());
+        for (const auto& v : *it) {
+            const double x = v.at(0).get<double>();
+            const double y = v.at(1).get<double>();
+            fb_vertices.emplace_back(v.at(0).get<std::int32_t>(), v.at(1).get<std::int32_t>(),
+                                     v.at(2).get<std::int32_t>());
+            if (first) {
+                min_x = max_x = x;
+                min_y = max_y = y;
+                first = false;
+            } else {
+                min_x = std::min(min_x, x);
+                max_x = std::max(max_x, x);
+                min_y = std::min(min_y, y);
+                max_y = std::max(max_y, y);
+            }
+        }
+    }
+    auto vertices_off = fbb.CreateVectorOfStructs(fb_vertices);
+
+    std::optional<::flatbuffers::Offset<::Appearance>> appearance_off;
+    if (auto it = city_feature.find("appearance"); it != city_feature.end() && it->is_object())
+        appearance_off = to_appearance(fbb, *it);
+
+    NodeItem bbox{min_x, min_y, max_x, max_y, 0};
+    auto feature_off =
+        CreateCityFeature(fbb, id_off, objects_off, vertices_off, appearance_off.value_or(0));
+    return {feature_off, bbox};
 }
 
 }  // namespace fcb

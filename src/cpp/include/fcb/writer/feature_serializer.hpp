@@ -5,6 +5,7 @@
 #    include <fcb/generated/feature_generated.h>
 #    include <fcb/generated/geometry_generated.h>
 #    include <fcb/generated/header_generated.h>
+#    include <fcb/packed_rtree.hpp>
 #    include <fcb/writer/attribute.hpp>
 #    include <fcb/writer/geom_encoder.hpp>
 
@@ -84,6 +85,18 @@ to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json
                                                    const std::string& id, const nlohmann::json& co,
                                                    const AttributeSchema& attr_schema,
                                                    const AttributeSchema* semantic_attr_schema);
+
+/// Builds one `CityFeature` table -- its CityObjects (visited in ascending
+/// id order), vertices, and optional feature-level appearance -- from a
+/// CityJSONFeature JSON object, plus its 2D bounding box over the RAW
+/// (untransformed, still-integer) vertex coordinates. Applying the file's
+/// `Transform` scale/translate to that bbox, and everything about hilbert
+/// ordering and index assembly, is the caller's job (M7's `FcbWriter`).
+/// Mirrors `to_fcb_city_feature` (writer/serializer.rs:410-489).
+std::pair<::flatbuffers::Offset<::CityFeature>, NodeItem>
+to_fcb_city_feature(::flatbuffers::FlatBufferBuilder& fbb, const std::string& id,
+                    const nlohmann::json& city_feature, const AttributeSchema& attr_schema,
+                    const AttributeSchema* semantic_attr_schema);
 
 }  // namespace fcb
 
