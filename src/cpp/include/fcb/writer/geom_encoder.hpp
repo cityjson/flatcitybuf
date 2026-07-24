@@ -107,6 +107,26 @@ struct TextureMapping {
 /// `values`'s own shape.
 std::vector<TextureMapping> encode_texture(const nlohmann::json& texture, GeometryKind kind);
 
+/// Everything one CityJSON geometry object flattens to. Mirrors
+/// `EncodedGeometry` (writer/geom_encoder.rs).
+struct EncodedGeometry {
+    GMBoundaries boundaries;
+    std::optional<GMSemantics> semantics;
+    std::optional<std::vector<MaterialMapping>> materials;
+    std::optional<std::vector<TextureMapping>> textures;
+};
+
+/// Flattens one CityJSON geometry object -- its boundaries and whatever
+/// semantics, material and texture it carries -- into the FlatCityBuf
+/// arrays. `geometry` is read directly off the parsed JSON (`type`,
+/// `boundaries`, and optionally `semantics`/`material`/`texture`); a
+/// `GeometryInstance` carries none of these except a differently-shaped
+/// `boundaries` (a single reference vertex index, not nested arrays) that
+/// this never touches -- it is encoded separately by M3's
+/// `to_geometry_instance`, and yields empty arrays here. Mirrors `encode`
+/// (writer/geom_encoder.rs:102-120).
+EncodedGeometry encode(const nlohmann::json& geometry);
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON

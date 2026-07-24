@@ -319,6 +319,29 @@ std::vector<TextureMapping> encode_texture(const nlohmann::json& texture, Geomet
     return out;
 }
 
+EncodedGeometry encode(const nlohmann::json& geometry) {
+    EncodedGeometry result;
+    const GeometryKind kind = geometry_kind_from_name(geometry.at("type").get<std::string>());
+
+    auto boundaries_it = geometry.find("boundaries");
+    result.boundaries = encode_boundaries(
+        kind, boundaries_it != geometry.end() ? *boundaries_it : nlohmann::json::array());
+
+    auto semantics_it = geometry.find("semantics");
+    if (semantics_it != geometry.end() && semantics_it->is_object())
+        result.semantics = encode_semantics(*semantics_it, kind, result.boundaries);
+
+    auto material_it = geometry.find("material");
+    if (material_it != geometry.end() && material_it->is_object())
+        result.materials = encode_material(*material_it, kind);
+
+    auto texture_it = geometry.find("texture");
+    if (texture_it != geometry.end() && texture_it->is_object())
+        result.textures = encode_texture(*texture_it, kind);
+
+    return result;
+}
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON

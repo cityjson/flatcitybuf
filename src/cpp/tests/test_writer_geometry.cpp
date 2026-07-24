@@ -374,6 +374,37 @@ TEST_CASE("encode_texture: a theme with no values member has_values is false") {
     CHECK(encoded[0].vertices.empty());
 }
 
+TEST_CASE("encode: a MultiSurface with boundaries, semantics and material all populate") {
+    auto geometry = nlohmann::json::parse(R"({
+        "type": "MultiSurface",
+        "lod": "2",
+        "boundaries": [[[0, 1, 2]], [[0, 2, 3]]],
+        "semantics": {
+            "surfaces": [{"type": "RoofSurface"}],
+            "values": [0, 0]
+        },
+        "material": {"t": {"values": [0, 1]}}
+    })");
+    auto encoded = encode(geometry);
+
+    CHECK(encoded.boundaries.indices == std::vector<std::uint32_t>{0, 1, 2, 0, 2, 3});
+    REQUIRE(encoded.semantics.has_value());
+    CHECK(*encoded.semantics->values == std::vector<std::uint32_t>{0, 0});
+    REQUIRE(encoded.materials.has_value());
+    CHECK(encoded.materials->size() == 1);
+    CHECK_FALSE(encoded.textures.has_value());  // no "texture" key at all
+}
+
+TEST_CASE("encode: a GeometryInstance yields empty arrays, not a crash") {
+    auto geometry = nlohmann::json::parse(R"({"type": "GeometryInstance", "boundaries": 5})");
+    auto encoded = encode(geometry);
+    CHECK(encoded.boundaries.indices.empty());
+    CHECK(encoded.boundaries.solids.empty());
+    CHECK_FALSE(encoded.semantics.has_value());
+    CHECK_FALSE(encoded.materials.has_value());
+    CHECK_FALSE(encoded.textures.has_value());
+}
+
 TEST_CASE("geometry_kind_from_name maps every known CityJSON type string") {
     CHECK(geometry_kind_from_name("MultiPoint") == GeometryKind::MultiPoint);
     CHECK(geometry_kind_from_name("MultiLineString") == GeometryKind::MultiLineString);
