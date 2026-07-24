@@ -42,7 +42,8 @@ if(FCB_WITH_JSON)
                                         src/writer/feature_serializer.cpp
                                         src/writer/header_serializer.cpp
                                         src/writer/rtree_builder.cpp
-                                        src/writer/btree_builder.cpp)
+                                        src/writer/btree_builder.cpp
+                                        src/writer/fcb_writer.cpp)
 endif()
 
 if(FCB_WITH_CURL)

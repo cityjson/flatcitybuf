@@ -10,6 +10,11 @@
 
 namespace fcb {
 
+/// Mirrors `static_btree::DEFAULT_BRANCHING_FACTOR` (static_btree/mod.rs:19),
+/// used whenever a caller requests an attribute index without naming an
+/// explicit branching factor.
+constexpr std::uint16_t kDefaultBranchingFactor = 16;
+
 /// One (key, feature byte offset) pair to be indexed. Several entries may
 /// share the same key (a column value repeated across features); the
 /// builder groups those into one payload entry rather than one leaf slot
