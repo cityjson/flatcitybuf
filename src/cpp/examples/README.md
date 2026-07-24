@@ -25,12 +25,14 @@ cmake --build build-curl         # -> build-curl/fcb_read_http
 |---|---|---|
 | `fcb_inspect_header` | `inspect_header.cpp` | Header only: extent, CRS, transform, and **which columns are queryable** |
 | `fcb_read_local` | `read_local.cpp` | Whole file (or a bbox) out as CityJSONSeq |
+| `fcb_to_cityjson` | `to_cityjson.cpp` | The CityJSON JSON representation, and **how to reach into its fields** |
 | `fcb_query_attributes` | `query_attributes.cpp` | Attribute queries through the static B+tree |
 | `fcb_read_features` | `read_features.cpp` | Raw feature access, no CityJSON conversion |
 | `fcb_custom_reader` | `custom_reader.cpp` | Implementing `fcb::RangeReader` yourself |
 | `fcb_read_http` | `read_http.cpp` | Remote reads over HTTP range requests |
 
-Start with `fcb_inspect_header` on an unfamiliar file.
+Start with `fcb_inspect_header` on an unfamiliar file. If you just want to know
+how to pull values out of the data, jump to `fcb_to_cityjson`.
 
 ---
 
@@ -70,6 +72,59 @@ $ ./build-native/fcb_read_local ../../examples/data/delft.fcb \
       84500 445800 85000 446500 | wc -l
 171                                     # 1 metadata + 170 features
 ```
+
+### `fcb_to_cityjson <file.fcb> [feature-index]`
+
+The one to read if the question is *"how do I get at the data?"*. It calls the
+two conversion entry points —
+
+```cpp
+nlohmann::json meta = fcb::to_cityjson_metadata(reader.header());
+nlohmann::json feat = fcb::to_cityjson_feature(iter.current(), reader.header());
+```
+
+— and then navigates the resulting JSON tree: the feature id, each
+CityObject's `type` and `attributes`, a geometry's `type`/`lod`/`boundaries`,
+and the vertices.
+
+```
+$ ./build-native/fcb_to_cityjson ../../examples/data/delft.fcb 0
+== metadata (to_cityjson_metadata) ==
+  version   2.0
+  CRS       https://www.opengis.net/def/crs/EPSG/0/7415
+  scale     [0.001, 0.001, 0.001]
+  translate [85088.391, 446394.250, 45.648]
+
+== feature (to_cityjson_feature) ==
+  id            NL.IMBAG.Pand.0503100000031902
+  CityObjects   2
+  - NL.IMBAG.Pand.0503100000031902     type=Building
+  - NL.IMBAG.Pand.0503100000031902-0   type=BuildingPart
+
+  attributes of NL.IMBAG.Pand.0503100000031902 (43):
+    status               Pand in gebruik
+    b3_h_dak_50p         11.26
+    b3_kas_warenhuis     false
+
+  geometry[0]: type=MultiSurface lod=0
+  vertices      2265 (quantized integers)
+    vertices[0]  raw [468999, -303852, -46777]  ->  real [85557.390, 446090.398, -1.129]
+```
+
+It then dumps the whole feature as pretty-printed JSON, so you can see every
+field the lines above reached into.
+
+Two things the example makes concrete, because both trip people up:
+
+- **Field access is `nlohmann::json`, not a bespoke API.** Use `.at("k")` (throws
+  if absent), `.value("k", default)` (safe for optional fields), `.contains("k")`
+  to guard, and `.get<double>()` / `.get<std::string>()` to pull a typed value.
+  Attribute *values* keep their CityJSON types — a number stays a number, a bool
+  a bool — so read them as such.
+- **Vertices are quantized integers.** `feature["vertices"]` holds `[i, j, k]`
+  integer triples; the real coordinate is `v[n] * transform.scale[n] +
+  transform.translate[n]`. The `transform` lives on the **metadata** object, not
+  the feature — which is why the example reads both.
 
 ### `fcb_query_attributes <file.fcb> <field> <op> <value> [field op value]...`
 
@@ -147,25 +202,44 @@ the concurrency primitive. Override `read_batch()` to service many ranges at
 once; a blocking interface is trivially wrapped by whatever threading model you
 already have, whereas an imposed async runtime is not.
 
-### `fcb_read_http <url>`
+### `fcb_read_http <url> [minx miny maxx maxy]`
 
-Needs the `build-curl` tree. Only the intersecting features are fetched.
+Needs the `build-curl` tree. Only the intersecting features are fetched, never
+the whole file — the request count at the end is the evidence.
+
+Against the published 3DBAG file (~68 GB, EPSG:28992), with a ~1 km bbox over
+central Amsterdam:
+
+```
+$ ./build-curl/fcb_read_http \
+    https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb \
+    120000 486000 121000 487000
+10771547 features, CityJSON 2.0
+opened in 2 HTTP request(s)
+2762 feature(s) in the query bbox, 37 HTTP request(s)
+```
+
+Opening a 68 GB file cost **2 requests**; the bbox query, **37** — the point of
+the format. **Always pass a bbox** for a file this size: with no bbox the
+example queries the western half of the extent, which on a national dataset is
+tens of GB of transfer.
+
+The same binary works against the small local fixture via the test range
+server (`just test-http` starts and stops it for you):
 
 ```
 $ python3 ../../src/cpp/tests/range_server.py ../../examples/data > /tmp/p.txt &
 $ ./build-curl/fcb_read_http "http://127.0.0.1:$(cat /tmp/p.txt)/delft.fcb"
 1115 features, CityJSON 2.0
-931 features in the western half, 9 HTTP requests
+opened in 2 HTTP request(s)
+931 feature(s) in the query bbox, 7 HTTP request(s)
 ```
 
-931 of 1115 features in **9 requests**. `just test-http` starts and stops that
-server for you as part of the test run.
-
-> The two public demo files at `storage.googleapis.com/flatcitybuf/` are
-> rejected with `header failed FlatBuffers verification`. That is correct: they
-> predate the alignment fix in `540772a`, and this reader re-enabled
-> `check_alignment`. The Python and TypeScript readers accept them only because
-> neither has a FlatBuffers verifier.
+> Older files at `storage.googleapis.com/flatcitybuf/` that predate the
+> alignment fix (`540772a`) are rejected with `header failed FlatBuffers
+> verification` — correct, since this reader re-enabled `check_alignment`.
+> `3dbag_all_index.fcb` above has been re-serialized with the current writer,
+> so it verifies. If you hit that error on another file, re-serialize it.
 
 ## Not covered here
 

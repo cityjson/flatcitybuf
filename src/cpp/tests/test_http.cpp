@@ -183,4 +183,55 @@ TEST_CASE("CityJSON emitted over HTTP matches the local file exactly") {
     CHECK(checked == 25);
 }
 
+// ------------------------------------------------- live remote (opt-in) ---
+//
+// A separate env var from FCB_TEST_HTTP_URL: the tests above compare against
+// the LOCAL delft.fcb and only work against a server serving that fixture,
+// whereas this one hits the real published 3DBAG file (~68 GB, EPSG:28992)
+// and has its own expected values. Set FCB_REMOTE_HTTP_URL to run it -- see
+// `just test-remote` -- otherwise it skips, so no CI run and no `ctest`
+// fetches 68 GB.
+//
+// The constants were cross-checked across the Rust, C++, Python and
+// TypeScript readers on 2026-07-23; all four agree. Update all four suites in
+// lock-step if the file is regenerated.
+static std::string remote_url() {
+    const char* u = std::getenv("FCB_REMOTE_HTTP_URL");
+    return u != nullptr ? std::string(u) : std::string();
+}
+
+TEST_CASE("the live 3DBAG file opens and queries over HTTP") {
+    const std::string url = remote_url();
+    if (url.empty()) {
+        MESSAGE("FCB_REMOTE_HTTP_URL not set; skipping (see `just test-remote`)");
+        return;
+    }
+
+    constexpr std::uint64_t kFeaturesCount = 10771547;
+    // ~1 km box over central Amsterdam (minx, miny, maxx, maxy).
+    const BBox amsterdam{120000.0, 486000.0, 121000.0, 487000.0};
+    constexpr int kBBoxCount = 2762;
+
+    auto transport = std::make_shared<CurlRangeReader>(url);
+
+    // Opening a 68 GB file must cost a handful of small ranged reads. If the
+    // header does not verify, the file predates the alignment fix (540772a).
+    FcbReader reader = FcbReader::open(transport);
+    CHECK(reader.header().info().features_count == kFeaturesCount);
+    CHECK(transport->request_count() <= 4);
+
+    transport->reset_request_count();
+    FeatureIterator it = reader.select_bbox(amsterdam);
+    int n = 0;
+    while (it.next())
+        ++n;
+
+    // Exact, and identical to the other three readers for the same box.
+    CHECK(n == kBBoxCount);
+    // The whole point: a bbox query over 68 GB is a bounded number of ranged
+    // requests, never a download.
+    CHECK(transport->request_count() > 1);
+    CHECK(transport->request_count() < 200);
+}
+
 #endif  // FCB_WITH_CURL

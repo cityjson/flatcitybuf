@@ -104,26 +104,60 @@ async fn read_http_file_attr(path: &str) -> Result<(), Box<dyn Error>> {
 mod http {
     use anyhow::Result;
 
+    use fcb_core::packed_rtree::Query;
+    use fcb_core::HttpFcbReader;
+
     use crate::{read_http_file_attr, read_http_file_bbox};
 
-    #[tokio::test]
-    async fn test_read_http_file() -> Result<()> {
-        let res =
-            read_http_file_bbox("https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb")
-                .await;
+    // The published 3DBAG file (~68 GB, EPSG:28992). These tests hit the live
+    // bucket, so they are `#[ignore]`d -- opt-in only. Run them with
+    // `just test-remote` (or `cargo nextest run --run-ignored ignored-only`),
+    // never in the default suite. FCB_REMOTE_HTTP_URL overrides the URL.
+    //
+    // The expected values were cross-checked across the Rust, C++, Python and
+    // TypeScript readers on 2026-07-23; all four agree. Update all four suites
+    // in lock-step if the file is regenerated (this one, test_http.cpp,
+    // test_http.py, http.test.ts).
+    const REMOTE_FEATURES_COUNT: u64 = 10_771_547;
+    // A ~1 km box over central Amsterdam (minx, miny, maxx, maxy).
+    const REMOTE_BBOX: (f64, f64, f64, f64) = (120_000.0, 486_000.0, 121_000.0, 487_000.0);
+    const REMOTE_BBOX_COUNT: usize = 2762;
 
+    fn remote_url() -> String {
+        std::env::var("FCB_REMOTE_HTTP_URL").unwrap_or_else(|_| {
+            "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb".to_string()
+        })
+    }
+
+    #[tokio::test]
+    #[ignore = "hits the live 68 GB 3DBAG bucket; run via `just test-remote`"]
+    async fn remote_3dbag_opens_and_counts_a_bbox() -> Result<()> {
+        let reader = HttpFcbReader::open(&remote_url()).await?;
+
+        // The header verifies -> the file is in the post-alignment-fix format.
+        assert_eq!(reader.header().features_count(), REMOTE_FEATURES_COUNT);
+
+        // The R-tree yields the match count without materializing features,
+        // so this is bounded regardless of the 68 GB body. Exact, and
+        // identical to what C++, Python and TypeScript return for this box.
+        let (minx, miny, maxx, maxy) = REMOTE_BBOX;
+        let iter = reader.select_query(Query::BBox(minx, miny, maxx, maxy)).await?;
+        assert_eq!(iter.features_count(), Some(REMOTE_BBOX_COUNT));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "hits the live 68 GB 3DBAG bucket; run via `just test-remote`"]
+    async fn remote_3dbag_bbox_scan() -> Result<()> {
+        let res = read_http_file_bbox(&remote_url()).await;
         assert!(res.is_ok());
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_read_http_file_attr() -> Result<()> {
-        // let _ = env_logger::builder().is_test(true).try_init();
-
-        // 70GB file
-        let res =
-            read_http_file_attr("https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb")
-                .await;
+    #[ignore = "hits the live 68 GB 3DBAG bucket; run via `just test-remote`"]
+    async fn remote_3dbag_attr_query() -> Result<()> {
+        let res = read_http_file_attr(&remote_url()).await;
         assert!(res.is_ok());
         Ok(())
     }

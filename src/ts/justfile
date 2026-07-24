@@ -28,6 +28,13 @@ install:
 test: install
     npx vitest run
 
+# The live-3DBAG test is skipped by the default `test` above (no
+# FCB_REMOTE_HTTP_URL); this sets it and runs only that test.
+
+# Opt-in: the live 3DBAG HTTP test (~68 GB bucket)
+test-remote: install
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" npx vitest run test/http.test.ts -t "live 3DBAG"
+
 # The ACTUAL shipping target. The globalSetup serves the corpus cross-origin so
 # the CORS failure path (which a Node fetch cannot reach, because Node does not
 # enforce CORS) is exercised. One-time setup: npx playwright install chromium
