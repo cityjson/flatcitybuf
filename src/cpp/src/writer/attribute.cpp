@@ -354,6 +354,96 @@ to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema)
     return fbb.CreateVector(columns);
 }
 
+std::vector<AttributeIndexEntry>
+attribute_to_index_entries(const nlohmann::json& attr, const AttributeSchema& schema,
+                           const std::vector<std::string>& indexing_attr) {
+    std::vector<AttributeIndexEntry> out;
+    if (!attr.is_object() || attr.empty())
+        return out;
+
+    for (const auto& name : indexing_attr) {
+        auto val_it = attr.find(name);
+        if (val_it == attr.end())
+            continue;
+        auto schema_it = schema.find(name);
+        if (schema_it == schema.end())
+            continue;
+        const auto [index, coltype] = schema_it->second;
+        const nlohmann::json& val = *val_it;
+
+        switch (coltype) {
+            case ::ColumnType::Bool:
+                out.push_back({index, KeyValue::from_bool(as_bool_or_false(val))});
+                break;
+            case ::ColumnType::Int:
+                out.push_back(
+                    {index, KeyValue::from_i32(static_cast<std::int32_t>(as_i64_or0(val)))});
+                break;
+            case ::ColumnType::UInt:
+                out.push_back(
+                    {index, KeyValue::from_u32(static_cast<std::uint32_t>(as_u64_or0(val)))});
+                break;
+            case ::ColumnType::Long:
+                out.push_back({index, KeyValue::from_i64(as_i64_or0(val))});
+                break;
+            case ::ColumnType::ULong:
+                out.push_back({index, KeyValue::from_u64(as_u64_or0(val))});
+                break;
+            case ::ColumnType::Float:
+                out.push_back({index, KeyValue::from_f32(static_cast<float>(as_f64_or0(val)))});
+                break;
+            case ::ColumnType::Double:
+                out.push_back({index, KeyValue::from_f64(as_f64_or0(val))});
+                break;
+            case ::ColumnType::String:
+                out.push_back(
+                    {index, KeyValue::from_string(KeyKind::String50, as_str_or_empty(val))});
+                break;
+            case ::ColumnType::DateTime: {
+                const Rfc3339Result parsed = parse_rfc3339(as_str_or_empty(val));
+                out.push_back({index, KeyValue::from_datetime(parsed.ok ? parsed.seconds : 0,
+                                                              parsed.ok ? parsed.nanos : 0)});
+                break;
+            }
+            case ::ColumnType::Byte:
+            case ::ColumnType::UByte:
+            case ::ColumnType::Short:
+            case ::ColumnType::UShort:
+            case ::ColumnType::Json:
+            case ::ColumnType::Binary:
+                // Not supported for indexing at extraction time -- matches
+                // writer/attribute.rs's `attribute_to_index_entries`.
+                break;
+        }
+    }
+    return out;
+}
+
+std::vector<AttributeIndexEntry>
+cityfeature_to_index_entries(const nlohmann::json& city_feature, const AttributeSchema& schema,
+                             const std::vector<std::string>& indexing_attr) {
+    std::vector<AttributeIndexEntry> out;
+    auto co_it = city_feature.find("CityObjects");
+    if (co_it == city_feature.end() || !co_it->is_object())
+        return out;
+
+    std::vector<std::string> object_ids;
+    object_ids.reserve(co_it->size());
+    for (const auto& [id, unused] : co_it->items())
+        object_ids.push_back(id);
+    std::sort(object_ids.begin(), object_ids.end());
+
+    for (const auto& id : object_ids) {
+        const nlohmann::json& co = co_it->at(id);
+        auto attr_it = co.find("attributes");
+        if (attr_it == co.end() || attr_it->is_null())
+            continue;
+        auto entries = attribute_to_index_entries(*attr_it, schema, indexing_attr);
+        out.insert(out.end(), entries.begin(), entries.end());
+    }
+    return out;
+}
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON

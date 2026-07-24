@@ -52,6 +52,35 @@ std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::json& at
 ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Column>>>
 to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema);
 
+/// One indexable (column, value) pair pulled out of a feature for the
+/// static B+tree builder (M6). `value.kind()` always matches
+/// `key_kind_for_column(schema column type)` for `index`.
+struct AttributeIndexEntry {
+    std::uint16_t index;
+    KeyValue value;
+};
+
+/// Extracts index entries for `indexing_attr` from one CityJSON attributes
+/// object. Only Bool, Int, UInt, Long, ULong, Float, Double, String and
+/// DateTime columns produce entries -- Byte, UByte, Short, UShort, Json and
+/// Binary are silently skipped, matching the Rust writer's
+/// `attribute_to_index_entries` exactly (a known, deliberate gap: those
+/// types ARE supported by the B+tree builder itself, just never reached
+/// through this normal extraction path). A name in `indexing_attr` absent
+/// from `attr` or from `schema` is skipped.
+std::vector<AttributeIndexEntry>
+attribute_to_index_entries(const nlohmann::json& attr, const AttributeSchema& schema,
+                           const std::vector<std::string>& indexing_attr);
+
+/// Same, over every object in one CityJSONFeature's `CityObjects`, visited
+/// in ascending object-id order (not JSON key order, which need not be
+/// stable) so that duplicate-key payload ordering in the eventual B+tree is
+/// reproducible. An object with no `attributes` member, or an explicit
+/// `"attributes": null`, contributes nothing.
+std::vector<AttributeIndexEntry>
+cityfeature_to_index_entries(const nlohmann::json& city_feature, const AttributeSchema& schema,
+                             const std::vector<std::string>& indexing_attr);
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON

@@ -165,6 +165,76 @@ TEST_CASE("to_columns builds a Header whose columns round-trip through the reade
     CHECK(h->columns()->Get(1)->type() == ::ColumnType::Bool);
 }
 
+TEST_CASE("attribute_to_index_entries extracts only the requested, indexable columns") {
+    AttributeSchema schema;
+    nlohmann::json attrs = nlohmann::json::parse(R"({
+        "name": "Building A",
+        "height": 12.5,
+        "count": 3,
+        "flag": true,
+        "raw": {"nested": 1}
+    })");
+    add_attributes(schema, attrs);
+
+    auto entries =
+        attribute_to_index_entries(attrs, schema, {"name", "height", "count", "flag", "raw"});
+    // "raw" is a Json column -- attribute_to_index_entries never produces an
+    // entry for it, matching the Rust writer's own gap (see spec doc).
+    REQUIRE(entries.size() == 4);
+
+    auto find = [&](std::uint16_t idx) -> const AttributeIndexEntry& {
+        for (auto& e : entries)
+            if (e.index == idx)
+                return e;
+        FAIL("missing entry for column " << idx);
+        static AttributeIndexEntry dummy{0, KeyValue()};
+        return dummy;
+    };
+    CHECK(find(schema.at("name").first).value.kind() == KeyKind::String50);
+    CHECK(find(schema.at("height").first).value.kind() == KeyKind::Float64);
+    CHECK(find(schema.at("flag").first).value.kind() == KeyKind::Bool);
+}
+
+TEST_CASE("attribute_to_index_entries parses DateTime strings, falling back to epoch on failure") {
+    AttributeSchema schema;
+    nlohmann::json attrs = {{"ts", "2010-10-13T12:29:24Z"}, {"bad_ts", "not a date"}};
+    schema.emplace("ts", std::make_pair(0, ::ColumnType::DateTime));
+    schema.emplace("bad_ts", std::make_pair(1, ::ColumnType::DateTime));
+
+    auto entries = attribute_to_index_entries(attrs, schema, {"ts", "bad_ts"});
+    REQUIRE(entries.size() == 2);
+    for (auto& e : entries)
+        CHECK(e.value.kind() == KeyKind::DateTime);
+}
+
+TEST_CASE("cityfeature_to_index_entries visits CityObjects in ascending id order") {
+    AttributeSchema schema;
+    schema.emplace("n", std::make_pair(0, ::ColumnType::ULong));
+
+    nlohmann::json feature = {
+        {"type", "CityJSONFeature"},
+        {"id", "f1"},
+        {"CityObjects",
+         {{"z_obj", {{"type", "Building"}, {"attributes", {{"n", 1}}}}},
+          {"a_obj", {{"type", "Building"}, {"attributes", {{"n", 2}}}}}}},
+        {"vertices", nlohmann::json::array()},
+    };
+
+    auto entries = cityfeature_to_index_entries(feature, schema, {"n"});
+    REQUIRE(entries.size() == 2);
+    // "a_obj" sorts before "z_obj", so its value (2) comes first.
+    CHECK(entries[0].value.kind() == KeyKind::UInt64);
+}
+
+TEST_CASE("cityfeature_to_index_entries skips objects with no attributes") {
+    AttributeSchema schema;
+    schema.emplace("n", std::make_pair(0, ::ColumnType::ULong));
+    nlohmann::json feature = {
+        {"CityObjects", {{"o1", {{"type", "Building"}}}, {"o2", {{"type", "Building"}}}}},
+    };
+    CHECK(cityfeature_to_index_entries(feature, schema, {"n"}).empty());
+}
+
 TEST_CASE("record layout is [u16 LE column index][value], schema-index order") {
     AttributeSchema schema;
     // Force known indices: "b" first (index 0), "a" second (index 1).
