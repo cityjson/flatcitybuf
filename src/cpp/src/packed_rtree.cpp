@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <utility>
 
 #include "detail/checked.hpp"
@@ -26,15 +27,86 @@ std::uint64_t read_u64_le(const std::uint8_t* p) {
     return v;
 }
 
-/// Half-open [start, end) node index range for one tree level.
-struct LevelBound {
-    std::uint64_t start;
-    std::uint64_t end;
-};
+void write_f64_le(std::uint8_t* p, double v) { std::memcpy(p, &v, sizeof(double)); }
 
-/// Mirrors generate_level_bounds (packed_rtree/mod.rs:342-375).
-/// level_bounds[0] is the LEAF level and is stored LAST; back() is the root.
-std::vector<LevelBound> generate_level_bounds(std::uint64_t num_items, std::uint16_t node_size) {
+void write_u64_le(std::uint8_t* p, std::uint64_t v) { std::memcpy(p, &v, sizeof(std::uint64_t)); }
+
+}  // namespace
+
+NodeItem NodeItem::decode(bytes_view b) {
+    if (b.size() < kSize) {
+        throw Error(ErrorCode::NoIndex, "short rtree node item");
+    }
+    NodeItem n{};
+    n.min_x = read_f64_le(b.data() + 0);
+    n.min_y = read_f64_le(b.data() + 8);
+    n.max_x = read_f64_le(b.data() + 16);
+    n.max_y = read_f64_le(b.data() + 24);
+    n.offset = read_u64_le(b.data() + 32);
+    return n;
+}
+
+NodeItem NodeItem::empty(std::uint64_t offset) {
+    NodeItem n{};
+    n.min_x = std::numeric_limits<double>::infinity();
+    n.min_y = std::numeric_limits<double>::infinity();
+    n.max_x = -std::numeric_limits<double>::infinity();
+    n.max_y = -std::numeric_limits<double>::infinity();
+    n.offset = offset;
+    return n;
+}
+
+void NodeItem::expand(const NodeItem& r) {
+    if (r.min_x < min_x)
+        min_x = r.min_x;
+    if (r.min_y < min_y)
+        min_y = r.min_y;
+    if (r.max_x > max_x)
+        max_x = r.max_x;
+    if (r.max_y > max_y)
+        max_y = r.max_y;
+}
+
+void NodeItem::encode(std::uint8_t* out) const {
+    write_f64_le(out + 0, min_x);
+    write_f64_le(out + 8, min_y);
+    write_f64_le(out + 16, max_x);
+    write_f64_le(out + 24, max_y);
+    write_u64_le(out + 32, offset);
+}
+
+bool NodeItem::intersects(const BBox& q) const {
+    // Strict comparisons, matching packed_rtree/mod.rs:122-134.
+    if (q.max_x < min_x)
+        return false;
+    if (q.max_y < min_y)
+        return false;
+    if (q.min_x > max_x)
+        return false;
+    if (q.min_y > max_y)
+        return false;
+    return true;
+}
+
+std::uint64_t rtree_num_nodes(std::uint64_t num_items, std::uint16_t node_size) {
+    if (node_size < 2) {
+        throw Error(ErrorCode::IllegalHeaderSize, "invalid index_node_size");
+    }
+    if (num_items == 0)
+        return 0;
+
+    std::uint64_t n = num_items;
+    std::uint64_t num_nodes = n;
+    for (;;) {
+        n = detail::ceil_div(n, node_size);
+        num_nodes = detail::checked_add(num_nodes, n, "rtree num_nodes");
+        if (n == 1)
+            break;
+    }
+    return num_nodes;
+}
+
+std::vector<LevelBound> rtree_level_bounds(std::uint64_t num_items, std::uint16_t node_size) {
     if (node_size < 2) {
         throw Error(ErrorCode::IllegalHeaderSize, "invalid index_node_size");
     }
@@ -70,52 +142,6 @@ std::vector<LevelBound> generate_level_bounds(std::uint64_t num_items, std::uint
     return bounds;
 }
 
-}  // namespace
-
-NodeItem NodeItem::decode(bytes_view b) {
-    if (b.size() < kSize) {
-        throw Error(ErrorCode::NoIndex, "short rtree node item");
-    }
-    NodeItem n{};
-    n.min_x = read_f64_le(b.data() + 0);
-    n.min_y = read_f64_le(b.data() + 8);
-    n.max_x = read_f64_le(b.data() + 16);
-    n.max_y = read_f64_le(b.data() + 24);
-    n.offset = read_u64_le(b.data() + 32);
-    return n;
-}
-
-bool NodeItem::intersects(const BBox& q) const {
-    // Strict comparisons, matching packed_rtree/mod.rs:122-134.
-    if (q.max_x < min_x)
-        return false;
-    if (q.max_y < min_y)
-        return false;
-    if (q.min_x > max_x)
-        return false;
-    if (q.min_y > max_y)
-        return false;
-    return true;
-}
-
-std::uint64_t rtree_num_nodes(std::uint64_t num_items, std::uint16_t node_size) {
-    if (node_size < 2) {
-        throw Error(ErrorCode::IllegalHeaderSize, "invalid index_node_size");
-    }
-    if (num_items == 0)
-        return 0;
-
-    std::uint64_t n = num_items;
-    std::uint64_t num_nodes = n;
-    for (;;) {
-        n = detail::ceil_div(n, node_size);
-        num_nodes = detail::checked_add(num_nodes, n, "rtree num_nodes");
-        if (n == 1)
-            break;
-    }
-    return num_nodes;
-}
-
 std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader, std::uint64_t index_begin,
                                                 std::uint64_t num_items, std::uint16_t node_size,
                                                 const BBox& query) {
@@ -123,7 +149,7 @@ std::vector<SearchResultItem> rtree_search_bbox(RangeReader& reader, std::uint64
     if (num_items == 0)
         return results;
 
-    const auto level_bounds = generate_level_bounds(num_items, node_size);
+    const auto level_bounds = rtree_level_bounds(num_items, node_size);
     const std::uint64_t num_nodes = rtree_num_nodes(num_items, node_size);
     const std::uint64_t leaf_nodes_offset = level_bounds.front().start;
 

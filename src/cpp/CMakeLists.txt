@@ -40,7 +40,8 @@ if(FCB_WITH_JSON)
     target_compile_definitions(fcb_core_cpp PUBLIC FCB_WITH_JSON=1)
     target_sources(fcb_core_cpp PRIVATE src/writer/attribute.cpp src/writer/geom_encoder.cpp
                                         src/writer/feature_serializer.cpp
-                                        src/writer/header_serializer.cpp)
+                                        src/writer/header_serializer.cpp
+                                        src/writer/rtree_builder.cpp)
 endif()
 
 if(FCB_WITH_CURL)

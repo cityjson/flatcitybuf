@@ -17,6 +17,7 @@
 #include <fcb/writer/attribute.hpp>
 #include <fcb/writer/feature_serializer.hpp>
 #include <fcb/writer/header_serializer.hpp>
+#include <fcb/writer/rtree_builder.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -299,4 +300,94 @@ TEST_CASE("oracle: to_fcb_header is byte-identical to the Rust writer's header, 
     // the real Rust CLI, like geometry_instance_interleaved was for M3).
     check_header_byte_exact("header_metadata_full", /*feature_count=*/1,
                             /*index_node_size=*/16);
+}
+
+TEST_CASE("oracle: build_packed_rtree is byte-identical to the Rust writer's spatial index, for "
+          "a real multi-feature fixture") {
+    // `duplicate_keys.fcb` (5 features, node size 16, per fcb_inspect_header)
+    // is the first fixture in the corpus with MORE than one feature and a
+    // real spatial index, needed to exercise `hilbert_sort` reordering and
+    // `build_packed_rtree`'s bottom-up aggregation non-trivially. This test
+    // reimplements just enough of `FcbWriter::write`'s orchestration
+    // (writer/mod.rs:191-225) to build realistic input -- computing each
+    // feature's ACTUAL (transform-scaled) bbox, sorting, and reassigning
+    // offsets from each feature's OWN encoded byte size -- without
+    // exposing any of that as this milestone's own API (that's M7's job).
+    const std::string fixture = "duplicate_keys";
+    const std::string fcb_path = std::string(FCB_CONFORMANCE_DIR) + "/" + fixture + ".fcb";
+    FcbReader r = FcbReader::open_file(fcb_path);
+    const auto& layout = r.header().layout();
+    REQUIRE(r.header().info().features_count == 5);
+    REQUIRE(r.header().info().index_node_size == 16);
+
+    std::vector<std::uint8_t> whole_file = read_file_bytes(fcb_path);
+    REQUIRE(whole_file.size() >= layout.attr_index_begin);
+    std::vector<std::uint8_t> expected_rtree_bytes(whole_file.begin() + layout.rtree_begin,
+                                                   whole_file.begin() + layout.attr_index_begin);
+
+    const std::string input_path =
+        std::string(FCB_CONFORMANCE_DIR) + "/inputs/" + fixture + ".city.jsonl";
+    std::vector<ordered_json> input_lines = read_jsonl(input_path);
+    const ordered_json& cj = input_lines[0];
+    std::vector<ordered_json> all_features(input_lines.begin() + 1, input_lines.end());
+    AttributeSchema attr_schema = build_attr_schema(all_features);
+
+    const auto& transform = cj.at("transform");
+    const double scale_x = transform.at("scale").at(0).get<double>();
+    const double scale_y = transform.at("scale").at(1).get<double>();
+    const double translate_x = transform.at("translate").at(0).get<double>();
+    const double translate_y = transform.at("translate").at(1).get<double>();
+
+    // Mirrors FeatureWriter::finish_to_feature + FcbWriter::write_feature:
+    // each feature gets its own fbb (matching `self.fbb.reset()` between
+    // features), its raw bbox is transform-scaled to real-world coordinates
+    // (`FcbWriter::actual_bbox`), and `feat_nodes[i].offset` starts as the
+    // feature's ORIGINAL (pre-sort) index -- exactly like Rust's
+    // `node.offset = self.feat_offsets.len() as u64` before the sort.
+    std::vector<std::uint64_t> feat_sizes(all_features.size());
+    std::vector<NodeItem> feat_nodes;
+    feat_nodes.reserve(all_features.size());
+    for (std::size_t i = 0; i < all_features.size(); ++i) {
+        flatbuffers::FlatBufferBuilder fbb;
+        auto [off, raw_bbox] = to_fcb_city_feature(fbb, all_features[i].at("id").get<std::string>(),
+                                                   all_features[i], attr_schema, nullptr);
+        fbb.FinishSizePrefixed(off);
+        feat_sizes[i] = fbb.GetSize();
+
+        NodeItem node{
+            raw_bbox.min_x * scale_x + translate_x, raw_bbox.min_y * scale_y + translate_y,
+            raw_bbox.max_x * scale_x + translate_x, raw_bbox.max_y * scale_y + translate_y, i};
+        feat_nodes.push_back(node);
+    }
+
+    NodeItem extent = calc_extent(feat_nodes);
+    hilbert_sort(feat_nodes, extent);
+
+    // Mirrors writer/mod.rs:211-222: reassign each sorted node's `.offset`
+    // to its FINAL byte position, derived from the ORIGINAL feature's own
+    // encoded size (looked up via the temp index `.offset` still carries at
+    // this point, before being overwritten here).
+    std::uint64_t running_offset = 0;
+    for (auto& node : feat_nodes) {
+        const std::uint64_t temp_id = node.offset;
+        node.offset = running_offset;
+        running_offset += feat_sizes[temp_id];
+    }
+
+    std::vector<NodeItem> tree = build_packed_rtree(feat_nodes, extent, /*node_size=*/16);
+    std::vector<std::uint8_t> actual_rtree_bytes = encode_packed_rtree(tree);
+
+    if (actual_rtree_bytes != expected_rtree_bytes) {
+        MESSAGE("actual size: " << actual_rtree_bytes.size()
+                                << " expected size: " << expected_rtree_bytes.size());
+        std::size_t n = std::min(actual_rtree_bytes.size(), expected_rtree_bytes.size());
+        for (std::size_t i = 0; i < n; ++i) {
+            if (actual_rtree_bytes[i] != expected_rtree_bytes[i]) {
+                MESSAGE("first diff at byte " << i << ": actual=" << (int)actual_rtree_bytes[i]
+                                              << " expected=" << (int)expected_rtree_bytes[i]);
+                break;
+            }
+        }
+    }
+    CHECK(actual_rtree_bytes == expected_rtree_bytes);
 }
