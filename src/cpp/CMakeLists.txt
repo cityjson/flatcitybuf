@@ -83,6 +83,9 @@ if(FCB_BUILD_EXAMPLES)
 
         add_executable(fcb_to_cityjson examples/to_cityjson.cpp)
         target_link_libraries(fcb_to_cityjson PRIVATE fcb_core_cpp)
+
+        add_executable(fcb_write_cityjson examples/write_cityjson.cpp)
+        target_link_libraries(fcb_write_cityjson PRIVATE fcb_core_cpp)
     endif()
 endif()
 

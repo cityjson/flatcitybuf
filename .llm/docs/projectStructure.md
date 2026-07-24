@@ -74,11 +74,13 @@ flatcitybuf/
 │   │   ├── tests/                  # pytest suite
 │   │   └── pyproject.toml          # Single source of package name/version
 │   │
-│   ├── 📁 cpp/                      # C++ reader -- standalone, from-scratch, no FFI
+│   ├── 📁 cpp/                      # C++ reader + writer -- standalone, from-scratch, no FFI
 │   │   ├── 📁 include/fcb/         # Public C++ headers (error.hpp, header.hpp, reader.hpp,
-│   │   │                          # feature.hpp, packed_rtree.hpp, stree.hpp, key.hpp, ...)
-│   │   ├── 📁 src/                 # Implementation (layout.cpp, reader.cpp, stree.cpp, ...)
-│   │   ├── 📁 examples/            # C++ usage examples
+│   │   │                          # feature.hpp, packed_rtree.hpp, stree.hpp, key.hpp,
+│   │   │                          # writer/attribute.hpp, writer/fcb_writer.hpp, ...)
+│   │   ├── 📁 src/                 # Implementation (layout.cpp, reader.cpp, stree.cpp,
+│   │   │                          # writer/fcb_writer.cpp, writer/btree_builder.cpp, ...)
+│   │   ├── 📁 examples/            # C++ usage examples (incl. fcb_write_cityjson)
 │   │   ├── 📁 tests/               # doctest suite, fake_range_reader.hpp, range_server.py
 │   │   ├── 📁 build*/              # C++ build artifacts (generated, gitignored)
 │   │   ├── 📄 CMakeLists.txt       # CMake build configuration
@@ -129,7 +131,11 @@ the Rust implementation (`src/rust/fcb_core`), which is the authoritative oracle
    `py3-none-any` wheel (no Rust toolchain required to build or install; the
    PyO3 extension formerly at `src/rust/fcb_py` was retired in favor of this)
 2. **C++** (`src/cpp/`) → Standalone C++ library with CMake build, ported from
-   Rust from scratch (no FFI, no Rust dependency at build or run time)
+   Rust from scratch (no FFI, no Rust dependency at build or run time). Reads
+   AND writes `.fcb` files -- the only port besides Rust itself that does;
+   `fcb::FcbWriter` (`include/fcb/writer/fcb_writer.hpp`) is validated against
+   real Rust-written files byte-for-byte, not just by decoding correctly
+   (`src/cpp/tests/test_writer_oracle.cpp`)
 3. **JavaScript/TypeScript** (`src/ts/`) → Published to npm as
    `@cityjson/flatcitybuf`, a from-scratch, native TypeScript reader (ESM, one
    runtime dependency: `flatbuffers`) mirroring the C++/Python ports. The old
@@ -171,10 +177,10 @@ retired.
 - **Python**: no FFI -- `src/py/` is a standalone, pure-Python reader that
   parses the FlatCityBuf format directly (flatbuffers runtime only; numpy is
   the only optional extra)
-- **C++**: no FFI -- `src/cpp/` is a standalone, from-scratch C++17 reader
-  that parses the FlatCityBuf format directly (flatbuffers + nlohmann/json,
-  libcurl optional for HTTP); it does **not** use a cxx bridge or any other
-  Rust interop
+- **C++**: no FFI -- `src/cpp/` is a standalone, from-scratch C++17
+  reader/writer that parses (and produces) the FlatCityBuf format directly
+  (flatbuffers + nlohmann/json, libcurl optional for HTTP); it does **not**
+  use a cxx bridge or any other Rust interop
 - **TypeScript**: no FFI, no WASM -- `src/ts/` is a standalone, from-scratch
   native TS reader (ESM, one runtime dependency: `flatbuffers`) for the browser
   and Node.js

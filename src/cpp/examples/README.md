@@ -1,6 +1,6 @@
 # C++ examples
 
-Six self-contained programs, one per capability. Every command below was run
+Eight self-contained programs, one per capability. Every command below was run
 against `examples/data/delft.fcb` (1115 features, EPSG:7415) and the output is
 what it actually printed.
 
@@ -30,6 +30,7 @@ cmake --build build-curl         # -> build-curl/fcb_read_http
 | `fcb_read_features` | `read_features.cpp` | Raw feature access, no CityJSON conversion |
 | `fcb_custom_reader` | `custom_reader.cpp` | Implementing `fcb::RangeReader` yourself |
 | `fcb_read_http` | `read_http.cpp` | Remote reads over HTTP range requests |
+| `fcb_write_cityjson` | `write_cityjson.cpp` | **Writing** a CityJSONSeq out as `.fcb` |
 
 Start with `fcb_inspect_header` on an unfamiliar file. If you just want to know
 how to pull values out of the data, jump to `fcb_to_cityjson`.
@@ -241,7 +242,43 @@ opened in 2 HTTP request(s)
 > `3dbag_all_index.fcb` above has been re-serialized with the current writer,
 > so it verifies. If you hit that error on another file, re-serialize it.
 
+### `fcb_write_cityjson <input.jsonl> <output.fcb>`
+
+Writes a CityJSONSeq out as `.fcb`, using this port's own writer
+(`fcb::FcbWriter`) — no Rust toolchain involved. Every attribute column found
+gets a B+tree index (mirrors the Rust CLI's `-A`/`--index-all-attributes`).
+
+```
+$ ./build-native/fcb_write_cityjson ../../examples/data/delft.city.jsonl delft2.fcb
+../../examples/data/delft.city.jsonl -> delft2.fcb
+  1115 feature(s), 7558422 byte(s)
+  44 attribute column(s), each with a B+tree index:
+    column 0    b3_bag_bag_overlap
+    column 1    b3_dak_type
+    ...
+    column 43   b3_bouwlagen
+
+$ ./build-native/fcb_query_attributes delft2.fcb b3_h_dak_50p gt 20
+condition: b3_h_dak_50p gt 20 (column type Double)
+4 of 1115 features matched
+```
+
+Same 4 features `fcb_query_attributes` finds against the original
+`delft.fcb` above — the rewritten file differs in exact byte size (this
+example always uses the default B+tree branching factor, which the original
+file may not have), but is functionally identical.
+
+`FcbWriter` streams: `add_feature` spools each feature's encoded bytes to a
+private temp file rather than holding the whole `CityJSONSeq` in memory, so
+this scales to input larger than available RAM — the same property Rust's
+own writer has, via its `tempfile` crate. Its output is validated against
+real Rust-written files byte-for-byte, not just by decoding correctly
+(`src/cpp/tests/test_writer_oracle.cpp`).
+
 ## Not covered here
 
-Writing. Producing `.fcb` files requires the Rust CLI (`cd src/rust && just ser
-<input.jsonl> <output.fcb>`); every other implementation is read-only.
+A CLI. `fcb_write_cityjson` above is a minimal demonstration, not a
+full-featured conversion tool (no bbox filter, no branching-factor override,
+no `--no-spatial-index` equivalent) — for that, the Rust CLI (`cd src/rust &&
+just ser <input.jsonl> <output.fcb>`) already covers the same ground this
+library exposes, and more.
