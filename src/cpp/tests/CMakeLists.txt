@@ -13,6 +13,7 @@ add_executable(fcb_tests
     test_attributes.cpp
     test_writer_attribute.cpp
     test_writer_geometry.cpp
+    test_writer_feature.cpp
     test_geometry.cpp
     test_cityjson.cpp
     test_http.cpp
