@@ -216,20 +216,24 @@ TEST_CASE("oracle: column order is insertion order, not alphabetical, confirmed 
     CHECK(columns[5].name == "a_json");
 }
 
-TEST_CASE("oracle: to_fcb_header is byte-identical to the Rust writer's header, including "
-          "geometry-templates/templates_vertices") {
-    // `single_feature.fcb` turned out to carry an attribute index (M6, not
-    // built yet -- its `fcb_inspect_header` "queryable" markers were missed
-    // on first read of this fixture, see docs/upstream-findings.md-adjacent
-    // note below). `geometry_instance_interleaved.fcb` has none (0 of 0
-    // columns queryable) and, as a bonus, exercises `geometry-templates` /
-    // `templates_vertices`, which single_feature does not carry at all.
-    const std::string fcb_path =
-        std::string(FCB_CONFORMANCE_DIR) + "/geometry_instance_interleaved.fcb";
+namespace {
+
+/// Byte-compares this writer's `to_fcb_header` output for
+/// `<fixture>.city.jsonl`'s metadata line against the corresponding slice of
+/// the real Rust-written `<fixture>.fcb` header (sliced via the header's own
+/// computed layout, never a hardcoded offset). `feature_count`/
+/// `index_node_size` must match whatever the fixture was actually generated
+/// with (check via `fcb_inspect_header`) -- neither is recoverable from the
+/// fixture's own header bytes in a way that lets this function derive them
+/// itself, since the whole point is to independently confirm them.
+void check_header_byte_exact(const std::string& fixture, std::uint64_t feature_count,
+                             std::uint16_t index_node_size) {
+    CAPTURE(fixture);
+    const std::string fcb_path = std::string(FCB_CONFORMANCE_DIR) + "/" + fixture + ".fcb";
     FcbReader r = FcbReader::open_file(fcb_path);
     const auto& layout = r.header().layout();
-    REQUIRE(r.header().info().features_count == 1);
-    REQUIRE(r.header().info().index_node_size == 16);
+    REQUIRE(r.header().info().features_count == feature_count);
+    REQUIRE(r.header().info().index_node_size == index_node_size);
     REQUIRE(r.header().attr_indices().empty());
 
     std::vector<std::uint8_t> whole_file = read_file_bytes(fcb_path);
@@ -239,16 +243,15 @@ TEST_CASE("oracle: to_fcb_header is byte-identical to the Rust writer's header, 
                                                     whole_file.begin() + layout.header_len);
 
     const std::string input_path =
-        std::string(FCB_CONFORMANCE_DIR) + "/inputs/geometry_instance_interleaved.city.jsonl";
+        std::string(FCB_CONFORMANCE_DIR) + "/inputs/" + fixture + ".city.jsonl";
     std::vector<ordered_json> input_lines = read_jsonl(input_path);
     const ordered_json& cj = input_lines[0];
     std::vector<ordered_json> all_features(input_lines.begin() + 1, input_lines.end());
     AttributeSchema attr_schema = build_attr_schema(all_features);
-    REQUIRE(attr_schema.empty());
 
     HeaderWriterOptions options;
-    options.feature_count = 1;
-    options.index_node_size = 16;
+    options.feature_count = feature_count;
+    options.index_node_size = index_node_size;
 
     flatbuffers::FlatBufferBuilder fbb;
     auto off = to_fcb_header(fbb, cj, options, attr_schema, nullptr, nullptr);
@@ -269,4 +272,31 @@ TEST_CASE("oracle: to_fcb_header is byte-identical to the Rust writer's header, 
         }
     }
     CHECK(actual_header_bytes == expected_header_bytes);
+}
+
+}  // namespace
+
+TEST_CASE("oracle: to_fcb_header is byte-identical to the Rust writer's header, including "
+          "geometry-templates/templates_vertices") {
+    // `single_feature.fcb` turned out to carry an attribute index (M6, not
+    // built yet -- its `fcb_inspect_header` "queryable" markers were missed
+    // on first read of this fixture, see docs/upstream-findings.md-adjacent
+    // note below). `geometry_instance_interleaved.fcb` has none (0 of 0
+    // columns queryable) and, as a bonus, exercises `geometry-templates` /
+    // `templates_vertices`, which single_feature does not carry at all.
+    check_header_byte_exact("geometry_instance_interleaved", /*feature_count=*/1,
+                            /*index_node_size=*/16);
+}
+
+TEST_CASE("oracle: to_fcb_header is byte-identical to the Rust writer's header, for a fixture "
+          "carrying every optional metadata field at once") {
+    // Added after the first codex review of this milestone flagged that no
+    // byte-exact test exercised referenceSystem, identifier, referenceDate,
+    // title, a full pointOfContact (incl. its address sub-object), or
+    // `extensions` -- geometry_instance_interleaved's metadata is `{}` and
+    // single_feature has none of these either. `header_metadata_full` is a
+    // fixture built specifically to cover all of them at once (generated via
+    // the real Rust CLI, like geometry_instance_interleaved was for M3).
+    check_header_byte_exact("header_metadata_full", /*feature_count=*/1,
+                            /*index_node_size=*/16);
 }

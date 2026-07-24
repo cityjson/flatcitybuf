@@ -114,6 +114,14 @@ TEST_CASE("conformance: geometry_instance_interleaved") {
     check_case("geometry_instance_interleaved");
 }
 
+// Added for the C++ writer's M4 byte-exact oracle test (test_writer_oracle.cpp),
+// which needed a fixture exercising every optional header metadata field at
+// once: referenceSystem, identifier, referenceDate, title, a full
+// pointOfContact (including a non-string address member and the
+// postalCode-vs-postcode key rename), and multiple `extensions` entries --
+// none of which single_feature/geometry_instance_interleaved carry.
+TEST_CASE("conformance: header_metadata_full") { check_case("header_metadata_full"); }
+
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");
     CHECK(r.header().info().features_count == 1);

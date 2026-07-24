@@ -15,6 +15,30 @@ std::string as_str_or_empty(const nlohmann::ordered_json& obj, const std::string
     return it->get<std::string>();
 }
 
+/// A schema-required `String` member (`PointOfContact.contactName`/
+/// `.emailAddress`, both non-`Option` in cjseq2's typed model). Rust's typed
+/// deserialization rejects the WHOLE document if either is missing or not a
+/// string; this writer takes raw JSON that was never run through that
+/// validation, so it enforces the same requirement itself, at the point of
+/// use, rather than silently writing an empty string for invalid input.
+std::string require_string_field(const nlohmann::ordered_json& obj, const std::string& key) {
+    auto it = obj.find(key);
+    if (it == obj.end() || !it->is_string())
+        throw Error(ErrorCode::MissingRequiredField,
+                    "pointOfContact." + key + " is required and must be a string");
+    return it->get<std::string>();
+}
+
+/// A schema-OPTIONAL `Option<String>` member (identifier/referenceDate/
+/// title, and every `PointOfContact` field but the two above). Disclosed,
+/// intentional leniency: Rust's typed model would also reject the whole
+/// document if one of these were present with the wrong JSON type (e.g. a
+/// number where a string is required) -- `Option<String>` accepts absence
+/// or `null`, not type mismatch -- but this writer treats "present with the
+/// wrong type" the same as "absent" rather than failing the whole header,
+/// matching this milestone's general policy of favoring a producible file
+/// over replicating Rust's document-level rejection for malformed optional
+/// metadata (see also `parse_reference_system`'s prefix-mismatch note).
 std::optional<std::string> optional_string_field(const nlohmann::ordered_json& obj,
                                                  const std::string& key) {
     auto it = obj.find(key);
@@ -48,6 +72,17 @@ std::optional<std::string> address_either(const nlohmann::ordered_json& address,
 std::int32_t parse_i32_whole(std::string_view s) {
     if (s.empty())
         return 0;
+    // `std::from_chars` rejects a leading '+' for signed integers, but
+    // Rust's `str::parse::<i32>()` accepts one (its `FromStr` impl allows an
+    // optional leading `+` or `-`) -- ".../EPSG/0/+7415" is a legal `code`
+    // segment there. Strip it here, but only when a digit actually follows,
+    // so a malformed "+-7415" or bare "+" still falls through to failure
+    // below rather than silently parsing "-7415".
+    if (s.front() == '+') {
+        s.remove_prefix(1);
+        if (s.empty() || !(s.front() >= '0' && s.front() <= '9'))
+            return 0;
+    }
     std::int32_t value = 0;
     auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);
     if (ec != std::errc() || ptr != s.data() + s.size())
@@ -131,7 +166,7 @@ to_templates_vertices(::flatbuffers::FlatBufferBuilder& fbb,
 PocOffsets to_point_of_contact(::flatbuffers::FlatBufferBuilder& fbb,
                                const nlohmann::ordered_json& poc) {
     PocOffsets out;
-    out.contact_name = fbb.CreateString(as_str_or_empty(poc, "contactName"));
+    out.contact_name = fbb.CreateString(require_string_field(poc, "contactName"));
 
     if (auto v = optional_string_field(poc, "contactType"))
         out.contact_type = fbb.CreateString(*v);
@@ -139,10 +174,15 @@ PocOffsets to_point_of_contact(::flatbuffers::FlatBufferBuilder& fbb,
         out.role = fbb.CreateString(*v);
     if (auto v = optional_string_field(poc, "phone"))
         out.phone = fbb.CreateString(*v);
-    out.email = fbb.CreateString(as_str_or_empty(poc, "emailAddress"));
+    out.email = fbb.CreateString(require_string_field(poc, "emailAddress"));
     if (auto v = optional_string_field(poc, "website"))
         out.website = fbb.CreateString(*v);
 
+    // `address`'s presence check is the same disclosed leniency as
+    // `optional_string_field`: Rust's `Option<Address>` would reject the
+    // whole document if `address` were present but not a JSON object (an
+    // `Address`'s `#[serde(flatten)]` map requires object shape); this
+    // writer just treats it as absent instead.
     if (auto addr_it = poc.find("address"); addr_it != poc.end() && addr_it->is_object()) {
         const nlohmann::ordered_json& address = *addr_it;
         if (auto v = address_member(address, "thoroughfareNumber"))

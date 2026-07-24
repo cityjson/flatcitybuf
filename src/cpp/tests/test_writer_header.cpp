@@ -1,3 +1,4 @@
+#include <fcb/error.hpp>
 #include <fcb/writer/header_serializer.hpp>
 
 #include <doctest/doctest.h>
@@ -58,6 +59,25 @@ TEST_CASE("parse_reference_system defaults to 0 when a segment fails to parse as
     auto parsed = parse_reference_system("https://www.opengis.net/def/crs/EPSG/0/7415x");
     REQUIRE(parsed.has_value());
     CHECK(parsed->code == 0);
+}
+
+TEST_CASE("parse_reference_system accepts a leading '+' sign, matching Rust's str::parse::<i32>") {
+    // Found by the M4 codex review: `std::from_chars` rejects a leading '+'
+    // for signed integers, but Rust's `FromStr` for `i32` accepts one, so
+    // ".../EPSG/0/+7415" must still parse as code 7415, not fall back to 0.
+    auto parsed = parse_reference_system("https://www.opengis.net/def/crs/EPSG/0/+7415");
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->code == 7415);
+}
+
+TEST_CASE("parse_reference_system falls back to 0 for a malformed leading sign") {
+    auto bare_plus = parse_reference_system("https://www.opengis.net/def/crs/EPSG/0/+");
+    REQUIRE(bare_plus.has_value());
+    CHECK(bare_plus->code == 0);
+
+    auto double_sign = parse_reference_system("https://www.opengis.net/def/crs/EPSG/0/+-7415");
+    REQUIRE(double_sign.has_value());
+    CHECK(double_sign->code == 0);
 }
 
 TEST_CASE("parse_reference_system returns nullopt for a URL not matching the OGC CRS prefix") {
@@ -212,6 +232,31 @@ TEST_CASE("to_point_of_contact leaves optional scalar and address fields absent 
     CHECK_FALSE(offs.address_postcode.has_value());
 }
 
+TEST_CASE("to_point_of_contact falls back to postalCode when postcode is explicitly null") {
+    auto poc = nlohmann::ordered_json::parse(R"({
+        "contactName": "x", "emailAddress": "x@example.com",
+        "address": {"postcode": null, "postalCode": "BBB"}
+    })");
+    flatbuffers::FlatBufferBuilder fbb;
+    PocOffsets offs = to_point_of_contact(fbb, poc);
+    REQUIRE(offs.address_postcode.has_value());
+    fbb.Finish(*offs.address_postcode);
+    const auto* s = flatbuffers::GetRoot<::flatbuffers::String>(fbb.GetBufferPointer());
+    CHECK(s->str() == "BBB");
+}
+
+TEST_CASE("to_point_of_contact throws MissingRequiredField when contactName is absent") {
+    auto poc = nlohmann::ordered_json::parse(R"({"emailAddress": "x@example.com"})");
+    flatbuffers::FlatBufferBuilder fbb;
+    CHECK_THROWS_AS(to_point_of_contact(fbb, poc), const Error&);
+}
+
+TEST_CASE("to_point_of_contact throws MissingRequiredField when emailAddress is not a string") {
+    auto poc = nlohmann::ordered_json::parse(R"({"contactName": "x", "emailAddress": 5})");
+    flatbuffers::FlatBufferBuilder fbb;
+    CHECK_THROWS_AS(to_point_of_contact(fbb, poc), const Error&);
+}
+
 TEST_CASE("to_fcb_header builds a minimal header with no metadata") {
     auto cj = nlohmann::ordered_json::parse(R"({
         "type": "CityJSON",
@@ -289,6 +334,73 @@ TEST_CASE("to_fcb_header prefers HeaderWriterOptions.geographical_extent over me
     const ::Header* h = build_header(fbb, cj, options, empty_schema);
     REQUIRE(h->geographical_extent() != nullptr);
     CHECK(h->geographical_extent()->min().x() == doctest::Approx(9.0));
+}
+
+TEST_CASE("to_fcb_header uses HeaderWriterOptions.geographical_extent when metadata is absent") {
+    auto cj = nlohmann::ordered_json::parse(R"({
+        "type": "CityJSON", "version": "2.0",
+        "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
+    })");
+    HeaderWriterOptions options;
+    options.geographical_extent = std::array<double, 6>{1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
+    AttributeSchema empty_schema;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const ::Header* h = build_header(fbb, cj, options, empty_schema);
+    REQUIRE(h->geographical_extent() != nullptr);
+    CHECK(h->geographical_extent()->min().x() == doctest::Approx(1.0));
+    CHECK(h->geographical_extent()->max().z() == doctest::Approx(6.0));
+}
+
+TEST_CASE("to_fcb_header writes an empty (but present) extensions vector for {}") {
+    auto cj = nlohmann::ordered_json::parse(R"({
+        "type": "CityJSON", "version": "2.0",
+        "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]},
+        "extensions": {}
+    })");
+    HeaderWriterOptions options;
+    AttributeSchema empty_schema;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const ::Header* h = build_header(fbb, cj, options, empty_schema);
+    REQUIRE(h->extensions() != nullptr);
+    CHECK(h->extensions()->size() == 0);
+}
+
+TEST_CASE("to_fcb_header wires semantic_columns from the semantic attribute schema") {
+    auto cj = nlohmann::ordered_json::parse(R"({
+        "type": "CityJSON", "version": "2.0",
+        "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
+    })");
+    HeaderWriterOptions options;
+    AttributeSchema empty_schema;
+    AttributeSchema semantic_schema;
+    semantic_schema["parent"] = {0, ::ColumnType::String};
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const ::Header* h = build_header(fbb, cj, options, empty_schema, &semantic_schema);
+    REQUIRE(h->semantic_columns() != nullptr);
+    REQUIRE(h->semantic_columns()->size() == 1);
+    CHECK(h->semantic_columns()->Get(0)->name()->str() == "parent");
+}
+
+TEST_CASE("to_fcb_header wires the appearance table from the CityJSON appearance member") {
+    auto cj = nlohmann::ordered_json::parse(R"({
+        "type": "CityJSON", "version": "2.0",
+        "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]},
+        "appearance": {
+            "materials": [{"name": "roof", "diffuseColor": [0.9, 0.5, 0.1]}]
+        }
+    })");
+    HeaderWriterOptions options;
+    AttributeSchema empty_schema;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const ::Header* h = build_header(fbb, cj, options, empty_schema);
+    REQUIRE(h->appearance() != nullptr);
+    REQUIRE(h->appearance()->materials() != nullptr);
+    REQUIRE(h->appearance()->materials()->size() == 1);
+    CHECK(h->appearance()->materials()->Get(0)->name()->str() == "roof");
 }
 
 TEST_CASE("to_fcb_header writes extensions from the CityJSON extensions member") {
