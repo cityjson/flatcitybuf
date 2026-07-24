@@ -241,3 +241,98 @@ TEST_CASE("to_geometry_instance: throws on a non-instance geometry type") {
     auto geometry = nlohmann::json::parse(R"({"type": "MultiSurface", "boundaries": []})");
     CHECK_THROWS_AS(to_geometry_instance(fbb, geometry), Error);
 }
+
+TEST_CASE("to_city_object: basic fields, attributes against a shared schema") {
+    AttributeSchema schema;
+    add_attributes(schema, nlohmann::json::parse(R"({"identificatie": "x", "height": 5})"));
+
+    auto co = nlohmann::json::parse(R"({
+        "type": "Building",
+        "geographicalExtent": [0, 0, 0, 10, 10, 10],
+        "attributes": {"identificatie": "NL.IMBAG.1", "height": 12},
+        "children": ["child-1"],
+        "parents": ["parent-1"]
+    })");
+
+    flatbuffers::FlatBufferBuilder fbb;
+    auto off = to_city_object(fbb, "co-1", co, schema, nullptr);
+    fbb.Finish(off);
+    const ::CityObject* fb_co = flatbuffers::GetRoot<::CityObject>(fbb.GetBufferPointer());
+
+    CHECK(fb_co->id()->str() == "co-1");
+    CHECK(fb_co->type() == ::CityObjectType::Building);
+    REQUIRE(fb_co->geographical_extent() != nullptr);
+    CHECK(fb_co->geographical_extent()->min().x() == doctest::Approx(0.0));
+    CHECK(fb_co->geographical_extent()->max().z() == doctest::Approx(10.0));
+    REQUIRE(fb_co->attributes() != nullptr);
+    CHECK(fb_co->columns() == nullptr);  // shared schema used, no own columns
+    REQUIRE(fb_co->children() != nullptr);
+    CHECK(fb_co->children()->Get(0)->str() == "child-1");
+    REQUIRE(fb_co->parents() != nullptr);
+    CHECK(fb_co->parents()->Get(0)->str() == "parent-1");
+    CHECK(fb_co->geometry() == nullptr);
+    CHECK(fb_co->geometry_instances() == nullptr);
+}
+
+TEST_CASE("to_city_object: attributes with an unknown key get their own schema and columns") {
+    AttributeSchema schema;
+    add_attributes(schema, nlohmann::json::parse(R"({"identificatie": "x"})"));
+
+    auto co = nlohmann::json::parse(
+        R"({"type": "BuildingPart", "attributes": {"identificatie": "y", "extra_field": 42}})");
+
+    flatbuffers::FlatBufferBuilder fbb;
+    auto off = to_city_object(fbb, "co-2", co, schema, nullptr);
+    fbb.Finish(off);
+    const ::CityObject* fb_co = flatbuffers::GetRoot<::CityObject>(fbb.GetBufferPointer());
+
+    REQUIRE(fb_co->attributes() != nullptr);
+    REQUIRE(fb_co->columns() != nullptr);
+    CHECK(fb_co->columns()->size() == 2);
+}
+
+TEST_CASE("to_city_object: geometry entries split into geometry vs geometry_instances") {
+    auto co = nlohmann::json::parse(R"({
+        "type": "Building",
+        "geometry": [
+            {"type": "MultiSurface", "lod": "1", "boundaries": [[[0, 1, 2]]]},
+            {"type": "GeometryInstance", "template": 0, "boundaries": [3],
+             "transformationMatrix": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]}
+        ]
+    })");
+
+    flatbuffers::FlatBufferBuilder fbb;
+    AttributeSchema schema;
+    auto off = to_city_object(fbb, "co-3", co, schema, nullptr);
+    fbb.Finish(off);
+    const ::CityObject* fb_co = flatbuffers::GetRoot<::CityObject>(fbb.GetBufferPointer());
+
+    REQUIRE(fb_co->geometry() != nullptr);
+    CHECK(fb_co->geometry()->size() == 1);
+    REQUIRE(fb_co->geometry_instances() != nullptr);
+    CHECK(fb_co->geometry_instances()->size() == 1);
+}
+
+TEST_CASE("to_city_object: an unrecognized type becomes ExtensionObject with extension_type set") {
+    auto co = nlohmann::json::parse(R"({"type": "+NoiseCityObject"})");
+    flatbuffers::FlatBufferBuilder fbb;
+    AttributeSchema schema;
+    auto off = to_city_object(fbb, "co-4", co, schema, nullptr);
+    fbb.Finish(off);
+    const ::CityObject* fb_co = flatbuffers::GetRoot<::CityObject>(fbb.GetBufferPointer());
+
+    CHECK(fb_co->type() == ::CityObjectType::ExtensionObject);
+    REQUIRE(fb_co->extension_type() != nullptr);
+    CHECK(fb_co->extension_type()->str() == "+NoiseCityObject");
+}
+
+TEST_CASE("to_city_object: no attributes key at all leaves the field absent") {
+    auto co = nlohmann::json::parse(R"({"type": "Building"})");
+    flatbuffers::FlatBufferBuilder fbb;
+    AttributeSchema schema;
+    auto off = to_city_object(fbb, "co-5", co, schema, nullptr);
+    fbb.Finish(off);
+    const ::CityObject* fb_co = flatbuffers::GetRoot<::CityObject>(fbb.GetBufferPointer());
+    CHECK(fb_co->attributes() == nullptr);
+    CHECK(fb_co->columns() == nullptr);
+}

@@ -10,6 +10,7 @@
 
 #    include <nlohmann/json.hpp>
 
+#    include <array>
 #    include <optional>
 #    include <string>
 
@@ -67,6 +68,22 @@ SurfaceType semantic_surface_type_from_name(const std::string& name);
 /// (writer/serializer.rs:1067-1102).
 ::flatbuffers::Offset<::GeometryInstance>
 to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& geometry);
+
+/// Builds a `GeographicalExtent` struct from a 6-element
+/// `[minx,miny,minz,maxx,maxy,maxz]` array. Shared with the header (M4),
+/// which has its own `geographicalExtent`. Mirrors `to_geographical_extent`
+/// (writer/serializer.rs:233-250).
+::GeographicalExtent to_geographical_extent(const std::array<double, 6>& extent);
+
+/// Builds one `CityObject` table: type, geographical extent, geometry
+/// (split into non-instance and `GeometryInstance` entries), attributes
+/// (against `attr_schema`, or the object's own schema when its attribute
+/// keys are not all present in `attr_schema`), children/children-roles/
+/// parents. Mirrors `to_city_object` (writer/serializer.rs:632-730).
+::flatbuffers::Offset<::CityObject> to_city_object(::flatbuffers::FlatBufferBuilder& fbb,
+                                                   const std::string& id, const nlohmann::json& co,
+                                                   const AttributeSchema& attr_schema,
+                                                   const AttributeSchema* semantic_attr_schema);
 
 }  // namespace fcb
 

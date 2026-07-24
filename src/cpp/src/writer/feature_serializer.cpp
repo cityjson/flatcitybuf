@@ -341,6 +341,134 @@ to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json
     return CreateGeometryInstance(fbb, &matrix, template_, boundaries_off);
 }
 
+::GeographicalExtent to_geographical_extent(const std::array<double, 6>& extent) {
+    return ::GeographicalExtent(::Vector(extent[0], extent[1], extent[2]),
+                                ::Vector(extent[3], extent[4], extent[5]));
+}
+
+namespace {
+
+/// Encodes `attr` against `schema`, or against a freshly-built schema of
+/// its own when `attr` carries a key `schema` does not know. Mirrors
+/// `to_fcb_attribute` (writer/serializer.rs:1151-1174).
+struct FcbAttribute {
+    ::flatbuffers::Offset<::flatbuffers::Vector<std::uint8_t>> attr_offset;
+    std::optional<AttributeSchema> own_schema;
+};
+
+FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& attr,
+                              const AttributeSchema& schema) {
+    bool is_own_schema = false;
+    for (const auto& [key, val] : attr.items()) {
+        if (schema.find(key) == schema.end()) {
+            is_own_schema = true;
+            break;
+        }
+    }
+    if (is_own_schema) {
+        AttributeSchema own_schema;
+        add_attributes(own_schema, attr);
+        auto encoded = encode_attributes_with_schema(attr, own_schema);
+        return {fbb.CreateVector(encoded), std::move(own_schema)};
+    }
+    auto encoded = encode_attributes_with_schema(attr, schema);
+    return {fbb.CreateVector(encoded), std::nullopt};
+}
+
+}  // namespace
+
+::flatbuffers::Offset<::CityObject> to_city_object(::flatbuffers::FlatBufferBuilder& fbb,
+                                                   const std::string& id, const nlohmann::json& co,
+                                                   const AttributeSchema& attr_schema,
+                                                   const AttributeSchema* semantic_attr_schema) {
+    auto id_off = fbb.CreateString(id);
+    auto [type_, extension_type_name] =
+        city_object_type_from_name(co.at("type").get<std::string>());
+    auto extension_type_off =
+        extension_type_name ? std::optional(fbb.CreateString(*extension_type_name)) : std::nullopt;
+
+    std::optional<::GeographicalExtent> extent;
+    if (auto it = co.find("geographicalExtent");
+        it != co.end() && it->is_array() && it->size() == 6) {
+        extent = to_geographical_extent({it->at(0).get<double>(), it->at(1).get<double>(),
+                                         it->at(2).get<double>(), it->at(3).get<double>(),
+                                         it->at(4).get<double>(), it->at(5).get<double>()});
+    }
+
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Geometry>>>>
+        geometry_off;
+    std::optional<
+        ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::GeometryInstance>>>>
+        geometry_instances_off;
+    if (auto git = co.find("geometry"); git != co.end() && git->is_array()) {
+        std::vector<::flatbuffers::Offset<::Geometry>> geoms;
+        std::vector<::flatbuffers::Offset<::GeometryInstance>> instances;
+        for (const auto& g : *git) {
+            if (g.at("type").get<std::string>() == "GeometryInstance")
+                instances.push_back(to_geometry_instance(fbb, g));
+            else
+                geoms.push_back(to_geometry(fbb, g, semantic_attr_schema));
+        }
+        // Both created -- even empty -- whenever "geometry" is present at
+        // all, matching Rust's Option<Vec<_>> filtered from ONE Option: it
+        // is the presence of the key, not either resulting list's own
+        // emptiness, that decides presence on the wire.
+        geometry_off = fbb.CreateVector(geoms);
+        geometry_instances_off = fbb.CreateVector(instances);
+    }
+
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<std::uint8_t>>> attributes_off;
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Column>>>>
+        columns_off;
+    if (auto ait = co.find("attributes"); ait != co.end() && ait->is_object()) {
+        FcbAttribute fcb_attr = to_fcb_attribute(fbb, *ait, attr_schema);
+        attributes_off = fcb_attr.attr_offset;
+        if (fcb_attr.own_schema)
+            columns_off = to_columns(fbb, *fcb_attr.own_schema);
+    }
+
+    std::optional<
+        ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>>>
+        children_off;
+    if (auto it = co.find("children"); it != co.end() && it->is_array()) {
+        std::vector<::flatbuffers::Offset<::flatbuffers::String>> c;
+        for (const auto& s : *it)
+            c.push_back(fbb.CreateString(s.get<std::string>()));
+        children_off = fbb.CreateVector(c);
+    }
+
+    // "childrenRoles" (CityObjectGroup only): an unspecified role is `null`
+    // in CityJSON; the header has no way to spell that, so it is written
+    // as the empty string, mirroring the equivalent handling for
+    // point-of-contact strings elsewhere in this writer.
+    std::optional<
+        ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>>>
+        children_roles_off;
+    if (auto it = co.find("childrenRoles"); it != co.end() && it->is_array()) {
+        std::vector<::flatbuffers::Offset<::flatbuffers::String>> r;
+        for (const auto& role : *it)
+            r.push_back(
+                fbb.CreateString(role.is_string() ? role.get<std::string>() : std::string()));
+        children_roles_off = fbb.CreateVector(r);
+    }
+
+    std::optional<
+        ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>>>
+        parents_off;
+    if (auto it = co.find("parents"); it != co.end() && it->is_array()) {
+        std::vector<::flatbuffers::Offset<::flatbuffers::String>> p;
+        for (const auto& s : *it)
+            p.push_back(fbb.CreateString(s.get<std::string>()));
+        parents_off = fbb.CreateVector(p);
+    }
+
+    return CreateCityObject(fbb, type_, extension_type_off.value_or(0), id_off,
+                            extent ? &*extent : nullptr, geometry_off.value_or(0),
+                            geometry_instances_off.value_or(0), attributes_off.value_or(0),
+                            columns_off.value_or(0), children_off.value_or(0),
+                            children_roles_off.value_or(0), parents_off.value_or(0));
+}
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON
