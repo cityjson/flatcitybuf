@@ -182,3 +182,48 @@ describe('FcbReader.fromUrl', () => {
     expect(calls).toBe(2)
   })
 })
+
+// ---------------------------------------------------- live remote (opt-in) ---
+//
+// The published 3DBAG file (~68 GB, EPSG:28992), read over real cross-origin
+// HTTP range requests. SKIPPED unless FCB_REMOTE_HTTP_URL is set, so `npx
+// vitest run` never touches the network or downloads 68 GB. Enable it with
+// `just test-remote` (which sets the env var), or point it at any
+// current-format file.
+//
+// The expected values were cross-checked across the Rust, C++, Python and
+// TypeScript readers on 2026-07-23; all four agree. Update all four suites in
+// lock-step if the file is regenerated (this one, http.test.cpp,
+// test_http.py, http.rs).
+const REMOTE_URL = process.env.FCB_REMOTE_HTTP_URL ?? ''
+const REMOTE_FEATURES_COUNT = 10_771_547
+// ~1 km box over central Amsterdam: [minX, minY, maxX, maxY].
+const REMOTE_BBOX: [number, number, number, number] = [120_000, 486_000, 121_000, 487_000]
+const REMOTE_BBOX_COUNT = 2762
+
+describe.skipIf(!REMOTE_URL)('live 3DBAG over HTTP', () => {
+  it('opens, reports the feature count, and queries a bbox with bounded requests', async () => {
+    // A real fetch counter: proves the 68 GB body is never downloaded.
+    let calls = 0
+    const counting: typeof fetch = (...args) => { calls++; return fetch(...args) }
+
+    // Opening must succeed (the header verifies -> the file is in the
+    // post-alignment-fix format) and cost a handful of requests, not a scan.
+    const reader = await FcbReader.fromUrl(REMOTE_URL, { fetch: counting })
+    expect(reader.header.info.featuresCount).toBe(REMOTE_FEATURES_COUNT)
+    const openCalls = calls
+    expect(openCalls).toBeLessThanOrEqual(4)
+
+    const cursor = await reader.select({
+      spatial: { kind: 'bbox', value: REMOTE_BBOX },
+    })
+    // Exact, and identical to what Rust, C++ and Python return for this box.
+    expect(cursor.featuresCount).toBe(REMOTE_BBOX_COUNT)
+
+    // The bbox query is more requests than the open, but still a small,
+    // bounded number -- never one-per-feature and never the whole file.
+    const queryCalls = calls - openCalls
+    expect(queryCalls).toBeGreaterThan(0)
+    expect(queryCalls).toBeLessThan(200)
+  }, 60_000)
+})

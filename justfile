@@ -17,6 +17,11 @@
 
 DIRS := "src/rust src/cpp src/py src/ts examples/web"
 
+# The published 3DBAG file every reader's opt-in remote HTTP test hits, and the
+# default remote data source for the examples. ~68 GB, EPSG:28992; served with
+# range requests, so a client only ever fetches the bytes a query needs.
+REMOTE_URL := "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb"
+
 # List all available commands
 default:
     @just --list
@@ -34,6 +39,21 @@ check: (_each "check")
 
 # Tests only, every language
 test: (_each "test")
+
+# The opt-in remote HTTP tests are OFF by default (they hit a live 68 GB
+# bucket); this turns them on in every reader. examples/web has no such test
+# and is skipped. Override the target with FCB_REMOTE_HTTP_URL.
+
+# Run the opt-in live-3DBAG HTTP tests in Rust, C++, Python and TypeScript
+test-remote:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-{{REMOTE_URL}}}"
+    echo "remote file: $FCB_REMOTE_HTTP_URL"
+    for d in src/rust src/cpp src/py src/ts; do
+      printf '\n\033[1m==> %s: just test-remote\033[0m\n' "$d"
+      (cd "$d" && just test-remote)
+    done
 
 # src/ts and examples/web have no linter configured; they say so and pass.
 

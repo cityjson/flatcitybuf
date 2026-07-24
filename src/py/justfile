@@ -26,6 +26,13 @@ sync:
 test: sync
     uv run pytest
 
+# The live-3DBAG test is skipped by the default `test` above (no
+# FCB_REMOTE_HTTP_URL); this sets it and runs only that test.
+
+# Opt-in: the live 3DBAG HTTP test (~68 GB bucket)
+test-remote: sync
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" uv run pytest tests/test_http.py -k remote -v
+
 # ruff check + ruff format --check
 lint: sync
     uv run ruff check .

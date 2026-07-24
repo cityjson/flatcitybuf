@@ -79,6 +79,9 @@ if(FCB_BUILD_EXAMPLES)
     if(FCB_WITH_JSON)
         add_executable(fcb_read_features examples/read_features.cpp)
         target_link_libraries(fcb_read_features PRIVATE fcb_core_cpp)
+
+        add_executable(fcb_to_cityjson examples/to_cityjson.cpp)
+        target_link_libraries(fcb_to_cityjson PRIVATE fcb_core_cpp)
     endif()
 endif()
 

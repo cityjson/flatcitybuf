@@ -661,6 +661,56 @@ gsutil cors set cors.json gs://your-bucket
 
 Then hard-reload — browsers cache the failed response.
 
+### 7.4 The opt-in live-3DBAG suite (all four readers)
+
+Every reader has an automated integration test against the published
+`3dbag_all_index.fcb` (~68 GB, EPSG:28992). They are **off by default** — they
+hit a live bucket, so they must never run in normal CI or download 68 GB when
+someone runs `pytest`/`vitest`/`nextest`. One command turns them on everywhere:
+
+```bash
+just test-remote        # Rust, C++, Python, TypeScript, in sequence
+```
+
+It sets `FCB_REMOTE_HTTP_URL` to the 3DBAG URL and runs each reader's gated
+test. Point it at any current-format file by exporting that variable first, or
+run one reader on its own:
+
+```bash
+cd src/py  && just test-remote
+cd src/cpp && just test-remote      # builds the curl tree first
+```
+
+Each test asserts the same three things, so a pass means the readers genuinely
+agree, not merely that each returns *something*:
+
+1. **The header verifies** — proof the file is in the post-`540772a` format
+   (this is what the C++ reader rejected before the re-upload).
+2. **`features_count == 10771547`**, and a ~1 km Amsterdam box
+   `[120000, 486000, 121000, 487000]` returns **exactly 2762 features** — the
+   same number in Rust, C++, Python and TypeScript.
+3. **A bounded number of range requests** — opening costs 2, the bbox query a
+   few dozen; the 68 GB body is never downloaded.
+
+Gating, per reader:
+
+| Reader | Mechanism | Skips when |
+|---|---|---|
+| Rust | `#[ignore]` + `FCB_REMOTE_HTTP_URL` | always, unless `--run-ignored` |
+| C++ | `FCB_REMOTE_HTTP_URL` env check | var unset |
+| Python | `@pytest.mark.skipif` on the env var | var unset |
+| TypeScript | `describe.skipIf` on the env var | var unset |
+
+> If `3dbag_all_index.fcb` is regenerated, the expected `10771547` / `2762`
+> constants must be updated in lock-step across all four suites
+> (`src/rust/fcb_core/tests/http.rs`, `src/cpp/tests/test_http.cpp`,
+> `src/py/tests/test_http.py`, `src/ts/test/http.test.ts`) — each file's
+> comment says so.
+
+The local-range-server tests (§7.1) stay: they cover the failure paths a real
+CDN cannot (ignored ranges, malformed `Content-Range`, CORS), deterministically
+and offline. The remote suite is an addition, not a replacement.
+
 ---
 
 ## 8. Known issues found while validating this guide
@@ -745,31 +795,23 @@ print(sum(a != b for a, b in zip(act, exp)), 'of', len(exp), 'lines differ')
 Add the four missing names to `CASES` and the suite will catch this
 permanently. Once fixed, it belongs in `docs/upstream-findings.md`.
 
-### Issue 3: the public demo files predate the alignment fix
+### Issue 3 (partly fixed): the public demo files predated the alignment fix
 
-| File | Uploaded | Size |
+| File | Size | Post-alignment-fix format? |
 |---|---|---|
-| `3dbag_subset_all_index.fcb` | 2025-05-25 | 3.8 GB |
-| `3dbag_all_index.fcb` | 2025-09-22 | 68.7 GB |
+| `3dbag_all_index.fcb` | 68.5 GB | **yes** — re-serialized 2026-07-23; verifies in all four readers |
+| `3dbag_subset_all_index.fcb` | 3.8 GB | no — still the pre-`540772a` layout |
 
-Both were written before `540772a` (2026-07-20), which fixed
-`finish_size_prefixed` laying out 8-byte-aligned structs relative to
-inconsistent bases. Its own message says: *"Files produced before this commit
-keep the old, internally inconsistent alignment."*
+`540772a` (2026-07-20) fixed `finish_size_prefixed` laying out 8-byte-aligned
+structs relative to inconsistent bases. Files written before it keep the old,
+internally inconsistent alignment, so C++ — which re-enabled `check_alignment`
+— rejects them with `header failed FlatBuffers verification`, while Rust
+(verifier does not check alignment), Python and TypeScript (no verifier at all)
+read them anyway.
 
-Consequence, by reader:
-
-| Reader | Reads the public files? | Why |
-|---|---|---|
-| Rust | yes | its verifier does not check struct alignment |
-| Python | yes | no FlatBuffers verifier; decodes bytes by hand |
-| TypeScript | yes | no FlatBuffers verifier (documented in `src/ts/README.md`) |
-| **C++** | **no** | `check_alignment` was re-enabled by `540772a` and correctly rejects them |
-
-So the C++ rejection is the *right* answer and the other three are reading
-files whose struct alignment is internally inconsistent. Re-writing and
-re-uploading both objects with the current writer would make the web viewer's
-default URL valid for every reader and let §7.2 be a genuine four-way check.
+`3dbag_all_index.fcb` has since been re-serialized and now verifies under all
+four readers — see the opt-in remote suite in §7.4. `3dbag_subset_all_index.fcb`
+(the web viewer's fallback URL) has not; re-uploading it would close this out.
 
 ### Issue 4: the old `just clippy` recipe failed with 50 pre-existing lints
 

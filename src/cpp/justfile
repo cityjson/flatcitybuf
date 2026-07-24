@@ -34,6 +34,16 @@ test-http:
     ./tests/run_http_tests.sh python3 tests/range_server.py \
         ../../examples/data ./build-curl/tests/fcb_tests
 
+# The live-3DBAG test is gated on FCB_REMOTE_HTTP_URL (separate from the
+# local-server FCB_TEST_HTTP_URL, which those tests compare against delft.fcb).
+# It skips the local-server cases and runs only the remote one.
+
+# Opt-in: the live 3DBAG HTTP test (~68 GB bucket)
+test-remote:
+    cmake -B build-curl -S . -DFCB_WITH_CURL=ON -DFCB_BUILD_TESTS=ON
+    cmake --build build-curl
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" ./build-curl/tests/fcb_tests -tc="the live 3DBAG file opens and queries over HTTP"
+
 # Configure and build the native core with tests
 build:
     cmake -B build-native -S . -DFCB_BUILD_TESTS=ON

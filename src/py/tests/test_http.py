@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import select
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from flatcitybuf.cityjson import to_cityjson_feature
 from flatcitybuf.errors import ErrorCode, FcbError
 from flatcitybuf.http_reader import HttpRangeReader
 from flatcitybuf.keys import KeyValue
+from flatcitybuf.packed_rtree import search_rtree
 from flatcitybuf.range_reader import FileRangeReader
 from flatcitybuf.reader import FcbReader
 from flatcitybuf.stree import AttrCondition, Operator
@@ -22,6 +24,29 @@ DELFT = REPO_ROOT / "examples" / "data" / "delft.fcb"
 RANGE_SERVER = REPO_ROOT / "src" / "cpp" / "tests" / "range_server.py"
 
 SMALL = CORPUS / "small.fcb"
+
+# ---------------------------------------------------- live remote fixture ---
+#
+# Opt-in integration test against the real, published 3DBAG file
+# (~68 GB, EPSG:28992). It is SKIPPED unless FCB_REMOTE_HTTP_URL is set --
+# CI never touches the network here, and nobody downloads 68 GB by running
+# `pytest`. Enable it with `just test-remote` (which sets the env var to the
+# default URL below), or point FCB_REMOTE_HTTP_URL at any current-format file.
+#
+# The expected values were cross-checked across the Rust, C++, Python and
+# TypeScript readers on 2026-07-23; all four agree. If the file is
+# regenerated they must be updated in lock-step here and in the other three
+# suites (src/rust/fcb_core/tests/http.rs, src/cpp/tests/test_http.cpp,
+# src/ts/test/http.test.ts).
+REMOTE_URL = os.environ.get("FCB_REMOTE_HTTP_URL", "")
+REMOTE_DEFAULT_URL = (
+    "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb"
+)
+REMOTE_FEATURES_COUNT = 10_771_547
+# A ~1 km box over central Amsterdam (minx, miny, maxx, maxy), well inside
+# the national extent.
+REMOTE_BBOX = (120_000.0, 486_000.0, 121_000.0, 487_000.0)
+REMOTE_BBOX_COUNT = 2762
 
 # ---------------------------------------------------------- server fixture ---
 #
@@ -241,3 +266,51 @@ def test_http_reader_issues_ranged_requests_not_the_whole_file(
     assert hits
     assert reader.request_count > 1
     assert 0 < reader.bytes_fetched < total
+
+
+# ---------------------------------------------------- live remote (opt-in) ---
+
+
+@pytest.mark.skipif(
+    not REMOTE_URL,
+    reason="set FCB_REMOTE_HTTP_URL to run (see `just test-remote`)",
+)
+def test_remote_3dbag_opens_and_queries_over_http() -> None:
+    """The published 3DBAG file, read over real HTTP range requests.
+
+    Proves three things at once: the header passes verification (the file
+    is in the post-alignment-fix format), the whole 68 GB is never
+    downloaded (a bounded number of ranged requests), and the spatial
+    index traverses to the same feature set the other three readers see.
+    """
+    reader = HttpRangeReader(REMOTE_URL)
+    fcb = FcbReader.open(reader)
+    header = fcb.header
+
+    assert header.info.features_count == REMOTE_FEATURES_COUNT
+
+    # Opening a 68 GB file must cost a handful of small ranged reads, not a
+    # download. If this ever approaches total_size the range logic regressed.
+    assert 0 < reader.bytes_fetched < 5_000_000
+
+    hits = search_rtree(
+        fcb.range_reader,
+        header.layout.rtree_begin,
+        header.info.features_count,
+        header.info.index_node_size,
+        REMOTE_BBOX,
+    )
+    # Exact, and identical to what the Rust, C++ and TypeScript readers
+    # return for the same box -- see the constants' note above.
+    assert len(hits) == REMOTE_BBOX_COUNT
+
+    # The bbox scan reads more, but still a tiny fraction of the file.
+    assert reader.bytes_fetched < total_size_guard(reader)
+
+
+def total_size_guard(reader: HttpRangeReader) -> int:
+    """A generous ceiling: 1% of the file. The Amsterdam box touches far
+    less, but pinning an exact byte count would be brittle against future
+    re-serializations, whereas 'never more than 1% of 68 GB' is a stable
+    statement of the property under test."""
+    return reader.total_size() // 100
