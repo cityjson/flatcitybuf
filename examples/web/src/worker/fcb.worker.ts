@@ -116,19 +116,23 @@ async function handleExport(msg: Extract<WorkerRequest, { type: 'export' }>): Pr
     post({ type: 'error', id: msg.id, message: 'no file open', aborted: false })
     return
   }
+  // Snapshot the reader: a concurrent 'open' can reassign the module-global
+  // `reader` while this export is awaiting, which would otherwise mix the old
+  // features with the new file's header.
+  const r = reader
   // A newer export aborts this one, but never the live render query.
   exportController?.abort()
   const my = new AbortController()
   exportController = my
   const signal = my.signal
   try {
-    const { features } = await runQuery(reader, {
+    const { features } = await runQuery(r, {
       bboxSource: msg.bboxSource, where: msg.where,
       limit: msg.limit, offset: msg.offset, signal,
     })
     if (signal.aborted) { post({ type: 'error', id: msg.id, message: 'aborted', aborted: true }); return }
-    const metadata = toCityJSONMetadata(reader.header)
-    const feats = features.map((f) => f.toCityJSON(reader!.header))
+    const metadata = toCityJSONMetadata(r.header)
+    const feats = features.map((f) => f.toCityJSON(r.header))
     let data: string
     if (msg.format === 'cityjsonseq') data = assembleCityJSONSeq(metadata, feats)
     else if (msg.format === 'cityjson') data = await convertMergedCityJSON(metadata, feats)
@@ -148,6 +152,9 @@ async function handleExport(msg: Extract<WorkerRequest, { type: 'export' }>): Pr
 ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data
   if (msg.type === 'open') {
+    // A new file invalidates any in-flight export (which snapshots the old
+    // reader); abort it so it stops fetching/converting.
+    exportController?.abort()
     try {
       reader = msg.url !== undefined
         ? await FcbReader.fromUrl(msg.url)

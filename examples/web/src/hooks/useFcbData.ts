@@ -41,6 +41,10 @@ function callWorker(msg: WorkerRequest, transfer: Transferable[] = []): Promise<
 // captured seq no longer matches is ignored (the worker also aborts the
 // superseded query's range reads).
 let requestSeq = 0
+// Generation guard for exports: bumped on each export and on every open, so a
+// stale export (superseded by a newer export or a new file) discards its result
+// instead of downloading under the wrong name or leaving the UI stuck.
+let exportSeq = 0
 
 function zoomForSpan(spanLng: number, spanLat: number): number {
   const span = Math.max(spanLng, spanLat, 1e-4)
@@ -55,7 +59,9 @@ function triggerDownload(data: string, mime: string, filename: string): void {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
+  // Revoke after a delay: some browsers need the object URL to stay valid until
+  // the download has actually started.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 export function useFcbData() {
@@ -195,8 +201,10 @@ export function useFcbData() {
 
   const openUrl = useCallback(async (url: string) => {
     const seq = ++requestSeq
+    exportSeq++ // invalidate any in-flight export
     setSourceName(url)
     setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
+    setExporting(false)
     setAvailableLods([]); setLod(undefined) // a new file has its own LoD set
     setLoading(true)
     setStatus(`opening ${url} …`)
@@ -206,12 +214,14 @@ export function useFcbData() {
     // it settles; only the failure path clears it here.
     if (r.type === 'opened') onOpened(r.header)
     else if (r.type === 'error') { setLoading(false); setStatus(`failed to open URL: ${r.message}`) }
-  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus, setSourceName])
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus, setSourceName, setExporting])
 
   const openFile = useCallback(async (file: File) => {
     const seq = ++requestSeq
+    exportSeq++ // invalidate any in-flight export
     setSourceName(file.name)
     setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
+    setExporting(false)
     setAvailableLods([]); setLod(undefined) // a new file has its own LoD set
     setLoading(true)
     setStatus(`opening ${file.name} …`)
@@ -220,7 +230,7 @@ export function useFcbData() {
     if (seq !== requestSeq) return
     if (r.type === 'opened') onOpened(r.header)
     else if (r.type === 'error') { setLoading(false); setStatus(`failed to open file: ${r.message}`) }
-  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus, setSourceName])
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus, setSourceName, setExporting])
 
   const query = useCallback((
     spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
@@ -283,18 +293,27 @@ export function useFcbData() {
     const a = store.get(activeQueryAtom)
     const count = store.get(renderedAtom).length
     if (a === undefined || count === 0) return
+    // Snapshot the generation and source at initiation: opening a new file (or a
+    // newer export) bumps exportSeq, and the source name feeds the filename — so
+    // a stale export neither downloads under the wrong name nor after a new file.
+    const mySeq = ++exportSeq
+    const source = store.get(sourceNameAtom)
     setExporting(true)
     setStatus(`preparing ${FORMATS[fmt].label} …`)
-    const r = await callWorker({
-      type: 'export', id: ++msgId,
-      bboxSource: a.bboxSource, where: a.where, limit: a.limit, offset: a.offset, format: fmt,
-    })
-    setExporting(false)
-    if (r.type === 'error') { setStatus(`export failed: ${r.message}`); return }
-    if (r.type !== 'export-result') return
-    const filename = deriveFilename(store.get(sourceNameAtom), fmt)
-    triggerDownload(r.data, r.mime, filename)
-    setStatus(`downloaded ${filename} (${count} feature${count === 1 ? '' : 's'})`)
+    try {
+      const r = await callWorker({
+        type: 'export', id: ++msgId,
+        bboxSource: a.bboxSource, where: a.where, limit: a.limit, offset: a.offset, format: fmt,
+      })
+      if (mySeq !== exportSeq) return // superseded by a newer export or a new file
+      if (r.type === 'error') { setStatus(`export failed: ${r.message}`); return }
+      if (r.type !== 'export-result') return
+      const filename = deriveFilename(source, fmt)
+      triggerDownload(r.data, r.mime, filename)
+      setStatus(`downloaded ${filename} (${count} feature${count === 1 ? '' : 's'})`)
+    } finally {
+      if (mySeq === exportSeq) setExporting(false)
+    }
   }, [store, setExporting, setStatus])
 
   return { openUrl, openFile, query, queryViewport, loadNext, applyLod,

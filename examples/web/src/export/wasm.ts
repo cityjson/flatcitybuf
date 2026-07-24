@@ -9,7 +9,9 @@ import { stringifyCityJSON } from './index'
 
 let ready: Promise<unknown> | undefined
 function ensureWasm(): Promise<unknown> {
-  if (ready === undefined) ready = init()
+  // Reset the cache if init rejects (e.g. a transient failure fetching the
+  // .wasm), so a later export can retry instead of failing forever.
+  if (ready === undefined) ready = init().catch((e) => { ready = undefined; throw e })
   return ready
 }
 
