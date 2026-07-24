@@ -12,7 +12,7 @@ static std::vector<ColumnInfo> to_column_info(const AttributeSchema& schema) {
     return out;
 }
 
-TEST_CASE("add_attributes assigns column indices in first-seen, alphabetical order") {
+TEST_CASE("add_attributes assigns column indices in first-seen, document order") {
     // Parsed from JSON TEXT, not built via C++ initializer-list literals:
     // nlohmann classifies a parsed integer as number_unsigned_t unless its
     // text has a leading '-', exactly mirroring serde_json's Number (whose
@@ -20,7 +20,7 @@ TEST_CASE("add_attributes assigns column indices in first-seen, alphabetical ord
     // actually keys off). A C++ literal like `5` is a signed `int` and would
     // parse to number_integer_t instead, giving a false mismatch here.
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json::parse(R"({
+    add_attributes(schema, nlohmann::ordered_json::parse(R"({
         "int": -10,
         "uint": 5,
         "bool": true,
@@ -40,22 +40,29 @@ TEST_CASE("add_attributes assigns column indices in first-seen, alphabetical ord
     CHECK(schema.at("json").second == ::ColumnType::Json);
     CHECK(schema.find("null") == schema.end());
 
-    // Alphabetical order of first appearance: array, bool, float, int, json,
-    // string, uint -- so THAT is the index assignment order, not insertion
-    // order into the nlohmann::json literal above.
-    CHECK(schema.at("array").first == 0);
-    CHECK(schema.at("bool").first == 1);
-    CHECK(schema.at("float").first == 2);
-    CHECK(schema.at("int").first == 3);
-    CHECK(schema.at("json").first == 4);
-    CHECK(schema.at("string").first == 5);
-    CHECK(schema.at("uint").first == 6);
+    // Document order of first appearance: int, uint, bool, float, string,
+    // array, json ("null" is skipped, so it never consumes an index). This
+    // is `nlohmann::ordered_json`'s iteration order, which preserves the
+    // source text's key order -- matching serde_json's actual behavior in
+    // this workspace (the `bson` dependency transitively activates
+    // serde_json's `preserve_order` feature, confirmed empirically against
+    // real `fcb`-CLI output; see the M3 oracle tests). Plain
+    // `nlohmann::json`'s default `std::map`-backed object would instead
+    // re-sort keys alphabetically, which is why the writer uses
+    // `ordered_json` throughout rather than the library's default.
+    CHECK(schema.at("int").first == 0);
+    CHECK(schema.at("uint").first == 1);
+    CHECK(schema.at("bool").first == 2);
+    CHECK(schema.at("float").first == 3);
+    CHECK(schema.at("string").first == 4);
+    CHECK(schema.at("array").first == 5);
+    CHECK(schema.at("json").first == 6);
 }
 
 TEST_CASE("add_attributes does not reassign an already-known column") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json{{"a", 1}});
-    add_attributes(schema, nlohmann::json{{"a", 2}, {"b", 3}});
+    add_attributes(schema, nlohmann::ordered_json{{"a", 1}});
+    add_attributes(schema, nlohmann::ordered_json{{"a", 2}, {"b", 3}});
     CHECK(schema.at("a").first == 0);
     CHECK(schema.at("b").first == 1);
     CHECK(schema.size() == 2);
@@ -63,7 +70,7 @@ TEST_CASE("add_attributes does not reassign an already-known column") {
 
 TEST_CASE("a non-object attrs value becomes a single json column") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json::array({1, 2}));
+    add_attributes(schema, nlohmann::ordered_json::array({1, 2}));
     CHECK(schema.size() == 1);
     CHECK(schema.at("json").second == ::ColumnType::Json);
 }
@@ -75,10 +82,11 @@ TEST_CASE("a repeated non-object attrs value reassigns the json column's index")
     // review), not something to paper over with a no-op-on-existing-key
     // `emplace`.
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json{{"a", true}});    // "a" takes index 0
-    add_attributes(schema, nlohmann::json::array({1, 2}));  // "json" takes index 1
+    add_attributes(schema, nlohmann::ordered_json{{"a", true}});    // "a" takes index 0
+    add_attributes(schema, nlohmann::ordered_json::array({1, 2}));  // "json" takes index 1
     CHECK(schema.at("json").first == 1);
-    add_attributes(schema, nlohmann::json::array({3, 4}));  // "json" is reassigned to index 2
+    add_attributes(schema,
+                   nlohmann::ordered_json::array({3, 4}));  // "json" is reassigned to index 2
     CHECK(schema.at("json").first == 2);
     CHECK(schema.size() == 2);  // still only "a" and "json" -- no new key added
 }
@@ -90,20 +98,20 @@ TEST_CASE("integer type guessing decides by value sign, not by nlohmann's own nu
     // the value's actual sign to stay oracle-compatible with serde_json's
     // sign-based PosInt/NegInt split (see M1's codex review).
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json{{"five", 5}});
+    add_attributes(schema, nlohmann::ordered_json{{"five", 5}});
     CHECK(schema.at("five").second == ::ColumnType::ULong);
 }
 
 TEST_CASE("integer type guessing follows sign and magnitude") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json::parse(R"({"neg": -1, "pos": 1})"));
+    add_attributes(schema, nlohmann::ordered_json::parse(R"({"neg": -1, "pos": 1})"));
     CHECK(schema.at("neg").second == ::ColumnType::Long);
     CHECK(schema.at("pos").second == ::ColumnType::ULong);
 }
 
 TEST_CASE("a full RFC3339 datetime string is detected, a bare date is not") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json{
+    add_attributes(schema, nlohmann::ordered_json{
                                {"dt", "2010-10-13T12:29:24Z"},
                                {"date_only", "2024-01-15"},
                                {"dt_offset", "2010-10-13T12:29:24+02:00"},
@@ -118,7 +126,7 @@ TEST_CASE("a full RFC3339 datetime string is detected, a bare date is not") {
 TEST_CASE("encode then decode round-trips every basic column type") {
     // Parsed from JSON text -- see the note in the first test case on why a
     // bare C++ initializer-list literal like `{"uint", 5}` would misclassify.
-    nlohmann::json attrs = nlohmann::json::parse(R"({
+    nlohmann::ordered_json attrs = nlohmann::ordered_json::parse(R"({
         "int": -10,
         "uint": 5,
         "bool": true,
@@ -151,15 +159,15 @@ TEST_CASE("encode then decode round-trips every basic column type") {
 
 TEST_CASE("an empty or non-object attrs value encodes to zero bytes") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json{{"a", 1}});
-    CHECK(encode_attributes_with_schema(nlohmann::json::object(), schema).empty());
-    CHECK(encode_attributes_with_schema(nlohmann::json::array(), schema).empty());
+    add_attributes(schema, nlohmann::ordered_json{{"a", 1}});
+    CHECK(encode_attributes_with_schema(nlohmann::ordered_json::object(), schema).empty());
+    CHECK(encode_attributes_with_schema(nlohmann::ordered_json::array(), schema).empty());
 }
 
 TEST_CASE("a schema member absent from attrs is skipped, not zero-filled") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json{{"a", 1}, {"b", 2}});
-    auto encoded = encode_attributes_with_schema(nlohmann::json{{"a", 7}}, schema);
+    add_attributes(schema, nlohmann::ordered_json{{"a", 1}, {"b", 2}});
+    auto encoded = encode_attributes_with_schema(nlohmann::ordered_json{{"a", 7}}, schema);
     auto decoded = decode_attributes(bytes_view(encoded), to_column_info(schema));
     REQUIRE(decoded.size() == 1);
     CHECK(decoded[0].first == "a");
@@ -167,7 +175,7 @@ TEST_CASE("a schema member absent from attrs is skipped, not zero-filled") {
 
 TEST_CASE("to_columns builds a Header whose columns round-trip through the reader") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json{{"b_col", true}, {"a_col", 5}});
+    add_attributes(schema, nlohmann::ordered_json{{"b_col", true}, {"a_col", 5}});
 
     flatbuffers::FlatBufferBuilder fbb;
     auto columns = to_columns(fbb, schema);
@@ -181,19 +189,19 @@ TEST_CASE("to_columns builds a Header whose columns round-trip through the reade
     const ::Header* h = flatbuffers::GetRoot<::Header>(fbb.GetBufferPointer());
     REQUIRE(h->columns() != nullptr);
     REQUIRE(h->columns()->size() == 2);
-    // Emitted in ascending column-index order: "a_col" is index 0 (first
-    // alphabetically among the two new names, regardless of the order
-    // written in the initializer list above), "b_col" is index 1.
-    CHECK(h->columns()->Get(0)->name()->str() == "a_col");
+    // Emitted in ascending column-index order: "b_col" is index 0 (first in
+    // the initializer list above -- ordered_json preserves that as
+    // iteration order, matching document order), "a_col" is index 1.
+    CHECK(h->columns()->Get(0)->name()->str() == "b_col");
     CHECK(h->columns()->Get(0)->index() == 0);
-    CHECK(h->columns()->Get(1)->name()->str() == "b_col");
+    CHECK(h->columns()->Get(0)->type() == ::ColumnType::Bool);
+    CHECK(h->columns()->Get(1)->name()->str() == "a_col");
     CHECK(h->columns()->Get(1)->index() == 1);
-    CHECK(h->columns()->Get(1)->type() == ::ColumnType::Bool);
 }
 
 TEST_CASE("attribute_to_index_entries extracts only the requested, indexable columns") {
     AttributeSchema schema;
-    nlohmann::json attrs = nlohmann::json::parse(R"({
+    nlohmann::ordered_json attrs = nlohmann::ordered_json::parse(R"({
         "name": "Building A",
         "height": 12.5,
         "count": 3,
@@ -223,7 +231,7 @@ TEST_CASE("attribute_to_index_entries extracts only the requested, indexable col
 
 TEST_CASE("attribute_to_index_entries parses DateTime strings, falling back to epoch on failure") {
     AttributeSchema schema;
-    nlohmann::json attrs = {{"ts", "2010-10-13T12:29:24Z"}, {"bad_ts", "not a date"}};
+    nlohmann::ordered_json attrs = {{"ts", "2010-10-13T12:29:24Z"}, {"bad_ts", "not a date"}};
     schema.emplace("ts", std::make_pair(0, ::ColumnType::DateTime));
     schema.emplace("bad_ts", std::make_pair(1, ::ColumnType::DateTime));
 
@@ -249,7 +257,7 @@ TEST_CASE(
     // codex review).
     AttributeSchema schema;
     schema.emplace("ts", std::make_pair(0, ::ColumnType::DateTime));
-    nlohmann::json attrs = {{"ts", "2016-12-31T23:59:60Z"}};
+    nlohmann::ordered_json attrs = {{"ts", "2016-12-31T23:59:60Z"}};
 
     auto entries = attribute_to_index_entries(attrs, schema, {"ts"});
     REQUIRE(entries.size() == 1);
@@ -262,13 +270,13 @@ TEST_CASE("cityfeature_to_index_entries visits CityObjects in ascending id order
     AttributeSchema schema;
     schema.emplace("n", std::make_pair(0, ::ColumnType::ULong));
 
-    nlohmann::json feature = {
+    nlohmann::ordered_json feature = {
         {"type", "CityJSONFeature"},
         {"id", "f1"},
         {"CityObjects",
          {{"z_obj", {{"type", "Building"}, {"attributes", {{"n", 1}}}}},
           {"a_obj", {{"type", "Building"}, {"attributes", {{"n", 2}}}}}}},
-        {"vertices", nlohmann::json::array()},
+        {"vertices", nlohmann::ordered_json::array()},
     };
 
     auto entries = cityfeature_to_index_entries(feature, schema, {"n"});
@@ -284,7 +292,7 @@ TEST_CASE("cityfeature_to_index_entries visits CityObjects in ascending id order
 TEST_CASE("cityfeature_to_index_entries skips objects with no attributes") {
     AttributeSchema schema;
     schema.emplace("n", std::make_pair(0, ::ColumnType::ULong));
-    nlohmann::json feature = {
+    nlohmann::ordered_json feature = {
         {"CityObjects", {{"o1", {{"type", "Building"}}}, {"o2", {{"type", "Building"}}}}},
     };
     CHECK(cityfeature_to_index_entries(feature, schema, {"n"}).empty());
@@ -293,12 +301,13 @@ TEST_CASE("cityfeature_to_index_entries skips objects with no attributes") {
 TEST_CASE("record layout is [u16 LE column index][value], schema-index order") {
     AttributeSchema schema;
     // Force known indices: "b" first (index 0), "a" second (index 1).
-    add_attributes(schema, nlohmann::json{{"b", true}});
-    add_attributes(schema, nlohmann::json{{"a", true}});
+    add_attributes(schema, nlohmann::ordered_json{{"b", true}});
+    add_attributes(schema, nlohmann::ordered_json{{"a", true}});
     REQUIRE(schema.at("b").first == 0);
     REQUIRE(schema.at("a").first == 1);
 
-    auto encoded = encode_attributes_with_schema(nlohmann::json{{"a", true}, {"b", false}}, schema);
+    auto encoded =
+        encode_attributes_with_schema(nlohmann::ordered_json{{"a", true}, {"b", false}}, schema);
     // "b" (index 0) is written before "a" (index 1), regardless of attrs's
     // own JSON key order.
     REQUIRE(encoded.size() == 6);  // two records of (u16 index + 1 byte bool)

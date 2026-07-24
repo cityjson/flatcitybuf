@@ -48,7 +48,7 @@ SurfaceType semantic_surface_type_from_name(const std::string& name);
 /// (writer/serializer.rs:533-622); `fb_wrap_mode`/`fb_texture_type`/
 /// `fb_texture_format` are folded in directly since nothing else calls them.
 ::flatbuffers::Offset<::Appearance> to_appearance(::flatbuffers::FlatBufferBuilder& fbb,
-                                                  const nlohmann::json& appearance);
+                                                  const nlohmann::ordered_json& appearance);
 
 /// Builds one `Geometry` table -- boundaries, and whatever semantics,
 /// material and texture it carries -- from a CityJSON geometry object
@@ -57,7 +57,7 @@ SurfaceType semantic_surface_type_from_name(const std::string& name);
 /// semantic attribute schema at all; a present-but-empty schema is a
 /// distinct, valid state. Mirrors `to_geometry` (writer/serializer.rs:891-1065).
 ::flatbuffers::Offset<::Geometry> to_geometry(::flatbuffers::FlatBufferBuilder& fbb,
-                                              const nlohmann::json& geometry,
+                                              const nlohmann::ordered_json& geometry,
                                               const AttributeSchema* semantic_attr_schema);
 
 /// Builds a `GeometryInstance` table: the template index, the 4x4
@@ -68,7 +68,7 @@ SurfaceType semantic_surface_type_from_name(const std::string& name);
 /// library rather than an abort). Mirrors `to_geometry_instance`
 /// (writer/serializer.rs:1067-1102).
 ::flatbuffers::Offset<::GeometryInstance>
-to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& geometry);
+to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::ordered_json& geometry);
 
 /// Builds a `GeographicalExtent` struct from a 6-element
 /// `[minx,miny,minz,maxx,maxy,maxz]` array. Shared with the header (M4),
@@ -82,7 +82,8 @@ to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json
 /// keys are not all present in `attr_schema`), children/children-roles/
 /// parents. Mirrors `to_city_object` (writer/serializer.rs:632-730).
 ::flatbuffers::Offset<::CityObject> to_city_object(::flatbuffers::FlatBufferBuilder& fbb,
-                                                   const std::string& id, const nlohmann::json& co,
+                                                   const std::string& id,
+                                                   const nlohmann::ordered_json& co,
                                                    const AttributeSchema& attr_schema,
                                                    const AttributeSchema* semantic_attr_schema);
 
@@ -95,7 +96,7 @@ to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json
 /// Mirrors `to_fcb_city_feature` (writer/serializer.rs:410-489).
 std::pair<::flatbuffers::Offset<::CityFeature>, NodeItem>
 to_fcb_city_feature(::flatbuffers::FlatBufferBuilder& fbb, const std::string& id,
-                    const nlohmann::json& city_feature, const AttributeSchema& attr_schema,
+                    const nlohmann::ordered_json& city_feature, const AttributeSchema& attr_schema,
                     const AttributeSchema* semantic_attr_schema);
 
 }  // namespace fcb

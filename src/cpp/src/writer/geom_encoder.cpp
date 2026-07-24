@@ -4,6 +4,7 @@
 
 #    include <fcb/error.hpp>
 
+#    include <algorithm>
 #    include <cstdint>
 #    include <limits>
 
@@ -13,38 +14,38 @@ namespace {
 
 constexpr std::uint32_t kNull = std::numeric_limits<std::uint32_t>::max();
 
-void push_ring(const nlohmann::json& ring, GMBoundaries& b) {
+void push_ring(const nlohmann::ordered_json& ring, GMBoundaries& b) {
     b.strings.push_back(static_cast<std::uint32_t>(ring.size()));
     for (const auto& idx : ring)
         b.indices.push_back(idx.get<std::uint32_t>());
 }
 
-void push_surface(const nlohmann::json& surface, GMBoundaries& b) {
+void push_surface(const nlohmann::ordered_json& surface, GMBoundaries& b) {
     for (const auto& ring : surface)
         push_ring(ring, b);
     b.surfaces.push_back(static_cast<std::uint32_t>(surface.size()));
 }
 
-void push_shell(const nlohmann::json& shell, GMBoundaries& b) {
+void push_shell(const nlohmann::ordered_json& shell, GMBoundaries& b) {
     for (const auto& surface : shell)
         push_surface(surface, b);
     b.shells.push_back(static_cast<std::uint32_t>(shell.size()));
 }
 
-void push_solid(const nlohmann::json& solid, GMBoundaries& b) {
+void push_solid(const nlohmann::ordered_json& solid, GMBoundaries& b) {
     for (const auto& shell : solid)
         push_shell(shell, b);
     b.solids.push_back(static_cast<std::uint32_t>(solid.size()));
 }
 
-std::uint32_t semantics_index(const nlohmann::json& v) {
+std::uint32_t semantics_index(const nlohmann::ordered_json& v) {
     return v.is_null() ? kNull : v.get<std::uint32_t>();
 }
 
 /// Appends one shell's worth of semantic indices. `shell` is `nullptr` for a
 /// whole-null shell, expanded to `boundaries.shells[shell_cursor]` NULLs --
 /// semantics has no wire encoding for a null shell, unlike material.
-void push_semantics_shell(const nlohmann::json* shell, const GMBoundaries& boundaries,
+void push_semantics_shell(const nlohmann::ordered_json* shell, const GMBoundaries& boundaries,
                           std::size_t& shell_cursor, std::vector<std::uint32_t>& flattened) {
     const std::uint32_t surface_count =
         shell_cursor < boundaries.shells.size() ? boundaries.shells[shell_cursor] : 0;
@@ -57,14 +58,14 @@ void push_semantics_shell(const nlohmann::json* shell, const GMBoundaries& bound
     }
 }
 
-std::uint32_t material_index(const nlohmann::json& v) {
+std::uint32_t material_index(const nlohmann::ordered_json& v) {
     return v.is_null() ? kNull : v.get<std::uint32_t>();
 }
 
 /// Appends one shell's material indices, or (`shell == nullptr`) records a
 /// whole-null shell as a `kNull` COUNT -- unlike semantics, material has a
 /// wire encoding for this, so it is not expanded into per-surface nulls.
-void push_material_shell(const nlohmann::json* shell, MaterialMapping& mv) {
+void push_material_shell(const nlohmann::ordered_json* shell, MaterialMapping& mv) {
     if (shell == nullptr) {
         mv.shells.push_back(kNull);
     } else {
@@ -74,19 +75,19 @@ void push_material_shell(const nlohmann::json* shell, MaterialMapping& mv) {
     }
 }
 
-void push_textured_ring(const nlohmann::json& ring, TextureMapping& m) {
+void push_textured_ring(const nlohmann::ordered_json& ring, TextureMapping& m) {
     m.strings.push_back(static_cast<std::uint32_t>(ring.size()));
     for (const auto& v : ring)
         m.vertices.push_back(material_index(v));  // null-aware, same as material
 }
 
-void push_textured_surface(const nlohmann::json& surface, TextureMapping& m) {
+void push_textured_surface(const nlohmann::ordered_json& surface, TextureMapping& m) {
     for (const auto& ring : surface)
         push_textured_ring(ring, m);
     m.surfaces.push_back(static_cast<std::uint32_t>(surface.size()));
 }
 
-void push_textured_shell(const nlohmann::json& shell, TextureMapping& m) {
+void push_textured_shell(const nlohmann::ordered_json& shell, TextureMapping& m) {
     for (const auto& surface : shell)
         push_textured_surface(surface, m);
     m.shells.push_back(static_cast<std::uint32_t>(shell.size()));
@@ -122,7 +123,7 @@ void push_textured_shell(const nlohmann::json& shell, TextureMapping& m) {
 /// array of null-or-non-array; 2: an array of null-or-(rank 1); 3: an array
 /// of null-or-(rank 2). `null` is legal at every level for this hierarchy,
 /// unlike texture's.
-bool fits_nullable_rank(const nlohmann::json& arr, int rank) {
+bool fits_nullable_rank(const nlohmann::ordered_json& arr, int rank) {
     if (!arr.is_array())
         return false;
     for (const auto& el : arr) {
@@ -141,7 +142,7 @@ bool fits_nullable_rank(const nlohmann::json& arr, int rank) {
 /// The shallowest rank (1, 2 or 3) `arr` fits, tried in that order -- the
 /// same order Rust's untagged enum variants are declared in, so an array
 /// readable at more than one depth resolves identically here.
-int sniff_nullable_rank(const nlohmann::json& arr) {
+int sniff_nullable_rank(const nlohmann::ordered_json& arr) {
     for (int rank = 1; rank <= 3; ++rank)
         if (fits_nullable_rank(arr, rank))
             return rank;
@@ -152,7 +153,7 @@ int sniff_nullable_rank(const nlohmann::json& arr) {
 /// each null or a non-array (a UV-vertex index). Texture, unlike
 /// semantics/material, is never null at an intermediate level -- only a
 /// ring's own elements can be.
-bool is_texture_ring(const nlohmann::json& v) {
+bool is_texture_ring(const nlohmann::ordered_json& v) {
     if (!v.is_array())
         return false;
     for (const auto& el : v)
@@ -164,7 +165,7 @@ bool is_texture_ring(const nlohmann::json& v) {
 /// True if `arr` fits a texture shape `depth` levels above a ring:
 /// `depth == 0` means `arr` must itself be a ring; `depth > 0` means an
 /// array whose every element fits `depth - 1`.
-bool fits_texture_depth(const nlohmann::json& arr, int depth) {
+bool fits_texture_depth(const nlohmann::ordered_json& arr, int depth) {
     if (depth == 0)
         return is_texture_ring(arr);
     if (!arr.is_array())
@@ -182,7 +183,7 @@ bool fits_texture_depth(const nlohmann::json& arr, int depth) {
 /// `TexturedSurface` is 2 array levels above a bare ring (a list of
 /// rings), so variant `rank` corresponds to `fits_texture_depth(arr, rank
 /// + 1)`, not `rank` itself.
-int sniff_texture_depth(const nlohmann::json& arr) {
+int sniff_texture_depth(const nlohmann::ordered_json& arr) {
     for (int rank = 1; rank <= 3; ++rank)
         if (fits_texture_depth(arr, rank + 1))
             return rank;
@@ -212,7 +213,7 @@ GeometryKind geometry_kind_from_name(const std::string& name) {
     throw Error(ErrorCode::InvalidAttributeValue, "unknown CityJSON geometry type '" + name + "'");
 }
 
-GMBoundaries encode_boundaries(GeometryKind kind, const nlohmann::json& boundaries) {
+GMBoundaries encode_boundaries(GeometryKind kind, const nlohmann::ordered_json& boundaries) {
     GMBoundaries b;
     switch (kind) {
         case GeometryKind::MultiPoint:
@@ -244,9 +245,10 @@ GMBoundaries encode_boundaries(GeometryKind kind, const nlohmann::json& boundari
     return b;
 }
 
-GMSemantics encode_semantics(const nlohmann::json& semantics, const GMBoundaries& boundaries) {
+GMSemantics encode_semantics(const nlohmann::ordered_json& semantics,
+                             const GMBoundaries& boundaries) {
     GMSemantics result;
-    result.surfaces = semantics.value("surfaces", nlohmann::json::array());
+    result.surfaces = semantics.value("surfaces", nlohmann::ordered_json::array());
 
     auto values_it = semantics.find("values");
     if (values_it == semantics.end() || values_it->is_null())
@@ -290,16 +292,25 @@ GMSemantics encode_semantics(const nlohmann::json& semantics, const GMBoundaries
     return result;
 }
 
-std::vector<MaterialMapping> encode_material(const nlohmann::json& material) {
+std::vector<MaterialMapping> encode_material(const nlohmann::ordered_json& material) {
     std::vector<MaterialMapping> out;
     if (!material.is_object())
         return out;
 
-    // `material` is a JSON object; nlohmann's default container already
-    // iterates it in ascending key order (see the AttributeSchema note in
-    // writer/attribute.hpp), matching Rust's explicit sort of its `HashMap`
-    // source, so no extra sort is needed here.
-    for (const auto& [theme, m] : material.items()) {
+    // Unlike attribute schemas (document order, see writer/attribute.hpp),
+    // `material` corresponds to Rust's `HashMap<String, CjMaterialReference>`
+    // -- genuinely unordered -- so Rust sorts theme names explicitly
+    // (`themes.sort_unstable()`) rather than relying on iteration order.
+    // `material` here is `ordered_json` like everything else in this writer,
+    // but that only preserves WHATEVER order the caller's JSON happened to
+    // have; themes must be sorted explicitly to match Rust regardless.
+    std::vector<std::string> themes;
+    for (const auto& [theme, unused] : material.items())
+        themes.push_back(theme);
+    std::sort(themes.begin(), themes.end());
+
+    for (const auto& theme : themes) {
+        const auto& m = material.at(theme);
         auto value_it = m.find("value");
         if (value_it != m.end() && !value_it->is_null()) {
             MaterialMapping mapping;
@@ -355,12 +366,21 @@ std::vector<MaterialMapping> encode_material(const nlohmann::json& material) {
     return out;
 }
 
-std::vector<TextureMapping> encode_texture(const nlohmann::json& texture) {
+std::vector<TextureMapping> encode_texture(const nlohmann::ordered_json& texture) {
     std::vector<TextureMapping> out;
     if (!texture.is_object())
         return out;
 
-    for (const auto& [theme, t] : texture.items()) {
+    // Same reasoning as encode_material: Rust's texture map is a genuine
+    // HashMap, sorted explicitly, so theme names are sorted here too rather
+    // than trusting iteration order.
+    std::vector<std::string> themes;
+    for (const auto& [theme, unused] : texture.items())
+        themes.push_back(theme);
+    std::sort(themes.begin(), themes.end());
+
+    for (const auto& theme : themes) {
+        const auto& t = texture.at(theme);
         TextureMapping mapping;
         mapping.theme = theme;
 
@@ -392,13 +412,13 @@ std::vector<TextureMapping> encode_texture(const nlohmann::json& texture) {
     return out;
 }
 
-EncodedGeometry encode(const nlohmann::json& geometry) {
+EncodedGeometry encode(const nlohmann::ordered_json& geometry) {
     EncodedGeometry result;
     const GeometryKind kind = geometry_kind_from_name(geometry.at("type").get<std::string>());
 
     auto boundaries_it = geometry.find("boundaries");
     result.boundaries = encode_boundaries(
-        kind, boundaries_it != geometry.end() ? *boundaries_it : nlohmann::json::array());
+        kind, boundaries_it != geometry.end() ? *boundaries_it : nlohmann::ordered_json::array());
 
     auto semantics_it = geometry.find("semantics");
     if (semantics_it != geometry.end() && semantics_it->is_object())

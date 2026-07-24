@@ -5,7 +5,7 @@
 using namespace fcb;
 
 static const ::Geometry* build_geometry(::flatbuffers::FlatBufferBuilder& fbb,
-                                        const nlohmann::json& geometry,
+                                        const nlohmann::ordered_json& geometry,
                                         const AttributeSchema* semantic_schema = nullptr) {
     auto off = to_geometry(fbb, geometry, semantic_schema);
     fbb.Finish(off);
@@ -44,7 +44,7 @@ TEST_CASE("semantic_surface_type_from_name maps an unknown name to ExtraSemantic
 }
 
 TEST_CASE("to_appearance builds materials, textures and vertices-texture") {
-    auto appearance = nlohmann::json::parse(R"({
+    auto appearance = nlohmann::ordered_json::parse(R"({
         "materials": [
             {"name": "roofandground", "ambientIntensity": 0.2, "diffuseColor": [0.9, 0.5, 0.1],
              "isSmooth": false}
@@ -88,7 +88,7 @@ TEST_CASE("to_appearance builds materials, textures and vertices-texture") {
 
 TEST_CASE("to_geometry: boundaries only, no semantics/material/texture") {
     flatbuffers::FlatBufferBuilder fbb;
-    auto geometry = nlohmann::json::parse(R"({
+    auto geometry = nlohmann::ordered_json::parse(R"({
         "type": "MultiSurface", "lod": "2",
         "boundaries": [[[0, 1, 2]], [[0, 2, 3]]]
     })");
@@ -106,10 +106,10 @@ TEST_CASE("to_geometry: boundaries only, no semantics/material/texture") {
 
 TEST_CASE("to_geometry: semantic surfaces carry children, parent and encoded attributes") {
     AttributeSchema semantic_schema;
-    add_attributes(semantic_schema, nlohmann::json{{"slope", 33.4}});
+    add_attributes(semantic_schema, nlohmann::ordered_json{{"slope", 33.4}});
 
     flatbuffers::FlatBufferBuilder fbb;
-    auto geometry = nlohmann::json::parse(R"({
+    auto geometry = nlohmann::ordered_json::parse(R"({
         "type": "MultiSurface", "lod": "2",
         "boundaries": [[[0, 1, 2]], [[0, 2, 3]], [[1, 2, 3]]],
         "semantics": {
@@ -148,7 +148,7 @@ TEST_CASE("to_geometry: material Values arrays are present-but-empty, not absent
     // MultiSurface-depth material: solids/shells are legitimately empty
     // (one index per surface, no per-shell/per-solid counts), but Rust
     // still creates them as PRESENT empty vectors, not absent fields.
-    auto geometry = nlohmann::json::parse(R"({
+    auto geometry = nlohmann::ordered_json::parse(R"({
         "type": "MultiSurface", "lod": "2",
         "boundaries": [[[0, 1, 2]], [[0, 2, 3]]],
         "material": {"roofandground": {"values": [0, 1]}}
@@ -170,7 +170,7 @@ TEST_CASE("to_geometry: material Values arrays are present-but-empty, not absent
 
 TEST_CASE("to_geometry: a single material value creates no solids/shells/vertices at all") {
     flatbuffers::FlatBufferBuilder fbb;
-    auto geometry = nlohmann::json::parse(R"({
+    auto geometry = nlohmann::ordered_json::parse(R"({
         "type": "MultiSurface", "lod": "2",
         "boundaries": [[[0, 1, 2]]],
         "material": {"t": {"value": 5}}
@@ -186,7 +186,7 @@ TEST_CASE("to_geometry: a single material value creates no solids/shells/vertice
 
 TEST_CASE("to_geometry: texture has_values distinguishes present-but-empty from absent arrays") {
     flatbuffers::FlatBufferBuilder fbb;
-    auto geometry = nlohmann::json::parse(R"({
+    auto geometry = nlohmann::ordered_json::parse(R"({
         "type": "MultiSurface", "lod": "2",
         "boundaries": [[[0, 1, 2]]],
         "texture": {
@@ -218,7 +218,7 @@ TEST_CASE("to_geometry: texture has_values distinguishes present-but-empty from 
 
 TEST_CASE("to_geometry_instance: builds template, transformation and boundaries") {
     flatbuffers::FlatBufferBuilder fbb;
-    auto geometry = nlohmann::json::parse(R"({
+    auto geometry = nlohmann::ordered_json::parse(R"({
         "type": "GeometryInstance",
         "template": 2,
         "boundaries": [7],
@@ -238,15 +238,15 @@ TEST_CASE("to_geometry_instance: builds template, transformation and boundaries"
 
 TEST_CASE("to_geometry_instance: throws on a non-instance geometry type") {
     flatbuffers::FlatBufferBuilder fbb;
-    auto geometry = nlohmann::json::parse(R"({"type": "MultiSurface", "boundaries": []})");
+    auto geometry = nlohmann::ordered_json::parse(R"({"type": "MultiSurface", "boundaries": []})");
     CHECK_THROWS_AS(to_geometry_instance(fbb, geometry), Error);
 }
 
 TEST_CASE("to_city_object: basic fields, attributes against a shared schema") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json::parse(R"({"identificatie": "x", "height": 5})"));
+    add_attributes(schema, nlohmann::ordered_json::parse(R"({"identificatie": "x", "height": 5})"));
 
-    auto co = nlohmann::json::parse(R"({
+    auto co = nlohmann::ordered_json::parse(R"({
         "type": "Building",
         "geographicalExtent": [0, 0, 0, 10, 10, 10],
         "attributes": {"identificatie": "NL.IMBAG.1", "height": 12},
@@ -276,9 +276,9 @@ TEST_CASE("to_city_object: basic fields, attributes against a shared schema") {
 
 TEST_CASE("to_city_object: attributes with an unknown key get their own schema and columns") {
     AttributeSchema schema;
-    add_attributes(schema, nlohmann::json::parse(R"({"identificatie": "x"})"));
+    add_attributes(schema, nlohmann::ordered_json::parse(R"({"identificatie": "x"})"));
 
-    auto co = nlohmann::json::parse(
+    auto co = nlohmann::ordered_json::parse(
         R"({"type": "BuildingPart", "attributes": {"identificatie": "y", "extra_field": 42}})");
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -292,7 +292,7 @@ TEST_CASE("to_city_object: attributes with an unknown key get their own schema a
 }
 
 TEST_CASE("to_city_object: geometry entries split into geometry vs geometry_instances") {
-    auto co = nlohmann::json::parse(R"({
+    auto co = nlohmann::ordered_json::parse(R"({
         "type": "Building",
         "geometry": [
             {"type": "MultiSurface", "lod": "1", "boundaries": [[[0, 1, 2]]]},
@@ -314,7 +314,7 @@ TEST_CASE("to_city_object: geometry entries split into geometry vs geometry_inst
 }
 
 TEST_CASE("to_city_object: an unrecognized type becomes ExtensionObject with extension_type set") {
-    auto co = nlohmann::json::parse(R"({"type": "+NoiseCityObject"})");
+    auto co = nlohmann::ordered_json::parse(R"({"type": "+NoiseCityObject"})");
     flatbuffers::FlatBufferBuilder fbb;
     AttributeSchema schema;
     auto off = to_city_object(fbb, "co-4", co, schema, nullptr);
@@ -327,7 +327,7 @@ TEST_CASE("to_city_object: an unrecognized type becomes ExtensionObject with ext
 }
 
 TEST_CASE("to_city_object: no attributes key at all leaves the field absent") {
-    auto co = nlohmann::json::parse(R"({"type": "Building"})");
+    auto co = nlohmann::ordered_json::parse(R"({"type": "Building"})");
     flatbuffers::FlatBufferBuilder fbb;
     AttributeSchema schema;
     auto off = to_city_object(fbb, "co-5", co, schema, nullptr);
@@ -338,7 +338,7 @@ TEST_CASE("to_city_object: no attributes key at all leaves the field absent") {
 }
 
 TEST_CASE("to_fcb_city_feature: objects visited in ascending id order, vertices, bbox") {
-    auto feature = nlohmann::json::parse(R"({
+    auto feature = nlohmann::ordered_json::parse(R"({
         "type": "CityJSONFeature",
         "id": "f1",
         "CityObjects": {
@@ -374,7 +374,7 @@ TEST_CASE("to_fcb_city_feature: objects visited in ascending id order, vertices,
 }
 
 TEST_CASE("to_fcb_city_feature: an empty vertex array yields a zeroed bbox, not garbage") {
-    auto feature = nlohmann::json::parse(
+    auto feature = nlohmann::ordered_json::parse(
         R"({"type": "CityJSONFeature", "id": "f2", "CityObjects": {}, "vertices": []})");
     AttributeSchema schema;
     flatbuffers::FlatBufferBuilder fbb;
@@ -387,7 +387,7 @@ TEST_CASE("to_fcb_city_feature: an empty vertex array yields a zeroed bbox, not 
 }
 
 TEST_CASE("to_fcb_city_feature: a feature-level appearance is built when present") {
-    auto feature = nlohmann::json::parse(R"({
+    auto feature = nlohmann::ordered_json::parse(R"({
         "type": "CityJSONFeature", "id": "f3", "CityObjects": {}, "vertices": [],
         "appearance": {"materials": [{"name": "m1"}]}
     })");

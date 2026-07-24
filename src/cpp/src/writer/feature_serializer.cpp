@@ -63,7 +63,8 @@ constexpr std::size_t kSemanticSurfaceTypeCount =
     sizeof(kSemanticSurfaceTypeNames) / sizeof(kSemanticSurfaceTypeNames[0]);
 
 std::optional<::flatbuffers::Offset<::flatbuffers::Vector<double>>>
-to_color(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& obj, const char* key) {
+to_color(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::ordered_json& obj,
+         const char* key) {
     auto it = obj.find(key);
     if (it == obj.end() || it->is_null())
         return std::nullopt;
@@ -80,7 +81,7 @@ to_color(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& obj, const
 /// `semantic_attr_schema == nullptr` (no schema at all, as opposed to an
 /// empty one) always yields no attributes, matching Rust's `Option<&..>`.
 ::flatbuffers::Offset<::SemanticObject>
-to_semantic_object(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& surface,
+to_semantic_object(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::ordered_json& surface,
                    const AttributeSchema* semantic_attr_schema) {
     auto [type_, extension_type_name] =
         semantic_surface_type_from_name(surface.at("type").get<std::string>());
@@ -99,7 +100,7 @@ to_semantic_object(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& 
     if (auto it = surface.find("parent"); it != surface.end() && !it->is_null())
         parent = it->get<std::uint32_t>();
 
-    nlohmann::json other = nlohmann::json::object();
+    nlohmann::ordered_json other = nlohmann::ordered_json::object();
     for (const auto& [key, val] : surface.items())
         if (key != "type" && key != "parent" && key != "children")
             other[key] = val;
@@ -132,7 +133,7 @@ SurfaceType semantic_surface_type_from_name(const std::string& name) {
 }
 
 ::flatbuffers::Offset<::Appearance> to_appearance(::flatbuffers::FlatBufferBuilder& fbb,
-                                                  const nlohmann::json& appearance) {
+                                                  const nlohmann::ordered_json& appearance) {
     std::optional<::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Material>>>>
         materials_off;
     if (auto it = appearance.find("materials"); it != appearance.end() && it->is_array()) {
@@ -233,7 +234,7 @@ SurfaceType semantic_surface_type_from_name(const std::string& name) {
 }
 
 ::flatbuffers::Offset<::Geometry> to_geometry(::flatbuffers::FlatBufferBuilder& fbb,
-                                              const nlohmann::json& geometry,
+                                              const nlohmann::ordered_json& geometry,
                                               const AttributeSchema* semantic_attr_schema) {
     const GeometryKind kind = geometry_kind_from_name(geometry.at("type").get<std::string>());
     const auto type_ = static_cast<::GeometryType>(kind);
@@ -319,7 +320,8 @@ SurfaceType semantic_surface_type_from_name(const std::string& name) {
 }
 
 ::flatbuffers::Offset<::GeometryInstance>
-to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& geometry) {
+to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb,
+                     const nlohmann::ordered_json& geometry) {
     if (geometry.at("type").get<std::string>() != "GeometryInstance") {
         throw Error(ErrorCode::InvalidAttributeValue,
                     "to_geometry_instance called on a non-GeometryInstance geometry");
@@ -358,8 +360,8 @@ struct FcbAttribute {
     std::optional<AttributeSchema> own_schema;
 };
 
-FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& attr,
-                              const AttributeSchema& schema) {
+FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb,
+                              const nlohmann::ordered_json& attr, const AttributeSchema& schema) {
     bool is_own_schema = false;
     for (const auto& [key, val] : attr.items()) {
         if (schema.find(key) == schema.end()) {
@@ -380,7 +382,8 @@ FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb, const nlohm
 }  // namespace
 
 ::flatbuffers::Offset<::CityObject> to_city_object(::flatbuffers::FlatBufferBuilder& fbb,
-                                                   const std::string& id, const nlohmann::json& co,
+                                                   const std::string& id,
+                                                   const nlohmann::ordered_json& co,
                                                    const AttributeSchema& attr_schema,
                                                    const AttributeSchema* semantic_attr_schema) {
     auto id_off = fbb.CreateString(id);
@@ -473,16 +476,16 @@ FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb, const nlohm
 
 std::pair<::flatbuffers::Offset<::CityFeature>, NodeItem>
 to_fcb_city_feature(::flatbuffers::FlatBufferBuilder& fbb, const std::string& id,
-                    const nlohmann::json& city_feature, const AttributeSchema& attr_schema,
+                    const nlohmann::ordered_json& city_feature, const AttributeSchema& attr_schema,
                     const AttributeSchema* semantic_attr_schema) {
     auto id_off = fbb.CreateString(id);
 
     // `CityObjects` is a JSON object, so visited in ascending id order for
     // reproducibility -- same determinism reasoning as
     // cityfeature_to_index_entries (writer/attribute.hpp).
-    static const nlohmann::json kEmptyObjects = nlohmann::json::object();
+    static const nlohmann::ordered_json kEmptyObjects = nlohmann::ordered_json::object();
     auto co_it = city_feature.find("CityObjects");
-    const nlohmann::json& city_objects =
+    const nlohmann::ordered_json& city_objects =
         (co_it != city_feature.end() && co_it->is_object()) ? *co_it : kEmptyObjects;
 
     std::vector<std::string> object_ids;

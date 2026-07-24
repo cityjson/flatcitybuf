@@ -132,7 +132,7 @@ Rfc3339Result parse_rfc3339(const std::string& s) {
 
 bool looks_like_rfc3339(const std::string& s) { return parse_rfc3339(s).ok; }
 
-std::optional<::ColumnType> guess_type(const nlohmann::json& value) {
+std::optional<::ColumnType> guess_type(const nlohmann::ordered_json& value) {
     if (value.is_boolean())
         return ::ColumnType::Bool;
     if (value.is_number()) {
@@ -143,7 +143,7 @@ std::optional<::ColumnType> guess_type(const nlohmann::json& value) {
         if (value.is_number_integer()) {
             // serde_json::Number splits PosInt/NegInt by the VALUE's sign,
             // regardless of the Rust literal's own signed/unsigned type. A
-            // C++ value built via `nlohmann::json(5)` (as opposed to parsed
+            // C++ value built via `nlohmann::ordered_json(5)` (as opposed to parsed
             // from JSON text with no leading '-') lands in nlohmann's signed
             // `number_integer_t` bucket even though 5 is non-negative, so
             // this must also decide by value, not by which nlohmann bucket
@@ -187,7 +187,7 @@ void put_f64(std::vector<std::uint8_t>& out, std::size_t at, double d) {
 // JSON shape drifted from the schema's remembered column type is written as
 // the type's zero value, not rejected.
 
-std::int64_t as_i64_or0(const nlohmann::json& v) {
+std::int64_t as_i64_or0(const nlohmann::ordered_json& v) {
     if (v.is_number_unsigned()) {
         const std::uint64_t u = v.get<std::uint64_t>();
         return u <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
@@ -199,7 +199,7 @@ std::int64_t as_i64_or0(const nlohmann::json& v) {
     return 0;
 }
 
-std::uint64_t as_u64_or0(const nlohmann::json& v) {
+std::uint64_t as_u64_or0(const nlohmann::ordered_json& v) {
     if (v.is_number_unsigned())
         return v.get<std::uint64_t>();
     if (v.is_number_integer()) {
@@ -209,17 +209,17 @@ std::uint64_t as_u64_or0(const nlohmann::json& v) {
     return 0;
 }
 
-double as_f64_or0(const nlohmann::json& v) { return v.is_number() ? v.get<double>() : 0.0; }
+double as_f64_or0(const nlohmann::ordered_json& v) { return v.is_number() ? v.get<double>() : 0.0; }
 
-bool as_bool_or_false(const nlohmann::json& v) { return v.is_boolean() && v.get<bool>(); }
+bool as_bool_or_false(const nlohmann::ordered_json& v) { return v.is_boolean() && v.get<bool>(); }
 
-std::string as_str_or_empty(const nlohmann::json& v) {
+std::string as_str_or_empty(const nlohmann::ordered_json& v) {
     return v.is_string() ? v.get<std::string>() : std::string();
 }
 
 }  // namespace
 
-void add_attributes(AttributeSchema& schema, const nlohmann::json& attrs) {
+void add_attributes(AttributeSchema& schema, const nlohmann::ordered_json& attrs) {
     if (!attrs.is_object()) {
         // Rust's `BTreeMap::insert` here ALWAYS overwrites -- even a "json"
         // column that already exists gets reassigned a new index equal to
@@ -241,7 +241,7 @@ void add_attributes(AttributeSchema& schema, const nlohmann::json& attrs) {
     }
 }
 
-std::size_t attr_size(::ColumnType coltype, const nlohmann::json& colval) {
+std::size_t attr_size(::ColumnType coltype, const nlohmann::ordered_json& colval) {
     switch (coltype) {
         case ::ColumnType::Byte:
             return sizeof(std::int8_t);
@@ -276,7 +276,7 @@ std::size_t attr_size(::ColumnType coltype, const nlohmann::json& colval) {
     throw Error(ErrorCode::UnsupportedColumnType, "attr_size: unknown column type");
 }
 
-std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::json& attr,
+std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::ordered_json& attr,
                                                         const AttributeSchema& schema) {
     std::vector<std::uint8_t> out;
     if (!attr.is_object() || attr.empty())
@@ -292,7 +292,7 @@ std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::json& at
         auto it = attr.find(name);
         if (it == attr.end() || it->is_null())
             continue;
-        const nlohmann::json& val = *it;
+        const nlohmann::ordered_json& val = *it;
 
         const std::size_t offset = out.size();
         const std::size_t size = attr_size(coltype, val);
@@ -379,7 +379,7 @@ to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema)
 }
 
 std::vector<AttributeIndexEntry>
-attribute_to_index_entries(const nlohmann::json& attr, const AttributeSchema& schema,
+attribute_to_index_entries(const nlohmann::ordered_json& attr, const AttributeSchema& schema,
                            const std::vector<std::string>& indexing_attr) {
     std::vector<AttributeIndexEntry> out;
     if (!attr.is_object() || attr.empty())
@@ -393,7 +393,7 @@ attribute_to_index_entries(const nlohmann::json& attr, const AttributeSchema& sc
         if (schema_it == schema.end())
             continue;
         const auto [index, coltype] = schema_it->second;
-        const nlohmann::json& val = *val_it;
+        const nlohmann::ordered_json& val = *val_it;
 
         switch (coltype) {
             case ::ColumnType::Bool:
@@ -444,7 +444,8 @@ attribute_to_index_entries(const nlohmann::json& attr, const AttributeSchema& sc
 }
 
 std::vector<AttributeIndexEntry>
-cityfeature_to_index_entries(const nlohmann::json& city_feature, const AttributeSchema& schema,
+cityfeature_to_index_entries(const nlohmann::ordered_json& city_feature,
+                             const AttributeSchema& schema,
                              const std::vector<std::string>& indexing_attr) {
     std::vector<AttributeIndexEntry> out;
     auto co_it = city_feature.find("CityObjects");
@@ -458,7 +459,7 @@ cityfeature_to_index_entries(const nlohmann::json& city_feature, const Attribute
     std::sort(object_ids.begin(), object_ids.end());
 
     for (const auto& id : object_ids) {
-        const nlohmann::json& co = co_it->at(id);
+        const nlohmann::ordered_json& co = co_it->at(id);
         auto attr_it = co.find("attributes");
         if (attr_it == co.end() || attr_it->is_null())
             continue;

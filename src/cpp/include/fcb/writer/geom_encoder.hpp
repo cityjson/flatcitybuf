@@ -35,7 +35,7 @@ GeometryKind geometry_kind_from_name(const std::string& name);
 /// depth `kind` implies. Mirrors `encode_boundaries`
 /// (writer/geom_encoder.rs:160-189). `GeometryKind::GeometryInstance`
 /// yields an empty `GMBoundaries`; it is encoded separately (M3).
-GMBoundaries encode_boundaries(GeometryKind kind, const nlohmann::json& boundaries);
+GMBoundaries encode_boundaries(GeometryKind kind, const nlohmann::ordered_json& boundaries);
 
 /// Flattened semantics: `surfaces` is the CityJSON `semantics.surfaces`
 /// array, passed through verbatim (FlatBuffers `SemanticObject` encoding,
@@ -46,7 +46,7 @@ GMBoundaries encode_boundaries(GeometryKind kind, const nlohmann::json& boundari
 /// missing member the same way defensively rather than throwing).
 /// Mirrors `GMSemantics` (writer/geom_encoder.rs).
 struct GMSemantics {
-    nlohmann::json surfaces = nlohmann::json::array();
+    nlohmann::ordered_json surfaces = nlohmann::ordered_json::array();
     std::optional<std::vector<std::uint32_t>> values;
 };
 
@@ -67,7 +67,8 @@ struct GMSemantics {
 /// instead of properly nested) -- shape-sniffing is what makes this port
 /// byte-compatible with Rust on those files too, not just the well-formed
 /// ones. Mirrors `encode_semantics` (writer/geom_encoder.rs:379-447).
-GMSemantics encode_semantics(const nlohmann::json& semantics, const GMBoundaries& boundaries);
+GMSemantics encode_semantics(const nlohmann::ordered_json& semantics,
+                             const GMBoundaries& boundaries);
 
 /// One theme's material mapping. Tagged-struct style (matching this
 /// codebase's `AttrValue` convention) rather than `std::variant`, since only
@@ -87,13 +88,15 @@ struct MaterialMapping {
 
 /// Flattens `material` (the CityJSON `geometry.material` object: theme name
 /// -> `{"value": N}` / `{"values": [...]}` / `{"values": null}`). Themes
-/// are visited in ascending name order (`material` is a JSON object, so
-/// this is automatic given nlohmann's default ordered container -- see the
-/// AttributeSchema note in `writer/attribute.hpp` for why that already
-/// matches Rust's determinism fix for its `HashMap` source). A `null`
-/// shell or solid -- legal at every level -- is recorded as a `UINT32_MAX`
-/// count, not dropped, so it decodes back as `null` rather than an empty
-/// array.
+/// are visited in ascending name order -- sorted EXPLICITLY, unlike an
+/// attribute schema's document order (`writer/attribute.hpp`): `material`
+/// corresponds to Rust's `HashMap<String, CjMaterialReference>`, genuinely
+/// unordered, so Rust sorts theme names itself
+/// (`themes.sort_unstable()`) rather than trusting iteration order, and
+/// this does the same regardless of what order the input JSON's `material`
+/// object happens to have. A `null` shell or solid -- legal at every level
+/// -- is recorded as a `UINT32_MAX` count, not dropped, so it decodes back
+/// as `null` rather than an empty array.
 ///
 /// As with `encode_semantics`, the depth of a `values` array is determined
 /// by sniffing its own JSON shape shallowest-first, mirroring Rust's
@@ -101,7 +104,7 @@ struct MaterialMapping {
 /// geometry's type -- see that function's doc comment for why this
 /// matters for cardinality-inconsistent-but-schema-valid files. Mirrors
 /// `encode_material` (writer/geom_encoder.rs:204-284).
-std::vector<MaterialMapping> encode_material(const nlohmann::json& material);
+std::vector<MaterialMapping> encode_material(const nlohmann::ordered_json& material);
 
 /// One theme's texture mapping. `has_values` distinguishes a theme with no
 /// `values` member at all (schema-valid; the per-theme texture object has
@@ -125,7 +128,7 @@ struct TextureMapping {
 /// then of `TexturedShell`, then of shell-lists), mirroring Rust's
 /// untagged `TextureValues` enum, rather than taken from the enclosing
 /// geometry's type. Mirrors `encode_texture` (writer/geom_encoder.rs:290-361).
-std::vector<TextureMapping> encode_texture(const nlohmann::json& texture);
+std::vector<TextureMapping> encode_texture(const nlohmann::ordered_json& texture);
 
 /// Everything one CityJSON geometry object flattens to. Mirrors
 /// `EncodedGeometry` (writer/geom_encoder.rs).
@@ -145,7 +148,7 @@ struct EncodedGeometry {
 /// this never touches -- it is encoded separately by M3's
 /// `to_geometry_instance`, and yields empty arrays here. Mirrors `encode`
 /// (writer/geom_encoder.rs:102-120).
-EncodedGeometry encode(const nlohmann::json& geometry);
+EncodedGeometry encode(const nlohmann::ordered_json& geometry);
 
 }  // namespace fcb
 
