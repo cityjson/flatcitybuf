@@ -1,6 +1,7 @@
 // src/store/index.ts
 import type { AttrCondition } from '@cityjson/flatcitybuf'
 import { atom } from 'jotai'
+import type { ExportFormat } from '../export/index'
 import type { Mesh } from '../geometry/index'
 import type { HeaderModel } from '../reader/index'
 
@@ -40,6 +41,16 @@ export const lodAtom = atom<string | undefined>(undefined)
  *  sorted ascending. Empty until the first result arrives; drives whether the
  *  LoD selector is shown and what options it lists. */
 export const availableLodsAtom = atom<string[]>([])
+
+/** The chosen export format for the download button. */
+export const exportFormatAtom = atom<ExportFormat>('cityjson')
+
+/** True while an export is being prepared in the worker. Disables the button
+ *  and swaps its label to "preparing…". */
+export const exportingAtom = atom<boolean>(false)
+
+/** The open source (URL or local file name), kept for the download filename. */
+export const sourceNameAtom = atom<string | undefined>(undefined)
 
 /** True when follow-camera is on but the view is zoomed too far out to fetch
  *  (the area would be too large). Drives a "zoom in" hint instead of a query. */

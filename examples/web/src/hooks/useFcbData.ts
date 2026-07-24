@@ -3,12 +3,13 @@ import type { AttrCondition } from '@cityjson/flatcitybuf'
 import { useAtom, useStore } from 'jotai'
 import { useCallback } from 'react'
 import { bboxToSource, forward } from '../crs/index'
+import { deriveFilename, type ExportFormat, FORMATS } from '../export/index'
 import type { HeaderModel } from '../reader/index'
 import {
-  activeQueryAtom, availableLodsAtom, fetchBboxAtom, headerAtom, limitAtom,
-  loadingAtom, lodAtom, MIN_FETCH_ZOOM, readyAtom, type RenderedFeature,
-  renderedAtom, selectedAtom, spatialModeAtom, statusAtom, totalAtom,
-  type ViewState, viewStateAtom,
+  activeQueryAtom, availableLodsAtom, exportFormatAtom, exportingAtom,
+  fetchBboxAtom, headerAtom, limitAtom, loadingAtom, lodAtom, MIN_FETCH_ZOOM,
+  readyAtom, type RenderedFeature, renderedAtom, selectedAtom, sourceNameAtom,
+  spatialModeAtom, statusAtom, totalAtom, type ViewState, viewStateAtom,
 } from '../store/index'
 import type { WorkerRequest, WorkerResponse } from '../worker/protocol'
 
@@ -46,6 +47,17 @@ function zoomForSpan(spanLng: number, spanLat: number): number {
   return Math.min(18, Math.max(11, Math.log2(360 / span) - 1.5))
 }
 
+function triggerDownload(data: string, mime: string, filename: string): void {
+  const url = URL.createObjectURL(new Blob([data], { type: mime }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export function useFcbData() {
   const [header, setHeader] = useAtom(headerAtom)
   const [rendered, setRendered] = useAtom(renderedAtom)
@@ -60,6 +72,8 @@ export function useFcbData() {
   const [, setFetchBbox] = useAtom(fetchBboxAtom)
   const [, setSelected] = useAtom(selectedAtom)
   const [, setViewState] = useAtom(viewStateAtom)
+  const [exporting, setExporting] = useAtom(exportingAtom)
+  const [, setSourceName] = useAtom(sourceNameAtom)
   // Read `lod`/`mode` from the store at call time (not via closures): an open is
   // async, and the file may be reset or the mode switched while it is in flight.
   const store = useStore()
@@ -181,6 +195,7 @@ export function useFcbData() {
 
   const openUrl = useCallback(async (url: string) => {
     const seq = ++requestSeq
+    setSourceName(url)
     setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
     setAvailableLods([]); setLod(undefined) // a new file has its own LoD set
     setLoading(true)
@@ -191,10 +206,11 @@ export function useFcbData() {
     // it settles; only the failure path clears it here.
     if (r.type === 'opened') onOpened(r.header)
     else if (r.type === 'error') { setLoading(false); setStatus(`failed to open URL: ${r.message}`) }
-  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus])
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus, setSourceName])
 
   const openFile = useCallback(async (file: File) => {
     const seq = ++requestSeq
+    setSourceName(file.name)
     setReady(false); setRendered([]); setTotal(undefined); setActive(undefined)
     setAvailableLods([]); setLod(undefined) // a new file has its own LoD set
     setLoading(true)
@@ -204,7 +220,7 @@ export function useFcbData() {
     if (seq !== requestSeq) return
     if (r.type === 'opened') onOpened(r.header)
     else if (r.type === 'error') { setLoading(false); setStatus(`failed to open file: ${r.message}`) }
-  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus])
+  }, [onOpened, setReady, setRendered, setTotal, setActive, setAvailableLods, setLod, setLoading, setStatus, setSourceName])
 
   const query = useCallback((
     spec: { bboxSource?: [number, number, number, number]; where?: AttrCondition[] },
@@ -260,7 +276,29 @@ export function useFcbData() {
     void runQuery({ bboxSource: active.bboxSource, where: active.where, lod: newLod }, false)
   }, [active, runQuery, setLod, setSelected])
 
-  return { openUrl, openFile, query, queryViewport, loadNext, applyLod, status,
+  // Export the current query result. Re-runs the active query in the worker,
+  // converts to the chosen format there, and downloads the returned string.
+  const exportAs = useCallback(async (format?: ExportFormat) => {
+    const fmt = format ?? store.get(exportFormatAtom)
+    const a = store.get(activeQueryAtom)
+    const count = store.get(renderedAtom).length
+    if (a === undefined || count === 0) return
+    setExporting(true)
+    setStatus(`preparing ${FORMATS[fmt].label} …`)
+    const r = await callWorker({
+      type: 'export', id: ++msgId,
+      bboxSource: a.bboxSource, where: a.where, limit: a.limit, offset: a.offset, format: fmt,
+    })
+    setExporting(false)
+    if (r.type === 'error') { setStatus(`export failed: ${r.message}`); return }
+    if (r.type !== 'export-result') return
+    const filename = deriveFilename(store.get(sourceNameAtom), fmt)
+    triggerDownload(r.data, r.mime, filename)
+    setStatus(`downloaded ${filename} (${count} feature${count === 1 ? '' : 's'})`)
+  }, [store, setExporting, setStatus])
+
+  return { openUrl, openFile, query, queryViewport, loadNext, applyLod,
+           exportAs, exporting, status,
            header, rendered, total, lod, availableLods,
            hasMore: total !== undefined && active !== undefined
              && active.offset + active.limit < total }
