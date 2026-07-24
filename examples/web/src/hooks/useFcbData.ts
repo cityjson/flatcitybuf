@@ -59,9 +59,10 @@ function triggerDownload(data: string, mime: string, filename: string): void {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  // Revoke after a delay: some browsers need the object URL to stay valid until
-  // the download has actually started.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  // Revoke shortly after: the browser captures the Blob at click() time, so a
+  // brief grace period is enough for the download to start — and it avoids
+  // holding a potentially large Blob in memory any longer than necessary.
+  setTimeout(() => URL.revokeObjectURL(url), 4_000)
 }
 
 export function useFcbData() {
