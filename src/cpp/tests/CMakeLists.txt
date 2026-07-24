@@ -11,6 +11,7 @@ add_executable(fcb_tests
     test_packed_rtree.cpp
     test_keys.cpp
     test_attributes.cpp
+    test_writer_attribute.cpp
     test_geometry.cpp
     test_cityjson.cpp
     test_http.cpp

@@ -38,6 +38,7 @@ if(FCB_WITH_JSON)
     find_package(nlohmann_json 3.2.0 CONFIG REQUIRED)
     target_link_libraries(fcb_core_cpp PUBLIC nlohmann_json::nlohmann_json)
     target_compile_definitions(fcb_core_cpp PUBLIC FCB_WITH_JSON=1)
+    target_sources(fcb_core_cpp PRIVATE src/writer/attribute.cpp)
 endif()
 
 if(FCB_WITH_CURL)
