@@ -135,6 +135,75 @@ TEST_CASE("MultiSolid and CompositeSolid of equal depth flatten identically") {
     CHECK(msol.shells == csol.shells);
 }
 
+TEST_CASE("encode_semantics: MultiSurface (flat, depth 1)") {
+    auto boundaries_json = nlohmann::json::parse(R"([
+        [[0, 3, 2, 1]], [[4, 5, 6, 7]], [[0, 1, 5, 4]], [[0, 2, 3, 8]], [[10, 12, 23, 48]]
+    ])");
+    auto boundaries = encode_boundaries(GeometryKind::MultiSurface, boundaries_json);
+
+    auto semantics_json = nlohmann::json::parse(R"({
+        "surfaces": [
+            {"type": "WallSurface", "slope": 33.4, "children": [2]},
+            {"type": "RoofSurface", "slope": 66.6},
+            {"type": "OuterCeilingSurface", "parent": 0, "colour": "blue"}
+        ],
+        "values": [0, 0, null, 1, 2]
+    })");
+    auto encoded = encode_semantics(semantics_json, GeometryKind::MultiSurface, boundaries);
+    CHECK(encoded.surfaces == semantics_json.at("surfaces"));
+    REQUIRE(encoded.values.has_value());
+    CHECK(*encoded.values == std::vector<std::uint32_t>{0, 0, UINT32_MAX, 1, 2});
+
+    auto decoded = decode_semantics_values(GeometryKind::MultiSurface, view(boundaries.solids),
+                                           view(boundaries.shells), view(*encoded.values));
+    CHECK(decoded == semantics_json.at("values"));
+}
+
+TEST_CASE("encode_semantics: a null shell expands to one null per surface (Solid, depth 2)") {
+    auto boundaries_json = nlohmann::json::parse("[[[[0,1,2]], [[3,4,5]]], [[[6,7,8]]]]");
+    auto boundaries = encode_boundaries(GeometryKind::Solid, boundaries_json);
+
+    auto semantics_json = nlohmann::json::parse(R"({
+        "surfaces": [{"type": "RoofSurface"}],
+        "values": [[0, 0], null]
+    })");
+    auto encoded = encode_semantics(semantics_json, GeometryKind::Solid, boundaries);
+    REQUIRE(encoded.values.has_value());
+    CHECK(*encoded.values == std::vector<std::uint32_t>{0, 0, UINT32_MAX});
+    // Deliberately NOT round-tripped: a null shell does not round-trip its
+    // spelling (it decodes back as a run of per-surface nulls), matching
+    // Rust's own documented behavior.
+}
+
+TEST_CASE("encode_semantics: CompositeSolid (depth 3)") {
+    auto boundaries_json = nlohmann::json::parse(R"([
+        [[
+            [[0, 3, 2, 1, 22]], [[4, 5, 6, 7]], [[0, 1, 5, 4]], [[1, 2, 6, 5]]
+        ]],
+        [[
+            [[666, 667, 668]], [[74, 75, 76]], [[880, 881, 885]]
+        ]]
+    ])");
+    auto boundaries = encode_boundaries(GeometryKind::CompositeSolid, boundaries_json);
+
+    auto semantics_json = nlohmann::json::parse(R"({
+        "surfaces": [{"type": "RoofSurface"}, {"type": "WallSurface"}],
+        "values": [[[0, 1, 1, null]], [[null, null, null]]]
+    })");
+    auto encoded = encode_semantics(semantics_json, GeometryKind::CompositeSolid, boundaries);
+    REQUIRE(encoded.values.has_value());
+    CHECK(*encoded.values ==
+          std::vector<std::uint32_t>{0, 1, 1, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX});
+}
+
+TEST_CASE("encode_semantics: absent surfaces/null values are handled") {
+    auto boundaries =
+        encode_boundaries(GeometryKind::MultiSurface, nlohmann::json::parse("[[[0,1,2]]]"));
+    auto encoded = encode_semantics(nlohmann::json::parse(R"({"surfaces": [], "values": null})"),
+                                    GeometryKind::MultiSurface, boundaries);
+    CHECK_FALSE(encoded.values.has_value());
+}
+
 TEST_CASE("geometry_kind_from_name maps every known CityJSON type string") {
     CHECK(geometry_kind_from_name("MultiPoint") == GeometryKind::MultiPoint);
     CHECK(geometry_kind_from_name("MultiLineString") == GeometryKind::MultiLineString);
