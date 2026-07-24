@@ -245,18 +245,23 @@ opened in 2 HTTP request(s)
 ### `fcb_write_cityjson <input.jsonl> <output.fcb>`
 
 Writes a CityJSONSeq out as `.fcb`, using this port's own writer
-(`fcb::FcbWriter`) — no Rust toolchain involved. Every attribute column found
-gets a B+tree index (mirrors the Rust CLI's `-A`/`--index-all-attributes`).
+(`fcb::FcbWriter`) — no Rust toolchain involved. Every ordinary attribute
+column found gets a B+tree index at branching factor 256 (mirrors the Rust
+CLI's `-A`/`--index-all-attributes` default); semantic-surface attributes get
+their own separate schema and are encoded, but not indexed — same as `-A`
+alone in the CLI.
 
 ```
 $ ./build-native/fcb_write_cityjson ../../examples/data/delft.city.jsonl delft2.fcb
 ../../examples/data/delft.city.jsonl -> delft2.fcb
-  1115 feature(s), 7558422 byte(s)
+  1115 feature(s)
   44 attribute column(s), each with a B+tree index:
     column 0    b3_bag_bag_overlap
     column 1    b3_dak_type
     ...
     column 43   b3_bouwlagen
+  1 semantic-surface attribute column(s) (not indexed):
+    on_footprint_edge
 
 $ ./build-native/fcb_query_attributes delft2.fcb b3_h_dak_50p gt 20
 condition: b3_h_dak_50p gt 20 (column type Double)
@@ -265,15 +270,23 @@ condition: b3_h_dak_50p gt 20 (column type Double)
 
 Same 4 features `fcb_query_attributes` finds against the original
 `delft.fcb` above — the rewritten file differs in exact byte size (this
-example always uses the default B+tree branching factor, which the original
-file may not have), but is functionally identical.
+example's schema-building pass is a close but not exact reproduction of the
+Rust CLI's own, see the comment at the top of `write_cityjson.cpp`), but is
+functionally identical, right down to a semantic-surface attribute
+(`on_footprint_edge`) that an earlier version of this example silently
+dropped by never building a semantic attribute schema for it.
 
-`FcbWriter` streams: `add_feature` spools each feature's encoded bytes to a
-private temp file rather than holding the whole `CityJSONSeq` in memory, so
-this scales to input larger than available RAM — the same property Rust's
-own writer has, via its `tempfile` crate. Its output is validated against
-real Rust-written files byte-for-byte, not just by decoding correctly
-(`src/cpp/tests/test_writer_oracle.cpp`).
+`FcbWriter::add_feature` spools each feature's encoded bytes to a private
+temp file rather than holding every encoded feature in memory at once, and
+`write(std::ostream&)` streams the finished file straight to `out` — reading
+each feature's bytes back from the spool in fixed-size chunks rather than
+materializing the whole feature section, let alone the whole file, as one
+buffer. (The `write()` overload returning a `std::vector<std::uint8_t>` is a
+convenience for small files and tests; it does not have this property, since
+returning the complete bytes by value requires holding them all at once —
+use `write(out)` for anything where output size matters.) `FcbWriter`'s
+output is validated against real Rust-written files byte-for-byte, not just
+by decoding correctly (`src/cpp/tests/test_writer_oracle.cpp`).
 
 ## Not covered here
 

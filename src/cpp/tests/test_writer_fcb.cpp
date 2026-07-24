@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <iterator>
 
 #include <doctest/doctest.h>
 
@@ -337,5 +338,48 @@ TEST_CASE("FcbWriter streams many features through the temp file without holding
     while (it.next())
         ++count;
     CHECK(count == 200);
+    std::remove(tmp.c_str());
+}
+
+TEST_CASE("FcbWriter::write(ostream&) produces byte-identical output to write(), and can write "
+          "straight to a real file") {
+    // The `ostream` overload is the one that actually delivers the
+    // streaming/bounded-memory property (write() the vector-returning
+    // convenience wrapper does not, and never claims to) -- flagged during
+    // the M8 codex review, since the original version of this milestone
+    // only ever exercised the vector-returning overload.
+    ordered_json cj = make_metadata();
+    std::vector<ordered_json> features;
+    for (int i = 0; i < 5; ++i)
+        features.push_back(make_feature("f" + std::to_string(i), ordered_json{{"n", i}}, i));
+    AttributeSchema schema;
+    for (const auto& f : features)
+        add_attributes(schema, f.at("CityObjects").begin().value().at("attributes"));
+
+    FcbWriterOptions options;
+    options.attribute_indices.emplace_back("n", std::nullopt);
+
+    FcbWriter w1(cj, options, schema, std::nullopt);
+    for (const auto& f : features)
+        w1.add_feature(f);
+    std::vector<std::uint8_t> via_vector = w1.write();
+
+    FcbWriter w2(cj, options, schema, std::nullopt);
+    for (const auto& f : features)
+        w2.add_feature(f);
+    const std::string tmp = "test_writer_fcb_ostream_overload.fcb";
+    {
+        std::ofstream out(tmp, std::ios::binary);
+        REQUIRE_MESSAGE(out.good(), "cannot create " << tmp);
+        w2.write(out);
+    }
+
+    std::ifstream in(tmp, std::ios::binary);
+    std::vector<std::uint8_t> via_ostream((std::istreambuf_iterator<char>(in)),
+                                          std::istreambuf_iterator<char>());
+    CHECK(via_vector == via_ostream);
+
+    FcbReader r = FcbReader::open_file(tmp);
+    CHECK(r.header().info().features_count == 5);
     std::remove(tmp.c_str());
 }

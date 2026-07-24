@@ -11,9 +11,9 @@
 
 #    include <array>
 #    include <cstdint>
-#    include <filesystem>
-#    include <fstream>
+#    include <cstdio>
 #    include <optional>
+#    include <ostream>
 #    include <string>
 #    include <vector>
 
@@ -37,17 +37,32 @@ struct FcbWriterOptions {
 };
 
 /// Streaming writer for one `.fcb` file, mirroring Rust's own `FcbWriter`
-/// (writer/mod.rs) shape and its memory-scalability property: each
-/// `add_feature` call encodes and spools that feature's bytes to a private
-/// temporary file rather than keeping every feature in memory at once, so
-/// a `CityJSONSeq` far larger than available RAM can still be written --
-/// Rust's own writer does the same, via the `tempfile` crate.
+/// (writer/mod.rs) shape: each `add_feature` call encodes and spools that
+/// feature's bytes to a private temporary file rather than keeping every
+/// encoded feature in memory at once -- the same reason Rust's own writer
+/// uses the `tempfile` crate. This keeps PEAK memory during accumulation to
+/// roughly one feature at a time, regardless of how many features are
+/// added, so a caller that itself streams its `CityJSONSeq` input (parsing
+/// one line, calling `add_feature`, discarding the parsed JSON) never needs
+/// the whole input in memory either.
+///
+/// The `write(std::ostream&)` overload preserves that property all the way
+/// through finalization: it streams each feature's bytes from the spool
+/// straight to `out` in fixed-size chunks, so finalizing never holds more
+/// than one chunk of feature data in memory. The `write()` overload
+/// returning `std::vector<std::uint8_t>` is a convenience wrapper for
+/// smaller files/tests and does NOT have that property -- it necessarily
+/// materializes the complete output in memory, since that is what its
+/// return type requires. Use the `ostream` overload (writing to an
+/// `std::ofstream` opened on the real output path) for anything where
+/// output size matters.
 ///
 /// Usage:
 /// ```cpp
 /// FcbWriter w(std::move(cj_metadata), options, std::move(attr_schema), std::nullopt);
 /// for (const auto& feature : features) w.add_feature(feature);
-/// std::vector<std::uint8_t> bytes = w.write();
+/// std::ofstream out("result.fcb", std::ios::binary);
+/// w.write(out);
 /// ```
 ///
 /// Not copyable or movable: it owns a live handle to its temp file for its
@@ -78,12 +93,21 @@ class FcbWriter {
 
     /// Finalizes the file: hilbert-sorts features by bbox (unless
     /// `options.write_index` is false or no features were added), builds
-    /// the spatial and attribute indices, and assembles the complete byte
-    /// stream -- magic bytes, header, R-tree, attribute indices, features,
+    /// the spatial and attribute indices, and streams the complete byte
+    /// sequence -- magic bytes, header, R-tree, attribute indices, features,
     /// in that order, byte-identical to what `FcbWriter::write`
-    /// (writer/mod.rs:191-278) produces for the same input.
+    /// (writer/mod.rs:191-278) produces for the same input -- to `out`,
+    /// copying feature bytes from the spool file in fixed-size chunks
+    /// rather than materializing them all at once.
     ///
-    /// May be called only once; throws `fcb::Error{IoError}` otherwise.
+    /// May be called only once (either overload); throws
+    /// `fcb::Error{IoError}` otherwise.
+    void write(std::ostream& out);
+
+    /// Convenience wrapper around `write(std::ostream&)` that returns the
+    /// complete file as one buffer. Does NOT have the streaming overload's
+    /// bounded-memory property -- prefer the `ostream` overload for large
+    /// output.
     std::vector<std::uint8_t> write();
 
   private:
@@ -103,8 +127,17 @@ class FcbWriter {
     double translate_x_;
     double translate_y_;
 
-    std::filesystem::path tmp_path_;
-    std::fstream tmp_;
+    // `std::tmpfile()`, not a hand-rolled path under
+    // `std::filesystem::temp_directory_path()`: the C standard guarantees
+    // it names a file "different from any other existing file" and removes
+    // it automatically on close, which is exactly the anonymous,
+    // collision-safe temp file Rust's own `tempfile` crate provides --
+    // reusing that guarantee is safer than reimplementing it. 64-bit
+    // seeking uses `fseeko`/`ftello` (POSIX) or `_fseeki64` (MSVC) instead
+    // of `fseek`'s `long` offset, which is only 32 bits wide on some
+    // platforms -- a real limit for a writer whose whole point is handling
+    // files too large to fit in memory.
+    std::FILE* tmp_ = nullptr;
     std::uint64_t tmp_write_pos_ = 0;
     bool written_ = false;
 
