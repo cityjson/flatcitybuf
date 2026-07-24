@@ -74,6 +74,24 @@ void push_material_shell(const nlohmann::json* shell, MaterialMapping& mv) {
     }
 }
 
+void push_textured_ring(const nlohmann::json& ring, TextureMapping& m) {
+    m.strings.push_back(static_cast<std::uint32_t>(ring.size()));
+    for (const auto& v : ring)
+        m.vertices.push_back(material_index(v));  // null-aware, same as material
+}
+
+void push_textured_surface(const nlohmann::json& surface, TextureMapping& m) {
+    for (const auto& ring : surface)
+        push_textured_ring(ring, m);
+    m.surfaces.push_back(static_cast<std::uint32_t>(surface.size()));
+}
+
+void push_textured_shell(const nlohmann::json& shell, TextureMapping& m) {
+    for (const auto& surface : shell)
+        push_textured_surface(surface, m);
+    m.shells.push_back(static_cast<std::uint32_t>(shell.size()));
+}
+
 }  // namespace
 
 GeometryKind geometry_kind_from_name(const std::string& name) {
@@ -248,6 +266,53 @@ std::vector<MaterialMapping> encode_material(const nlohmann::json& material, Geo
 
             case GeometryKind::GeometryInstance:
                 break;
+        }
+        out.push_back(std::move(mapping));
+    }
+    return out;
+}
+
+std::vector<TextureMapping> encode_texture(const nlohmann::json& texture, GeometryKind kind) {
+    std::vector<TextureMapping> out;
+    if (!texture.is_object())
+        return out;
+
+    for (const auto& [theme, t] : texture.items()) {
+        TextureMapping mapping;
+        mapping.theme = theme;
+
+        auto values_it = t.find("values");
+        if (values_it != t.end() && !values_it->is_null()) {
+            mapping.has_values = true;
+            switch (kind) {
+                case GeometryKind::MultiPoint:
+                case GeometryKind::MultiLineString:
+                    // Forbidden by the CityJSON schema; kept only for
+                    // switch-exhaustiveness (never actually reached, since
+                    // a valid file has no texture on these types).
+                    break;
+                case GeometryKind::MultiSurface:
+                case GeometryKind::CompositeSurface:
+                    for (const auto& surface : *values_it)
+                        push_textured_surface(surface, mapping);
+                    mapping.shells.push_back(static_cast<std::uint32_t>(values_it->size()));
+                    break;
+                case GeometryKind::Solid:
+                    for (const auto& shell : *values_it)
+                        push_textured_shell(shell, mapping);
+                    mapping.solids.push_back(static_cast<std::uint32_t>(values_it->size()));
+                    break;
+                case GeometryKind::MultiSolid:
+                case GeometryKind::CompositeSolid:
+                    for (const auto& solid : *values_it) {
+                        for (const auto& shell : solid)
+                            push_textured_shell(shell, mapping);
+                        mapping.solids.push_back(static_cast<std::uint32_t>(solid.size()));
+                    }
+                    break;
+                case GeometryKind::GeometryInstance:
+                    break;
+            }
         }
         out.push_back(std::move(mapping));
     }

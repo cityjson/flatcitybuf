@@ -289,6 +289,91 @@ TEST_CASE("encode_material: values: null is a NullValues mapping, not dropped") 
     CHECK(encoded[0].theme == "t");
 }
 
+TEST_CASE("encode_texture: MultiSurface-depth values (the shallowest a texture can be)") {
+    auto texture = nlohmann::json::parse(R"({
+        "t": {"values": [[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]]}
+    })");
+    auto encoded = encode_texture(texture, GeometryKind::MultiSurface);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].theme == "t");
+    CHECK(encoded[0].has_values);
+    CHECK(encoded[0].vertices ==
+          std::vector<std::uint32_t>{0, 10, 20, 30, 1, 11, 21, UINT32_MAX, 2, 12, UINT32_MAX, 32});
+    CHECK(encoded[0].strings == std::vector<std::uint32_t>{4, 4, 4});
+    CHECK(encoded[0].surfaces == std::vector<std::uint32_t>{1, 1, 1});
+    CHECK(encoded[0].shells == std::vector<std::uint32_t>{3});
+    CHECK(encoded[0].solids.empty());
+}
+
+TEST_CASE("encode_texture: Solid-depth values") {
+    auto texture = nlohmann::json::parse(R"({
+        "t": {"values": [
+            [[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]],
+            [[[3, 13, 23, 33]], [[4, 14, 24, null]]]
+        ]}
+    })");
+    auto encoded = encode_texture(texture, GeometryKind::Solid);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].vertices ==
+          std::vector<std::uint32_t>{0, 10, 20, 30, 1, 11, 21, UINT32_MAX, 2, 12, UINT32_MAX, 32,
+                                     3, 13, 23, 33, 4, 14, 24, UINT32_MAX});
+    CHECK(encoded[0].strings == std::vector<std::uint32_t>{4, 4, 4, 4, 4});
+    CHECK(encoded[0].surfaces == std::vector<std::uint32_t>{1, 1, 1, 1, 1});
+    CHECK(encoded[0].shells == std::vector<std::uint32_t>{3, 2});
+    CHECK(encoded[0].solids == std::vector<std::uint32_t>{2});
+}
+
+TEST_CASE("encode_texture: CompositeSolid-depth values") {
+    auto texture = nlohmann::json::parse(R"({
+        "t": {"values": [
+            [
+                [[[0, 10, 20]], [[1, 11, null]]],
+                [[[2, 12, 22]], [[3, null, 23]]]
+            ],
+            [[[[4, 14, 24]], [[5, 15, 25]]]]
+        ]}
+    })");
+    auto encoded = encode_texture(texture, GeometryKind::CompositeSolid);
+    REQUIRE(encoded.size() == 1);
+    CHECK(encoded[0].vertices == std::vector<std::uint32_t>{0, 10, 20, 1, 11, UINT32_MAX, 2, 12, 22,
+                                                            3, UINT32_MAX, 23, 4, 14, 24, 5, 15,
+                                                            25});
+    CHECK(encoded[0].strings == std::vector<std::uint32_t>{3, 3, 3, 3, 3, 3});
+    CHECK(encoded[0].surfaces == std::vector<std::uint32_t>{1, 1, 1, 1, 1, 1});
+    CHECK(encoded[0].shells == std::vector<std::uint32_t>{2, 2, 2});
+    CHECK(encoded[0].solids == std::vector<std::uint32_t>{2, 1});
+}
+
+TEST_CASE("encode_texture: multiple themes") {
+    auto texture = nlohmann::json::parse(R"({
+        "winter": {"values": [[[0, 10, 20]]]},
+        "summer": {"values": [[[1, 11, null]]]}
+    })");
+    auto encoded = encode_texture(texture, GeometryKind::MultiSurface);
+    REQUIRE(encoded.size() == 2);
+
+    auto find = [&](const std::string& theme) -> const TextureMapping& {
+        for (auto& t : encoded)
+            if (t.theme == theme)
+                return t;
+        FAIL("missing theme " << theme);
+        static TextureMapping dummy;
+        return dummy;
+    };
+    CHECK(find("winter").vertices == std::vector<std::uint32_t>{0, 10, 20});
+    CHECK(find("winter").strings == std::vector<std::uint32_t>{3});
+    CHECK(find("summer").vertices == std::vector<std::uint32_t>{1, 11, UINT32_MAX});
+    CHECK(find("summer").strings == std::vector<std::uint32_t>{3});
+}
+
+TEST_CASE("encode_texture: a theme with no values member has_values is false") {
+    auto encoded =
+        encode_texture(nlohmann::json::parse(R"({"t": {}})"), GeometryKind::MultiSurface);
+    REQUIRE(encoded.size() == 1);
+    CHECK_FALSE(encoded[0].has_values);
+    CHECK(encoded[0].vertices.empty());
+}
+
 TEST_CASE("geometry_kind_from_name maps every known CityJSON type string") {
     CHECK(geometry_kind_from_name("MultiPoint") == GeometryKind::MultiPoint);
     CHECK(geometry_kind_from_name("MultiLineString") == GeometryKind::MultiLineString);

@@ -87,6 +87,26 @@ struct MaterialMapping {
 /// `values`'s own shape.
 std::vector<MaterialMapping> encode_material(const nlohmann::json& material, GeometryKind kind);
 
+/// One theme's texture mapping. `has_values` distinguishes a theme with no
+/// `values` member at all (schema-valid; the per-theme texture object has
+/// no `required`) from one whose `values` array is present. Mirrors
+/// `TextureMapping` (writer/geom_encoder.rs).
+struct TextureMapping {
+    std::string theme;
+    bool has_values = false;
+    std::vector<std::uint32_t> solids, shells, surfaces, strings, vertices;
+};
+
+/// Flattens `texture` (the CityJSON `geometry.texture` object) at the depth
+/// `kind` implies. `texture.values` nests exactly as deeply as `boundaries`
+/// itself (one UV-vertex index per boundary vertex index), unlike material,
+/// which is one level shallower. Nullable only at the leaf: unlike
+/// material, there is no wire encoding for a whole-null intermediate level,
+/// so nothing here decodes an intermediate `null`. Mirrors `encode_texture`
+/// (writer/geom_encoder.rs:290-361), dispatching on `kind` rather than on
+/// `values`'s own shape.
+std::vector<TextureMapping> encode_texture(const nlohmann::json& texture, GeometryKind kind);
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON
