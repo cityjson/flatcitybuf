@@ -28,7 +28,11 @@ export type SpatialMode = 'all' | 'bbox' | 'follow'
 export const spatialModeAtom = atom<SpatialMode>('follow')
 
 /** Max features rendered per query (and "Load next batch" page size). */
-export const limitAtom = atom<number>(200)
+export const limitAtom = atom<number>(1000)
+
+/** True when follow-camera is on but the view is zoomed too far out to fetch
+ *  (the area would be too large). Drives a "zoom in" hint instead of a query. */
+export const followTooFarAtom = atom<boolean>(false)
 
 /** The active attribute filter, applied on top of every spatial mode. `[]`/
  *  undefined means no attribute filter. Held in an atom (not QueryPanel local
@@ -57,8 +61,8 @@ export const readyAtom = atom<boolean>(false)
  *  it never blocks input, so the user can keep panning while data arrives. */
 export const loadingAtom = atom<boolean>(false)
 
-/** The lng/lat bbox actually sent to the last follow-camera query (the visible
- *  area plus its pad). Drawn on the map so the fetched region is visible rather
+/** The lng/lat bbox actually sent to the last follow-camera query (inset inside
+ *  the visible area). Drawn on the map so the fetched region is visible rather
  *  than something you have to infer. Undefined when the current results did not
  *  come from a camera-derived bbox. */
 export const fetchBboxAtom = atom<[number, number, number, number] | undefined>(undefined)
