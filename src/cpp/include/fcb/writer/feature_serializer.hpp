@@ -48,6 +48,26 @@ SurfaceType semantic_surface_type_from_name(const std::string& name);
 ::flatbuffers::Offset<::Appearance> to_appearance(::flatbuffers::FlatBufferBuilder& fbb,
                                                   const nlohmann::json& appearance);
 
+/// Builds one `Geometry` table -- boundaries, and whatever semantics,
+/// material and texture it carries -- from a CityJSON geometry object
+/// (everything but a `GeometryInstance`, which `to_geometry_instance`
+/// handles). `semantic_attr_schema` is `nullptr` when the file has no
+/// semantic attribute schema at all; a present-but-empty schema is a
+/// distinct, valid state. Mirrors `to_geometry` (writer/serializer.rs:891-1065).
+::flatbuffers::Offset<::Geometry> to_geometry(::flatbuffers::FlatBufferBuilder& fbb,
+                                              const nlohmann::json& geometry,
+                                              const AttributeSchema* semantic_attr_schema);
+
+/// Builds a `GeometryInstance` table: the template index, the 4x4
+/// transformation matrix, and the single-element boundaries array holding
+/// the reference vertex index. Throws `fcb::Error` if `geometry`'s `type`
+/// is not `"GeometryInstance"` (Rust `panic!`s here instead -- a
+/// programmer-error assertion that becomes a catchable exception in a
+/// library rather than an abort). Mirrors `to_geometry_instance`
+/// (writer/serializer.rs:1067-1102).
+::flatbuffers::Offset<::GeometryInstance>
+to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& geometry);
+
 }  // namespace fcb
 
 #endif  // FCB_WITH_JSON

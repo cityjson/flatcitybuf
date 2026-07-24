@@ -71,6 +71,46 @@ to_color(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& obj, const
     return fbb.CreateVector(v);
 }
 
+/// One `SemanticObject`, built from a raw CityJSON semantic surface object
+/// (a JSON object, not a typed struct -- there is no cjseq-equivalent in
+/// C++). `other` -- every member besides `type`/`parent`/`children` -- is
+/// encoded against `semantic_attr_schema` when present and non-empty;
+/// `semantic_attr_schema == nullptr` (no schema at all, as opposed to an
+/// empty one) always yields no attributes, matching Rust's `Option<&..>`.
+::flatbuffers::Offset<::SemanticObject>
+to_semantic_object(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& surface,
+                   const AttributeSchema* semantic_attr_schema) {
+    auto [type_, extension_type_name] =
+        semantic_surface_type_from_name(surface.at("type").get<std::string>());
+    auto extension_type =
+        extension_type_name ? std::optional(fbb.CreateString(*extension_type_name)) : std::nullopt;
+
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<std::uint32_t>>> children;
+    if (auto it = surface.find("children"); it != surface.end() && it->is_array()) {
+        std::vector<std::uint32_t> c;
+        for (const auto& v : *it)
+            c.push_back(v.get<std::uint32_t>());
+        children = fbb.CreateVector(c);
+    }
+
+    ::flatbuffers::Optional<std::uint32_t> parent = ::flatbuffers::nullopt;
+    if (auto it = surface.find("parent"); it != surface.end() && !it->is_null())
+        parent = it->get<std::uint32_t>();
+
+    nlohmann::json other = nlohmann::json::object();
+    for (const auto& [key, val] : surface.items())
+        if (key != "type" && key != "parent" && key != "children")
+            other[key] = val;
+
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<std::uint8_t>>> attributes;
+    if (!other.empty() && semantic_attr_schema != nullptr) {
+        attributes = fbb.CreateVector(encode_attributes_with_schema(other, *semantic_attr_schema));
+    }
+
+    return CreateSemanticObject(fbb, type_, attributes.value_or(0), children.value_or(0), parent,
+                                extension_type.value_or(0));
+}
+
 }  // namespace
 
 CoType city_object_type_from_name(const std::string& name) {
@@ -188,6 +228,117 @@ SurfaceType semantic_surface_type_from_name(const std::string& name) {
     return CreateAppearance(fbb, materials_off.value_or(0), textures_off.value_or(0),
                             vertices_texture_off.value_or(0), default_theme_texture_off.value_or(0),
                             default_theme_material_off.value_or(0));
+}
+
+::flatbuffers::Offset<::Geometry> to_geometry(::flatbuffers::FlatBufferBuilder& fbb,
+                                              const nlohmann::json& geometry,
+                                              const AttributeSchema* semantic_attr_schema) {
+    const GeometryKind kind = geometry_kind_from_name(geometry.at("type").get<std::string>());
+    const auto type_ = static_cast<::GeometryType>(kind);
+    auto lod = geometry.find("lod");
+    auto lod_off = (lod != geometry.end() && lod->is_string())
+                       ? std::optional(fbb.CreateString(lod->get<std::string>()))
+                       : std::nullopt;
+
+    EncodedGeometry encoded = encode(geometry);
+    auto solids_off = fbb.CreateVector(encoded.boundaries.solids);
+    auto shells_off = fbb.CreateVector(encoded.boundaries.shells);
+    auto surfaces_off = fbb.CreateVector(encoded.boundaries.surfaces);
+    auto strings_off = fbb.CreateVector(encoded.boundaries.strings);
+    auto boundaries_off = fbb.CreateVector(encoded.boundaries.indices);
+
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<std::uint32_t>>> semantics_values_off;
+    std::optional<
+        ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::SemanticObject>>>>
+        semantics_objects_off;
+    if (encoded.semantics) {
+        std::vector<::flatbuffers::Offset<::SemanticObject>> objects;
+        for (const auto& surface : encoded.semantics->surfaces)
+            objects.push_back(to_semantic_object(fbb, surface, semantic_attr_schema));
+        semantics_objects_off = fbb.CreateVector(objects);
+        if (encoded.semantics->values)
+            semantics_values_off = fbb.CreateVector(*encoded.semantics->values);
+    }
+
+    std::optional<
+        ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::MaterialMapping>>>>
+        material_off;
+    if (encoded.materials) {
+        std::vector<::flatbuffers::Offset<::MaterialMapping>> mappings;
+        for (const auto& m : *encoded.materials) {
+            auto theme = fbb.CreateString(m.theme);
+            switch (m.kind) {
+                case fcb::MaterialMapping::Kind::Value:
+                    mappings.push_back(CreateMaterialMapping(
+                        fbb, theme, 0, 0, 0, ::flatbuffers::Optional<std::uint32_t>(m.value)));
+                    break;
+                case fcb::MaterialMapping::Kind::Values:
+                    // Present-but-empty: created unconditionally, even when
+                    // a level genuinely has zero entries, so `[]` stays
+                    // distinct from an absent field.
+                    mappings.push_back(CreateMaterialMapping(
+                        fbb, theme, fbb.CreateVector(m.solids), fbb.CreateVector(m.shells),
+                        fbb.CreateVector(m.vertices), ::flatbuffers::nullopt));
+                    break;
+                case fcb::MaterialMapping::Kind::NullValues:
+                    mappings.push_back(
+                        CreateMaterialMapping(fbb, theme, 0, 0, 0, ::flatbuffers::nullopt));
+                    break;
+            }
+        }
+        material_off = fbb.CreateVector(mappings);
+    }
+
+    std::optional<
+        ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::TextureMapping>>>>
+        texture_off;
+    if (encoded.textures) {
+        std::vector<::flatbuffers::Offset<::TextureMapping>> mappings;
+        for (const auto& t : *encoded.textures) {
+            auto theme = fbb.CreateString(t.theme);
+            if (t.has_values) {
+                // As with material Values: all five arrays are created
+                // unconditionally, even where empty.
+                mappings.push_back(CreateTextureMapping(
+                    fbb, theme, fbb.CreateVector(t.solids), fbb.CreateVector(t.shells),
+                    fbb.CreateVector(t.surfaces), fbb.CreateVector(t.strings),
+                    fbb.CreateVector(t.vertices)));
+            } else {
+                mappings.push_back(CreateTextureMapping(fbb, theme, 0, 0, 0, 0, 0));
+            }
+        }
+        texture_off = fbb.CreateVector(mappings);
+    }
+
+    return CreateGeometry(fbb, type_, lod_off.value_or(0), solids_off, shells_off, surfaces_off,
+                          strings_off, boundaries_off, semantics_values_off.value_or(0),
+                          semantics_objects_off.value_or(0), material_off.value_or(0),
+                          texture_off.value_or(0));
+}
+
+::flatbuffers::Offset<::GeometryInstance>
+to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::json& geometry) {
+    if (geometry.at("type").get<std::string>() != "GeometryInstance") {
+        throw Error(ErrorCode::InvalidAttributeValue,
+                    "to_geometry_instance called on a non-GeometryInstance geometry");
+    }
+
+    const std::uint32_t template_ = geometry.at("template").get<std::uint32_t>();
+
+    std::vector<std::uint32_t> indices;
+    for (const auto& v : geometry.at("boundaries"))
+        indices.push_back(v.get<std::uint32_t>());
+    auto boundaries_off = fbb.CreateVector(indices);
+
+    const auto& m = geometry.at("transformationMatrix");
+    ::TransformationMatrix matrix(
+        m.at(0).get<double>(), m.at(1).get<double>(), m.at(2).get<double>(), m.at(3).get<double>(),
+        m.at(4).get<double>(), m.at(5).get<double>(), m.at(6).get<double>(), m.at(7).get<double>(),
+        m.at(8).get<double>(), m.at(9).get<double>(), m.at(10).get<double>(),
+        m.at(11).get<double>(), m.at(12).get<double>(), m.at(13).get<double>(),
+        m.at(14).get<double>(), m.at(15).get<double>());
+
+    return CreateGeometryInstance(fbb, &matrix, template_, boundaries_off);
 }
 
 }  // namespace fcb
