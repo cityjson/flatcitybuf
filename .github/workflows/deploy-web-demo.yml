@@ -1,0 +1,58 @@
+name: Deploy web demo (Cloudflare)
+
+# Deploys examples/web (the browser viewer) to Cloudflare Workers static
+# assets on every push to main that touches the demo or the reader it
+# depends on. Kept separate from docs.yml/GitHub Pages -- a repo has exactly
+# one Pages deployment target, and this needs its own regardless of that.
+#
+# account_id lives in examples/web/wrangler.jsonc (not a secret, same as any
+# wrangler.toml); only the deploy token is secret. One-time setup: add a
+# CLOUDFLARE_API_TOKEN repository secret (Settings -> Secrets and variables
+# -> Actions), a token scoped to "Edit Cloudflare Workers" for this account.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/web/**"
+      - "src/ts/**"
+      - ".github/workflows/deploy-web-demo.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web-demo-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just task runner
+        uses: taiki-e/install-action@just
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # examples/web resolves @cityjson/flatcitybuf from src/ts/dist via a
+      # file: dependency, so the reader has to be built first (same order the
+      # root justfile's DIRS fan-out uses).
+      - name: Build the reader package
+        run: just build
+        working-directory: src/ts
+
+      - name: Build the web demo
+        run: just build
+        working-directory: examples/web
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: examples/web
+          command: deploy
