@@ -25,7 +25,13 @@ FlatCityBuf revolutionizes 3D city model storage and retrieval by combining the 
 
 ## Demo
 
-Web prototype can be available from **[https://flatcitybuf-prototype.hideba.me](https://flatcitybuf-prototype.hideba.me/)**
+Try the browser viewer live at
+**[flatcitybuf-web-demo.baba-papa1120-ba.workers.dev](https://flatcitybuf-web-demo.baba-papa1120-ba.workers.dev/)** —
+open a `.fcb` over HTTP range requests (the full 3DBAG dataset by default) or a
+local file, run spatial and attribute queries, and render the result with
+deck.gl. No server component; reading is pure TypeScript, with export to
+CityJSON/OBJ using a lazy-loaded WASM helper. Source in
+[`examples/web`](examples/web). Supersedes the earlier WASM-based prototype.
 
 <https://github.com/user-attachments/assets/ab49f026-1907-4a25-a5fb-8bc69e9a102b>
 
@@ -197,6 +203,7 @@ cargo bench -p fcb_core --bench read -- --release
 ## 📚 Documentation
 
 - **[API Documentation](https://docs.rs/fcb_core)** - Comprehensive API reference
+- **[API reference, all languages](https://cityjson.github.io/flatcitybuf/)** - Rust, C++, Python and TypeScript docs, rebuilt on every push to `main`
 - **[MSc thesis at TU Delft](https://resolver.tudelft.nl/uuid:6727c979-5e46-4fe0-9349-a7803e825d02)** - FlatCityBuf was developed by @hideba for his MSc thesis in Geomatics, read all the details!
 
 ---

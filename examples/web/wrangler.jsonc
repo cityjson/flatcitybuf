@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Pure static SPA: no Worker code, just the Vite build served as assets.
+  // account_id is not a secret (it's the same value you'd put in wrangler.toml
+  // for any project on this account) -- only the deploy token is.
+  "name": "flatcitybuf-web-demo",
+  "account_id": "6cc02f85299aabbb646246d5f6befc21",
+  "compatibility_date": "2026-07-24",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

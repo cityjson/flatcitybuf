@@ -13,6 +13,10 @@ name: API documentation
 # this workflow never encodes a per-language command -- only where the output
 # lands.
 #
+# The examples/web demo is NOT built here: it deploys separately to Cloudflare
+# Workers (see deploy-web-demo.yml). A repo has exactly one Pages deployment
+# target, so it never shared this one.
+#
 # Called by release.yml (which passes release_tag, so the site is also
 # attached to the release as a tarball), and runnable on its own.
 
