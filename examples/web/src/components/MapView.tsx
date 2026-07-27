@@ -5,7 +5,7 @@ import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
 import { DeckGL } from '@deck.gl/react'
 import { useAtom, useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
-import { Map } from 'react-map-gl/maplibre'
+import { AttributionControl, Map } from 'react-map-gl/maplibre'
 import { useCameraFollow } from '../hooks/useCameraFollow'
 import { useDrawBbox } from '../hooks/useDrawBbox'
 import { BuildingLayer } from '../render/BuildingLayer'
@@ -33,6 +33,14 @@ function useCanvasSize(): { width: number; height: number } {
 }
 
 const BASEMAP = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+
+// 3DBAG is CC BY 4.0 and requires a visible credit that links to its copyright
+// page (https://docs.3dbag.nl/en/copyright). Fed through MapLibre's attribution
+// control as `customAttribution`, so it sits alongside — not instead of — the
+// basemap's own CARTO/OpenStreetMap credits in the bottom-right corner.
+const FCB_ATTRIBUTION =
+  '<a href="https://docs.3dbag.nl/en/copyright" target="_blank" '
+  + 'rel="noopener noreferrer">© 3DBAG by tudelft3d and 3DGI</a>'
 
 /** True only once `flag` has been on for `ms`. Warm queries finish in ~10 ms,
  *  so showing the indicator immediately would just flicker. */
@@ -180,7 +188,12 @@ export function MapView() {
         }
       }}
     >
-      <Map mapStyle={BASEMAP} />
+      {/* `attributionControl={false}` stops MapLibre from auto-creating its own
+          control; the explicit one below merges the basemap credits with the
+          3DBAG credit into a single bottom-right control. */}
+      <Map mapStyle={BASEMAP} attributionControl={false}>
+        <AttributionControl compact={false} customAttribution={FCB_ATTRIBUTION} />
+      </Map>
       {/* Passive: `pointer-events-none` means it can never swallow a drag or
           click, so panning stays responsive while data is still arriving. */}
       {showLoading && (
