@@ -26,14 +26,14 @@ FlatCityBuf revolutionizes 3D city model storage and retrieval by combining the 
 ## Demo
 
 Try the browser viewer live at
-**[flatcitybuf-web-demo.baba-papa1120-ba.workers.dev](https://flatcitybuf-web-demo.baba-papa1120-ba.workers.dev/)** —
+**[flatcitybuf-prototype.hideba.me](https://flatcitybuf-prototype.hideba.me)** —
 open a `.fcb` over HTTP range requests (the full 3DBAG dataset by default) or a
 local file, run spatial and attribute queries, and render the result with
 deck.gl. No server component; reading is pure TypeScript, with export to
 CityJSON/OBJ using a lazy-loaded WASM helper. Source in
 [`examples/web`](examples/web). Supersedes the earlier WASM-based prototype.
 
-<https://github.com/user-attachments/assets/ab49f026-1907-4a25-a5fb-8bc69e9a102b>
+https://github.com/user-attachments/assets/3ae6a0f8-7e31-42da-8f59-0396f037c716
 
 ## Example FlatCityBuf File
 
