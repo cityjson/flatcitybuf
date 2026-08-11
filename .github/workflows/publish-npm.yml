@@ -53,6 +53,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Build BEFORE typecheck: the examples resolve @cityjson/flatcitybuf
+      # through the package self-reference into dist/, absent on a fresh
+      # checkout (same ordering constraint as `just check` in src/ts). The
+      # build output embeds no version, so building before the bump is fine —
+      # npm publish reads the version from package.json at pack time.
+      - name: Build the package
+        run: npm run build
+
       - name: Typecheck and test before publishing
         # ci-ts.yml gates the source on every push, but a dispatch can run on
         # any commit; re-running the checks here makes it impossible to publish
@@ -71,9 +79,6 @@ jobs:
           # what is committed. No tag yet: publish must succeed first.
           VERSION="$(npm version "$BUMP" --no-git-tag-version)"
           echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Build the package
-        run: npm run build
 
       - name: Verify the artifact before publishing
         run: |
