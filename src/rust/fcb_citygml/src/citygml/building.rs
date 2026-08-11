@@ -1,11 +1,12 @@
 //! The building module: `bldg:Building`.
 //!
-//! Only the geometry of the building itself is read here. Its attributes,
-//! its boundary surfaces and its nested parts and installations each arrive
-//! with their own task, and each is additive: a property this reader does not
+//! The geometry and the attributes of the building itself are read here. Its
+//! boundary surfaces and its nested parts and installations each arrive with
+//! their own task, and each is additive: a property this reader does not
 //! recognise is passed over silently rather than reported, because at this
 //! stage nearly every property of a real building is one of those.
 
+use super::attributes::read_common_attributes;
 use crate::gml::{parse_geometry, GmlGeometry, XlinkRegistry};
 use crate::model::{IntermediateGeometry, IntermediateObject};
 use crate::xml::XmlNode;
@@ -62,6 +63,7 @@ pub(crate) fn read_building(
         .map(str::to_owned)
         .unwrap_or_else(|| format!("citygml-obj-{member_index}"));
     let mut object = IntermediateObject::new(id, cjseq::CityObjectType::Building);
+    read_common_attributes(node, &mut object.attributes, report);
     object.geometries = read_lod_geometries(node, registry, report)?;
     Ok(object)
 }

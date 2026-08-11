@@ -312,7 +312,7 @@ fn geometry_srs_name(member: &XmlNode) -> Option<String> {
 }
 
 /// Whether a node is the named element in one of those namespaces.
-fn is_in(node: &XmlNode, namespaces: &[&str], local: &str) -> bool {
+pub(crate) fn is_in(node: &XmlNode, namespaces: &[&str], local: &str) -> bool {
     node.local == local && namespaces.contains(&node.ns.as_str())
 }
 

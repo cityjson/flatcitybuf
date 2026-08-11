@@ -12,6 +12,7 @@
 //! each module: the two differ only in ways this converter does not read, and
 //! files in the wild are still written against 1.0.
 
+mod attributes;
 pub(crate) mod building;
 
 use crate::gml::XlinkRegistry;

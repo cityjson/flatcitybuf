@@ -12,3 +12,8 @@ mod common;
 fn lod1_building() {
     common::assert_fixture("lod1_building");
 }
+
+#[test]
+fn attributes() {
+    common::assert_fixture("attributes");
+}
