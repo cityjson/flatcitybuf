@@ -35,6 +35,11 @@ const SOLID_MEMBERS: &str = "solidMembers";
 const PATCHES: &str = "patches";
 const POLYGON: &str = "Polygon";
 
+/// The wrapper that reverses a surface, and the property holding what it
+/// wraps.
+const ORIENTABLE_SURFACE: &str = "OrientableSurface";
+const BASE_SURFACE: &str = "baseSurface";
+
 /// Surface patches that share the `Polygon` content model, and so parse with
 /// [`parse_polygon`].
 const PATCH_LOCAL_NAMES: [&str; 4] = [POLYGON, "PolygonPatch", "Triangle", "Rectangle"];
@@ -42,6 +47,12 @@ const PATCH_LOCAL_NAMES: [&str; 4] = [POLYGON, "PolygonPatch", "Triangle", "Rect
 /// Local name of the XLink locator attribute. Attributes are matched on their
 /// local name alone, so this reaches `xlink:href` under any prefix.
 const HREF_ATTR: &str = "href";
+
+/// The `gml:OrientableSurface` attribute that may reverse its base surface,
+/// and the one value of it that does. The default is `"+"`, which is why
+/// absence and `"+"` mean the same thing.
+const ORIENTATION_ATTR: &str = "orientation";
+const REVERSED: &str = "-";
 
 /// Reason recorded for a polygon whose rings carry no area.
 const DEGENERATE: &str = "degenerate ring";
@@ -171,6 +182,17 @@ fn parse_surfaces(
 
 /// Resolve one `gml:surfaceMember`, inline or by reference.
 ///
+/// A member holds its polygon in one of three ways, and the three nest: the
+/// polygon may be inline, it may be an `xlink:href` to one indexed in
+/// `registry`, or it may sit under a `gml:OrientableSurface` whose
+/// `gml:baseSurface` holds — again — any of the three. Each
+/// `orientation="-"` on the way down reverses the surface, so an odd number
+/// of them reverses the polygon's rings and an even number cancels out.
+///
+/// The descent is a loop rather than recursion so that a deeply nested
+/// document costs heap rather than stack; it always moves to a strictly
+/// deeper element of a finite tree, so it terminates.
+///
 /// Returns `Ok(None)` for a member this reader cannot turn into a polygon,
 /// having recorded why in `report`.
 fn parse_surface_member(
@@ -178,35 +200,76 @@ fn parse_surface_member(
     registry: &XlinkRegistry,
     report: &mut ParseReport,
 ) -> Result<Option<Polygon3>, CityGmlError> {
-    if let Some(href) = member.attr(HREF_ATTR) {
-        let context = element_context(member);
-        return match registry.lookup(href, &context)? {
-            Some(polygon) => Ok(Some(polygon.clone())),
-            // Indexed, but degenerate: the reference resolves, the polygon
-            // just carries no area, so it is skipped like an inline one.
-            None => {
+    let mut property = member;
+    let mut reversed = false;
+    loop {
+        if let Some(href) = property.attr(HREF_ATTR) {
+            let context = element_context(property);
+            return match registry.lookup(href, &context)? {
+                Some(polygon) => Ok(Some(orient(polygon.clone(), reversed))),
+                // Indexed, but degenerate: the reference resolves, the
+                // polygon just carries no area, so it is skipped like an
+                // inline one.
+                None => {
+                    report
+                        .skipped
+                        .push(degenerate(href.strip_prefix('#').map(str::to_owned)));
+                    Ok(None)
+                }
+            };
+        }
+
+        if let Some(node) = gml_child(property, POLYGON) {
+            let Some(polygon) = parse_polygon(node)? else {
                 report
                     .skipped
-                    .push(degenerate(href.strip_prefix('#').map(str::to_owned)));
-                Ok(None)
-            }
-        };
-    }
+                    .push(degenerate(node.gml_id().map(str::to_owned)));
+                return Ok(None);
+            };
+            return Ok(Some(orient(polygon, reversed)));
+        }
 
-    let Some(node) = gml_child(member, POLYGON) else {
-        report.skipped.push(unsupported(
-            member,
-            format!("no inline GML <{POLYGON}> and no xlink:href"),
-        ));
-        return Ok(None);
-    };
-    let Some(polygon) = parse_polygon(node)? else {
+        if let Some(orientable) = gml_child(property, ORIENTABLE_SURFACE) {
+            reversed ^= orientable.attr(ORIENTATION_ATTR) == Some(REVERSED);
+            let Some(base) = gml_child(orientable, BASE_SURFACE) else {
+                report.skipped.push(unsupported(
+                    orientable,
+                    format!("no GML <{BASE_SURFACE}> to orient"),
+                ));
+                return Ok(None);
+            };
+            property = base;
+            continue;
+        }
+
         report
             .skipped
-            .push(degenerate(node.gml_id().map(str::to_owned)));
+            .push(unsupported(property, unsupported_surface_reason(property)));
         return Ok(None);
-    };
-    Ok(Some(polygon))
+    }
+}
+
+/// Why a surface property yielded no polygon, naming the element that was
+/// dropped so the report says what was lost and not only that something was.
+fn unsupported_surface_reason(property: &XmlNode) -> String {
+    match property.children.iter().find(|child| child.ns == GML_NS) {
+        Some(child) => format!("GML <{}> is not a supported surface", child.local),
+        None => format!("no inline GML <{POLYGON}> and no xlink:href"),
+    }
+}
+
+/// Apply a `gml:OrientableSurface`'s orientation to the surface it wraps.
+///
+/// Reversing the point order of every ring — interior rings included —
+/// reverses the surface's normal, which is exactly what `orientation="-"`
+/// asks for.
+fn orient(mut polygon: Polygon3, reversed: bool) -> Polygon3 {
+    if reversed {
+        for ring in &mut polygon.rings {
+            ring.pts.reverse();
+        }
+    }
+    polygon
 }
 
 /// Collect the polygons of a `gml:patches` property of a `gml:Surface`.
@@ -519,6 +582,192 @@ mod tests {
         let mut report = ParseReport::default();
         let geometry = parse_geometry(&root, &registry, &mut report).unwrap();
         (geometry, report)
+    }
+
+    /// A `gml:MultiSurface` around ready-made member elements.
+    fn multi_surface(members: &str) -> String {
+        format!(
+            r#"<gml:MultiSurface xmlns:gml="http://www.opengis.net/gml">{members}</gml:MultiSurface>"#
+        )
+    }
+
+    /// The polygons of a `MultiSurface`, with the report that came with them.
+    fn surfaces(xml: &str) -> (Vec<Polygon3>, ParseReport) {
+        let (geometry, report) = parse(xml);
+        let GmlGeometry::MultiSurface(polygons) = geometry.unwrap() else {
+            panic!("expected a MultiSurface");
+        };
+        (polygons, report)
+    }
+
+    /// A `gml:surfaceMember` holding an `OrientableSurface` over `base`.
+    ///
+    /// `attrs` is spliced into the `OrientableSurface` start tag, so it can
+    /// carry an `orientation`, and `base` is the content of its
+    /// `gml:baseSurface` property — a polygon, or another orientable surface.
+    fn orientable_member(attrs: &str, base: &str) -> String {
+        format!(
+            "<gml:surfaceMember><gml:OrientableSurface{attrs}>\
+             <gml:baseSurface>{base}</gml:baseSurface>\
+             </gml:OrientableSurface></gml:surfaceMember>"
+        )
+    }
+
+    /// A square with a square hole, as a `gml:Polygon` carrying `gml:id`.
+    fn holed_polygon(gml_id: &str) -> String {
+        format!(
+            r#"<gml:Polygon gml:id="{gml_id}">
+                 <gml:exterior><gml:LinearRing>
+                   <gml:posList>0 0 0 10 0 0 10 10 0 0 10 0 0 0 0</gml:posList>
+                 </gml:LinearRing></gml:exterior>
+                 <gml:interior><gml:LinearRing>
+                   <gml:posList>2 2 0 4 2 0 4 4 0 2 2 0</gml:posList>
+                 </gml:LinearRing></gml:interior>
+               </gml:Polygon>"#
+        )
+    }
+
+    /// The rings of [`holed_polygon`] as parsed, in document order.
+    fn holed_rings() -> Vec<Vec<[f64; 3]>> {
+        vec![
+            vec![[0., 0., 0.], [10., 0., 0.], [10., 10., 0.], [0., 10., 0.]],
+            vec![[2., 2., 0.], [4., 2., 0.], [4., 4., 0.]],
+        ]
+    }
+
+    /// The same rings with every point order reversed.
+    fn reversed_holed_rings() -> Vec<Vec<[f64; 3]>> {
+        holed_rings()
+            .into_iter()
+            .map(|mut ring| {
+                ring.reverse();
+                ring
+            })
+            .collect()
+    }
+
+    /// The point lists of a polygon's rings, exterior first.
+    fn ring_points(polygon: &Polygon3) -> Vec<Vec<[f64; 3]>> {
+        polygon.rings.iter().map(|ring| ring.pts.clone()).collect()
+    }
+
+    #[test]
+    fn a_negatively_oriented_surface_reverses_every_ring() {
+        let (polygons, report) = surfaces(&multi_surface(&orientable_member(
+            r#" orientation="-""#,
+            &holed_polygon("base"),
+        )));
+        assert_eq!(polygons.len(), 1);
+        // The base polygon's identity survives the indirection.
+        assert_eq!(polygons[0].gml_id.as_deref(), Some("base"));
+        // Both the exterior and the interior ring are wound the other way.
+        assert_eq!(ring_points(&polygons[0]), reversed_holed_rings());
+        assert!(report.skipped.is_empty(), "{report:?}");
+    }
+
+    #[test]
+    fn a_positively_oriented_surface_passes_the_base_polygon_through() {
+        // "+" is the default, and an absent orientation means the same.
+        for attrs in ["", r#" orientation="+""#] {
+            let (polygons, report) = surfaces(&multi_surface(&orientable_member(
+                attrs,
+                &holed_polygon("base"),
+            )));
+            assert_eq!(polygons.len(), 1, "{attrs:?}");
+            assert_eq!(polygons[0].gml_id.as_deref(), Some("base"), "{attrs:?}");
+            assert_eq!(ring_points(&polygons[0]), holed_rings(), "{attrs:?}");
+            assert!(report.skipped.is_empty(), "{attrs:?}: {report:?}");
+        }
+    }
+
+    #[test]
+    fn nested_orientable_surfaces_compose_their_orientation() {
+        // Two reversals cancel: the base polygon comes out as written.
+        let doubly_negative = orientable_member(
+            r#" orientation="-""#,
+            &format!(
+                "<gml:OrientableSurface orientation=\"-\"><gml:baseSurface>{}\
+                 </gml:baseSurface></gml:OrientableSurface>",
+                holed_polygon("base")
+            ),
+        );
+        let (polygons, report) = surfaces(&multi_surface(&doubly_negative));
+        assert_eq!(polygons.len(), 1);
+        assert_eq!(ring_points(&polygons[0]), holed_rings());
+        assert!(report.skipped.is_empty(), "{report:?}");
+
+        // One reversal and one pass-through still reverse.
+        let single_negative = orientable_member(
+            r#" orientation="+""#,
+            &format!(
+                "<gml:OrientableSurface orientation=\"-\"><gml:baseSurface>{}\
+                 </gml:baseSurface></gml:OrientableSurface>",
+                holed_polygon("base")
+            ),
+        );
+        let (polygons, _) = surfaces(&multi_surface(&single_negative));
+        assert_eq!(ring_points(&polygons[0]), reversed_holed_rings());
+    }
+
+    #[test]
+    fn an_orientable_base_surface_may_be_an_xlink() {
+        let root = node(&format!(
+            r##"<root xmlns:gml="http://www.opengis.net/gml"
+                      xmlns:xlink="http://www.w3.org/1999/xlink">
+                  <defs>{}</defs>
+                  <gml:MultiSurface>
+                    <gml:surfaceMember><gml:OrientableSurface orientation="-">
+                      <gml:baseSurface xlink:href="#shared"/>
+                    </gml:OrientableSurface></gml:surfaceMember>
+                  </gml:MultiSurface>
+                </root>"##,
+            holed_polygon("shared")
+        ));
+        let registry = XlinkRegistry::collect(&root);
+        let ms = root
+            .descendants()
+            .find(|n| n.local == "MultiSurface")
+            .unwrap();
+        let mut report = ParseReport::default();
+        let geometry = parse_geometry(ms, &registry, &mut report).unwrap().unwrap();
+        let GmlGeometry::MultiSurface(polygons) = geometry else {
+            panic!("expected a MultiSurface");
+        };
+        assert_eq!(polygons.len(), 1);
+        assert_eq!(polygons[0].gml_id.as_deref(), Some("shared"));
+        assert_eq!(ring_points(&polygons[0]), reversed_holed_rings());
+        assert!(report.skipped.is_empty(), "{report:?}");
+    }
+
+    #[test]
+    fn an_orientable_surface_without_a_base_surface_is_skipped() {
+        let (polygons, report) = surfaces(&multi_surface(
+            r#"<gml:surfaceMember><gml:OrientableSurface gml:id="o1" orientation="-"/>
+               </gml:surfaceMember>"#,
+        ));
+        assert!(polygons.is_empty());
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].element, "OrientableSurface");
+        assert_eq!(report.skipped[0].gml_id.as_deref(), Some("o1"));
+        assert!(
+            report.skipped[0].reason.contains("baseSurface"),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn a_negatively_oriented_degenerate_surface_is_still_a_skip() {
+        let (polygons, report) = surfaces(&multi_surface(&orientable_member(
+            r#" orientation="-""#,
+            r#"<gml:Polygon gml:id="flat"><gml:exterior><gml:LinearRing>
+                 <gml:posList>0 0 0 1 0 0 0 0 0</gml:posList>
+               </gml:LinearRing></gml:exterior></gml:Polygon>"#,
+        )));
+        assert!(polygons.is_empty());
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].element, "Polygon");
+        assert_eq!(report.skipped[0].gml_id.as_deref(), Some("flat"));
+        assert_eq!(report.skipped[0].reason, "degenerate ring");
     }
 
     #[test]
@@ -842,19 +1091,26 @@ mod tests {
     }
 
     #[test]
-    fn a_surface_member_with_neither_polygon_nor_href_is_skipped() {
-        let (geometry, report) = parse(
-            r#"<gml:MultiSurface xmlns:gml="http://www.opengis.net/gml">
-                 <gml:surfaceMember gml:id="m1"><gml:OrientableSurface/></gml:surfaceMember>
-               </gml:MultiSurface>"#,
-        );
-        let GmlGeometry::MultiSurface(polygons) = geometry.unwrap() else {
-            panic!("expected a MultiSurface");
-        };
+    fn a_surface_member_holding_an_unsupported_surface_names_it() {
+        let (polygons, report) = surfaces(&multi_surface(
+            r#"<gml:surfaceMember gml:id="m1"><gml:Sphere/></gml:surfaceMember>"#,
+        ));
         assert!(polygons.is_empty());
         assert_eq!(report.skipped.len(), 1);
         assert_eq!(report.skipped[0].element, "surfaceMember");
         assert_eq!(report.skipped[0].gml_id.as_deref(), Some("m1"));
+        // The element that was dropped is named, so the report says what was
+        // lost rather than only that something was.
+        assert!(report.skipped[0].reason.contains("Sphere"), "{report:?}");
+    }
+
+    #[test]
+    fn an_empty_surface_member_is_skipped() {
+        let (polygons, report) = surfaces(&multi_surface(r#"<gml:surfaceMember gml:id="m1"/>"#));
+        assert!(polygons.is_empty());
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].element, "surfaceMember");
+        assert!(report.skipped[0].reason.contains("href"), "{report:?}");
     }
 
     #[test]
