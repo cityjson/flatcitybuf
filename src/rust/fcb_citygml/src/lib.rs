@@ -9,17 +9,20 @@
 //! Reading and converting are two halves. [`parse_to_model`] runs the first:
 //! it streams the document, buffers one `cityObjectMember` subtree at a time,
 //! and hands each to a module reader, which builds the
-//! [`IntermediateObject`](model::IntermediateObject) tree in real-world
-//! coordinates. Only the second half quantises, which it cannot do earlier —
-//! the transform is not known until the last coordinate has been seen.
+//! [`IntermediateObject`] tree in real-world coordinates. Only the second
+//! half — the converter — quantises, which it cannot do earlier: the
+//! transform is not known until the last coordinate has been seen.
 
 mod citygml;
+mod convert;
 pub mod crs;
 mod error;
 pub mod gml;
 pub mod model;
 pub mod xml;
 
+#[doc(hidden)]
+pub use convert::convert;
 pub use error::CityGmlError;
 pub use model::{IntermediateGeometry, IntermediateObject, SemanticSurface};
 
@@ -132,11 +135,9 @@ pub fn parse_citygml<R: BufRead>(
     reader: R,
     opts: &ParseOptions,
 ) -> Result<(CityGmlDocument, ParseReport), CityGmlError> {
-    let (_objects, _crs, report) = parse_to_model(reader, opts)?;
-    // The converter from the intermediate model to CityJSON is the next piece
-    // of work; until it lands, a document that reads cleanly still converts to
-    // an empty one.
-    Ok((empty_document(opts), report))
+    let (objects, crs, mut report) = parse_to_model(reader, opts)?;
+    let document = convert(objects, crs, opts, &mut report);
+    Ok((document, report))
 }
 
 /// Read a CityGML document into the intermediate model, without converting
@@ -360,16 +361,5 @@ fn xml_error<R>(reader: &NsReader<R>, source: quick_xml::Error) -> CityGmlError 
     CityGmlError::Xml {
         position: reader.buffer_position(),
         source,
-    }
-}
-
-/// The CityJSONSeq metadata line for a document with no city objects.
-fn empty_document(opts: &ParseOptions) -> CityGmlDocument {
-    let mut metadata = cjseq::CityJSON::new();
-    metadata.transform.scale = opts.scale.to_vec();
-    metadata.transform.translate = vec![0.0, 0.0, 0.0];
-    CityGmlDocument {
-        metadata,
-        features: Vec::new(),
     }
 }

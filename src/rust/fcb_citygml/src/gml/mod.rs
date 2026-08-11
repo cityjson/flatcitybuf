@@ -55,7 +55,7 @@ const DIMS: usize = 3;
 /// Parse a `gml:Polygon` element into its repaired rings.
 ///
 /// The boundary, ring and position elements inside it are recognised only in
-/// [`GML_NS`]; an element with a matching local name in any other namespace
+/// the GML namespace; an element with a matching local name in any other one
 /// is not GML geometry and is passed over, which leaves the polygon looking
 /// as though that part were absent. Which element *is* the polygon is the
 /// caller's decision, so `node` itself is not checked — `gml:Triangle` and

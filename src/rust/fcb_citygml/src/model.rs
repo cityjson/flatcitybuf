@@ -1,7 +1,7 @@
 //! The intermediate model: a city object as CityGML describes it, before
 //! anything is quantised.
 //!
-//! The readers in [`crate::citygml`] build this; the converter turns it into
+//! The CityGML module readers build this; the converter turns it into
 //! CityJSON. Keeping the two apart means coordinates stay real-world `f64`
 //! for the whole of the reading half — the transform cannot be computed
 //! until the last coordinate in the file has been seen — and it gives the
