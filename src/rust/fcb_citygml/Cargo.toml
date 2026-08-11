@@ -1,0 +1,15 @@
+[package]
+name = "fcb_citygml"
+version = "0.1.0"
+edition = "2021"
+description = "CityGML 2.0 to CityJSON(Seq) converter used by the FlatCityBuf CLI"
+license = "MIT"
+
+[dependencies]
+quick-xml = { workspace = true }
+cjseq = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
