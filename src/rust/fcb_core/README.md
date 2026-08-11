@@ -1,354 +1,75 @@
-# FlatCityBuf Core Library
+# fcb_core
 
-A high-performance Rust library for encoding and decoding CityJSON data to the FlatCityBuf (FCB) binary format. FCB uses FlatBuffers for efficient serialization with support for spatial and attribute indexing.
+Read and write [FlatCityBuf](https://github.com/cityjson/flatcitybuf) (`.fcb`)
+— a cloud-optimized binary encoding of [CityJSON](https://www.cityjson.org/).
+It carries the standard's semantics in [FlatBuffers](https://flatbuffers.dev/),
+with a packed Hilbert R-tree for spatial queries and static B+tree indices for
+attribute queries, laid out so a client reads only the bytes it actually needs
+— from a local file, a non-seekable stream, or a remote URL over HTTP range
+requests. `fcb_core` is the reference implementation of the format and the only
+one that *writes* it.
 
-## Features
+## Install
 
-- **Binary Format**: Efficient storage using FlatBuffers
-- **Spatial Indexing**: Fast spatial queries with R-tree indexing
-- **Attribute Indexing**: Query features by attribute values
-- **HTTP Support**: Stream features over HTTP with range requests
-- **Memory Efficient**: Streaming readers for large datasets
-- **CityJSON Compatibility**: Full support for CityJSON 2.0 specification
+```bash
+cargo add fcb_core
+```
 
-## Installation
-
-Add this to your `Cargo.toml`:
+The `http` feature is enabled by default and brings in `reqwest` and
+`http-range-client`. For a dependency-light, purely local reader:
 
 ```toml
 [dependencies]
-fcb_core = "0.1.0"
-
-# For HTTP support
-fcb_core = { version = "0.1.0", features = ["http"] }
+fcb_core = { version = "0.7", default-features = false }
 ```
 
-## Quick Start
-
-### Writing FCB Files
+## Reading a file
 
 ```rust
-use fcb_core::{
-    FcbWriter, HeaderWriterOptions, AttributeSchema, AttributeSchemaMethods,
-    read_cityjson_from_reader, CJTypeKind
-};
-use std::fs::File;
-use std::io::{BufReader, BufWriter};
-
-// read cityjson data
-let input_file = File::open("input.city.jsonl")?;
-let input_reader = BufReader::new(input_file);
-let cj_seq = read_cityjson_from_reader(input_reader, CJTypeKind::Seq)?;
-
-if let CJType::Seq(cj_seq) = cj_seq {
-    // build attribute schema
-    let mut attr_schema = AttributeSchema::new();
-    for feature in cj_seq.features.iter() {
-        for (_, co) in feature.city_objects.iter() {
-            if let Some(attributes) = &co.attributes {
-                attr_schema.add_attributes(attributes);
-            }
-        }
-    }
-
-    // configure writer options
-    let attr_indices = vec![
-        ("building_type".to_string(), None),
-        ("height".to_string(), None),
-    ];
-
-    let header_options = HeaderWriterOptions {
-        write_index: true,
-        feature_count: cj_seq.features.len() as u64,
-        index_node_size: 16,
-        attribute_indices: Some(attr_indices),
-        geographical_extent: None,
-    };
-
-    // create writer and add features
-    let output_file = File::create("output.fcb")?;
-    let output_writer = BufWriter::new(output_file);
-
-    let mut fcb = FcbWriter::new(
-        cj_seq.cj,
-        Some(header_options),
-        Some(attr_schema),
-        None
-    )?;
-
-    for feature in cj_seq.features.iter() {
-        fcb.add_feature(feature)?;
-    }
-
-    fcb.write(output_writer)?;
-}
-```
-
-you can also use the `fcb_cli` to serialize CityJSON to FCB. Check the [CLI README](../cli/README.md) for more details.
-
-### Reading FCB Files
-
-#### Read All Features
-
-```rust
-use fcb_core::{FcbReader, deserializer::to_cj_metadata};
+use fcb_core::{deserializer::to_cj_metadata, FcbReader};
 use std::fs::File;
 use std::io::BufReader;
 
-let input_file = File::open("input.fcb")?;
-let input_reader = BufReader::new(input_file);
+let file = BufReader::new(File::open("delft.fcb")?);
+let mut features = FcbReader::open(file)?.select_all()?;
 
-let mut reader = FcbReader::open(input_reader)?.select_all()?;
-let header = reader.header();
-let cj_metadata = to_cj_metadata(&header)?;
+// The CityJSON metadata object (version, transform, CRS, extent) is the
+// header; it is the first line of the equivalent CityJSONSeq document.
+let cj = to_cj_metadata(&features.header())?;
+println!("CityJSON {}, {} features", cj.version, features.header().features_count());
 
-println!("features: {}", header.features_count());
-
-while let Some(feature_buf) = reader.next()? {
-    let cj_feature = feature_buf.cur_cj_feature()?;
-    // process feature
-    println!("feature id: {}", cj_feature.id);
+while let Some(feature) = features.next()? {
+    let cj_feature = feature.cur_cj_feature()?;
+    println!("{}: {} city object(s)", cj_feature.id, cj_feature.city_objects.len());
 }
 ```
 
-#### Spatial Queries (Bounding Box)
+Spatial queries (`select_query`), attribute queries (`select_attr_query`),
+HTTP streaming (`HttpFcbReader`) and writing (`FcbWriter`) are all covered in
+the crate documentation on [docs.rs](https://docs.rs/fcb_core).
 
-```rust
-use fcb_core::{FcbReader, packed_rtree::Query};
+## Documentation
 
-let mut reader = FcbReader::open(input_reader)?
-    .select_query(Query::BBox(minx, miny, maxx, maxy))?;
-
-while let Some(feature_buf) = reader.next()? {
-    let cj_feature = feature_buf.cur_cj_feature()?;
-    // process spatially filtered feature
-}
-```
-
-#### Attribute Queries
-
-```rust
-use fcb_core::{FcbReader, KeyType, Operator, FixedStringKey, Float};
-
-let query = vec![
-    (
-        "height".to_string(),
-        Operator::Gt,
-        KeyType::Float64(Float(10.0)),
-    ),
-    (
-        "building_type".to_string(),
-        Operator::Eq,
-        KeyType::StringKey50(FixedStringKey::from_str("residential")),
-    ),
-];
-
-let mut reader = FcbReader::open(input_reader)?.select_attr_query(query)?;
-
-while let Some(feature_buf) = reader.next()? {
-    let cj_feature = feature_buf.cur_cj_feature()?;
-    // process filtered features
-}
-```
-
-### HTTP Streaming
-
-```rust
-use fcb_core::HttpFcbReader;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let http_reader = HttpFcbReader::open("https://example.com/data.fcb").await?;
-
-    // spatial query over http
-    let mut iter = http_reader
-        .select_query(Query::BBox(minx, miny, maxx, maxy))
-        .await?;
-
-    while let Some(feature) = iter.next().await? {
-        let cj_feature = feature.cj_feature()?;
-        // process feature streamed over http
-    }
-
-    Ok(())
-}
-```
+- [API reference on docs.rs](https://docs.rs/fcb_core)
+- [Rust guide](https://github.com/cityjson/flatcitybuf/blob/main/docs/rust.md)
+  — workspace layout, build and test commands, worked examples
+- [Format specification](https://github.com/cityjson/flatcitybuf/blob/main/docs/specification.md)
+  — the byte layout, cited to source
+- [`fcb_cli`](https://crates.io/crates/fcb_cli) — the `fcb` command-line tool
+  for converting CityJSON to and from `.fcb`
+- [Repository](https://github.com/cityjson/flatcitybuf)
 
 ## Attribution
 
-Portions of this software are derived from [FlatGeobuf](https://github.com/flatgeobuf/flatgeobuf) (BSD 2-Clause License).
-See [ATTRIBUTION.md](ATTRIBUTION.md) for detailed attribution information.
-
-## API Reference
-
-### Core Types
-
-#### `FcbWriter<'a>`
-
-Main writer for serializing CityJSON to FCB format.
-
-**Methods:**
-
-- `new(cj, header_options, attr_schema, semantic_attr_schema) -> Result<Self>`
-- `add_feature(&mut self, feature) -> Result<()>`
-- `write(self, output) -> Result<()>`
-
-#### `FcbReader<R>`
-
-Reader for deserializing FCB files.
-
-**Methods:**
-
-- `open(reader) -> Result<Self>`
-- `select_all(self) -> Result<FeatureIter<R, Seekable>>`
-- `select_query(self, query) -> Result<FeatureIter<R, Seekable>>`
-- `select_attr_query(self, query) -> Result<FeatureIter<R, Seekable>>`
-- `select_all_seq(self) -> Result<FeatureIter<R, NotSeekable>>`
-- `select_query_seq(self, query) -> Result<FeatureIter<R, NotSeekable>>`
-- `select_attr_query_seq(self, query) -> Result<FeatureIter<R, NotSeekable>>`
-
-#### `HttpFcbReader<T>`
-
-HTTP-based streaming reader.
-
-**Methods:**
-
-- `open(url) -> Result<Self>`
-- `select_all(self) -> Result<AsyncFeatureIter<T>>`
-- `select_query(self, query) -> Result<AsyncFeatureIter<T>>`
-- `select_attr_query(self, query) -> Result<AsyncFeatureIter<T>>`
-
-### Configuration
-
-#### `HeaderWriterOptions`
-
-Configuration for FCB header writing.
-
-```rust
-pub struct HeaderWriterOptions {
-    pub write_index: bool,
-    pub feature_count: u64,
-    pub index_node_size: u16,
-    pub attribute_indices: Option<Vec<(String, Option<u16>)>>,
-    pub geographical_extent: Option<[f64; 6]>,
-}
-```
-
-#### `AttributeSchema`
-
-Schema for managing attribute types and indexing.
-
-**Methods:**
-
-- `new() -> Self`
-- `add_attributes(&mut self, attributes)`
-- `get(&self, name) -> Option<(u16, ColumnType)>`
-
-### Query Types
-
-#### Spatial Queries
-
-```rust
-use fcb_core::packed_rtree::Query;
-
-// bounding box query
-let bbox_query = Query::BBox(minx, miny, maxx, maxy);
-```
-
-#### Attribute Queries
-
-```rust
-use fcb_core::{KeyType, Operator, FixedStringKey, Float};
-
-type AttrQuery = Vec<(String, Operator, KeyType)>;
-
-// numeric comparison
-let height_query = (
-    "height".to_string(),
-    Operator::Gt,
-    KeyType::Float64(Float(10.0))
-);
-
-// string exact match
-let type_query = (
-    "building_type".to_string(),
-    Operator::Eq,
-    KeyType::StringKey50(FixedStringKey::from_str("residential"))
-);
-
-// datetime comparison
-let date_query = (
-    "registration_date".to_string(),
-    Operator::Gt,
-    KeyType::DateTime(chrono::DateTime::from_str("2020-01-01T00:00:00Z")?)
-);
-```
-
-### Supported Operators
-
-- `Operator::Eq` - equals
-- `Operator::Gt` - greater than
-- `Operator::Lt` - less than
-- `Operator::Gte` - greater than or equal
-- `Operator::Lte` - less than or equal
-
-### Supported Key Types
-
-- `KeyType::Float64(Float)` - 64-bit floating point
-- `KeyType::StringKey50(FixedStringKey)` - fixed-length strings up to 50 chars
-- `KeyType::DateTime(chrono::DateTime<Utc>)` - datetime values
-- `KeyType::UByte(u8)` - unsigned 8-bit integer
-
-## Error Handling
-
-The library uses `thiserror` for structured error handling:
-
-```rust
-use fcb_core::error::{Error, Result};
-
-match fcb_reader.select_all() {
-    Ok(reader) => {
-        // process features
-    }
-    Err(Error::NoIndex) => {
-        println!("file has no spatial index");
-    }
-    Err(Error::AttributeIndexNotFound) => {
-        println!("no attribute index found");
-    }
-    Err(e) => {
-        println!("error: {}", e);
-    }
-}
-```
-
-## Features
-
-Enable optional features in `Cargo.toml`:
-
-```toml
-[dependencies]
-fcb_core = { version = "0.1.0", features = ["http"] }
-```
-
-- `http` - enables HTTP streaming capabilities
-
-## Examples
-
-See the `tests/` directory for comprehensive examples:
-
-- `tests/attr_index.rs` - attribute indexing and querying
-- `tests/http.rs` - HTTP streaming examples
-- `tests/e2e.rs` - end-to-end serialization/deserialization
-- `tests/read.rs` - various reading patterns
-
-## Related
-
-- [FlatCityBuf CLI](../cli/) - command-line tools
-- [FlatCityBuf WASM](../wasm/) - web assembly bindings
-- [CityJSON Specification](https://cityjson.org/)
-- [FlatBuffers](https://flatbuffers.dev/)
+Portions of this software are derived from
+[FlatGeobuf](https://github.com/flatgeobuf/flatgeobuf) (BSD 2-Clause License),
+copyright (c) 2018-2024 Björn Harrtell and contributors — specifically the
+packed R-tree spatial index, the HTTP range request handling, and parts of the
+binary format design. See
+[ATTRIBUTION.md](https://github.com/cityjson/flatcitybuf/blob/main/src/rust/fcb_core/ATTRIBUTION.md)
+for details.
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT — see [LICENSE](https://github.com/cityjson/flatcitybuf/blob/main/src/rust/fcb_core/LICENSE).
+FlatGeobuf portions remain under their original BSD 2-Clause License.

@@ -1,7 +1,7 @@
 # Rust Coding Guidelines for Library Development
 
-The Rust workspace is `fcb_core` (the library), `cli` (`fcb`), `fcb_api` (axum
-server) and `wasm`. `fcb_core` is **the authoritative oracle** for the format —
+The Rust workspace is `fcb_core` (the library), `cli` (`fcb`) and `fcb_api`
+(axum server). `fcb_core` is **the authoritative oracle** for the format —
 the C++, Python and TypeScript readers are validated against its output, so a
 behaviour change here ripples into three other implementations and the
 conformance corpus. See the root `CLAUDE.md`.

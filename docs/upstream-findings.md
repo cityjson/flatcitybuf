@@ -993,7 +993,7 @@ retired after shipping; see git history under `docs/superpowers/plans/`, line
 340 of the retired file),
 inside `test_rtree_index_size_matches_the_reference_formula`:
 `assert rtree_index_size(1, 16) == 40`. The shipped implementation and its
-formula are correct (`.llm/docs/specification.md:131` gives
+formula are correct (`docs/specification.md:131` gives
 `rtree_index_size`) — only the plan's illustrative test snippet had the
 wrong worked example.
 
@@ -1275,3 +1275,109 @@ incidentally *more* faithful to the source text here, not less. Not fixed:
 changing `serde_json`'s float parsing is outside this port's scope, and
 "correctly-rounded" is the behavior worth keeping, not replicating the
 imprecision.
+
+# Defects found while auditing `ser`/`deser` round-trip fidelity
+
+Found by driving the release binaries over the four checked-in source datasets
+(`fcb_core/tests/data/*.city.jsonl`) and deep-diffing input against output —
+matching features **by `id`**, because `ser` reorders features along the Hilbert
+curve and a positional comparison silently compares unrelated features.
+
+## 31. The header's `appearance` palette was written but never read back — FIXED (this branch)
+
+**Where:** `fcb_core/src/reader/deserializer.rs`, `to_cj_metadata`.
+
+`Header` has an `appearance` field, and `to_fcb_header` fills it from
+`cj.appearance` (`writer/serializer.rs:114`, used at `:208`). The reader never
+read it: `Header::appearance()` (`fb/header_generated.rs:2688`) was not called
+anywhere under `src/reader/`, and only the *feature* path decoded an appearance
+(`deserializer.rs`, `feature.appearance()`). `to_cj_metadata` had no reference
+to appearance at all.
+
+**Repro** — the bytes really are on disk, so this is a read defect, not a write
+one:
+
+```console
+$ strings conformance/geom_temp.fcb | grep -c UUID_e58d9d68   # the material name
+1
+$ fcb deser conformance/geom_temp.fcb out.jsonl
+$ head -1 out.jsonl | python3 -c "import json,sys; print('appearance' in json.load(sys.stdin))"
+False
+```
+
+**Why it is worse than a fidelity loss.** A header's geometry templates index
+*into the header's palette* — a template belongs to no feature, so its
+`material`/`texture` mapping can refer to nothing else. The reader emitted the
+templates and dropped the palette, so `geom_temp` round-tripped to a header with
+three templates carrying material mappings to indices 1 and 2 and texture
+mappings, and **no `appearance` object at all**: dangling indices in output that
+still looks schema-valid.
+
+This also disproves the rationale the three ports recorded for mirroring the
+omission ("each feature carries the slice of the palette it actually uses").
+In `geom_temp` the header palette and the per-feature palettes are disjoint:
+the header holds materials `UUID_e58d9d68…`/`UUID_f55b5612…` and textures
+`Vegetation_Juniper2.jpg`/`MaerZ-0.png`, none of which appear in any feature,
+and the features carry entirely different textures.
+
+**Fix:** the appearance decode is now one shared
+`to_cj_appearance(Appearance) -> Result<CjAppearance, Error>`, called by both
+`to_cj_feature` and `to_cj_metadata`. Shared rather than duplicated on purpose:
+the `"image": "" -> absent` choice and the empty-vector semantics must stay
+identical on both paths, and duplicating them is what let the header path drift
+unnoticed.
+
+**Corpus:** only `conformance/geom_temp.expected.jsonl` changed — regenerated
+from the **existing** `.fcb` (no `.fcb` was rebuilt, which would churn bytes and
+break `test_writer_oracle.cpp`). The restored palette matches the original
+`geom_temp.city.jsonl` header appearance exactly.
+
+**Ports — all three deliberately mirror the old behaviour and are now wrong:**
+
+| Port | Site | Status |
+|---|---|---|
+| C++ | `src/cpp/src/cityjson.cpp`, `to_cityjson_metadata` | **FIXED** — emits `appearance` beside the templates that index it; the stale comment at the per-geometry mapping site is corrected. 279/279 doctest cases, 292/292 with the HTTP adapter, ASan/UBSan clean |
+| Python | `src/py/flatcitybuf/cityjson.py`, `to_cityjson_metadata` | **FIXED** — emits `appearance` beside the templates, via the existing `_appearance_to_json`; stale comment corrected. 255 pass (251 without numpy), `mypy --strict` and `ruff` clean |
+| TypeScript | `src/ts/src/cityjson/index.ts`, `toCityJSONMetadata` | **FIXED** — emits `appearance` via the existing `appearanceToJson`; the `CityJSON` interface in `cityjson/types.ts` gained the `appearance?` member it was missing (`tsc` caught that the type never modelled it). 244 Node + 3 browser tests, `tsc --noEmit` clean |
+
+Each unfixed port's `geom_temp` conformance case fails until it emits the header
+appearance; Python's `CASES` in `tests/test_conformance.py` includes `geom_temp`.
+
+## 32. The writer dropped `appearance` and **all** geometry templates when a header had no `metadata` — FIXED (this branch)
+
+**Where:** `fcb_core/src/writer/serializer.rs`, the `else` arm of
+`if let Some(meta) = cj.metadata.as_ref()`.
+
+`to_fcb_header` builds `appearance`, `templates` and `templates_vertices` from
+`cj.appearance` and `cj.geometry_templates` — siblings of `metadata`, not
+children of it — and then chooses between two `Header::create` calls. The
+metadata-present arm passed all three; the metadata-absent arm left them to
+`..Default::default()`, i.e. absent. So a CityJSON header carrying geometry
+templates but no `metadata` lost **every template and the whole palette**, with
+no error.
+
+Found while fixing #31: the new regression test wrote a header with an
+appearance and templates but no `metadata`, and still decoded nothing — the
+reader fix alone did not make it pass.
+
+**Fix:** the `else` arm now passes `appearance`, `templates` and
+`templates_vertices` too.
+
+**Coverage:** `fcb_core/tests/appearance_roundtrip.rs::the_header_appearance_palette_roundtrips`
+exercises both defects at once — a header with a palette *and* templates that
+index it, and no `metadata` — and compares the whole palette as one value rather
+than a chosen subset of its members.
+
+**Ports (writers only; the Python and TypeScript readers are N/A):**
+
+| Port | Status |
+|---|---|
+| C++ | **Verified unaffected.** `src/cpp/src/writer/header_serializer.cpp` computes `appearance`, `templates` and `templates_vertices` before, and independently of, the `metadata` block, then has a **single** unconditional `CreateHeader` that always passes all three. The metadata `if` only populates metadata-derived optionals. The two-branch shape that caused this bug in Rust does not exist there. |
+
+**Why the writer oracle could not have caught this.** `test_writer_oracle.cpp`
+compares C++ output byte-for-byte against the checked-in `.fcb` fixtures — but
+those were produced by the *old, buggy* Rust writer, and no fixture is a
+metadata-absent header carrying appearance or templates. Byte-identical-to-Rust
+would have meant byte-identical-to-the-bug. The C++ writer is clear here by
+construction, not by oracle agreement; a fixture exercising that shape would be
+needed to keep it that way.

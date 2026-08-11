@@ -1,13 +1,14 @@
 # Installing the FlatCityBuf C++ library
 
-A native C++17 reader. **No Rust toolchain, no CXX bridge, no TLS dependency.**
+A native C++17 reader and writer. **No Rust toolchain, no CXX bridge, no TLS
+dependency.**
 
 ## Dependencies
 
 | Dependency | Required? | Why |
 |---|---|---|
 | `flatbuffers` | yes | the on-disk format |
-| `nlohmann-json` | `FCB_WITH_JSON=ON` (default) | CityJSON emission |
+| `nlohmann-json` | `FCB_WITH_JSON=ON` (default) | CityJSON emission, and the writer |
 | `libcurl` | `FCB_WITH_CURL=ON` (default **OFF**) | HTTP range requests |
 | `doctest` | `FCB_BUILD_TESTS=ON` (default) | tests only, never installed |
 
@@ -33,8 +34,8 @@ cmake --install build --prefix /your/prefix
 ```
 
 Useful options: `-DFCB_WITH_CURL=ON` (HTTP), `-DFCB_WITH_JSON=OFF` (drop
-CityJSON emission and the nlohmann dependency), `-DFCB_BUILD_TESTS=OFF`,
-`-DFCB_BUILD_EXAMPLES=OFF`.
+CityJSON emission, the writer, and the nlohmann dependency),
+`-DFCB_BUILD_TESTS=OFF`, `-DFCB_BUILD_EXAMPLES=OFF`.
 
 ## Use from CMake
 
@@ -93,9 +94,54 @@ is not. Read the contract comment in `include/fcb/range_reader.hpp` before
 implementing — short reads, error reporting, ordering and representation
 stability are all specified there.
 
+## Writing a file
+
+`fcb::FcbWriter` produces `.fcb` natively — no Rust toolchain here either.
+Needs `FCB_WITH_JSON` (on by default). Parse each CityJSONSeq line as
+`nlohmann::ordered_json`, never plain `nlohmann::json` — the latter stores
+object members alphabetically, which silently renumbers the columns. The
+attribute schema must reflect every feature you will add, so scan them once
+before constructing the writer:
+
+```cpp
+#include <fcb/writer/attribute.hpp>
+#include <fcb/writer/fcb_writer.hpp>
+
+fcb::AttributeSchema schema;
+for (const auto& feature : features)              // pass one: the schema
+    for (const auto& obj : feature.at("CityObjects"))
+        if (auto a = obj.find("attributes"); a != obj.end())
+            fcb::add_attributes(schema, *a);
+
+fcb::FcbWriterOptions options;                    // R-tree on by default
+for (const auto& entry : schema)
+    options.attribute_indices.emplace_back(entry.first, 256);  // B+tree, branching 256
+
+fcb::FcbWriter w(metadata_line, options, schema, std::nullopt);
+for (const auto& feature : features)              // pass two: the features
+    w.add_feature(feature);
+std::ofstream out("city.fcb", std::ios::binary);
+w.write(out);
+```
+
+Both indices are the writer's own: `options.write_index` / `index_node_size`
+control the packed Hilbert R-tree, `options.attribute_indices` names the
+columns that get a static B+tree. `add_feature` spools each encoded feature
+to a temp file and `write(std::ostream&)` streams the result out in chunks,
+so peak memory does not grow with the number of features — the
+`std::vector`-returning `write()` overload is a convenience for small files
+and does not have that property. The output is checked byte-for-byte against
+real Rust-written files, not merely for decoding correctly
+(`tests/test_writer_oracle.cpp`).
+
+Column numbering is the order `add_attributes` first *sees* a name — document
+order, never alphabetical — so visit CityObjects deterministically (the
+example sorts by id, as the Rust CLI does) if the columns must line up with a
+Rust-written file. `examples/write_cityjson.cpp` is the full version of the
+above, including the separate schema semantic-surface attributes need.
+
 ## Not implemented
 
-- **Writing.** Producing `.fcb` files still requires the Rust CLI.
-- **Appearance** (texture and material mappings) is not decoded. Everything
-  else — attributes, geometry, semantics, geometry templates, extents,
-  relationships — is.
+- **A CLI.** This is a library; `fcb_write_cityjson` in `examples/` is a
+  demonstration, not a conversion tool. The Rust CLI still covers that
+  ground, and more.

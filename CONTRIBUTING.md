@@ -33,7 +33,7 @@ There are many ways to contribute to FlatCityBuf:
 
 Before contributing, ensure you have:
 
-- **Rust toolchain** (1.83.0 or later)
+- **Rust toolchain** (recent stable)
 - **Git** for version control
 - **Node.js** ≥ 22.12 (for the TypeScript reader in `src/ts`)
 - **cargo-watch** (for development workflow)

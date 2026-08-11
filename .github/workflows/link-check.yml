@@ -1,0 +1,27 @@
+name: link-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lychee:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --offline checks only internal/relative links, so a moved or deleted
+      # file fails loudly while external URLs never make the build flaky.
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --offline
+            --no-progress
+            --exclude-path docs/superpowers
+            --exclude-path .claude
+            --exclude-path .superpowers
+            --exclude-path node_modules
+            --exclude-path target
+            './**/*.md'
+          fail: true

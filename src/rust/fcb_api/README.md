@@ -2,21 +2,23 @@
 
 A cloud-optimized API for serving 3D city models from FlatCityBuf files, designed as a modern alternative to the traditional 3DBAG API (Flask + PostgreSQL).
 
+> This document covers the **server**: its endpoints, query syntax,
+> configuration and deployment. For the Rust workspace as a whole — how to
+> build, test, and use `fcb_core` directly — see
+> [docs/rust.md](../../../docs/rust.md).
+
 ---
 
 ## Overview
 
-The FlatCityBuf API provides an OGC API-compatible interface for querying and retrieving 3D city models stored in the FlatCityBuf format. Built with Rust and Axum, it leverages HTTP range requests and efficient spatial/attribute indexing for fast, scalable access to large city datasets.
+The FlatCityBuf API provides an OGC API-compatible interface for querying and retrieving 3D city models stored in the FlatCityBuf format. Built with Rust and Axum, it reads a single `.fcb` file over HTTP range requests through `fcb_core`, so the file itself can be a multi-gigabyte object in cloud storage and a query still costs only a handful of requests.
 
 ### Key Features
 
-- 🚀 **High Performance**: Zero-copy data access with FlatBuffers
-- 🌐 **Cloud-Native**: Optimized for HTTP range requests and serverless deployment
-- 📍 **Spatial Indexing**: Packed R-tree for efficient bounding box queries
-- 🔍 **Attribute Filtering**: Static B+Tree indices for fast attribute-based searches
 - 🗺️ **CRS Support**: Automatic coordinate transformation between CRS systems
 - 📦 **Multiple Output Formats**: CityJSONFeature, CityJSON, CityJSONSeq, OBJ
 - 🔗 **OGC API Compatible**: Standards-compliant endpoints and responses
+- 🌐 **Cloud-Native**: Stateless, serverless-friendly; no database, no local data
 
 ---
 
@@ -135,12 +137,8 @@ GET /collections/pand/items?filter=oorspronkelijkbouwjaar BETWEEN 1900 AND 1950
 GET /collections/pand/items?filter=b3_bouwlagen>2 AND status='Pand in gebruik'
 ```
 
-**Performance Notes:**
-
-- ID lookups are highly optimized via direct attribute index access
-- Bounding box queries perform well with R-tree spatial index
-- General attribute filters may be slower due to multiple HTTP range requests
-- Acceptable for typical use cases but not optimal for high-throughput complex filtering
+Attribute-filtered queries are slower than bbox and ID queries — see
+[Known Limitations](#attribute-filter-performance-) below.
 
 ### 📄 Pagination
 
@@ -274,7 +272,7 @@ GET /collections/pand/items?f=obj
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `FCB_URL` | URL or file path to FlatCityBuf file | `https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb` | Yes |
+| `FCB_URL` | URL or file path to FlatCityBuf file | `https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb` | Yes |
 | `BASE_URL` | API base URL for generating links | `https://api.3dbag.nl` | Yes |
 | `MAX_RETURN_FEATURES` | Maximum features per request | `100` | No |
 | `HOST` | Server bind address | `127.0.0.1` (binary) / `0.0.0.0` (Docker) | No |
@@ -288,8 +286,8 @@ GET /collections/pand/items?f=obj
 
 - **Platform**: Google Cloud Run (serverless)
 - **Data Source**: CityJSONSeq from gilfoyle server (September 22nd snapshot)
-- **Storage**: Google Cloud Storage
-  - URL: `https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb`
+- **Storage**: Cloudflare R2
+  - URL: `https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb`
   - File Size: ~70GB
   - Includes spatial and attribute indices
 - **Architecture**: Stateless, auto-scaling containers
@@ -304,7 +302,7 @@ docker build -f src/rust/Dockerfile -t fcb_api:latest .
 
 # Run with environment variables
 docker run -p 8080:8080 \
-  -e FCB_URL="https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb" \
+  -e FCB_URL="https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb" \
   -e BASE_URL="https://api.3dbag.nl" \
   -e MAX_RETURN_FEATURES="100" \
   fcb_api:latest
@@ -318,7 +316,7 @@ cd src/rust
 cargo build --release -p fcb_api
 
 # Run with environment variables
-FCB_URL="https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb" \
+FCB_URL="https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb" \
 BASE_URL="https://api.3dbag.nl" \
 MAX_RETURN_FEATURES="100" \
 ./target/release/fcb_api
@@ -326,27 +324,19 @@ MAX_RETURN_FEATURES="100" \
 
 ### Updating Data
 
-When the source 3DBAG data is updated, regenerate the FlatCityBuf file:
+When the source 3DBAG data is updated, regenerate the FlatCityBuf file with the
+`fcb` CLI and upload it to the bucket `FCB_URL` points at. The file the server
+expects is one written with **all attributes indexed** and a branching factor of
+256:
 
 ```bash
-# Install FlatCityBuf CLI (if not already installed)
-cargo install fcb
-
-# Convert CityJSONSeq to FlatCityBuf with full indexing
-# -A option indexes all attributes
-fcb ser \
-  /path/to/3dbag.city.jsonl \
-  3dbag_all_index.fcb \
-  -A \
-  --attr-branching-factor 256
-
-# Verify the generated file
-fcb info 3dbag_all_index.fcb
-
-# Upload to cloud storage
-gsutil cp 3dbag_all_index.fcb gs://your-bucket/
-# or rsync to your server
+fcb ser /path/to/3dbag.city.jsonl 3dbag_all_index.fcb -A --attr-branching-factor 256
+# then upload 3dbag_all_index.fcb to the bucket FCB_URL points at
+# (R2: `rclone copy`, `wrangler r2 object put`, or the dashboard)
 ```
+
+Installation, every flag, and the `inspect` command for verifying the
+result: [CLI README](../cli/README.md).
 
 ---
 
@@ -427,6 +417,9 @@ GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/i
 
 ## References
 
+- [Rust guide](../../../docs/rust.md) — the workspace, build and test commands
+- [`fcb` CLI reference](../cli/README.md) — producing the `.fcb` this server reads
+- [FlatCityBuf format specification](../../../docs/specification.md)
 - [FlatCityBuf GitHub Repository](https://github.com/cityjson/flatcitybuf)
 - [FlatCityBuf Master Thesis](https://resolver.tudelft.nl/uuid:6727c979-5e46-4fe0-9349-a7803e825d02)
 - [OGC API - Features Specification](https://ogcapi.ogc.org/features/)

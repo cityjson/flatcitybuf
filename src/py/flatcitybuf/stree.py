@@ -733,7 +733,7 @@ def search_stree(
     so that the Rust, C++ and Python readers agree. Each is a decision,
     not an oversight; do not "fix" one without reading the "known
     divergences from the Rust reader" section of
-    .llm/docs/specification.md.
+    docs/specification.md.
 
     1. Byte columns decode as u8, not i8. The writer stores Byte as u8
        (writer/attribute.rs:209) and indexes it as MemoryIndex<u8>

@@ -40,7 +40,8 @@ cargo run -p fcb_cli -- ser input.city.jsonl output.fcb
 fcb <COMMAND> [OPTIONS] <INPUT> <OUTPUT>
 ```
 
-Input and output are positional: the input comes first, the output second.
+Input and output are positional: the input comes first, the output second. The
+read-only command `inspect` takes a single positional argument.
 
 ### Commands
 
@@ -54,7 +55,7 @@ fcb ser [OPTIONS] <INPUT>... <OUTPUT>
 
 **Arguments:**
 
-- `<INPUT>...` - Input file(s) or glob patterns (supports multiple files, use '-' for stdin)
+- `<INPUT>...` - Input file(s) or glob patterns (supports multiple files; each path must end in `.json` or `.jsonl` -- `ser` does not read from stdin)
 - `<OUTPUT>` - Output file, always the last positional (use '-' for stdout)
 
 **Options:**
@@ -62,8 +63,9 @@ fcb ser [OPTIONS] <INPUT>... <OUTPUT>
 - `-a, --attr-index ATTRIBUTES` - Comma-separated list of attributes to create index for
 - `-A, --index-all-attributes` - Index all attributes found in the dataset
 - `-s, --no-spatial-index` - Disable the spatial index (it is written by default)
-- `--attr-branching-factor FACTOR` - Branching factor for attribute index (default: 256)
+- `--attr-branching-factor FACTOR` - Branching factor for attribute index (default: 16 with `--attr-index`, 256 with `--index-all-attributes`)
 - `--index-node-size SIZE` - Node size of the spatial R-tree index (default: 16)
+- `--no-feature-count` - Write a `features_count` of 0, meaning "unknown", which forces readers to scan to EOF (conformance fixtures only)
 - `-b, --bbox BBOX` - Bounding box filter in format "minx,miny,maxx,maxy"
 - `-g, --ge` - Automatically calculate and set geospatial extent in header
 
@@ -95,8 +97,8 @@ fcb ser data.city.jsonl data.fcb --index-all-attributes
 fcb ser large_dataset.city.jsonl filtered.fcb \
   --bbox "4.35,52.0,4.4,52.1"
 
-# from stdin to stdout
-cat input.city.jsonl | fcb ser - - > output.fcb
+# to stdout (input must still be a real file path)
+fcb ser input.city.jsonl - > output.fcb
 ```
 
 #### `deser` - Deserialize FCB to CityJSON
@@ -122,29 +124,69 @@ fcb deser input.fcb output.city.jsonl
 cat input.fcb | fcb deser - - > output.city.jsonl
 ```
 
-#### `info` - Show FCB file information
+#### `inspect` - Inspect an FCB file
 
-Display metadata and statistics about an FCB file.
-
-```bash
-fcb info <INPUT>
-```
-
-**Example:**
+Show what an FCB dataset's header declares, either in a full-screen terminal UI
+or as a static text report. Only the header is read -- feature bytes are never
+fetched -- so inspecting a remote file over HTTP range requests costs a couple
+of small requests regardless of dataset size.
 
 ```bash
-fcb info delft.fcb
+fcb inspect [--static] <SOURCE>
 ```
 
-**Output includes:**
+**Arguments:**
 
-- File size in MB
-- FCB version
-- Feature count
-- Bounding box coordinates
-- Indexed attributes
-- Title (if present)
-- Geographical extent
+- `<SOURCE>` - Local path or HTTP(S) URL to an FCB file
+
+**Options:**
+
+- `--static` - print the static report instead of the terminal UI
+
+**Output mode:** with stdout on a terminal you get the interactive UI; with
+stdout piped or redirected `inspect` prints the static report and exits 0.
+`--static` forces the report even on a terminal, which is what scripts and the
+`just inspect` recipe use.
+
+**The static report includes:**
+
+- Source (the path or URL) and file size (remote sources report `unknown`)
+- CityJSON version, title, identifier and reference date, when present
+- Feature count and number of attribute columns
+- Geographical extent (min/max and dimensions), when set
+- Index summary: whether a spatial R-tree is present and its node size, plus
+  the names of the indexed attributes
+- Coordinate reference system (code, version, code string), when set
+- Coordinate transform (scale and translate), when present
+
+**Tabs (terminal UI):**
+
+- **Metadata** - version, feature count, index sizes, extent, transform, CRS
+- **Columns** - the header attribute schema, one row per column
+- **Map** - the dataset extent drawn on a world map; shown only for a geographic CRS, otherwise the projected extent is printed instead
+
+**Key bindings:**
+
+- `q`, `Esc`, `Ctrl-C` - quit
+- `Tab`, `→`, `l` - next tab
+- `Shift-Tab`, `←`, `h` - previous tab
+- `↓`, `j` / `↑`, `k` - scroll the column list
+- `g` / `G` - jump to the first / last column
+
+**Examples:**
+
+```bash
+# local file
+fcb inspect delft.fcb
+
+# remote file over HTTP range requests -- only the header is fetched
+fcb inspect https://example.com/data.fcb
+
+# static report, for scripts and captured output
+fcb inspect --static delft.fcb
+```
+
+> **No terminal, no problem.** The terminal UI needs an interactive TTY, so with stdout redirected or piped `inspect` falls back to the static report and exits 0. Pass `--static` to get that same report on a terminal; both paths print byte-identical, colour-free text.
 
 #### `cbor` - Convert CityJSON to CBOR
 
@@ -170,6 +212,8 @@ fcb bson <INPUT> <OUTPUT>
 - **CityJSON Text Sequences** (`.city.jsonl`) - Line-delimited CityJSON features
 - **FCB** (`.fcb`) - FlatCityBuf binary format
 
+> **Remote Input:** `inspect` also accepts an `http://` or `https://` URL and reads the header over HTTP range requests. The other commands (`ser`, `deser`, `cbor`, `bson`) take local paths only, plus `-` for stdin/stdout where documented.
+
 > **Multi-file Support:** The `ser` command accepts multiple input files and glob patterns; the last positional argument is always the output. When merging files with different coordinate transforms, vertices are automatically aligned to the first file's transform.
 
 ### Output Formats
@@ -188,7 +232,7 @@ fcb ser dataset.city.jsonl dataset.fcb \
   --attr-branching-factor 256
 
 # 2. check file information
-fcb info dataset.fcb
+fcb inspect --static dataset.fcb
 
 # 3. convert back to cityjson
 fcb deser dataset.fcb output.city.jsonl

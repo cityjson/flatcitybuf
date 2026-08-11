@@ -1,53 +1,45 @@
-# FlatCityBuf — native C++ reader
+# FlatCityBuf — native C++
 
-A from-scratch C++17 implementation of the FlatCityBuf reader. It replaces the
-previous CXX-bridge bindings over the Rust core: there is no Rust toolchain,
-no generated bridge source to compile, and no TLS dependency.
+A from-scratch C++17 implementation of FlatCityBuf: a **reader and a writer**,
+parsing and producing `.fcb` bytes directly. It replaces the previous
+CXX-bridge bindings over the Rust core — there is no Rust toolchain, no
+generated bridge source to compile, and no TLS dependency. All IO goes through
+one synchronous `fcb::RangeReader`, so local files, HTTP range requests and
+your own transport share a single traversal path.
 
-See [INSTALL.md](INSTALL.md) for building and using it.
+## Quick start
 
-## Why native
+```bash
+cd src/cpp
+cmake -B build -S .
+cmake --build build
+./build/fcb_read_local ../../examples/data/delft.fcb > delft.jsonl
+```
 
-The FFI bindings were awkward precisely where it mattered: the Rust side owned
-a tokio runtime, and bridging that to C++ callers leaked complexity in both
-directions. This implementation has no async runtime at all. All IO goes
-through one synchronous, user-implementable `RangeReader` interface with a
-batched read, so local files and HTTP share a single traversal path and host
-applications keep their own threading model.
+That reads a `.fcb` out as CityJSONSeq. Writing goes the other way, through
+`fcb::FcbWriter` — `./build/fcb_write_cityjson <input.jsonl> <output.fcb>`, from
+[`examples/write_cityjson.cpp`](examples/write_cityjson.cpp).
+
+The library API (open, `select_bbox` / `select_attr`, CityJSON conversion) is
+shown in [docs/cpp.md](../../docs/cpp.md) and [INSTALL.md](INSTALL.md).
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `include/fcb/` | public headers |
+| `include/fcb/` | public headers (`writer/` for the writer API) |
 | `include/fcb/generated/` | committed flatc output (consumers never need flatc) |
 | `src/` | implementation; `src/detail/` is internal |
-| `tests/` | doctest suite, range-capable HTTP test server (conformance corpus lives at `/conformance` in the repo root) |
-| `examples/` | `read_local.cpp`, `read_http.cpp` |
+| `tests/` | doctest suite and the range-capable HTTP test server |
+| `examples/` | one runnable program per capability — see [examples/README.md](examples/README.md) |
 
-## Verification
+## Documentation
 
-Output is checked against the Rust reader on the full Delft fixture — all 1115
-features, compared as parsed JSON trees rather than text, since key order and
-float formatting legitimately differ. The conformance corpus in `conformance/`
-at the repository root is the oracle this reader is checked against; its
-`.expected.jsonl` files are produced by the Rust reader, and the planned
-Python and TypeScript readers will share it once they exist. The corpus
-covers edge cases the main fixture does not reach: single-feature files,
-prefix-colliding strings, duplicate keys forcing payload entries, zero-area
-extents, and geometry templates.
-
-The suite runs clean under ASan and UBSan.
-
-## Correctness notes
-
-Porting surfaced several defects in the Rust implementation, most now fixed
-upstream — see [`docs/upstream-findings.md`](../../docs/upstream-findings.md).
-Two behaviours here are deliberately stricter than the reference:
-
-- `select_attr` post-filters fixed-width string candidates against the full,
-  untruncated value. Keys are truncated to 50 or 100 bytes and zero-padded, so
-  the index yields candidates rather than answers.
-- Range operators are evaluated as strict-or-inclusive bounds at the leaf
-  rather than as "range minus equal", which drops genuine matches when one
-  feature carries several values of an indexed attribute.
+- **[docs/cpp.md](../../docs/cpp.md)** — the C++ guide: status, build options,
+  reading and writing, testing, and where this implementation deliberately
+  differs from the Rust reference
+- [INSTALL.md](INSTALL.md) — dependencies, install, CMake integration, HTTP,
+  custom transports, writing a file
+- [examples/README.md](examples/README.md) — every example program, with its
+  real output
+- [../../docs/specification.md](../../docs/specification.md) — the format itself

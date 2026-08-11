@@ -38,7 +38,7 @@ def Str(s: str) -> KeyValue:
 
 def test_serialized_sizes_match_the_rust_key_encoders() -> None:
     # Format spec -> "attribute indexing" -> "key encodings" table
-    # (.llm/docs/specification.md:211-229); test_keys.cpp:11-27.
+    # (docs/specification.md:211-229); test_keys.cpp:11-27.
     assert key_serialized_size(KeyKind.INT8) == 1
     assert key_serialized_size(KeyKind.UINT8) == 1
     assert key_serialized_size(KeyKind.BOOL) == 1
