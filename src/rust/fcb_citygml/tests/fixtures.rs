@@ -22,3 +22,8 @@ fn attributes() {
 fn semantic_surfaces() {
     common::assert_fixture("semantic_surfaces");
 }
+
+#[test]
+fn building_hierarchy() {
+    common::assert_fixture("building_hierarchy");
+}

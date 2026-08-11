@@ -122,28 +122,23 @@ fn reference_system(crs: &NormalizedCrs, report: &mut ParseReport) -> Option<Ref
     }
 }
 
-/// One top-level object as a CityJSONFeature, with its own vertex table.
+/// One top-level object and everything nested in it, as a CityJSONFeature
+/// with its own vertex table.
+///
+/// A CityJSONFeature is one *tree* of City Objects, not one object: a building
+/// and its parts and installations are written into the same feature and share
+/// its vertex array, and the feature is identified by the root of that tree
+/// (§ 7.2 of the CityJSON spec). Splitting them into a feature apiece would
+/// break the `parents`/`children` links, which may only name objects of the
+/// same feature.
 ///
 /// An object with neither geometry nor attributes still becomes a feature:
 /// it exists in the source, and a City Object with only a `type` is valid
 /// CityJSON.
 fn feature(object: &IntermediateObject, quantizer: &Quantizer) -> cjseq::CityJSONFeature {
     let mut vertices = VertexTable::default();
-    let mut city_object = cjseq::CityObject::new(object.co_type.clone());
-
-    let geometry: Vec<cjseq::Geometry> = object
-        .geometries
-        .iter()
-        .map(|geometry| convert_geometry(geometry, quantizer, &mut vertices))
-        .collect();
-    // `geometry: []` and no `geometry` member differ, and the second is what
-    // an object without geometry means.
-    city_object.geometry = (!geometry.is_empty()).then_some(geometry);
-    city_object.attributes =
-        (!object.attributes.is_empty()).then(|| Value::Object(object.attributes.clone()));
-
-    let mut city_objects = HashMap::with_capacity(1);
-    city_objects.insert(object.id.clone(), city_object);
+    let mut city_objects = HashMap::new();
+    add_city_object(object, None, quantizer, &mut vertices, &mut city_objects);
 
     cjseq::CityJSONFeature {
         thetype: cjseq::CityJSONFeatureType::CityJSONFeature,
@@ -151,6 +146,52 @@ fn feature(object: &IntermediateObject, quantizer: &Quantizer) -> cjseq::CityJSO
         city_objects,
         vertices: vertices.vertices,
         appearance: None,
+    }
+}
+
+/// Write `object` into the feature's City Objects, then each of its children,
+/// linking every pair from both ends.
+///
+/// Depth-first in document order, so the vertex table fills in the order the
+/// source wrote the coordinates: an object's own geometry first, then that of
+/// each child in turn.
+///
+/// `parent` is the id of the object this one is nested in, and `None` for the
+/// root. CityJSON's `parents` is an array because a City Object may belong to
+/// several groups; a building part belongs to exactly one building, so the
+/// array a nested object gets holds exactly one id.
+fn add_city_object(
+    object: &IntermediateObject,
+    parent: Option<&str>,
+    quantizer: &Quantizer,
+    vertices: &mut VertexTable,
+    city_objects: &mut HashMap<String, cjseq::CityObject>,
+) {
+    let mut city_object = cjseq::CityObject::new(object.co_type.clone());
+
+    let geometry: Vec<cjseq::Geometry> = object
+        .geometries
+        .iter()
+        .map(|geometry| convert_geometry(geometry, quantizer, vertices))
+        .collect();
+    // `geometry: []` and no `geometry` member differ, and the second is what
+    // an object without geometry means. The same holds for `children`: an
+    // empty array would claim the object was asked and had none.
+    city_object.geometry = (!geometry.is_empty()).then_some(geometry);
+    city_object.attributes =
+        (!object.attributes.is_empty()).then(|| Value::Object(object.attributes.clone()));
+    city_object.parents = parent.map(|parent| vec![parent.to_string()]);
+    city_object.children = (!object.children.is_empty()).then(|| {
+        object
+            .children
+            .iter()
+            .map(|child| child.id.clone())
+            .collect()
+    });
+
+    city_objects.insert(object.id.clone(), city_object);
+    for child in &object.children {
+        add_city_object(child, Some(&object.id), quantizer, vertices, city_objects);
     }
 }
 
@@ -748,6 +789,71 @@ mod tests {
             geometry_json(object)["semantics"]["values"],
             serde_json::json!([0, null])
         );
+    }
+
+    /// A nested object tree is one feature: every object in it is a City
+    /// Object of that feature, linked both ways, and every coordinate indexes
+    /// the one vertex array they share.
+    #[test]
+    fn a_child_tree_becomes_one_feature_of_linked_city_objects() {
+        let face = |z: f64| {
+            GmlGeometry::MultiSurface(vec![polygon(vec![
+                [0.0, 0.0, z],
+                [1.0, 0.0, z],
+                [1.0, 1.0, z],
+            ])])
+        };
+        let named = |id: &str, co_type, geometry| {
+            let mut object = object(geometry);
+            object.id = id.to_string();
+            object.co_type = co_type;
+            object
+        };
+
+        let mut root = named("b1", cjseq::CityObjectType::Building, face(0.0));
+        let mut part = named("p1", cjseq::CityObjectType::BuildingPart, face(1.0));
+        part.children.push(named(
+            "i1",
+            cjseq::CityObjectType::BuildingInstallation,
+            face(2.0),
+        ));
+        root.children.push(part);
+
+        let doc = convert_one(vec![root], None);
+        assert_eq!(doc.features.len(), 1);
+        let feature = &doc.features[0];
+        // The feature is named after the root, whatever it holds.
+        assert_eq!(feature.id, "b1");
+        assert_eq!(feature.city_objects.len(), 3);
+
+        assert_eq!(
+            feature.city_objects["b1"].children,
+            Some(vec!["p1".to_string()])
+        );
+        assert!(feature.city_objects["b1"].parents.is_none());
+        assert_eq!(
+            feature.city_objects["p1"].parents,
+            Some(vec!["b1".to_string()])
+        );
+        assert_eq!(
+            feature.city_objects["p1"].children,
+            Some(vec!["i1".to_string()])
+        );
+        assert_eq!(
+            feature.city_objects["i1"].parents,
+            Some(vec!["p1".to_string()])
+        );
+        assert!(feature.city_objects["i1"].children.is_none());
+
+        // Nine distinct points, pooled feature-wide and in document order:
+        // the root's, then the part's, then the grandchild's.
+        assert_eq!(feature.vertices.len(), 9);
+        let cjseq::Geometry::MultiSurface { boundaries, .. } =
+            &feature.city_objects["i1"].geometry.as_ref().unwrap()[0]
+        else {
+            panic!("expected a MultiSurface");
+        };
+        assert_eq!(boundaries, &vec![vec![vec![6, 7, 8]]]);
     }
 
     /// Array levels between the outermost array and a vertex index.
