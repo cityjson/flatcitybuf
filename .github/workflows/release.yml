@@ -22,7 +22,7 @@ jobs:
       tag_exists: ${{ steps.check_tag.outputs.TAG_EXISTS }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GA_TOKEN }}
@@ -86,7 +86,7 @@ jobs:
       # already what uploads the assets below.
       - name: Create GitHub Release
         if: steps.check_tag.outputs.TAG_EXISTS == 'false'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: v${{ steps.extract_version.outputs.VERSION }}
           name: v${{ steps.extract_version.outputs.VERSION }}
@@ -128,7 +128,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # CMake needs BOTH flatbuffers and nlohmann-json (FCB_WITH_JSON is ON by
       # default). The previous workflow installed only nlohmann-json, so
@@ -194,14 +194,14 @@ jobs:
           fi
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}.*
           retention-days: 90
 
       - name: Attach to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: ${{ matrix.artifact_name }}.*
