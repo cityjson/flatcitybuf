@@ -6,6 +6,7 @@
 //! [`ParseReport`] describing anything that was valid CityGML but could not be
 //! represented in CityJSON.
 
+pub mod crs;
 mod error;
 
 pub use error::CityGmlError;
