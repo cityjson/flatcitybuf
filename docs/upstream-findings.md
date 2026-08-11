@@ -1381,3 +1381,53 @@ metadata-absent header carrying appearance or templates. Byte-identical-to-Rust
 would have meant byte-identical-to-the-bug. The C++ writer is clear here by
 construction, not by oracle agreement; a fixture exercising that shape would be
 needed to keep it that way.
+
+# Defects found while exercising the ports against live data
+
+## 33. Python: the bbox phase was the one read phase with no buffering — FIXED (this branch)
+
+**Where:** `src/py/flatcitybuf/packed_rtree.py`, `search_rtree`.
+
+Four phases read over a `RangeReader`, and three of them wrap it in a
+per-query `BufferedRangeReader` sized to the reference's own constant:
+
+| Phase | Wrapper | Window | Reference |
+|---|---|---|---|
+| open | `header.py:309` | `_OPEN_PREFETCH_SIZE` = 12944 | `http_reader/mod.rs:80-98` |
+| features | `reader.py:248`, `:300` | `_FEATURE_FETCH_SIZE` = 1 MiB | — |
+| attribute index | `stree.py:774` | `_INDEX_FETCH_SIZE` = 1 MiB | `http_reader/mod.rs:363` |
+| **bbox / R-tree** | **none** | — | `http_reader/mod.rs:213` says 256 KiB |
+
+`search_rtree` issued one physical `reader.read` per R-tree node. Against a
+`FileRangeReader` that is merely extra syscalls; over HTTP it is one request
+per node. The spec's "HTTP constants" table
+(`docs/specification.md:341`) documents a bbox combine threshold of
+`256*1024` — Python implemented the attribute one beside it but not this.
+
+**Measured** — the live 68 GB 3DBAG file, bbox `120000 486000 121000 487000`,
+identical results throughout (2762 features):
+
+| | open | bbox query | wall clock |
+|---|---|---|---|
+| C++ (`fcb_read_http`) | 2 requests | 37 requests | ~6.4 s |
+| Python, before | 2 requests | **240 requests** | **32.4 s** |
+| Python, after | 2 requests | **10 requests** | **1.4 s** |
+
+Not a correctness defect — the answer was always right, and matches C++ and
+Rust exactly (and on `delft.fcb`, all three agree on the same 170 features).
+It is a divergence in the one behaviour the format exists for: fetching only
+the bytes you need, in as few requests as possible.
+
+**Fix:** one `BufferedRangeReader(reader, _NODE_FETCH_SIZE)` at the top of
+`search_rtree`, mirroring `stree.py` exactly, with `_NODE_FETCH_SIZE =
+256 * 1024` cited to `http_reader/mod.rs:213`. The window only ever widens a
+read the caller already asked for, so the existing bounds checks still govern
+what is decoded.
+
+**Coverage:** `tests/test_packed_rtree.py::test_a_multi_level_search_buffers_instead_of_reading_per_node`
+asserts strictly fewer physical reads than nodes visited — the property, not
+the window size. Verified to fail without the fix (2 reads vs 1).
+
+**Ports:** C++ and Rust already combine on this path and are unaffected. The
+TypeScript reader has the same four phases and has **not** been checked for
+this — worth doing when it is next touched.
