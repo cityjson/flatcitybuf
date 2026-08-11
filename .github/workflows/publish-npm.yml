@@ -102,6 +102,9 @@ jobs:
           # Only the manifests move. dist/ is build output, not tracked.
           git add package.json package-lock.json
           git commit -m "chore: release npm v${{ steps.bump.outputs.version }}"
+          # Discard any tracked files the build/test steps modified, or
+          # `pull --rebase` refuses with "You have unstaged changes".
+          git checkout -- :/
           # The verify and publish steps above run for minutes, so the branch
           # may have moved; the bump touches only the manifests, so rebase
           # onto the current tip and retry instead of failing non-fast-forward

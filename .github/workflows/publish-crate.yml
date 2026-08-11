@@ -68,7 +68,9 @@ jobs:
           # moved since checkout. cargo-workspaces commits AND pushes
           # internally, and a non-fast-forward push aborts the whole release
           # -- re-sync first to shrink that race to the seconds between this
-          # rebase and its push.
+          # rebase and its push. Discard any tracked files the check step
+          # modified first, or the rebase refuses on a dirty tree.
+          git checkout -- :/
           git pull --rebase
           cargo workspaces version --all --yes --force="fcb*" \
             --no-individual-tags ${{ github.event.inputs.version_bump }}

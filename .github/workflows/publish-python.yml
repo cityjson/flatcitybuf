@@ -93,6 +93,9 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(f"version={new_version}\n")
           PY
+          # uv.lock embeds the project's own version; refresh it so the
+          # release commit keeps the lockfile consistent with pyproject.toml.
+          uv lock
 
       - name: Build the wheel and sdist
         working-directory: src/py
@@ -116,9 +119,15 @@ jobs:
 
       - name: Commit the version bump
         run: |
-          # Only pyproject.toml moves. dist/ is build output, not tracked.
-          git add src/py/pyproject.toml
+          # Only the manifest and its lockfile move. dist/ is build output,
+          # not tracked.
+          git add src/py/pyproject.toml src/py/uv.lock
           git commit -m "chore: release python v${{ steps.bump.outputs.version }}"
+          # `just check`'s uv sync and the build can leave other tracked
+          # files modified; discard that noise or `pull --rebase` refuses
+          # with "You have unstaged changes" (which is exactly how the
+          # v0.5.0 release lost its bump commit).
+          git checkout -- :/
           # The verify and publish steps above run for minutes, so the branch
           # may have moved; the bump touches only pyproject.toml, so rebase
           # onto the current tip and retry instead of failing non-fast-forward
