@@ -64,6 +64,12 @@ jobs:
       - name: Bump version
         working-directory: src/rust
         run: |
+          # `just check` above runs for many minutes, so the branch may have
+          # moved since checkout. cargo-workspaces commits AND pushes
+          # internally, and a non-fast-forward push aborts the whole release
+          # -- re-sync first to shrink that race to the seconds between this
+          # rebase and its push.
+          git pull --rebase
           cargo workspaces version --all --yes --force="fcb*" \
             --no-individual-tags ${{ github.event.inputs.version_bump }}
 

@@ -102,6 +102,18 @@ jobs:
           # Only the manifests move. dist/ is build output, not tracked.
           git add package.json package-lock.json
           git commit -m "chore: release npm v${{ steps.bump.outputs.version }}"
+          # The verify and publish steps above run for minutes, so the branch
+          # may have moved; the bump touches only the manifests, so rebase
+          # onto the current tip and retry instead of failing non-fast-forward
+          # -- the publish already happened, and losing this commit desyncs
+          # the repo from npm. Tag only after the push, so the tag points at
+          # the commit that actually landed (a pre-rebase tag would not).
+          for attempt in 1 2 3; do
+            if git pull --rebase && git push; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 5
+          done
           git tag "npm-v${{ steps.bump.outputs.version }}"
-          git push
           git push --tags
