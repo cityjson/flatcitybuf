@@ -96,3 +96,11 @@ build/
 
 # subagent-driven-development scratch (briefs, reports, review packages)
 .superpowers/
+.wrangler/
+
+# C++ CMake build trees (build-native, build-curl, build-default, ...)
+build-*/
+
+# npm state wherever a tool drops it, and repo-root scratch data
+node_modules/
+/tmp/
