@@ -12,10 +12,15 @@ TMP="$(mktemp)"
 SERVER_PID=$!
 trap 'kill "${SERVER_PID}" 2>/dev/null || true; rm -f "${TMP}"' EXIT
 
-for _ in $(seq 1 100); do
+# 60s wall-clock budget, not a fixed iteration count: a cold python3 on a
+# macOS CI runner can take >15s just to launch (first-run code-signing
+# verification), which is longer than the old 100 x 0.05s loop allowed.
+DEADLINE=$((SECONDS + 60))
+PORT=""
+while [[ -z "${PORT}" ]] && (( SECONDS < DEADLINE )); do
+  kill -0 "${SERVER_PID}" 2>/dev/null || break   # server died: fail fast
   PORT="$(cat "${TMP}" 2>/dev/null || true)"
-  [[ -n "${PORT}" ]] && break
-  sleep 0.05
+  [[ -n "${PORT}" ]] || sleep 0.2
 done
 [[ -n "${PORT:-}" ]] || { echo "range_server.py did not report a port" >&2; exit 1; }
 
