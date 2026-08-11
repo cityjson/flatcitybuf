@@ -94,6 +94,27 @@ pub fn normalize_srs(srs_name: &str) -> Option<NormalizedCrs> {
     })
 }
 
+/// Whether a `srsName` names more than one CRS, so that [`normalize_srs`]
+/// keeps only its horizontal component.
+///
+/// Only the compound URN form can carry a vertical component, and it always
+/// says so with a comma; nothing else here has to be parsed to tell. The
+/// caller warns, because dropping the vertical CRS silently would leave a
+/// document claiming a 2D reference system for 3D coordinates.
+pub(crate) fn drops_vertical_component(srs_name: &str) -> bool {
+    let srs_name = srs_name.trim().to_ascii_lowercase();
+    let Some(body) = URN_PREFIXES
+        .iter()
+        .find_map(|prefix| srs_name.strip_prefix(prefix))
+    else {
+        return false;
+    };
+    let Some(components) = body.strip_prefix(',') else {
+        return false;
+    };
+    components.split(',').filter(|c| !c.is_empty()).count() > 1
+}
+
 /// Extract the EPSG code and the spelling it came from.
 fn parse_epsg_code(srs_name: &str) -> Option<(u32, SrsForm)> {
     // Only the code's digits survive, so case folding the whole value is
@@ -219,6 +240,25 @@ mod tests {
         // "EPSG:4326" is the legacy x=lon convention; only the urn/OGC-URL forms are lat/lon.
         assert!(!normalize_srs("EPSG:4326").unwrap().swap_axes);
     }
+    #[test]
+    fn only_a_multi_component_urn_drops_a_vertical_crs() {
+        assert!(drops_vertical_component(
+            "urn:ogc:def:crs,crs:EPSG::25832,crs:EPSG::5783"
+        ));
+        assert!(drops_vertical_component(
+            "  URN:X-OGC:DEF:CRS,crs:EPSG::25832,crs:EPSG::5783  "
+        ));
+        for form in [
+            "urn:ogc:def:crs:EPSG::25832",
+            "urn:ogc:def:crs,crs:EPSG::25832", // compound spelling, one CRS
+            "EPSG:25832",
+            "https://www.opengis.net/def/crs/EPSG/0/25832",
+            "",
+        ] {
+            assert!(!drops_vertical_component(form), "{form}");
+        }
+    }
+
     #[test]
     fn unknown_is_none() {
         assert!(normalize_srs("CRS:84unknown-junk").is_none());

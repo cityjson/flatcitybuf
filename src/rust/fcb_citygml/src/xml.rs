@@ -166,6 +166,23 @@ pub fn load_subtree<R: BufRead>(
     }
 }
 
+/// Build a childless [`XmlNode`] from a self-closing element's tag.
+///
+/// [`load_subtree`] cannot read one: an [`Event::Empty`] has no end tag, so
+/// waiting for one would swallow the following siblings. Callers that walk a
+/// level of the document therefore handle `Empty` with this and `Start` with
+/// [`load_subtree`], and treat the two results alike.
+///
+/// # Errors
+///
+/// Returns [`CityGmlError::Xml`] when an attribute cannot be decoded.
+pub(crate) fn leaf_node<R>(
+    reader: &NsReader<R>,
+    start: &BytesStart,
+) -> Result<XmlNode, CityGmlError> {
+    node_from_start(reader, start)
+}
+
 /// Parse a whole XML string into the [`XmlNode`] of its root element.
 ///
 /// This exists so that the geometry readers can be tested against XML

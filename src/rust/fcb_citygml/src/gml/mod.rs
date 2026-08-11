@@ -36,7 +36,7 @@ pub struct Polygon3 {
 /// (`http://www.opengis.net/gml/3.2`, used by CityGML 3.0) is deliberately
 /// *not* accepted: recognising its elements here would claim a conformance
 /// the rest of the converter does not have.
-const GML_NS: &str = "http://www.opengis.net/gml";
+pub(crate) const GML_NS: &str = "http://www.opengis.net/gml";
 
 /// Local names of the elements this module reads. A local name alone never
 /// identifies an element — an application schema is free to define its own
@@ -251,12 +251,12 @@ fn repair_ring(pts: Vec<[f64; 3]>) -> Option<Vec<[f64; 3]>> {
 }
 
 /// Whether a node is the named GML element — local name *and* namespace.
-fn is_gml(node: &XmlNode, local: &str) -> bool {
+pub(crate) fn is_gml(node: &XmlNode, local: &str) -> bool {
     node.local == local && node.ns == GML_NS
 }
 
 /// The first direct child that is the named GML element.
-fn gml_child<'a>(node: &'a XmlNode, local: &str) -> Option<&'a XmlNode> {
+pub(crate) fn gml_child<'a>(node: &'a XmlNode, local: &str) -> Option<&'a XmlNode> {
     node.children.iter().find(|child| is_gml(child, local))
 }
 
