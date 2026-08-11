@@ -24,7 +24,52 @@ brew install flatbuffers nlohmann-json doctest
 sudo apt-get install libflatbuffers-dev nlohmann-json3-dev doctest-dev
 ```
 
-## Build and install
+## Install via vcpkg
+
+The port lives in a [custom vcpkg registry](https://github.com/HideBa/vcpkg)
+(not the built-in microsoft/vcpkg one). Next to your project's `vcpkg.json`,
+add a `vcpkg-configuration.json`:
+
+```json
+{
+  "default-registry": {
+    "kind": "git",
+    "repository": "https://github.com/microsoft/vcpkg",
+    "baseline": "2f1d605400c8727cc00c15797aba796c88ccd523"
+  },
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/HideBa/vcpkg",
+      "baseline": "215cc3b59bab5198f619c0a1c0ecdc8144624189",
+      "packages": ["flatcitybuf"]
+    }
+  ]
+}
+```
+
+and declare the dependency in `vcpkg.json`:
+
+```json
+{
+  "name": "my-app",
+  "version": "0.1.0",
+  "dependencies": ["flatcitybuf"]
+}
+```
+
+Use `{ "name": "flatcitybuf", "features": ["curl"] }` instead to get the
+HTTP range-request reader. Configure with vcpkg's toolchain file
+(`-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`) and
+integrate exactly as in [Use from CMake](#use-from-cmake) below — the port
+installs the same `flatcitybuf::flatcitybuf` target the manual build does.
+
+The port builds this directory from the `v0.8.0` tag with tests and examples
+off, JSON on. One packaging note: vcpkg ships a newer FlatBuffers than the
+generated headers' exact-version assert expects, so the port patches the
+assert to major-version-only.
+
+## Build and install from source
 
 ```bash
 cd src/cpp
