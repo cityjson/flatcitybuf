@@ -93,6 +93,12 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
         other: HashMap::new(),
     });
 
+    // The header's own appearance palette. The geometry templates decoded
+    // below index straight into it -- a template belongs to no feature, so its
+    // `material`/`texture` mapping can refer to nothing else. Emitting the
+    // templates while dropping this left those mappings dangling (finding #31).
+    cj.appearance = header.appearance().map(to_cj_appearance).transpose()?;
+
     // Decode Geometry Templates if present
     if let (Some(fb_templates), Some(fb_vertices)) =
         (header.templates(), header.templates_vertices())
@@ -593,15 +599,28 @@ pub fn to_cj_feature(
         .map_or(Vec::new(), |v| to_cj_vertices(v.iter().collect()));
 
     // Decode appearance if present
-    if let Some(appearance) = feature.appearance() {
-        let mut cj_appearance = CjAppearance {
-            materials: None,
-            textures: None,
-            vertices_texture: None,
-            default_theme_texture: None,
-            default_theme_material: None,
-        };
+    cj.appearance = feature.appearance().map(to_cj_appearance).transpose()?;
 
+    Ok(cj) // Return Result
+}
+
+/// Decode one FlatBuffers `Appearance` table into its CityJSON form.
+///
+/// Shared by both callers on purpose: a `Header` and a `CityFeature` each carry
+/// an `Appearance`, and the two must decode identically -- notably the
+/// `"image": "" -> absent` choice documented below, which the C++ reader
+/// mirrors. Duplicating this let the header path drift silently once already
+/// (finding #31: the header's palette was written but never read back).
+pub(crate) fn to_cj_appearance(appearance: Appearance) -> Result<CjAppearance, Error> {
+    let mut cj_appearance = CjAppearance {
+        materials: None,
+        textures: None,
+        vertices_texture: None,
+        default_theme_texture: None,
+        default_theme_material: None,
+    };
+
+    {
         // Decode materials. `name` is the schema's one required member; every
         // other one is optional, and an absent one stays absent rather than
         // reappearing as `null`.
@@ -671,11 +690,9 @@ pub fn to_cj_feature(
         if let Some(default_theme_material) = appearance.default_theme_material() {
             cj_appearance.default_theme_material = Some(default_theme_material.to_string());
         }
-
-        cj.appearance = Some(cj_appearance);
     }
 
-    Ok(cj) // Return Result
+    Ok(cj_appearance)
 }
 
 pub(crate) fn decode_geometry(

@@ -212,6 +212,13 @@ pub(super) fn to_fcb_header<'a>(
             },
         ))
     } else {
+        // No `metadata`, so every metadata-derived field above is absent --
+        // but `appearance` and the geometry templates are not among them. They
+        // come from `cj.appearance` and `cj.geometry_templates`, which are
+        // siblings of `metadata`, not children of it. Leaving them to
+        // `..Default::default()` here silently dropped the palette and every
+        // template whenever a header happened to carry no metadata
+        // (finding #32).
         Ok(Header::create(
             fbb,
             &HeaderArgs {
@@ -223,6 +230,9 @@ pub(super) fn to_fcb_header<'a>(
                 geographical_extent: geographical_extent_from_options.as_ref(),
                 version,
                 attribute_index,
+                appearance,
+                templates,
+                templates_vertices,
                 extensions,
                 ..Default::default()
             },

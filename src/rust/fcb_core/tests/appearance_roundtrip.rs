@@ -1121,3 +1121,131 @@ fn an_absent_texture_image_does_not_come_back_as_an_empty_string() -> Result<()>
     assert_eq!(decoded["textures"][0]["image"], json!("a.jpg"));
     Ok(())
 }
+
+/// The header carries its own appearance palette, and the header's geometry
+/// templates index *into it* -- a template's `material`/`texture` mapping can
+/// only refer to the header's arrays, because a template belongs to no feature.
+///
+/// The writer stores that palette (`writer/serializer.rs` puts `cj.appearance`
+/// in the `Header`), but `to_cj_metadata` used to never read it back, so a
+/// `ser` -> `deser` round trip emitted templates whose mappings pointed at a
+/// palette that was no longer there. That is finding #31: not merely a fidelity
+/// loss, but dangling indices in schema-valid-looking output.
+#[test]
+fn the_header_appearance_palette_roundtrips() -> Result<()> {
+    let appearance = json!({
+        "materials": [{
+            "name": "template-material",
+            "ambientIntensity": 0.4,
+            "diffuseColor": [0.9, 0.1, 0.75],
+            "emissiveColor": [0.0, 0.0, 0.0],
+            "specularColor": [1.0, 1.0, 1.0],
+            "shininess": 0.2,
+            "transparency": 0.5,
+            "isSmooth": false
+        }],
+        "textures": [{
+            "type": "PNG",
+            "image": "template.png",
+            "wrapMode": "wrap",
+            "textureType": "unknown",
+            "borderColor": [0.0, 0.1, 0.2, 1.0]
+        }],
+        "vertices-texture": [[0.0, 0.5], [1.0, 0.0]],
+        "default-theme-texture": "winter",
+        "default-theme-material": "irradiation"
+    });
+
+    // A header with geometry templates *and* the palette those templates
+    // index, which is exactly the shape `geom_temp.city.jsonl` has.
+    let cj_line = json!({
+        "type": "CityJSON",
+        "version": "2.0",
+        "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]},
+        "CityObjects": {},
+        "vertices": [],
+        "appearance": appearance,
+        "geometry-templates": {
+            "templates": [{
+                "type": "MultiSurface",
+                "lod": "1",
+                "boundaries": [[[0, 1, 2]]],
+                "material": {"visual": {"values": [0]}},
+                "texture": {"visual": {"values": [[[0, 0, 1, 0]]]}}
+            }],
+            "vertices-templates": [[0, 0, 0], [1, 0, 0], [1, 1, 0]]
+        }
+    });
+    let feature_line = json!({
+        "type": "CityJSONFeature",
+        "id": "feat-1",
+        "CityObjects": {
+            "co-1": {
+                "type": "Building",
+                "geometry": [{
+                    "type": "MultiSurface",
+                    "lod": "1",
+                    "boundaries": [[[0, 1, 2]]]
+                }]
+            }
+        },
+        "vertices": [[0, 0, 0], [1, 0, 0], [1, 1, 0]]
+    });
+    let input = format!("{cj_line}\n{feature_line}\n");
+
+    let seq = match read_cityjson_from_reader(
+        BufReader::new(Cursor::new(input.into_bytes())),
+        CJTypeKind::Seq,
+    )? {
+        CJType::Seq(seq) => seq,
+        _ => panic!("expected CityJSONSeq"),
+    };
+    assert!(
+        seq.cj.appearance.is_some(),
+        "the parsed header must carry the appearance the test wrote"
+    );
+
+    let mut fcb_buf: Vec<u8> = Vec::new();
+    {
+        let mut fcb = FcbWriter::new(
+            seq.cj.clone(),
+            Some(HeaderWriterOptions {
+                write_index: false,
+                feature_count: seq.features.len() as u64,
+                index_node_size: 16,
+                attribute_indices: None,
+                geographical_extent: None,
+            }),
+            Some(AttributeSchema::new()),
+            None,
+        )?;
+        for feature in seq.features.iter() {
+            fcb.add_feature(feature)?;
+        }
+        fcb.write(&mut fcb_buf)?;
+    }
+
+    let reader = FcbReader::open(Cursor::new(fcb_buf))?.select_all()?;
+    let decoded_cj = deserializer::to_cj_metadata(&reader.header())?;
+
+    let decoded = decoded_cj
+        .appearance
+        .as_ref()
+        .expect("the header's appearance palette must survive the round trip");
+    assert_eq!(
+        serde_json::to_value(decoded)?,
+        appearance,
+        "the whole palette, compared as one value -- not a chosen subset of its members"
+    );
+
+    // The reason the palette matters: the templates that index it are emitted.
+    let templates = decoded_cj
+        .geometry_templates
+        .as_ref()
+        .expect("the header declares geometry templates");
+    assert!(
+        templates.templates[0].common().is_some(),
+        "the template that indexes the palette must still be emitted"
+    );
+    Ok(())
+}

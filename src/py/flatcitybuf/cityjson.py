@@ -567,12 +567,14 @@ def _geometry_to_json(
                 s["type"] = "ExtraSemanticSurface"
 
             # SemanticObject.parent is `uint = null` -- the same
-            # optional-scalar shape as MaterialMapping.value, and the
-            # Rust reference reader DOES emit it (pinned against a
-            # round trip through the Rust writer in test_cityjson.py,
-            # since no committed corpus fixture happens to set it).
-            # src/cpp/src/cityjson.cpp does not emit this field at all;
-            # see the task report for why Python diverges from it here.
+            # optional-scalar shape as MaterialMapping.value, so absent
+            # and zero are both real states and this must test None, not
+            # truthiness. The Rust reference reader DOES emit it (pinned
+            # against a round trip through the Rust writer in
+            # test_cityjson.py, since no committed corpus fixture
+            # happens to set it), and so does the C++ port
+            # (cityjson.cpp, `if (const auto p = so->parent())`). All
+            # three agree; there is no divergence here.
             parent = so.Parent()
             if parent is not None:
                 s["parent"] = parent
@@ -600,13 +602,13 @@ def _geometry_to_json(
             ),
         }
 
-    # Appearance: per-geometry mappings only. The header's `appearance`
-    # object (the materials/textures/vertices-texture arrays these
-    # index into) is deliberately not emitted here -- the Rust reader
-    # does not emit it either, and CityJSONSeq consumers read it from
-    # the source file. The per-FEATURE appearance (materials, textures,
-    # vertices-texture) is a different thing and IS emitted, by
-    # to_cityjson_feature below.
+    # Appearance: per-geometry mappings only -- the indices into the
+    # palette, not the palette itself. The palette these index into is
+    # emitted by to_cityjson_metadata (header-level) and by
+    # to_cityjson_feature (feature-level). It used to be dropped on the
+    # header path, on the since disproved grounds that the Rust reader
+    # did not emit it either; that was upstream finding #31, and it left
+    # these mappings pointing at nothing.
     if g.MaterialLength() > 0:
         out["material"] = _materials_to_json(g.MaterialLength(), g.Material)
     if g.TextureLength() > 0:
@@ -800,6 +802,17 @@ def _to_cityjson_metadata_impl(header: HeaderView) -> Dict[str, Any]:
     extensions = _extensions_to_json(hdr)
     if extensions:
         cj["extensions"] = extensions
+
+    # The header's own appearance palette. The geometry templates below
+    # index straight into it -- a template belongs to no feature, so its
+    # `material`/`texture` mapping can refer to nothing else. Emitting
+    # the templates while dropping this left those mappings dangling:
+    # upstream finding #31, fixed in Rust's to_cj_metadata and in
+    # cityjson.cpp's to_cityjson_metadata.
+    if hdr is not None:
+        header_appearance = hdr.Appearance()
+        if header_appearance is not None:
+            cj["appearance"] = _appearance_to_json(header_appearance)
 
     # Geometry templates: shapes shared by every GeometryInstance in the
     # file, with their own vertex list. Emitted only when BOTH arrays

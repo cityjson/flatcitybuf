@@ -619,10 +619,12 @@ function geometryTemplates(
  *  and `extensions`. Pure computation over an already-parsed header: it issues
  *  no reads and can be called any number of times.
  *
- *  The header's own `appearance` table is deliberately NOT emitted here: the
- *  reference does not emit it either (`to_cj_metadata` never sets
- *  `cj.appearance`), and each feature carries the slice of the palette it
- *  actually uses in its own `appearance`.
+ *  The header's own `appearance` table IS emitted here. It used to be dropped,
+ *  on the since disproved grounds that the reference did not emit it either
+ *  and that each feature carried the slice of the palette it used; in
+ *  `geom_temp` the header and per-feature palettes are in fact disjoint, and
+ *  the header's geometry templates index the header palette specifically.
+ *  Dropping it left those template mappings dangling -- upstream finding #31.
  *
  *  @param header `reader.header`.
  *  @param opts how to spell `Long`/`ULong` attribute values; see
@@ -661,6 +663,13 @@ export function toCityJSONMetadata(header: HeaderView, opts?: Int64Policy): City
     vertices: [],
     metadata,
   }
+  // The header's own appearance palette. The geometry templates below index
+  // straight into it -- a template belongs to no feature, so its
+  // `material`/`texture` mapping can refer to nothing else. Emitting the
+  // templates while dropping this left those mappings dangling: upstream
+  // finding #31.
+  const headerAppearance = hdr.appearance(new FbAppearance())
+  put(cj, 'appearance', headerAppearance !== null ? appearanceToJson(headerAppearance) : undefined)
   put(cj, 'geometry-templates', geometryTemplates(header, policy))
   put(cj, 'extensions', extensions(hdr))
   return cj

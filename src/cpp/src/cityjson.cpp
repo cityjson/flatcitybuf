@@ -435,10 +435,12 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
         out["semantics"] = std::move(sem);
     }
 
-    // Appearance: per-geometry mappings only. The header's `appearance`
-    // object (the materials/textures/vertices-texture arrays these index
-    // into) is deliberately not emitted -- the Rust reader does not emit it
-    // either, and CityJSONSeq consumers read it from the source file.
+    // Appearance: per-geometry mappings only -- the indices into the palette,
+    // not the palette itself. The palette these index into is emitted by
+    // `to_cityjson_metadata` (header-level) and by `to_cityjson_feature`
+    // (feature-level). It used to be dropped on the header path, on the since
+    // disproved grounds that the Rust reader did not emit it either; that was
+    // upstream finding #31, and it left these mappings pointing at nothing.
     //
     // An EMPTY mapping vector omits the key entirely: the reference returns
     // None for an empty slice (geom_decoder.rs:343, :472) and serde drops the
@@ -636,6 +638,15 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
     const ::Header* hdr = detail::HeaderAccess::get(header);
     if (auto ext = extensions_to_json(hdr); !ext.is_null()) {
         cj["extensions"] = std::move(ext);
+    }
+
+    // The header's own appearance palette. The geometry templates below index
+    // straight into it -- a template belongs to no feature, so its
+    // `material`/`texture` mapping can refer to nothing else. Emitting the
+    // templates while dropping this left those mappings dangling: upstream
+    // finding #31, fixed in `to_cj_metadata` (deserializer.rs).
+    if (hdr != nullptr && hdr->appearance() != nullptr) {
+        cj["appearance"] = appearance_to_json(hdr->appearance());
     }
 
     if (hdr != nullptr && hdr->templates() != nullptr && hdr->templates_vertices() != nullptr) {

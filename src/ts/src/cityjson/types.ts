@@ -147,6 +147,10 @@ export interface CityJSON {
   CityObjects: Record<string, CityObject>
   vertices: number[][]
   metadata?: Metadata
+  /** The document-level material/texture palette. The `material`/`texture`
+   *  mappings inside `geometry-templates` index into THIS palette, not into
+   *  any feature's -- a template belongs to no feature. */
+  appearance?: Appearance
   'geometry-templates'?: GeometryTemplates
   /** `name -> { url, version }`, emitted only when at least one extension is
    *  named. */
