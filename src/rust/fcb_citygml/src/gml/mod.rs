@@ -4,6 +4,10 @@
 //! rings, the first exterior and the rest interior, each ring a list of 3D
 //! points.
 
+mod geometry;
+
+pub use geometry::{parse_geometry, GmlGeometry, XlinkRegistry};
+
 use crate::xml::XmlNode;
 use crate::CityGmlError;
 
