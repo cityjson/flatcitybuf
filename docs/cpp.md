@@ -11,11 +11,11 @@ Source: [`src/cpp/`](../src/cpp).
 
 ## Status
 
-| | |
-|---|---|
-| Reading | conformant against the corpus in [`conformance/`](../conformance) |
-| Writing | `fcb::FcbWriter`, checked byte-for-byte against Rust-written files |
-| Standard | C++17; no Rust toolchain, no CXX bridge, no TLS dependency |
+|            |                                                                         |
+| ---------- | ----------------------------------------------------------------------- |
+| Reading    | conformant against the corpus in [`conformance/`](../conformance)       |
+| Writing    | `fcb::FcbWriter`, checked byte-for-byte against Rust-written files      |
+| Standard   | C++17; no Rust toolchain, no CXX bridge, no TLS dependency              |
 | Transports | local file, libcurl HTTP range requests, or your own `fcb::RangeReader` |
 
 ### Why native
@@ -41,12 +41,12 @@ cmake --install build --prefix /your/prefix
 
 CMake options ([`CMakeLists.txt:8-11`](../src/cpp/CMakeLists.txt)):
 
-| Option | Default | Effect |
-|---|---|---|
-| `FCB_WITH_JSON` | `ON` | CityJSON conversion, and the writer |
-| `FCB_WITH_CURL` | `OFF` | the libcurl HTTP range reader |
-| `FCB_BUILD_TESTS` | `ON` | the doctest suite |
-| `FCB_BUILD_EXAMPLES` | `ON` | the example programs |
+| Option               | Default | Effect                              |
+| -------------------- | ------- | ----------------------------------- |
+| `FCB_WITH_JSON`      | `ON`    | CityJSON conversion, and the writer |
+| `FCB_WITH_CURL`      | `OFF`   | the libcurl HTTP range reader       |
+| `FCB_BUILD_TESTS`    | `ON`    | the doctest suite                   |
+| `FCB_BUILD_EXAMPLES` | `ON`    | the example programs                |
 
 Dependencies, package names per platform, `find_package` integration, HTTP
 usage, and implementing your own transport: **[`src/cpp/INSTALL.md`](../src/cpp/INSTALL.md)**.
@@ -94,7 +94,7 @@ convenience for small files and does not have that property.
 Two traps are worth knowing before you start: input lines must be parsed as
 `nlohmann::ordered_json` (plain `nlohmann::json` sorts object members
 alphabetically and silently renumbers the columns), and column numbering follows
-the order `add_attributes` first *sees* a name — document order, never
+the order `add_attributes` first _sees_ a name — document order, never
 alphabetical.
 
 The full procedure, including index options, is in
@@ -122,13 +122,13 @@ which is why `just test` does not cover them.
 
 Extras beyond the five standard verbs (`just --list` in `src/cpp`):
 
-| Recipe | What it does |
-|---|---|
-| `test-remote` | opt-in live 3DBAG HTTP test against the published ~68 GB file |
-| `harden` | the two gates CI enforces and no other recipe does: the default build must link neither curl nor a TLS stack, and the suite must be clean under ASan/UBSan |
-| `tidy` | clang-tidy static analysis; not part of `check` yet |
-| `gen-fbs` | regenerate the committed FlatBuffers headers |
-| `docs` | doxygen HTML API docs (needs doxygen on PATH) |
+| Recipe        | What it does                                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test-remote` | opt-in live 3DBAG HTTP test against the published ~68 GB file                                                                                              |
+| `harden`      | the two gates CI enforces and no other recipe does: the default build must link neither curl nor a TLS stack, and the suite must be clean under ASan/UBSan |
+| `tidy`        | clang-tidy static analysis; not part of `check` yet                                                                                                        |
+| `gen-fbs`     | regenerate the committed FlatBuffers headers                                                                                                               |
+| `docs`        | doxygen HTML API docs (needs doxygen on PATH)                                                                                                              |
 
 ### What the suite proves
 
