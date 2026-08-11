@@ -33,7 +33,7 @@ test: install
 
 # Opt-in: the live 3DBAG HTTP test (~68 GB bucket)
 test-remote: install
-    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" npx vitest run test/http.test.ts -t "live 3DBAG"
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb}" npx vitest run test/http.test.ts -t "live 3DBAG"
 
 # The ACTUAL shipping target. The globalSetup serves the corpus cross-origin so
 # the CORS failure path (which a Node fetch cannot reach, because Node does not

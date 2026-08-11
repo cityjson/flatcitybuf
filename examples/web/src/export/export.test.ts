@@ -39,7 +39,7 @@ describe('assembleCityJSONSeq', () => {
 
 describe('deriveFilename', () => {
   it('strips .fcb and the URL path, then appends the format extension', () => {
-    const url = 'https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb'
+    const url = 'https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb'
     expect(deriveFilename(url, 'cityjson')).toBe('3dbag_all_index.city.json')
     expect(deriveFilename(url, 'cityjsonseq')).toBe('3dbag_all_index.city.jsonl')
     expect(deriveFilename(url, 'obj')).toBe('3dbag_all_index.obj')

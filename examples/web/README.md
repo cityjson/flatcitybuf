@@ -88,8 +88,9 @@ Access-Control-Expose-Headers: Content-Range, Accept-Ranges
 
 Without `Content-Range` exposed, the fetch reader cannot determine the file
 size and refuses to guess. Local files (drop/pick) are same-origin and never
-hit this. For a Google Cloud Storage bucket, set a CORS config that exposes
-the header:
+hit this. On a Cloudflare R2 bucket, add `Content-Range` and `Accept-Ranges`
+to `ExposeHeaders` in the bucket's CORS policy. For a Google Cloud Storage
+bucket, set a CORS config that exposes the header:
 
 ```bash
 echo '[{"maxAgeSeconds":3600,"method":["GET","HEAD","OPTIONS"],"origin":["*"],"responseHeader":["Content-Type","Content-Range","Accept-Ranges"]}]' > cors.json

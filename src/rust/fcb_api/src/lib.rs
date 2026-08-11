@@ -52,9 +52,8 @@ fn is_local_file(url: &str) -> bool {
 }
 
 pub async fn create_app() -> Router {
-    let fcb_url = env::var("FCB_URL").unwrap_or_else(|_| {
-        "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb".to_string()
-    });
+    let fcb_url = env::var("FCB_URL")
+        .unwrap_or_else(|_| "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb".to_string());
 
     let base_url = env::var("BASE_URL").unwrap_or_else(|_| "https://api.3dbag.nl".to_string());
 

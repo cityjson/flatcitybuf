@@ -13,7 +13,7 @@ e2e:
 
 # Run the API server with default 3DBAG data
 run:
-	FCB_URL=https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb cargo run
+	FCB_URL=https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb cargo run
 
 # Build release version
 build:

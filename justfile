@@ -20,7 +20,7 @@ DIRS := "src/rust src/cpp src/py src/ts examples/web"
 # The published 3DBAG file every reader's opt-in remote HTTP test hits, and the
 # default remote data source for the examples. ~68 GB, EPSG:28992; served with
 # range requests, so a client only ever fetches the bytes a query needs.
-REMOTE_URL := "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb"
+REMOTE_URL := "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb"
 
 # List all available commands
 default:

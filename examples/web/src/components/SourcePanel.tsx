@@ -4,7 +4,7 @@ import { useFcbData } from '../hooks/useFcbData'
 import { PrimaryButton, SectionHeading } from './ui'
 
 const DEFAULT_URL =
-  'https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb'
+  'https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb'
 
 const INPUT =
   'rounded border border-cj-charcoal/20 px-2 py-1 text-sm '

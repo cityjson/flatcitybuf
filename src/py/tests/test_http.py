@@ -39,9 +39,7 @@ SMALL = CORPUS / "small.fcb"
 # suites (src/rust/fcb_core/tests/http.rs, src/cpp/tests/test_http.cpp,
 # src/ts/test/http.test.ts).
 REMOTE_URL = os.environ.get("FCB_REMOTE_HTTP_URL", "")
-REMOTE_DEFAULT_URL = (
-    "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb"
-)
+REMOTE_DEFAULT_URL = "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb"
 REMOTE_FEATURES_COUNT = 10_771_547
 # A ~1 km box over central Amsterdam (minx, miny, maxx, maxy), well inside
 # the national extent.

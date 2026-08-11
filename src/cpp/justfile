@@ -1,4 +1,4 @@
-# FlatCityBuf — native C++17 reader.
+# FlatCityBuf — native C++17 reader and writer.
 #
 # Standard interface, identical in every justfile in this repo:
 #
@@ -42,7 +42,7 @@ test-http:
 test-remote:
     cmake -B build-curl -S . -DFCB_WITH_CURL=ON -DFCB_BUILD_TESTS=ON
     cmake --build build-curl
-    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" ./build-curl/tests/fcb_tests -tc="the live 3DBAG file opens and queries over HTTP"
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb}" ./build-curl/tests/fcb_tests -tc="the live 3DBAG file opens and queries over HTTP"
 
 # Configure and build the native core with tests
 build:

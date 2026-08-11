@@ -10,7 +10,7 @@ from flatcitybuf.errors import ErrorCode, FcbError
 from flatcitybuf.range_reader import RangeReader
 
 # http_reader/mod.rs:42, cited in the format spec's "HTTP
-# constants" table (.llm/docs/specification.md:339)
+# constants" table (docs/specification.md:339)
 # as DEFAULT_HTTP_FETCH_SIZE. The Rust source comments it
 # "the largest request we'll speculatively make" -- a CAP, not a
 # minimum floor. That is exactly how it is used here: `read()` never
@@ -31,6 +31,19 @@ from flatcitybuf.range_reader import RangeReader
 # (a default-buffering HttpRangeReader would silently balloon the
 # 12944-byte open prefetch into a much larger first request).
 DEFAULT_HTTP_FETCH_SIZE = 1_048_576
+
+
+# Computed here rather than imported from the package root, which
+# would be a circular import (flatcitybuf/__init__.py imports this
+# module).
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("flatcitybuf")
+    except Exception:
+        return "0.0.0+unknown"
+
 
 # RFC 7233 Content-Range, as sent on a 206: "bytes <start>-<end>/<total>".
 _CONTENT_RANGE_RE = re.compile(r"^bytes (\d+)-(\d+)/(\d+)$")
@@ -190,9 +203,15 @@ class HttpRangeReader(RangeReader):
         """One physical HTTP request for the half-open byte range
         [offset, offset + length)."""
         last = offset + length - 1
+        # A real User-Agent, not urllib's default: bot-protection layers
+        # (e.g. Cloudflare in front of the hosted datasets) reject
+        # "Python-urllib/x.y" outright with a 403.
         request = urllib.request.Request(
             self._url,
-            headers={"Range": f"bytes={offset}-{last}"},
+            headers={
+                "Range": f"bytes={offset}-{last}",
+                "User-Agent": f"flatcitybuf-python/{_version()}",
+            },
         )
         response: Any
         try:

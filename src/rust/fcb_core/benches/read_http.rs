@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 // Configuration for the benchmark
 const ITERATIONS: u32 = 50;
 const WARMUP_ITERATIONS: u32 = 10;
-const FCB_URL: &str = "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb";
+const FCB_URL: &str = "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb";
 const THREEBAG_API_URL: &str = "https://api.3dbag.nl/collections/pand/items";
 
 // Test feature IDs to benchmark

@@ -213,7 +213,7 @@ central Amsterdam:
 
 ```
 $ ./build-curl/fcb_read_http \
-    https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb \
+    https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb \
     120000 486000 121000 487000
 10771547 features, CityJSON 2.0
 opened in 2 HTTP request(s)
@@ -236,7 +236,7 @@ opened in 2 HTTP request(s)
 931 feature(s) in the query bbox, 7 HTTP request(s)
 ```
 
-> Older files at `storage.googleapis.com/flatcitybuf/` that predate the
+> Older files at `flatcitybuf.open3d.city/data/` that predate the
 > alignment fix (`540772a`) are rejected with `header failed FlatBuffers
 > verification` — correct, since this reader re-enabled `check_alignment`.
 > `3dbag_all_index.fcb` above has been re-serialized with the current writer,

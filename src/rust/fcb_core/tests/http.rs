@@ -125,7 +125,7 @@ mod http {
 
     fn remote_url() -> String {
         std::env::var("FCB_REMOTE_HTTP_URL").unwrap_or_else(|_| {
-            "https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb".to_string()
+            "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb".to_string()
         })
     }
 

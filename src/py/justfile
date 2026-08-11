@@ -31,7 +31,7 @@ test: sync
 
 # Opt-in: the live 3DBAG HTTP test (~68 GB bucket)
 test-remote: sync
-    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" uv run pytest tests/test_http.py -k remote -v
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb}" uv run pytest tests/test_http.py -k remote -v
 
 # ruff check + ruff format --check
 lint: sync
@@ -61,8 +61,8 @@ fix: sync
 # numpy is a genuine optional extra: every code path has a working pure-Python
 # fallback, and BOTH states must be verified — otherwise whichever one happens to
 # be installed is the only one ever exercised. This mirrors CI's two passes.
-# Expect `251 passed, 4 skipped` here (numpy-parity tests importorskip), against
-# `255 passed` with numpy present.
+# Expect `251 passed, 5 skipped, 1 deselected` here (numpy-parity tests
+# importorskip), against `255 passed` with numpy present.
 
 # Re-run mypy + pytest with numpy uninstalled, then restore it
 test-no-numpy:
