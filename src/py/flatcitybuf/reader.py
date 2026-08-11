@@ -128,6 +128,13 @@ class FcbReader:
     def __init__(self, reader: RangeReader, header: HeaderView) -> None:
         self._reader = reader
         self.header = header
+        # One window reused across `feature_at` calls, so walking a
+        # sorted hit list costs a fetch per window rather than per
+        # feature. Held on the instance rather than created per call
+        # precisely because a single call cannot amortise anything --
+        # that is what made the documented query -> feature_at loop
+        # issue two HTTP requests per feature (finding #34).
+        self._feature_window = BufferedRangeReader(reader, _FEATURE_FETCH_SIZE)
 
     @classmethod
     def open_file(cls, path: str | Path) -> FcbReader:
@@ -185,11 +192,15 @@ class FcbReader:
         Random access, one feature per call -- for a large result set,
         the caller reads forward through hits already sorted ascending
         by offset (both search functions guarantee that order), which
-        is the access pattern the format is laid out for.
+        is the access pattern the format is laid out for. Reads go
+        through a buffering window shared by every call on this reader,
+        so that forward walk costs a fetch per window and not per
+        feature; an out-of-order or distant offset simply misses the
+        window and refills it, exactly as a random read would.
         """
         offset = item.offset if isinstance(item, SearchResultItem) else item
         return _read_feature_at(
-            self._reader, self.header.layout.feature_begin, offset
+            self._feature_window, self.header.layout.feature_begin, offset
         )
 
     def select_attr(

@@ -1407,11 +1407,16 @@ per node. The spec's "HTTP constants" table
 **Measured** — the live 68 GB 3DBAG file, bbox `120000 486000 121000 487000`,
 identical results throughout (2762 features):
 
-| | open | bbox query | wall clock |
+| | open | R-tree traversal | wall clock |
 |---|---|---|---|
-| C++ (`fcb_read_http`) | 2 requests | 37 requests | ~6.4 s |
 | Python, before | 2 requests | **240 requests** | **32.4 s** |
 | Python, after | 2 requests | **10 requests** | **1.4 s** |
+
+These count the **index traversal only**, not the feature reads that follow.
+An earlier revision of this entry put C++'s 37 in the same table; that number
+is C++'s total for the whole query *including* decoding all 2762 features, so
+it was never comparable to a traversal-only figure. The end-to-end comparison
+belongs to finding #34, which is where the rest of the gap turned out to be.
 
 Not a correctness defect — the answer was always right, and matches C++ and
 Rust exactly (and on `delft.fcb`, all three agree on the same 170 features).
@@ -1431,3 +1436,56 @@ the window size. Verified to fail without the fix (2 reads vs 1).
 **Ports:** C++ and Rust already combine on this path and are unaffected. The
 TypeScript reader has the same four phases and has **not** been checked for
 this — worth doing when it is next touched.
+
+## 34. Python: `feature_at` read through the raw reader, costing 2 HTTP requests per feature — FIXED (this branch)
+
+**Where:** `src/py/flatcitybuf/reader.py`, `FcbReader.feature_at`.
+
+`feature_at` is the documented way back from an index hit to a feature — both
+`search_rtree` and `select_attr` return byte offsets, and `docs/py.md` shows
+the loop:
+
+```python
+for hit in hits:
+    cj = fcb.to_cityjson_feature(reader.feature_at(hit), reader.header)
+```
+
+It read through `self._reader`, the **raw** reader. `select_all` and
+`select_attr`'s post-filter each wrapped that reader in a
+`BufferedRangeReader(_FEATURE_FETCH_SIZE)`, but `feature_at` did not — and a
+per-call wrapper could not have helped anyway, since one call has nothing to
+amortise. Every call therefore issued its own physical reads: a length prefix
+and a body, **2.0 HTTP requests per feature**, measured.
+
+This is the same class as finding #33 and was found immediately after it, by
+asking why the numbers there did not match C++'s once features were actually
+decoded rather than just counted.
+
+**Measured** — live 68 GB 3DBAG file, bbox `120000 486000 121000 487000`,
+2762 features, identical results throughout:
+
+| | requests | wall clock |
+|---|---|---|
+| Python, before | ~5764 (10 index + ~5524 features) | >10 min (timed out) |
+| Python, after | **39** | **9.2 s** |
+| C++ `fcb_read_http` | 37 | ~6.4 s |
+| TypeScript | 34 | 5.2 s |
+
+Before both fixes the same query was ~5764 requests; all four implementations
+now agree on 2762 features within a few requests of each other.
+
+**Fix:** one `BufferedRangeReader(reader, _FEATURE_FETCH_SIZE)` created in
+`FcbReader.__init__` and reused by every `feature_at` call, so walking a sorted
+hit list costs a fetch per window rather than per feature. An out-of-order or
+distant offset simply misses the window and refills it, exactly as a random
+read would — the method stays random-access.
+
+**Coverage:** `tests/test_public_api.py::test_walking_a_hit_list_with_feature_at_does_not_read_per_feature`
+asserts fewer physical reads than features walked — the property, not the
+window size.
+
+**Ports:** C++ and TypeScript were measured on the same query and do not have
+this gap (37 and 34 requests end to end). TypeScript in particular wraps a
+single `BufferedRangeReader` around the source at open
+(`src/ts/src/reader.ts`), so every phase inherits buffering by construction
+rather than needing a wrapper per phase.
