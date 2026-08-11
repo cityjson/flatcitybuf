@@ -72,6 +72,40 @@ pub enum GmlGeometry {
     CompositeSolid(Vec<Vec<Vec<Polygon3>>>),
 }
 
+impl GmlGeometry {
+    /// Every polygon of the geometry, whatever its nesting, in document
+    /// order.
+    ///
+    /// The nesting is what tells a `Solid` from a `MultiSurface`, so it is
+    /// kept in the type; a caller that only has something to say about each
+    /// polygon — the semantics reader, the bounding box — should not have to
+    /// match on the aggregate to say it.
+    pub fn polygons(&self) -> Vec<&Polygon3> {
+        match self {
+            Self::MultiSurface(polygons) | Self::CompositeSurface(polygons) => {
+                polygons.iter().collect()
+            }
+            Self::Solid(shells) => shells.iter().flatten().collect(),
+            Self::MultiSolid(solids) | Self::CompositeSolid(solids) => {
+                solids.iter().flatten().flatten().collect()
+            }
+        }
+    }
+
+    /// [`polygons`](Self::polygons), mutably.
+    pub fn polygons_mut(&mut self) -> Vec<&mut Polygon3> {
+        match self {
+            Self::MultiSurface(polygons) | Self::CompositeSurface(polygons) => {
+                polygons.iter_mut().collect()
+            }
+            Self::Solid(shells) => shells.iter_mut().flatten().collect(),
+            Self::MultiSolid(solids) | Self::CompositeSolid(solids) => {
+                solids.iter_mut().flatten().flatten().collect()
+            }
+        }
+    }
+}
+
 /// Parse a GML geometry aggregate rooted at `node`.
 ///
 /// Returns `Ok(None)` when `node` is not one of `gml:MultiSurface`,

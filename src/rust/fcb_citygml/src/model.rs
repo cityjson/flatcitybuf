@@ -19,6 +19,26 @@ pub struct SemanticSurface {
     /// The CityJSON semantic surface type, e.g. `"RoofSurface"`.
     pub stype: String,
     pub attributes: Map<String, Value>,
+    /// For an opening — a `Door` or a `Window` — the index of the surface it
+    /// opens, in the same geometry's `surfaces` list. CityJSON 2.0 § 3.3
+    /// spells this `parent`.
+    pub parent: Option<usize>,
+    /// The reverse of [`parent`](Self::parent): the openings this surface
+    /// holds. Empty for a surface with none, which is written as no
+    /// `children` member at all rather than as an empty array.
+    pub children: Vec<usize>,
+}
+
+impl SemanticSurface {
+    /// A surface of `stype` with no attributes and no place in a hierarchy.
+    pub(crate) fn new(stype: String) -> Self {
+        Self {
+            stype,
+            attributes: Map::new(),
+            parent: None,
+            children: Vec::new(),
+        }
+    }
 }
 
 /// One geometry of a city object, at one level of detail.

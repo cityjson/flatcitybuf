@@ -17,3 +17,8 @@ fn lod1_building() {
 fn attributes() {
     common::assert_fixture("attributes");
 }
+
+#[test]
+fn semantic_surfaces() {
+    common::assert_fixture("semantic_surfaces");
+}

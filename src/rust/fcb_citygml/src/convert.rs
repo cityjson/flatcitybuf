@@ -20,7 +20,7 @@ use serde_json::Value;
 
 use crate::crs::NormalizedCrs;
 use crate::gml::{GmlGeometry, Polygon3};
-use crate::model::{IntermediateGeometry, IntermediateObject};
+use crate::model::{IntermediateGeometry, IntermediateObject, SemanticSurface};
 use crate::{CityGmlDocument, ParseOptions, ParseReport};
 
 /// Convert the intermediate model into CityJSONSeq structures.
@@ -166,9 +166,12 @@ fn convert_geometry(
     vertices: &mut VertexTable,
 ) -> cjseq::Geometry {
     let lod = Some(geometry.lod.clone());
-    // Semantics, materials and textures are later tasks; nothing here can
-    // fill them in yet.
-    let common = cjseq::GeometryCommon::default();
+    // Materials and textures are a later task; nothing here can fill them in
+    // yet.
+    let common = cjseq::GeometryCommon {
+        semantics: semantics(geometry),
+        ..cjseq::GeometryCommon::default()
+    };
     let surfaces = |polygons: &[Polygon3], vertices: &mut VertexTable| -> Vec<cjseq::Surface> {
         polygons
             .iter()
@@ -209,6 +212,76 @@ fn convert_geometry(
             common,
         },
     }
+}
+
+/// The `semantics` member of a geometry, or `None` when the geometry has no
+/// semantics to state.
+///
+/// CityJSON's `values` is the geometry's `boundaries` with the innermost level
+/// — the rings of each surface — replaced by one index per surface, so it is
+/// nested exactly one level less deeply than the boundaries are. A surface no
+/// boundary surface claimed is `null` there, and a geometry where *every*
+/// surface would be `null` says nothing at all, so it gets no `semantics`
+/// member rather than an array of nulls.
+fn semantics(geometry: &IntermediateGeometry) -> Option<cjseq::Semantics> {
+    let polygons = geometry.geometry.polygons();
+    if geometry.surfaces.is_empty() || !polygons.iter().any(|polygon| polygon.sem_idx.is_some()) {
+        return None;
+    }
+
+    // An index that is not a surface of this geometry would name a surface
+    // some other geometry owns; `null` is the honest answer.
+    let count = geometry.surfaces.len();
+    let indices = |polygons: &[Polygon3]| -> cjseq::SemanticsShell {
+        polygons
+            .iter()
+            .map(|polygon| polygon.sem_idx.filter(|index| *index < count))
+            .collect()
+    };
+    let shells = |shells: &[Vec<Polygon3>]| -> cjseq::SemanticsSolid {
+        shells.iter().map(|shell| Some(indices(shell))).collect()
+    };
+
+    let values = match &geometry.geometry {
+        GmlGeometry::MultiSurface(polygons) | GmlGeometry::CompositeSurface(polygons) => {
+            cjseq::SemanticsValues::Surfaces(indices(polygons))
+        }
+        GmlGeometry::Solid(solid) => cjseq::SemanticsValues::Shells(shells(solid)),
+        GmlGeometry::MultiSolid(solids) | GmlGeometry::CompositeSolid(solids) => {
+            cjseq::SemanticsValues::Solids(solids.iter().map(|solid| Some(shells(solid))).collect())
+        }
+    };
+
+    Some(cjseq::Semantics {
+        surfaces: geometry.surfaces.iter().map(semantics_surface).collect(),
+        values: Some(values),
+        other: HashMap::new(),
+    })
+}
+
+/// One intermediate semantic surface as CityJSON's Semantic Object: its type,
+/// its place in the opening hierarchy, and its attributes as further members
+/// of the same object.
+fn semantics_surface(surface: &SemanticSurface) -> cjseq::SemanticsSurface {
+    cjseq::SemanticsSurface {
+        thetype: surface_type(&surface.stype),
+        parent: surface.parent,
+        // No opening is written as no member at all: an empty `children`
+        // array would claim the surface was asked and had none.
+        children: (!surface.children.is_empty()).then(|| surface.children.clone()),
+        other: surface.attributes.clone().into_iter().collect(),
+    }
+}
+
+/// A surface type name as cjseq spells it.
+///
+/// The known names deserialize into their own variants, and anything else is
+/// an Extension type carried through verbatim. The readers only ever produce
+/// names from the CityGML schema, so the fallback is unreachable today; it is
+/// here because losing the type would be worse than passing an unknown one on.
+fn surface_type(stype: &str) -> cjseq::SemanticSurfaceType {
+    serde_json::from_value(Value::String(stype.to_string()))
+        .unwrap_or_else(|_| cjseq::SemanticSurfaceType::Extension(stype.to_string()))
 }
 
 /// A polygon as a CityJSON surface: exterior ring first, then the interior
@@ -313,7 +386,7 @@ impl Extent {
 fn visit_points(objects: &[IntermediateObject], f: &mut impl FnMut(&[f64; 3])) {
     for object in objects {
         for geometry in &object.geometries {
-            for polygon in polygons(&geometry.geometry) {
+            for polygon in geometry.geometry.polygons() {
                 for ring in &polygon.rings {
                     ring.pts.iter().for_each(&mut *f);
                 }
@@ -327,7 +400,7 @@ fn visit_points(objects: &[IntermediateObject], f: &mut impl FnMut(&[f64; 3])) {
 fn swap_axes(objects: &mut [IntermediateObject]) {
     for object in objects.iter_mut() {
         for geometry in &mut object.geometries {
-            for polygon in polygons_mut(&mut geometry.geometry) {
+            for polygon in geometry.geometry.polygons_mut() {
                 for ring in &mut polygon.rings {
                     for pt in &mut ring.pts {
                         pt.swap(0, 1);
@@ -336,32 +409,6 @@ fn swap_axes(objects: &mut [IntermediateObject]) {
             }
         }
         swap_axes(&mut object.children);
-    }
-}
-
-/// Every polygon of a geometry, whatever its nesting.
-fn polygons(geometry: &GmlGeometry) -> Vec<&Polygon3> {
-    match geometry {
-        GmlGeometry::MultiSurface(polygons) | GmlGeometry::CompositeSurface(polygons) => {
-            polygons.iter().collect()
-        }
-        GmlGeometry::Solid(shells) => shells.iter().flatten().collect(),
-        GmlGeometry::MultiSolid(solids) | GmlGeometry::CompositeSolid(solids) => {
-            solids.iter().flatten().flatten().collect()
-        }
-    }
-}
-
-/// [`polygons`], mutably.
-fn polygons_mut(geometry: &mut GmlGeometry) -> Vec<&mut Polygon3> {
-    match geometry {
-        GmlGeometry::MultiSurface(polygons) | GmlGeometry::CompositeSurface(polygons) => {
-            polygons.iter_mut().collect()
-        }
-        GmlGeometry::Solid(shells) => shells.iter_mut().flatten().collect(),
-        GmlGeometry::MultiSolid(solids) | GmlGeometry::CompositeSolid(solids) => {
-            solids.iter_mut().flatten().flatten().collect()
-        }
     }
 }
 
@@ -562,6 +609,145 @@ mod tests {
             let boundaries = serde_json::to_value(geometry).unwrap()["boundaries"].clone();
             assert_eq!(nesting_depth(&boundaries), depth, "{geometry:?}");
         }
+    }
+
+    /// The same square, pointing at a semantic surface.
+    fn semantic_polygon(pts: Vec<[f64; 3]>, sem_idx: Option<usize>) -> Polygon3 {
+        Polygon3 {
+            sem_idx,
+            ..polygon(pts)
+        }
+    }
+
+    /// A semantic surface of `stype` with nothing else on it.
+    fn surface(stype: &str) -> SemanticSurface {
+        SemanticSurface::new(stype.to_string())
+    }
+
+    /// The one geometry of the one city object of the one feature, as JSON.
+    fn geometry_json(object: IntermediateObject) -> serde_json::Value {
+        let doc = convert_one(vec![object], None);
+        serde_json::to_value(
+            &doc.features[0].city_objects["o1"]
+                .geometry
+                .as_ref()
+                .unwrap()[0],
+        )
+        .unwrap()
+    }
+
+    /// `values` is `boundaries` with its innermost level — the rings — gone,
+    /// so it is nested exactly one level less deeply, whatever the geometry.
+    #[test]
+    fn semantics_values_are_nested_one_level_less_deeply_than_boundaries() {
+        let face = |sem_idx| {
+            semantic_polygon(
+                vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+                sem_idx,
+            )
+        };
+        for (geometry, expected) in [
+            (
+                GmlGeometry::MultiSurface(vec![face(Some(0)), face(None)]),
+                serde_json::json!([0, null]),
+            ),
+            (
+                GmlGeometry::CompositeSurface(vec![face(Some(1))]),
+                serde_json::json!([1]),
+            ),
+            (
+                GmlGeometry::Solid(vec![vec![face(Some(0)), face(Some(1))]]),
+                serde_json::json!([[0, 1]]),
+            ),
+            (
+                GmlGeometry::MultiSolid(vec![vec![vec![face(Some(1))]]]),
+                serde_json::json!([[[1]]]),
+            ),
+            (
+                GmlGeometry::CompositeSolid(vec![vec![vec![face(Some(0))]]]),
+                serde_json::json!([[[0]]]),
+            ),
+        ] {
+            let mut object = object(geometry);
+            object.geometries[0].surfaces = vec![surface("RoofSurface"), surface("GroundSurface")];
+            let json = geometry_json(object);
+            assert_eq!(json["semantics"]["values"], expected);
+            assert_eq!(
+                json["semantics"]["surfaces"],
+                serde_json::json!([{"type": "RoofSurface"}, {"type": "GroundSurface"}])
+            );
+        }
+    }
+
+    /// A geometry no boundary surface described has no `semantics` member —
+    /// not an empty one, and not an array of nulls.
+    #[test]
+    fn a_geometry_without_semantics_has_no_semantics_member() {
+        let face = polygon(vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]]);
+        // No surfaces at all.
+        let json = geometry_json(object(GmlGeometry::MultiSurface(vec![face.clone()])));
+        assert!(json.get("semantics").is_none(), "{json}");
+
+        // Surfaces, but nothing pointing at them: the same thing, said
+        // differently.
+        let mut object = object(GmlGeometry::MultiSurface(vec![face]));
+        object.geometries[0].surfaces = vec![surface("WallSurface")];
+        let json = geometry_json(object);
+        assert!(json.get("semantics").is_none(), "{json}");
+    }
+
+    /// An opening's `parent`, and the surface's `children`, reach the
+    /// CityJSON document; a surface with no opening writes neither member.
+    #[test]
+    fn the_opening_hierarchy_is_written_out() {
+        let mut wall = surface("WallSurface");
+        wall.children = vec![1];
+        let mut window = surface("Window");
+        window.parent = Some(0);
+        window
+            .attributes
+            .insert("direction".to_string(), Value::String("north".to_string()));
+
+        let mut object = object(GmlGeometry::MultiSurface(vec![
+            semantic_polygon(
+                vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+                Some(0),
+            ),
+            semantic_polygon(
+                vec![[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0]],
+                Some(1),
+            ),
+        ]));
+        object.geometries[0].surfaces = vec![wall, window];
+
+        assert_eq!(
+            geometry_json(object)["semantics"]["surfaces"],
+            serde_json::json!([
+                {"type": "WallSurface", "children": [1]},
+                {"type": "Window", "parent": 0, "direction": "north"}
+            ])
+        );
+    }
+
+    /// An index that names no surface of this geometry is written as `null`:
+    /// it would otherwise point into another geometry's list.
+    #[test]
+    fn a_semantic_index_out_of_range_is_written_as_null() {
+        let mut object = object(GmlGeometry::MultiSurface(vec![
+            semantic_polygon(
+                vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+                Some(0),
+            ),
+            semantic_polygon(
+                vec![[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0]],
+                Some(7),
+            ),
+        ]));
+        object.geometries[0].surfaces = vec![surface("RoofSurface")];
+        assert_eq!(
+            geometry_json(object)["semantics"]["values"],
+            serde_json::json!([0, null])
+        );
     }
 
     /// Array levels between the outermost array and a vertex index.

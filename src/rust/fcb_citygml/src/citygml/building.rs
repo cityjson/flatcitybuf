@@ -1,16 +1,20 @@
 //! The building module: `bldg:Building`.
 //!
-//! The geometry and the attributes of the building itself are read here. Its
-//! boundary surfaces and its nested parts and installations each arrive with
-//! their own task, and each is additive: a property this reader does not
+//! The geometry, the attributes and the boundary surfaces of the building
+//! itself are read here. Its nested parts and installations arrive with their
+//! own task, and each addition is additive: a property this reader does not
 //! recognise is passed over silently rather than reported, because at this
 //! stage nearly every property of a real building is one of those.
 
+use std::collections::{BTreeMap, HashMap};
+
+use serde_json::{Map, Value};
+
 use super::attributes::read_common_attributes;
 use crate::gml::{parse_geometry, GmlGeometry, XlinkRegistry};
-use crate::model::{IntermediateGeometry, IntermediateObject};
+use crate::model::{IntermediateGeometry, IntermediateObject, SemanticSurface};
 use crate::xml::XmlNode;
-use crate::{CityGmlError, ParseReport, Skipped};
+use crate::{is_in, CityGmlError, ParseReport, Skipped};
 
 /// Namespace URIs of the CityGML building module, 2.0 and 1.0.
 const BUILDING_NS: [&str; 2] = [
@@ -35,9 +39,45 @@ const LOD_PREFIX: &str = "lod";
 /// The highest level of detail CityGML 2.0 defines.
 const HIGHEST_LOD: u8 = 4;
 
+/// Local name of the property holding a thematic boundary surface, and of the
+/// property holding one of that surface's openings.
+const BOUNDED_BY: &str = "boundedBy";
+const OPENING: &str = "opening";
+
+/// The thematic boundary surfaces of the building module, each of which is a
+/// CityJSON semantic surface type spelled the same way.
+///
+/// The interior surfaces — `InteriorWallSurface`, `CeilingSurface`,
+/// `FloorSurface` — are deliberately absent: they are boundaries of a
+/// `bldg:Room`, not of a building, and they arrive with the reader that reads
+/// rooms.
+const BOUNDARY_SURFACES: [&str; 6] = [
+    "RoofSurface",
+    "WallSurface",
+    "GroundSurface",
+    "ClosureSurface",
+    "OuterCeilingSurface",
+    "OuterFloorSurface",
+];
+
+/// The openings a boundary surface may hold. Each becomes a semantic surface
+/// of its own, pointing at the surface it opens.
+const OPENINGS: [&str; 2] = ["Window", "Door"];
+
+/// Local name of a GML polygon, for the report.
+const POLYGON: &str = "Polygon";
+
 /// Whether a node is a `bldg:Building`.
 pub(crate) fn is_building(node: &XmlNode) -> bool {
     node.local == BUILDING && BUILDING_NS.contains(&node.ns.as_str())
+}
+
+/// Whether a node is one of the named elements of the building module.
+///
+/// The local name alone is not enough: an application schema may define a
+/// `WallSurface` of its own, and it is not the CityGML one.
+fn is_building_element(node: &XmlNode, locals: &[&str]) -> bool {
+    BUILDING_NS.contains(&node.ns.as_str()) && locals.contains(&node.local.as_str())
 }
 
 /// Read a `bldg:Building` into the intermediate model.
@@ -65,7 +105,318 @@ pub(crate) fn read_building(
     let mut object = IntermediateObject::new(id, cjseq::CityObjectType::Building);
     read_common_attributes(node, &mut object.attributes, report);
     object.geometries = read_lod_geometries(node, registry, report)?;
+    read_semantic_surfaces(node, registry, &mut object.geometries, report)?;
     Ok(object)
+}
+
+/// Read an object's `bldg:boundedBy` thematic surfaces, and label the polygons
+/// of `geometries` with the semantics they state.
+///
+/// Every building-family object — a `Building`, a `BuildingPart`, a
+/// `BuildingInstallation` — carries boundary surfaces the same way, so this
+/// takes the object's node and its already-read geometries rather than
+/// belonging to the `Building` reader alone.
+///
+/// The two halves are read separately because CityGML states them separately:
+/// `bldg:boundedBy` says what each polygon *is*, and `bldg:lod2Solid` says how
+/// the polygons make up the object — usually by `xlink:href`, in either
+/// direction. Joining the two by `gml:id` is what makes both spellings work,
+/// and it is why the order the two properties are written in does not matter.
+///
+/// # Errors
+///
+/// Propagates the geometry reader's errors, as [`read_building`] does.
+pub(crate) fn read_semantic_surfaces(
+    node: &XmlNode,
+    registry: &XlinkRegistry,
+    geometries: &mut [IntermediateGeometry],
+    report: &mut ParseReport,
+) -> Result<(), CityGmlError> {
+    let boundaries = read_boundary_surfaces(node, registry, report)?;
+    attach_semantics(boundaries, geometries, report);
+    Ok(())
+}
+
+/// The semantic surfaces an object's boundary surfaces state, grouped by the
+/// level of detail whose geometry they describe.
+///
+/// The grouping is per LoD because a CityJSON geometry carries its own
+/// `surfaces` list: a `WallSurface` with both a `lod2MultiSurface` and a
+/// `lod3MultiSurface` describes two geometries, and each needs its own entry
+/// and its own index.
+#[derive(Debug, Default)]
+struct BoundarySurfaces {
+    /// LoD → what was read at that LoD. Ordered so that the report reads the
+    /// same way twice for the same document.
+    by_lod: BTreeMap<String, LodSurfaces>,
+}
+
+/// The semantic surfaces of one level of detail, and the polygons that carry
+/// them.
+#[derive(Debug, Default)]
+struct LodSurfaces {
+    /// The surfaces in the order they were written, which is the order their
+    /// indices are in.
+    surfaces: Vec<SemanticSurface>,
+    /// `gml:id` of a polygon → the surface it belongs to. A polygon reaches
+    /// the object's geometry by that id, whichever side of the reference it
+    /// was written on.
+    surface_of_polygon: HashMap<String, usize>,
+}
+
+impl BoundarySurfaces {
+    /// Append `surface` to the list for `lod` and answer the index it took.
+    fn push(&mut self, lod: &str, surface: SemanticSurface) -> usize {
+        let lod_surfaces = self.by_lod.entry(lod.to_string()).or_default();
+        lod_surfaces.surfaces.push(surface);
+        lod_surfaces.surfaces.len() - 1
+    }
+
+    /// Record that the polygon with this `gml:id` belongs to surface `index`
+    /// at `lod`.
+    fn label(&mut self, lod: &str, polygon_id: &str, index: usize) {
+        self.by_lod
+            .entry(lod.to_string())
+            .or_default()
+            .surface_of_polygon
+            .insert(polygon_id.to_string(), index);
+    }
+
+    /// Note that surface `child` opens surface `parent`.
+    fn add_child(&mut self, lod: &str, parent: usize, child: usize) {
+        if let Some(surface) = self
+            .by_lod
+            .get_mut(lod)
+            .and_then(|lod_surfaces| lod_surfaces.surfaces.get_mut(parent))
+        {
+            surface.children.push(child);
+        }
+    }
+}
+
+/// Read every `bldg:boundedBy` of an object.
+fn read_boundary_surfaces(
+    node: &XmlNode,
+    registry: &XlinkRegistry,
+    report: &mut ParseReport,
+) -> Result<BoundarySurfaces, CityGmlError> {
+    let mut boundaries = BoundarySurfaces::default();
+    for property in &node.children {
+        if !is_in(property, &BUILDING_NS, BOUNDED_BY) {
+            continue;
+        }
+        let mut read_any = false;
+        for surface in &property.children {
+            if !is_building_element(surface, &BOUNDARY_SURFACES) {
+                continue;
+            }
+            read_boundary_surface(surface, registry, &mut boundaries, report)?;
+            read_any = true;
+        }
+        if !read_any {
+            // A `boundedBy` this reader took nothing from is content that was
+            // lost: a surface type it does not know, or — the common case — a
+            // reference to a boundary surface shared with another building,
+            // which this converter does not follow.
+            report.skipped.push(Skipped {
+                element: property.local.clone(),
+                gml_id: property.gml_id().map(str::to_owned),
+                reason: format!("<{BOUNDED_BY}> holds no boundary surface this reader knows"),
+            });
+        }
+    }
+    Ok(boundaries)
+}
+
+/// One thematic surface or opening as it is being read: what it will become,
+/// and where it has already become it.
+///
+/// The index is per LoD and not one index at all, because a single
+/// `<bldg:WallSurface>` may hold geometry at several levels of detail, and
+/// each of those is a CityJSON geometry with a `surfaces` list of its own.
+struct PendingSurface {
+    /// The CityJSON semantic surface type: the element's local name, which
+    /// CityGML and CityJSON spell the same way.
+    stype: String,
+    attributes: Map<String, Value>,
+    /// LoD → the index this surface took in that LoD's list.
+    indices: HashMap<String, usize>,
+}
+
+impl PendingSurface {
+    /// Read a thematic surface's or an opening's own attributes.
+    fn read(node: &XmlNode, report: &mut ParseReport) -> Self {
+        let mut attributes = Map::new();
+        read_common_attributes(node, &mut attributes, report);
+        Self {
+            stype: node.local.clone(),
+            attributes,
+            indices: HashMap::new(),
+        }
+    }
+
+    /// The index this surface takes at `lod`, creating its entry on first
+    /// use — and, for an opening, linking it to the surface it opens from
+    /// both ends.
+    fn index_at(
+        &mut self,
+        lod: &str,
+        parent: Option<usize>,
+        boundaries: &mut BoundarySurfaces,
+    ) -> usize {
+        if let Some(index) = self.indices.get(lod) {
+            return *index;
+        }
+        let mut surface = SemanticSurface::new(self.stype.clone());
+        surface.attributes = self.attributes.clone();
+        surface.parent = parent;
+        let index = boundaries.push(lod, surface);
+        if let Some(parent) = parent {
+            boundaries.add_child(lod, parent, index);
+        }
+        self.indices.insert(lod.to_string(), index);
+        index
+    }
+}
+
+/// Read one thematic surface: the surface itself, then its openings.
+fn read_boundary_surface(
+    surface: &XmlNode,
+    registry: &XlinkRegistry,
+    boundaries: &mut BoundarySurfaces,
+    report: &mut ParseReport,
+) -> Result<(), CityGmlError> {
+    let mut pending = PendingSurface::read(surface, report);
+
+    for property in &surface.children {
+        let Some(lod) = lod_of(property) else {
+            continue;
+        };
+        let index = pending.index_at(lod, None, boundaries);
+        label_polygons(property, lod, index, registry, boundaries, report)?;
+    }
+
+    for property in &surface.children {
+        if !is_in(property, &BUILDING_NS, OPENING) {
+            continue;
+        }
+        for opening in &property.children {
+            if !is_building_element(opening, &OPENINGS) {
+                continue;
+            }
+            read_opening(opening, &mut pending, registry, boundaries, report)?;
+        }
+    }
+    Ok(())
+}
+
+/// Read one `bldg:Window` or `bldg:Door` into a semantic surface of its own.
+///
+/// An opening's surfaces are not the wall's: CityJSON gives each opening its
+/// own entry and links the two with `parent`/`children` (§ 3.3). `opened` is
+/// the surface it opens, and it is created at the opening's own LoD if it has
+/// no entry there yet, so that the link always points inside the same
+/// `surfaces` list.
+fn read_opening(
+    opening: &XmlNode,
+    opened: &mut PendingSurface,
+    registry: &XlinkRegistry,
+    boundaries: &mut BoundarySurfaces,
+    report: &mut ParseReport,
+) -> Result<(), CityGmlError> {
+    let mut pending = PendingSurface::read(opening, report);
+
+    for property in &opening.children {
+        let Some(lod) = lod_of(property) else {
+            continue;
+        };
+        let parent = opened.index_at(lod, None, boundaries);
+        let index = pending.index_at(lod, Some(parent), boundaries);
+        label_polygons(property, lod, index, registry, boundaries, report)?;
+    }
+    Ok(())
+}
+
+/// Record every polygon of one `lodX…` property of a boundary surface as
+/// belonging to semantic surface `index`.
+///
+/// The polygons themselves are not kept: they reach CityJSON through the
+/// object's own geometry, and this only has to be able to recognise them there
+/// — which is what a `gml:id` is for. A polygon written without one cannot be
+/// recognised, so its semantics are lost and the loss is reported.
+fn label_polygons(
+    property: &XmlNode,
+    lod: &str,
+    index: usize,
+    registry: &XlinkRegistry,
+    boundaries: &mut BoundarySurfaces,
+    report: &mut ParseReport,
+) -> Result<(), CityGmlError> {
+    let Some(geometry) = read_geometry_property(property, registry, report)? else {
+        report.skipped.push(Skipped {
+            element: property.local.clone(),
+            gml_id: property.gml_id().map(str::to_owned),
+            reason: format!("no supported GML geometry in <{}>", property.local),
+        });
+        return Ok(());
+    };
+    for polygon in geometry.polygons() {
+        match &polygon.gml_id {
+            Some(id) => boundaries.label(lod, id, index),
+            None => report.skipped.push(Skipped {
+                element: POLYGON.to_string(),
+                gml_id: None,
+                reason: format!(
+                    "a polygon of <{}> has no gml:id, so no geometry can be matched to it; \
+                     its semantics are dropped",
+                    property.local
+                ),
+            }),
+        }
+    }
+    Ok(())
+}
+
+/// Hand each LoD's semantic surfaces to the geometries at that LoD, and point
+/// every polygon at the surface it belongs to.
+///
+/// A polygon whose `gml:id` no boundary surface claimed keeps
+/// [`sem_idx`](crate::gml::Polygon3::sem_idx) `None`, which is CityJSON's
+/// `null`: a surface with no semantics, not a surface with the wrong ones.
+///
+/// Boundary surfaces at an LoD the object has no geometry for describe nothing
+/// this converter can write — CityJSON has no place for semantics without a
+/// geometry to hang them on — so they are dropped and reported.
+fn attach_semantics(
+    boundaries: BoundarySurfaces,
+    geometries: &mut [IntermediateGeometry],
+    report: &mut ParseReport,
+) {
+    for (lod, lod_surfaces) in boundaries.by_lod {
+        let mut carried = false;
+        for geometry in geometries.iter_mut().filter(|geometry| geometry.lod == lod) {
+            for polygon in geometry.geometry.polygons_mut() {
+                polygon.sem_idx = polygon
+                    .gml_id
+                    .as_deref()
+                    .and_then(|id| lod_surfaces.surface_of_polygon.get(id))
+                    .copied();
+            }
+            geometry.surfaces = lod_surfaces.surfaces.clone();
+            carried = true;
+        }
+        if !carried {
+            report.skipped.push(Skipped {
+                element: BOUNDED_BY.to_string(),
+                gml_id: None,
+                reason: format!(
+                    "{} boundary surface(s) at LoD {lod}: the object has no LoD {lod} geometry \
+                     to carry them, so their semantics are dropped",
+                    lod_surfaces.surfaces.len()
+                ),
+            });
+        }
+    }
 }
 
 /// Read every geometry property of an object, in document order.
@@ -145,6 +496,332 @@ mod tests {
         node(&format!(
             r#"<bldg:{local} xmlns:bldg="http://www.opengis.net/citygml/building/2.0"/>"#
         ))
+    }
+
+    /// A `bldg:Building` holding `properties`, with every namespace these
+    /// tests use bound on it.
+    fn building(properties: &str) -> String {
+        format!(
+            r#"<bldg:Building xmlns:bldg="http://www.opengis.net/citygml/building/2.0"
+                              xmlns:gen="http://www.opengis.net/citygml/generics/2.0"
+                              xmlns:gml="http://www.opengis.net/gml"
+                              xmlns:xlink="http://www.w3.org/1999/xlink"
+                              gml:id="b1">{properties}</bldg:Building>"#
+        )
+    }
+
+    /// Read a whole building, with the xlink registry the member scan would
+    /// have collected for it — which covers the building's own subtree, so a
+    /// reference either way round resolves.
+    fn read(xml: &str) -> (IntermediateObject, ParseReport) {
+        let building = node(xml);
+        let registry = XlinkRegistry::collect(&building);
+        let mut report = ParseReport::default();
+        let object = read_building(&building, &registry, 0, &mut report)
+            .unwrap_or_else(|err| panic!("read failed: {err}"));
+        (object, report)
+    }
+
+    /// A unit square at height `z`, as a `gml:Polygon` carrying `gml:id`.
+    fn polygon(gml_id: &str, z: f64) -> String {
+        format!(
+            r#"<gml:Polygon gml:id="{gml_id}"><gml:exterior><gml:LinearRing>
+                 <gml:posList>0 0 {z} 1 0 {z} 1 1 {z} 0 0 {z}</gml:posList>
+               </gml:LinearRing></gml:exterior></gml:Polygon>"#
+        )
+    }
+
+    /// A `gml:Solid` whose one shell holds `members`.
+    fn solid(members: &str) -> String {
+        format!(
+            "<gml:Solid><gml:exterior><gml:CompositeSurface>{members}\
+             </gml:CompositeSurface></gml:exterior></gml:Solid>"
+        )
+    }
+
+    /// A `gml:MultiSurface` around `members`.
+    fn multi_surface(members: &str) -> String {
+        format!("<gml:MultiSurface>{members}</gml:MultiSurface>")
+    }
+
+    /// A `gml:surfaceMember` holding an `xlink:href` to `gml_id`.
+    fn member_ref(gml_id: &str) -> String {
+        format!(r##"<gml:surfaceMember xlink:href="#{gml_id}"/>"##)
+    }
+
+    /// A `gml:surfaceMember` holding a polygon inline.
+    fn member(polygon: &str) -> String {
+        format!("<gml:surfaceMember>{polygon}</gml:surfaceMember>")
+    }
+
+    /// A `bldg:boundedBy` holding one thematic surface of `stype`, whose
+    /// `lod{lod}MultiSurface` holds `members`.
+    fn bounded_by(stype: &str, lod: u8, members: &str) -> String {
+        format!(
+            "<bldg:boundedBy><bldg:{stype}><bldg:lod{lod}MultiSurface>{}\
+             </bldg:lod{lod}MultiSurface></bldg:{stype}></bldg:boundedBy>",
+            multi_surface(members)
+        )
+    }
+
+    /// The semantic surface each polygon of a geometry points at, in
+    /// document order.
+    fn sem_indices(geometry: &IntermediateGeometry) -> Vec<Option<usize>> {
+        geometry
+            .geometry
+            .polygons()
+            .iter()
+            .map(|polygon| polygon.sem_idx)
+            .collect()
+    }
+
+    /// The types of a geometry's semantic surfaces, in index order.
+    fn stypes(geometry: &IntermediateGeometry) -> Vec<&str> {
+        geometry
+            .surfaces
+            .iter()
+            .map(|surface| surface.stype.as_str())
+            .collect()
+    }
+
+    /// The standard CityGML pattern: the polygons are written under the
+    /// boundary surfaces and the solid points at each of them.
+    #[test]
+    fn a_solid_of_xlinks_inherits_the_semantics_of_the_polygons_it_names() {
+        let (object, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>{}{}",
+            solid(&format!(
+                "{}{}{}",
+                member_ref("r1"),
+                member_ref("w1"),
+                member_ref("w2")
+            )),
+            bounded_by("RoofSurface", 2, &member(&polygon("r1", 3.0))),
+            bounded_by(
+                "WallSurface",
+                2,
+                &format!(
+                    "{}{}",
+                    member(&polygon("w1", 1.0)),
+                    member(&polygon("w2", 2.0))
+                )
+            ),
+        )));
+
+        let geometry = &object.geometries[0];
+        assert_eq!(geometry.lod, "2");
+        assert_eq!(stypes(geometry), vec!["RoofSurface", "WallSurface"]);
+        // The solid's own order, not the order the surfaces were written in.
+        assert_eq!(sem_indices(geometry), vec![Some(0), Some(1), Some(1)]);
+        assert!(report.skipped.is_empty(), "{report:?}");
+    }
+
+    /// The same file written the other way round: the polygons are inline in
+    /// the solid and the boundary surface points at them. The join is by
+    /// `gml:id` either way.
+    #[test]
+    fn a_boundary_surface_may_point_at_the_solids_own_polygons() {
+        let (object, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>{}{}",
+            solid(&format!(
+                "{}{}",
+                member(&polygon("g1", 0.0)),
+                member(&polygon("r1", 3.0))
+            )),
+            bounded_by("GroundSurface", 2, &member_ref("g1")),
+            bounded_by("RoofSurface", 2, &member_ref("r1")),
+        )));
+
+        let geometry = &object.geometries[0];
+        assert_eq!(stypes(geometry), vec!["GroundSurface", "RoofSurface"]);
+        assert_eq!(sem_indices(geometry), vec![Some(0), Some(1)]);
+        assert!(report.skipped.is_empty(), "{report:?}");
+    }
+
+    /// A polygon no boundary surface claimed keeps no semantics rather than
+    /// borrowing its neighbour's.
+    #[test]
+    fn an_unclaimed_polygon_keeps_no_semantics() {
+        let (object, _) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>{}",
+            solid(&format!(
+                "{}{}",
+                member_ref("w1"),
+                // Inline, with an id no boundary surface mentions.
+                member(&polygon("loose", 9.0))
+            )),
+            bounded_by("WallSurface", 2, &member(&polygon("w1", 1.0))),
+        )));
+
+        assert_eq!(sem_indices(&object.geometries[0]), vec![Some(0), None]);
+    }
+
+    /// An opening is a semantic surface of its own, linked to the surface it
+    /// opens from both ends.
+    #[test]
+    fn an_opening_becomes_its_own_surface_linked_to_the_wall() {
+        let wall = format!(
+            "<bldg:boundedBy><bldg:WallSurface>\
+               <bldg:lod3MultiSurface>{}</bldg:lod3MultiSurface>\
+               <bldg:opening><bldg:Window>\
+                 <bldg:lod3MultiSurface>{}</bldg:lod3MultiSurface>\
+               </bldg:Window></bldg:opening>\
+               <bldg:opening><bldg:Door>\
+                 <bldg:lod3MultiSurface>{}</bldg:lod3MultiSurface>\
+               </bldg:Door></bldg:opening>\
+             </bldg:WallSurface></bldg:boundedBy>",
+            multi_surface(&member(&polygon("w1", 1.0))),
+            multi_surface(&member(&polygon("win1", 2.0))),
+            multi_surface(&member(&polygon("door1", 3.0))),
+        );
+        let (object, report) = read(&building(&format!(
+            "<bldg:lod3MultiSurface>{}</bldg:lod3MultiSurface>{wall}",
+            multi_surface(&format!(
+                "{}{}{}",
+                member_ref("w1"),
+                member_ref("win1"),
+                member_ref("door1")
+            )),
+        )));
+
+        let geometry = &object.geometries[0];
+        assert_eq!(stypes(geometry), vec!["WallSurface", "Window", "Door"]);
+        assert_eq!(
+            sem_indices(geometry),
+            vec![Some(0), Some(1), Some(2)],
+            "{report:?}"
+        );
+        assert_eq!(geometry.surfaces[0].parent, None);
+        assert_eq!(geometry.surfaces[0].children, vec![1, 2]);
+        assert_eq!(geometry.surfaces[1].parent, Some(0));
+        assert!(geometry.surfaces[1].children.is_empty());
+        assert_eq!(geometry.surfaces[2].parent, Some(0));
+    }
+
+    /// One `WallSurface` with geometry at two levels of detail is one entry
+    /// in each geometry's list, not two in either.
+    #[test]
+    fn a_surface_written_at_two_levels_of_detail_joins_both_geometries() {
+        let wall = format!(
+            "<bldg:boundedBy><bldg:WallSurface>\
+               <bldg:lod2MultiSurface>{}</bldg:lod2MultiSurface>\
+               <bldg:lod3MultiSurface>{}</bldg:lod3MultiSurface>\
+             </bldg:WallSurface></bldg:boundedBy>",
+            multi_surface(&member(&polygon("w2", 1.0))),
+            multi_surface(&member(&polygon("w3", 2.0))),
+        );
+        let (object, _) = read(&building(&format!(
+            "<bldg:lod2MultiSurface>{}</bldg:lod2MultiSurface>\
+             <bldg:lod3MultiSurface>{}</bldg:lod3MultiSurface>{wall}",
+            multi_surface(&member_ref("w2")),
+            multi_surface(&member_ref("w3")),
+        )));
+
+        assert_eq!(object.geometries.len(), 2);
+        for geometry in &object.geometries {
+            assert_eq!(stypes(geometry), vec!["WallSurface"]);
+            assert_eq!(sem_indices(geometry), vec![Some(0)]);
+        }
+    }
+
+    /// Semantics with no geometry at their level of detail cannot be written
+    /// in CityJSON at all, so they are dropped — and said to be.
+    #[test]
+    fn boundary_surfaces_at_a_lod_with_no_geometry_are_reported() {
+        let (object, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>{}",
+            solid(&member(&polygon("f1", 0.0))),
+            bounded_by("WallSurface", 3, &member(&polygon("w3", 1.0))),
+        )));
+
+        assert!(object.geometries[0].surfaces.is_empty());
+        assert_eq!(sem_indices(&object.geometries[0]), vec![None]);
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].element, BOUNDED_BY);
+        assert!(report.skipped[0].reason.contains("LoD 3"), "{report:?}");
+    }
+
+    /// A boundary-surface polygon with no `gml:id` can never be recognised in
+    /// the object's geometry, so what is lost is reported rather than dropped
+    /// in silence.
+    #[test]
+    fn a_boundary_polygon_without_a_gml_id_is_reported() {
+        let (object, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>\
+             <bldg:boundedBy><bldg:WallSurface><bldg:lod2MultiSurface>{}\
+             </bldg:lod2MultiSurface></bldg:WallSurface></bldg:boundedBy>",
+            solid(&member(&polygon("w1", 1.0))),
+            multi_surface(
+                r#"<gml:surfaceMember><gml:Polygon><gml:exterior><gml:LinearRing>
+                     <gml:posList>0 0 1 1 0 1 1 1 1 0 0 1</gml:posList>
+                   </gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember>"#
+            ),
+        )));
+
+        // The surface still exists — it is only its polygon that is lost.
+        assert_eq!(stypes(&object.geometries[0]), vec!["WallSurface"]);
+        assert_eq!(sem_indices(&object.geometries[0]), vec![None]);
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].element, POLYGON);
+        assert!(report.skipped[0].reason.contains("gml:id"), "{report:?}");
+    }
+
+    /// The attributes of a boundary surface are the surface's own, and the
+    /// building's are the building's.
+    #[test]
+    fn a_boundary_surface_keeps_its_own_attributes() {
+        let (object, _) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>\
+             <bldg:boundedBy><bldg:RoofSurface>\
+               <gml:name>North roof</gml:name>\
+               <gen:doubleAttribute name=\"slope\"><gen:value>38.7</gen:value></gen:doubleAttribute>\
+               <bldg:lod2MultiSurface>{}</bldg:lod2MultiSurface>\
+             </bldg:RoofSurface></bldg:boundedBy>",
+            solid(&member_ref("r1")),
+            multi_surface(&member(&polygon("r1", 3.0))),
+        )));
+
+        let attributes = &object.geometries[0].surfaces[0].attributes;
+        assert_eq!(attributes["name"], serde_json::json!("North roof"));
+        assert_eq!(attributes["slope"], serde_json::json!(38.7));
+        assert!(
+            object.attributes.is_empty(),
+            "the surface's attributes are not the building's: {:?}",
+            object.attributes
+        );
+    }
+
+    /// A `boundedBy` this reader can take nothing from — a reference to a
+    /// surface shared with another feature, or a surface type it does not
+    /// know — is content that was lost.
+    #[test]
+    fn a_bounded_by_holding_no_known_surface_is_reported() {
+        let (object, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>\
+             <bldg:boundedBy xlink:href=\"#shared-wall\"/>",
+            solid(&member(&polygon("f1", 0.0))),
+        )));
+
+        assert!(object.geometries[0].surfaces.is_empty());
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].element, BOUNDED_BY);
+    }
+
+    /// `gml:boundedBy` is an Envelope, not a boundary surface; the two differ
+    /// only in their namespace.
+    #[test]
+    fn a_gml_bounded_by_is_not_a_boundary_surface() {
+        let (object, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>\
+             <gml:boundedBy><gml:Envelope srsName=\"EPSG:7415\">\
+               <gml:lowerCorner>0 0 0</gml:lowerCorner>\
+               <gml:upperCorner>1 1 1</gml:upperCorner>\
+             </gml:Envelope></gml:boundedBy>",
+            solid(&member(&polygon("f1", 0.0))),
+        )));
+
+        assert!(object.geometries[0].surfaces.is_empty());
+        assert!(report.skipped.is_empty(), "{report:?}");
     }
 
     #[test]
