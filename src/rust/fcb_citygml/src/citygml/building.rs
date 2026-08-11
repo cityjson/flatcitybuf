@@ -123,6 +123,9 @@ pub(crate) fn read_building(
 /// direction. Joining the two by `gml:id` is what makes both spellings work,
 /// and it is why the order the two properties are written in does not matter.
 ///
+/// Reading them twice is also why this pass reports through a scratch report:
+/// see [`merge_diagnostics`].
+///
 /// # Errors
 ///
 /// Propagates the geometry reader's errors, as [`read_building`] does.
@@ -132,9 +135,46 @@ pub(crate) fn read_semantic_surfaces(
     geometries: &mut [IntermediateGeometry],
     report: &mut ParseReport,
 ) -> Result<(), CityGmlError> {
-    let boundaries = read_boundary_surfaces(node, registry, report)?;
+    let mut boundary_report = ParseReport::default();
+    let boundaries = read_boundary_surfaces(node, registry, &mut boundary_report)?;
+    merge_diagnostics(boundary_report, report);
     attach_semantics(boundaries, geometries, report);
     Ok(())
+}
+
+/// Merge the boundary pass's diagnostics into the object's, leaving out the
+/// ones already recorded.
+///
+/// The same polygon is parsed twice — once where it is defined, under the
+/// boundary surface, and once where the object's geometry names it — and each
+/// parse drops a degenerate or unsupported one on its own account. Both are
+/// right, and both are the *same* loss: a report that named it twice would
+/// count one lost polygon as two.
+///
+/// Only an entry that names a `gml:id` can be shown to be a repeat, because a
+/// `gml:id` is unique within a document; two anonymous polygons dropped for
+/// the same reason are two losses, and stay two entries. Warnings are appended
+/// unchanged for the same reason — two surfaces may raise the same one
+/// honestly, and there is no id to tell them apart.
+///
+/// The check is against the entries kept so far, so a repeat *within* the
+/// boundary pass — the same polygon claimed by two boundary surfaces — is
+/// caught too. It is quadratic in the number of skipped entries, which is a
+/// count of what a document got *wrong*; a document where that is large has a
+/// bigger problem than this loop.
+fn merge_diagnostics(from: ParseReport, into: &mut ParseReport) {
+    for skipped in from.skipped {
+        let already_recorded = skipped.gml_id.is_some()
+            && into.skipped.iter().any(|seen| {
+                seen.gml_id == skipped.gml_id
+                    && seen.element == skipped.element
+                    && seen.reason == skipped.reason
+            });
+        if !already_recorded {
+            into.skipped.push(skipped);
+        }
+    }
+    into.warnings.extend(from.warnings);
 }
 
 /// The semantic surfaces an object's boundary surfaces state, grouped by the
@@ -531,6 +571,16 @@ mod tests {
         )
     }
 
+    /// A polygon whose ring collapses to fewer than three distinct points, so
+    /// that it carries no area and the geometry readers drop it.
+    fn degenerate(gml_id: &str) -> String {
+        format!(
+            r#"<gml:Polygon gml:id="{gml_id}"><gml:exterior><gml:LinearRing>
+                 <gml:posList>0 0 0 1 0 0 0 0 0</gml:posList>
+               </gml:LinearRing></gml:exterior></gml:Polygon>"#
+        )
+    }
+
     /// A `gml:Solid` whose one shell holds `members`.
     fn solid(members: &str) -> String {
         format!(
@@ -764,6 +814,76 @@ mod tests {
         assert_eq!(report.skipped.len(), 1);
         assert_eq!(report.skipped[0].element, POLYGON);
         assert!(report.skipped[0].reason.contains("gml:id"), "{report:?}");
+    }
+
+    /// The report entries that name a given `gml:id`.
+    fn skipped_for<'a>(report: &'a ParseReport, gml_id: &str) -> Vec<&'a Skipped> {
+        report
+            .skipped
+            .iter()
+            .filter(|skipped| skipped.gml_id.as_deref() == Some(gml_id))
+            .collect()
+    }
+
+    /// A polygon written under a boundary surface and named by the solid is
+    /// parsed twice — once by each pass — but it is one polygon, and a report
+    /// that named it twice would count one loss as two.
+    #[test]
+    fn a_polygon_dropped_by_both_passes_is_reported_once() {
+        let (_, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>{}",
+            solid(&format!(
+                "{}{}",
+                member(&polygon("f1", 0.0)),
+                member_ref("flat")
+            )),
+            bounded_by("WallSurface", 2, &member(&degenerate("flat"))),
+        )));
+
+        let entries = skipped_for(&report, "flat");
+        assert_eq!(entries.len(), 1, "{report:?}");
+        assert_eq!(entries[0].element, POLYGON);
+        assert_eq!(entries[0].reason, "degenerate ring");
+    }
+
+    /// And a polygon only the boundary pass ever sees is still reported: the
+    /// deduplication must not cost a diagnostic nothing else would raise.
+    #[test]
+    fn a_polygon_only_the_boundary_pass_drops_is_still_reported() {
+        let (_, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>{}",
+            solid(&member(&polygon("f1", 0.0))),
+            bounded_by(
+                "WallSurface",
+                2,
+                &format!(
+                    "{}{}",
+                    member(&polygon("w1", 1.0)),
+                    member(&degenerate("flat"))
+                )
+            ),
+        )));
+
+        let entries = skipped_for(&report, "flat");
+        assert_eq!(entries.len(), 1, "{report:?}");
+        assert_eq!(entries[0].element, POLYGON);
+        assert_eq!(entries[0].reason, "degenerate ring");
+    }
+
+    /// Two *different* polygons dropped for the same reason are two losses,
+    /// and stay two entries: only an identified element can be shown to be
+    /// the same one twice.
+    #[test]
+    fn two_different_polygons_dropped_alike_stay_two_entries() {
+        let (_, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>{}{}",
+            solid(&member(&polygon("f1", 0.0))),
+            bounded_by("WallSurface", 2, &member(&degenerate("flat-a"))),
+            bounded_by("RoofSurface", 2, &member(&degenerate("flat-b"))),
+        )));
+
+        assert_eq!(skipped_for(&report, "flat-a").len(), 1, "{report:?}");
+        assert_eq!(skipped_for(&report, "flat-b").len(), 1, "{report:?}");
     }
 
     /// The attributes of a boundary surface are the surface's own, and the
