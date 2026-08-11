@@ -16,7 +16,7 @@ The repo holds **four independent reader implementations of the same format**:
 | **Rust** — the origin, and the **authoritative oracle** | `src/rust/fcb_core` | reader + writer |
 | C++ | `src/cpp` | reader + writer, conformant |
 | Python (pure, `py3-none-any`) | `src/py` | reader, conformant |
-| TypeScript | `src/ts` | reader, **in progress** |
+| TypeScript | `src/ts` | reader, conformant |
 
 Rust and C++ write files; Python and TypeScript are read-only. All four are
 from-scratch ports with **no FFI** — they parse (and, for Rust/C++, produce)
@@ -61,7 +61,7 @@ cd src/ts  && just test-browser
 ```
 
 `just --list` (root or any subdirectory) shows everything, including the
-per-language extras (`src/rust`: `ser`/`deser`/`info`/`bench`; `src/cpp`:
+per-language extras (`src/rust`: `ser`/`deser`/`inspect`/`bench`; `src/cpp`:
 `tidy`/`harden`; `src/py`: `test-no-numpy`).
 
 Never gate on `just fix` output: it is the only recipe that rewrites source.
@@ -106,7 +106,7 @@ Full manual verification procedure, local and remote: `docs/TESTING.md`.
 
 ## Reference documents
 
-- `.llm/docs/specification.md` — the format, from schema level down to byte
+- `docs/specification.md` — the format, from schema level down to byte
   offsets, constants and formulas, each cited to the Rust line that proves it.
   **Read this before writing any decoder; do not re-derive the format.**
 - `.llm/docs/projectStructure.md` — folder layout and component relationships.

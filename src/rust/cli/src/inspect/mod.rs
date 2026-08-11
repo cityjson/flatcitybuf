@@ -4,9 +4,10 @@ pub mod app;
 pub mod map;
 pub mod model;
 pub mod source;
+pub mod static_report;
 pub mod ui;
 
-use std::io::{self, IsTerminal, Stdout};
+use std::io::{self, IsTerminal, Stdout, Write};
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -61,20 +62,52 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
     }
 }
 
-/// Public entry: inspect a local path or URL, driving a full-screen TUI.
-pub fn run_inspect(source: &str) -> Result<(), CliError> {
-    run_inspect_with_tty(source, io::stdout().is_terminal())
+/// Which of the two renderings `inspect` produces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectMode {
+    /// Full-screen interactive terminal UI.
+    Tui,
+    /// One-shot plain-text report on stdout.
+    Static,
 }
 
-/// Testable seam: `is_tty` is injected so tests can assert the non-TTY guard
+/// Pick the mode: `--static` always wins, and without a terminal the TUI is
+/// impossible, so a pipe or a redirect gets the static report.
+pub fn select_mode(force_static: bool, is_tty: bool) -> InspectMode {
+    if force_static || !is_tty {
+        InspectMode::Static
+    } else {
+        InspectMode::Tui
+    }
+}
+
+/// Public entry: inspect a local path or URL. Renders the TUI on a terminal,
+/// and the static report when `force_static` is set or stdout is redirected.
+pub fn run_inspect(source: &str, force_static: bool) -> Result<(), CliError> {
+    run_inspect_with_tty(source, force_static, io::stdout().is_terminal())
+}
+
+/// Testable seam: `is_tty` is injected so tests can drive the mode choice
 /// without a real terminal.
-pub fn run_inspect_with_tty(source: &str, is_tty: bool) -> Result<(), CliError> {
+pub fn run_inspect_with_tty(
+    source: &str,
+    force_static: bool,
+    is_tty: bool,
+) -> Result<(), CliError> {
     // Load the model first: cheap failures (bad path, bad URL) surface as plain
     // stderr errors rather than after switching into the alternate screen.
     let model = source::load_model(source)?;
 
-    if !is_tty {
-        return Err(CliError::NotATerminal);
+    if select_mode(force_static, is_tty) == InspectMode::Static {
+        let report = static_report::render(&model);
+        // Not `print!`: that panics when the write fails, and a reader that
+        // closed the pipe early (`| head`) is a normal end, not a failure.
+        if let Err(err) = io::stdout().write_all(report.as_bytes()) {
+            if err.kind() != io::ErrorKind::BrokenPipe {
+                return Err(err.into());
+            }
+        }
+        return Ok(());
     }
 
     let mut app = App::new(model.columns.len());
@@ -97,18 +130,28 @@ pub fn run_inspect_with_tty(source: &str, is_tty: bool) -> Result<(), CliError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CliError;
 
     #[test]
-    fn non_tty_is_rejected_before_touching_the_terminal() {
-        // A valid local file, but no TTY: must fail fast with NotATerminal,
+    fn non_tty_falls_back_to_the_static_report() {
+        // A valid local file, but no TTY: prints the report and succeeds,
         // never entering raw mode.
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../conformance/inferable_types.fcb"
         );
-        let err = run_inspect_with_tty(path, false);
-        assert!(matches!(err, Err(CliError::NotATerminal)));
+        assert!(run_inspect_with_tty(path, false, false).is_ok());
+    }
+
+    #[test]
+    fn static_flag_wins_over_a_terminal() {
+        assert_eq!(select_mode(true, true), InspectMode::Static);
+        assert_eq!(select_mode(true, false), InspectMode::Static);
+    }
+
+    #[test]
+    fn a_terminal_without_the_flag_gets_the_tui() {
+        assert_eq!(select_mode(false, true), InspectMode::Tui);
+        assert_eq!(select_mode(false, false), InspectMode::Static);
     }
 
     #[test]

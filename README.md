@@ -37,9 +37,10 @@ https://github.com/user-attachments/assets/3ae6a0f8-7e31-42da-8f59-0396f037c716
 
 ## Example FlatCityBuf File
 
-- [3DBAG all (70GB)](https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb): serialised whole 3DBAG dataset with spatial and attribute indexing
-- [3DBAG small (3.4GB)](https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb)
+- [3DBAG all (70GB)](https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb): serialised whole 3DBAG dataset with spatial and attribute indexing
+- [3DBAG small (3.4GB)](https://flatcitybuf.open3d.city/data/3dbag_subset_all_index.fcb)
 - [Delft (6MB)](examples/data/delft.fcb)
+- [Every hosted file](docs/data.md): the full `.fcb` and CityJSONSeq inventory, with sizes and URLs
 
 ### 🎯 Why FlatCityBuf?
 
@@ -83,11 +84,13 @@ FlatCityBuf delivers **10-20× faster** data retrieval compared to CityJSONTextS
 
 ```
 flatcitybuf/
-├── 📦 fcb_core/          # Core library for reading/writing FlatCityBuf
-├── 🛠️ fcb_cli/           # Command-line interface and tools
+├── 🦀 src/rust/         # Rust reader + writer (fcb_core, cli, fcb_api)
+├── ⚙️ src/cpp/          # Native C++ reader + writer
+├── 🐍 src/py/           # Pure-Python reader (no compiled dependency)
 ├── 🌐 src/ts/           # Pure TypeScript reader (browser + Node.js)
-├── 📚 docs/             # Documentation and examples
-└── 🧪 examples/         # Usage examples and tutorials
+├── 📚 docs/             # Format specification and per-language guides
+├── ✅ conformance/      # Shared oracle corpus every implementation validates against
+└── 🧪 examples/         # Usage examples, tutorials and the web demo
 ```
 
 ### Technology Stack
@@ -99,13 +102,16 @@ flatcitybuf/
 - **Web Support**: Pure TypeScript reader (`@cityjson/flatcitybuf`), no WebAssembly
 - **CLI**: Comprehensive command-line tools
 
-### Language Bindings
+### Language Implementations
 
-FlatCityBuf provides bindings for multiple languages:
+FlatCityBuf has four independent, from-scratch implementations of the same
+format — no FFI between them; each parses (and, for Rust and C++, produces) the
+bytes directly. Rust is the authoritative reference:
 
-- **[Python](src/py/README.md)** – Pure-Python reader, no compiled dependency (`pip install flatcitybuf`)
-- **[C++](src/cpp/README.md)** – Native C++ bindings via CXX bridge
-- **[TypeScript](src/ts/README.md)** – Pure TypeScript reader for the browser or Node.js (`@cityjson/flatcitybuf`)
+- **[Rust](docs/rust.md)** – Reader and writer, the reference implementation (`cargo install fcb_cli`)
+- **[C++](docs/cpp.md)** – Native reader and writer, conformant; no CXX bridge or Rust dependency
+- **[Python](docs/py.md)** – Pure-Python native reader, conformant, no compiled dependency (`pip install flatcitybuf`)
+- **[TypeScript](docs/ts.md)** – Native reader for the browser or Node.js, conformant (`@cityjson/flatcitybuf`)
 
 ---
 
@@ -113,7 +119,7 @@ FlatCityBuf provides bindings for multiple languages:
 
 ### Prerequisites
 
-- **Rust toolchain** (1.83.0 or later)
+- **Rust toolchain** (recent stable)
 - **Node.js** ≥ 22.12 (for the TypeScript reader in `src/ts`)
 
 ### 📦 Installation
@@ -157,7 +163,7 @@ cargo build --workspace --all-features --exclude fcb_py --release
 
 The browser/Node.js reader is a separate pure TypeScript package in `src/ts`
 (published as `@cityjson/flatcitybuf`); build it with `npm ci && npm run build`
-from `src/ts`. See [src/ts/README.md](src/ts/README.md).
+from `src/ts`. See the [TypeScript guide](docs/ts.md).
 
 ### 🛠️ CLI Usage
 
@@ -182,13 +188,17 @@ fcb ser 'data/*.city.jsonl' output.fcb
 fcb ser 'cities/**/*.city.json' all_cities.fcb
 
 # With spatial index and attribute index
-fcb ser data.city.jsonl data.fcb --attr-index attribute_name,attribute_name2 --attr-branching-factor 256
+fcb ser data.city.jsonl data.fcb --attr-index attribute_name,attribute_name2
 
 # Back to CityJSONSeq
 fcb deser data.fcb output.city.jsonl
 
-# Show information about the file
-fcb info data.fcb
+# Show information about the file (static text report)
+fcb inspect data.fcb --static
+
+# Browse a dataset in an interactive terminal UI (local path or http(s):// URL,
+# which reads only the header over range requests)
+fcb inspect data.fcb
 ```
 
 ### 🧪 Run Benchmarks
@@ -201,6 +211,18 @@ cargo bench -p fcb_core --bench read -- --release
 ---
 
 ## 📚 Documentation
+
+| Document                                             | What it is for                                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **[Format specification](docs/specification.md)**    | The binary format, from schema level down to byte offsets, constants and formulas      |
+| **[Rust guide](docs/rust.md)**                       | Building, testing and using the Rust reader, writer and `fcb` CLI                      |
+| **[C++ guide](docs/cpp.md)**                         | Building, testing and using the native C++ reader and writer                           |
+| **[Python guide](docs/py.md)**                       | Installing and using the pure-Python reader                                            |
+| **[TypeScript guide](docs/ts.md)**                   | Installing and using the TypeScript reader in the browser or Node.js                   |
+| **[Datasets](docs/data.md)**                         | The public `.fcb` and CityJSONSeq files, what is hosted and where                       |
+| **[Testing](docs/TESTING.md)**                       | The full manual verification procedure, local and remote                               |
+| **[Upstream findings](docs/upstream-findings.md)**   | Permanent record of defects found across the implementations, each cited and reproduced |
+| **[Contributing](CONTRIBUTING.md)**                  | How to report bugs, request features and submit pull requests                           |
 
 - **[API Documentation](https://docs.rs/fcb_core)** - Comprehensive API reference
 - **[API reference, all languages](https://cityjson.github.io/flatcitybuf/)** - Rust, C++, Python and TypeScript docs, rebuilt on every push to `main`

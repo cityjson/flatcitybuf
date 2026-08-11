@@ -5,7 +5,7 @@
 // "how many features, in what CRS, over what extent, and WHICH attributes can
 // I actually query?" -- that last one matters, because `select_attr` only
 // works on columns that were given an index at write time. The Rust CLI's
-// `fcb info` covers the same ground; this is the C++ API doing it.
+// `fcb inspect --static` covers the same ground; this is the C++ API doing it.
 #include <fcb/generated/header_generated.h>
 #include <fcb/header.hpp>
 #include <fcb/reader.hpp>

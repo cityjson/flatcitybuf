@@ -105,16 +105,16 @@ enum Commands {
         output: String,
     },
 
-    /// Show info about FCB file
-    Info {
-        /// Input FCB file
-        input: PathBuf,
-    },
-
-    /// Interactively inspect an FCB file or URL in a terminal UI
+    /// Inspect an FCB file or URL: a terminal UI on a TTY, a static report
+    /// otherwise
     Inspect {
         /// Local path or HTTP(S) URL to an FCB file
         source: String,
+
+        /// Print the static text report instead of the terminal UI. Implied
+        /// when stdout is not a terminal.
+        #[arg(long = "static", action = ArgAction::SetTrue)]
+        static_report: bool,
     },
 }
 
@@ -789,231 +789,6 @@ fn encode_bson(input: &str, output: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn show_info(input: PathBuf) -> Result<(), Error> {
-    let term = Term::stdout();
-
-    // Print header
-    term.write_line(&format!(
-        "\n{} {}",
-        style("━━━").bold().cyan(),
-        style("FlatCityBuf File Information").bold().cyan()
-    ))
-    .ok();
-    term.write_line(&format!(
-        "{} {}",
-        style("━━━").bold().cyan(),
-        style("━━━━━━━━━━━━━━━━━━━━━━━━━━━").bold().cyan()
-    ))
-    .ok();
-    term.write_line("").ok();
-
-    let reader = BufReader::new(File::open(&input)?);
-    let file_size = reader.get_ref().metadata()?.len();
-    let fcb_reader = FcbReader::open(reader)?.select_all()?;
-    let header = fcb_reader.header();
-
-    // File information
-    term.write_line(&format!("{} File Details", style("▶").bold().green()))
-        .ok();
-    term.write_line(&format!(
-        "  {} {}",
-        style("Path:").dim(),
-        style(input.display()).yellow()
-    ))
-    .ok();
-
-    // Format file size nicely
-    let size_str = if file_size >= 1024 * 1024 * 1024 {
-        format!("{:.2} GB", file_size as f64 / (1024.0 * 1024.0 * 1024.0))
-    } else if file_size >= 1024 * 1024 {
-        format!("{:.2} MB", file_size as f64 / (1024.0 * 1024.0))
-    } else if file_size >= 1024 {
-        format!("{:.2} KB", file_size as f64 / 1024.0)
-    } else {
-        format!("{} bytes", file_size)
-    };
-
-    term.write_line(&format!(
-        "  {} {}",
-        style("Size:").dim(),
-        style(size_str).yellow()
-    ))
-    .ok();
-    term.write_line(&format!(
-        "  {} {}",
-        style("Version:").dim(),
-        style(header.version()).yellow()
-    ))
-    .ok();
-
-    if let Some(title) = header.title() {
-        term.write_line(&format!(
-            "  {} {}",
-            style("Title:").dim(),
-            style(title).yellow()
-        ))
-        .ok();
-    }
-
-    term.write_line("").ok();
-
-    // Dataset information
-    term.write_line(&format!("{} Dataset", style("▶").bold().green()))
-        .ok();
-    term.write_line(&format!(
-        "  {} {}",
-        style("Features:").dim(),
-        style(header.features_count()).bold().yellow()
-    ))
-    .ok();
-
-    if let Some(extent) = header.geographical_extent() {
-        term.write_line(&format!("  {} Yes", style("Geospatial Extent:").dim()))
-            .ok();
-        term.write_line(&format!(
-            "    {} [{:.2}, {:.2}, {:.2}]",
-            style("Min:").dim(),
-            extent.min().x(),
-            extent.min().y(),
-            extent.min().z()
-        ))
-        .ok();
-        term.write_line(&format!(
-            "    {} [{:.2}, {:.2}, {:.2}]",
-            style("Max:").dim(),
-            extent.max().x(),
-            extent.max().y(),
-            extent.max().z()
-        ))
-        .ok();
-
-        // Calculate dimensions
-        let width = extent.max().x() - extent.min().x();
-        let height = extent.max().y() - extent.min().y();
-        let depth = extent.max().z() - extent.min().z();
-        term.write_line(&format!(
-            "    {} {:.2} × {:.2} × {:.2}",
-            style("Dimensions:").dim(),
-            width,
-            height,
-            depth
-        ))
-        .ok();
-    } else {
-        term.write_line(&format!(
-            "  {} {}",
-            style("Geospatial Extent:").dim(),
-            style("Not set").dim()
-        ))
-        .ok();
-    }
-
-    term.write_line("").ok();
-
-    // Index information
-    term.write_line(&format!("{} Indices", style("▶").bold().green()))
-        .ok();
-
-    let has_spatial_index = header.index_node_size() > 0;
-    term.write_line(&format!(
-        "  {} {}",
-        style("Spatial R-tree:").dim(),
-        if has_spatial_index {
-            style("Yes").green()
-        } else {
-            style("No").red()
-        }
-    ))
-    .ok();
-
-    let raw_attr_index = header.attribute_index();
-    if let Some(ai_vec) = raw_attr_index {
-        let attr_names: Vec<String> = ai_vec
-            .iter()
-            .filter_map(|ai| {
-                header
-                    .columns()
-                    .iter()
-                    .flat_map(|c| c.iter())
-                    .find(|ci| ci.index() == ai.index())
-                    .map(|ci| ci.name().to_string())
-            })
-            .collect();
-
-        term.write_line(&format!(
-            "  {} {} (B+Tree)",
-            style("Attribute Indices:").dim(),
-            style(attr_names.len()).yellow()
-        ))
-        .ok();
-
-        if !attr_names.is_empty() {
-            for (i, name) in attr_names.iter().enumerate().take(10) {
-                term.write_line(&format!(
-                    "    {}. {}",
-                    style(i + 1).dim(),
-                    style(name).cyan()
-                ))
-                .ok();
-            }
-            if attr_names.len() > 10 {
-                term.write_line(&format!(
-                    "    {} {} more attributes...",
-                    style("...").dim(),
-                    style(attr_names.len() - 10).dim()
-                ))
-                .ok();
-            }
-        }
-    } else {
-        term.write_line(&format!(
-            "  {} {}",
-            style("Attribute Indices:").dim(),
-            style("None").dim()
-        ))
-        .ok();
-    }
-
-    term.write_line("").ok();
-
-    // Transform information
-    if let Some(transform) = header.transform() {
-        term.write_line(&format!(
-            "{} Coordinate Transform",
-            style("▶").bold().green()
-        ))
-        .ok();
-        term.write_line(&format!(
-            "  {} [{:.6}, {:.6}, {:.6}]",
-            style("Scale:").dim(),
-            transform.scale().x(),
-            transform.scale().y(),
-            transform.scale().z()
-        ))
-        .ok();
-        term.write_line(&format!(
-            "  {} [{:.6}, {:.6}, {:.6}]",
-            style("Translate:").dim(),
-            transform.translate().x(),
-            transform.translate().y(),
-            transform.translate().z()
-        ))
-        .ok();
-        term.write_line("").ok();
-    }
-
-    // Footer
-    term.write_line(&format!(
-        "{} {}",
-        style("━━━").bold().cyan(),
-        style("━━━━━━━━━━━━━━━━━━━━━━━━━━━").bold().cyan()
-    ))
-    .ok();
-    term.write_line("").ok();
-
-    Ok(())
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
@@ -1046,9 +821,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Deser { input, output } => deserialize(&input, &output)?,
         Commands::Cbor { input, output } => encode_cbor(&input, &output)?,
         Commands::Bson { input, output } => encode_bson(&input, &output)?,
-        Commands::Info { input } => show_info(input)?,
-        Commands::Inspect { source } => {
-            if let Err(err) = fcb_cli::inspect::run_inspect(&source) {
+        Commands::Inspect {
+            source,
+            static_report,
+        } => {
+            if let Err(err) = fcb_cli::inspect::run_inspect(&source, static_report) {
                 eprintln!("{err}");
                 std::process::exit(1);
             }

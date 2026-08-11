@@ -10,6 +10,7 @@ use ratatui::Frame;
 use crate::inspect::app::{App, Tab};
 use crate::inspect::map;
 use crate::inspect::model::InspectModel;
+use crate::inspect::static_report;
 
 /// Render the tab bar plus the body of the active tab.
 pub fn draw(frame: &mut Frame, model: &InspectModel, app: &App) {
@@ -63,6 +64,9 @@ fn draw_metadata(frame: &mut Frame, area: Rect, model: &InspectModel) {
     }
     if let Some(id) = &model.identifier {
         lines.push(kv("Identifier", id.clone()));
+    }
+    if let Some(bytes) = model.size_bytes {
+        lines.push(kv("Size", static_report::format_size(bytes)));
     }
     lines.push(kv("CityJSON Version", model.version.clone()));
     lines.push(kv("Features", model.features_count.to_string()));
@@ -243,6 +247,8 @@ mod tests {
 
     fn sample_model() -> InspectModel {
         InspectModel {
+            source: "sample.fcb".into(),
+            size_bytes: Some(4096),
             title: Some("Sample City".into()),
             identifier: None,
             version: "2.0".into(),
@@ -250,6 +256,7 @@ mod tests {
             reference_date: None,
             index_node_size: 16,
             attribute_index_count: 1,
+            attribute_index_names: vec!["building_height".into()],
             columns: vec![ColumnInfo {
                 name: "building_height".into(),
                 type_name: "Double".into(),

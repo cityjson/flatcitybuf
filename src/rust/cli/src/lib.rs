@@ -7,8 +7,9 @@
 //! fcb ser     city.jsonl city.fcb   # CityJSONSeq -> .fcb  (-A indexes every
 //!                                   # attribute, -g writes the extent)
 //! fcb deser   city.fcb   city.jsonl # .fcb -> CityJSONSeq
-//! fcb info    city.fcb              # header, extent and index summary
-//! fcb inspect city.fcb              # interactive terminal UI
+//! fcb inspect city.fcb              # terminal UI, or a static header report
+//!                                   # when stdout is not a TTY (--static
+//!                                   # forces it)
 //! fcb cbor    city.json  city.cbor  # CityJSON -> CBOR (size comparison)
 //! fcb bson    city.json  city.bson  # CityJSON -> BSON (size comparison)
 //! ```
@@ -57,7 +58,4 @@ pub enum CliError {
 
     #[error("FCB core error: {0}")]
     FcbCore(#[from] Error),
-
-    #[error("inspect requires an interactive terminal; use `fcb info` for static output")]
-    NotATerminal,
 }

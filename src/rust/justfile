@@ -28,7 +28,7 @@ test:
 
 # Opt-in: the live 3DBAG HTTP tests (~68 GB bucket)
 test-remote:
-    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://storage.googleapis.com/flatcitybuf/3dbag_all_index.fcb}" cargo nextest run --all-features -p fcb_core --test http --run-ignored ignored-only
+    FCB_REMOTE_HTTP_URL="${FCB_REMOTE_HTTP_URL:-https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb}" cargo nextest run --all-features -p fcb_core --test http --run-ignored ignored-only
 
 # Clippy is deliberately NOT gated on `-D warnings` yet: fcb_core carries 50
 # pre-existing style lints (should_implement_trait, missing_safety_doc,
@@ -85,9 +85,10 @@ audit:
 update:
     cargo update
 
-# Show header, extent and index summary for a .fcb file.
-info file="fcb_core/tests/data/delft.fcb":
-    cargo run -q -p fcb_cli -- info {{file}}
+# Static header, extent, CRS and index report for a .fcb file (or URL).
+# Without --static the same command opens the terminal UI instead.
+inspect file="../../examples/data/delft.fcb":
+    cargo run -q -p fcb_cli -- inspect {{file}} --static
 
 # CityJSONSeq -> .fcb
 ser input output:

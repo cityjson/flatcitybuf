@@ -1,21 +1,42 @@
-//! Owned, borrow-free snapshot of an FCB header for the inspect TUI.
+//! Owned, borrow-free snapshot of an FCB header for the inspect TUI and the
+//! static report.
 
 use fcb_core::Header;
 
 /// Borrow-free snapshot of an FCB header for rendering.
 #[derive(Debug, Clone)]
 pub struct InspectModel {
+    /// What was inspected: the local path or the URL, as the user typed it.
+    pub source: String,
+    /// Total size of the file in bytes. `None` for an HTTP source, where the
+    /// header read never learns the length of the whole object.
+    pub size_bytes: Option<u64>,
     pub title: Option<String>,
     pub identifier: Option<String>,
     pub version: String,
     pub features_count: u64,
     pub reference_date: Option<String>,
+    /// R-tree node size; `0` means the writer omitted the spatial index.
     pub index_node_size: u16,
+    /// Number of attribute index entries in the header.
     pub attribute_index_count: usize,
+    /// Names of the indexed attributes, resolved through the header columns.
+    /// An entry whose column is missing cannot be named, so this may be
+    /// shorter than [`InspectModel::attribute_index_count`].
+    pub attribute_index_names: Vec<String>,
     pub columns: Vec<ColumnInfo>,
     pub crs: Option<CrsInfo>,
     pub extent: Option<ExtentInfo>,
     pub transform: Option<TransformInfo>,
+}
+
+impl InspectModel {
+    /// True when the header declares a packed Hilbert R-tree. A node size of
+    /// zero is how a file written with `--no-spatial-index` records its
+    /// absence.
+    pub fn has_spatial_index(&self) -> bool {
+        self.index_node_size > 0
+    }
 }
 
 /// Owned snapshot of one FCB column's metadata.
@@ -75,7 +96,10 @@ pub struct TransformInfo {
 
 /// Build an owned snapshot from a borrowed header. All borrowed `&str`/vector
 /// data is copied so the reader (and its buffer) can be dropped afterwards.
-pub fn from_header(header: &Header) -> InspectModel {
+///
+/// `source` is the path or URL as typed, and `size_bytes` the total file size
+/// where it is known (local files only).
+pub fn from_header(header: &Header, source: &str, size_bytes: Option<u64>) -> InspectModel {
     let columns = header
         .columns()
         .map(|cols| {
@@ -109,7 +133,28 @@ pub fn from_header(header: &Header) -> InspectModel {
         translate: [t.translate().x(), t.translate().y(), t.translate().z()],
     });
 
+    // Each attribute index entry points at a column by index; resolve those to
+    // names so the report can list what is queryable, not just how many.
+    let attribute_index_names = header
+        .attribute_index()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|ai| {
+                    header
+                        .columns()
+                        .iter()
+                        .flat_map(|cols| cols.iter())
+                        .find(|col| col.index() == ai.index())
+                        .map(|col| col.name().to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     InspectModel {
+        source: source.to_string(),
+        size_bytes,
         title: header.title().map(|s| s.to_string()),
         identifier: header.identifier().map(|s| s.to_string()),
         version: header.version().to_string(),
@@ -117,6 +162,7 @@ pub fn from_header(header: &Header) -> InspectModel {
         reference_date: header.reference_date().map(|s| s.to_string()),
         index_node_size: header.index_node_size(),
         attribute_index_count: header.attribute_index().map(|v| v.len()).unwrap_or(0),
+        attribute_index_names,
         columns,
         crs,
         extent,
@@ -144,7 +190,7 @@ mod tests {
         let path = corpus("inferable_types.fcb");
         let reader = BufReader::new(File::open(&path).expect("open fixture"));
         let fcb = FcbReader::open(reader).expect("open fcb");
-        let model = from_header(&fcb.header());
+        let model = from_header(&fcb.header(), "inferable_types.fcb", Some(1234));
 
         // Every FCB header carries a version string.
         assert!(!model.version.is_empty());
@@ -154,6 +200,24 @@ mod tests {
             assert!(!col.name.is_empty());
             assert!(!col.type_name.is_empty());
         }
+        assert_eq!(model.source, "inferable_types.fcb");
+        assert_eq!(model.size_bytes, Some(1234));
+        // Every indexed attribute that resolves to a column is named, so the
+        // name list can never be longer than the entry count.
+        assert!(model.attribute_index_names.len() <= model.attribute_index_count);
+    }
+
+    #[test]
+    fn spatial_index_presence_follows_node_size() {
+        let path = corpus("inferable_types.fcb");
+        let reader = BufReader::new(File::open(&path).expect("open fixture"));
+        let fcb = FcbReader::open(reader).expect("open fcb");
+        let mut model = from_header(&fcb.header(), "x.fcb", None);
+
+        model.index_node_size = 16;
+        assert!(model.has_spatial_index());
+        model.index_node_size = 0;
+        assert!(!model.has_spatial_index());
     }
 
     #[test]

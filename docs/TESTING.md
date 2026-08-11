@@ -17,7 +17,7 @@ rather than hidden.
 
 | Area | What changed |
 |---|---|
-| **C++** (`src/cpp`) | Native C++17 reader replacing the CXX bridge; optional libcurl HTTP adapter |
+| **C++** (`src/cpp`) | Native C++17 reader and writer replacing the CXX bridge; optional libcurl HTTP adapter |
 | **Python** (`src/py`) | Pure-Python reader (`py3-none-any`) replacing the PyO3 extension |
 | **TypeScript** (`src/ts`) | Native TS reader replacing the WASM binding |
 | **Web example** (`examples/web`) | React/deck.gl viewer on the native TS reader |
@@ -87,7 +87,7 @@ Expected:
 
 | Command | Expected result | Time here |
 |---|---|---|
-| `cd src/rust && just test` | `174 tests run: 174 passed, 0 skipped` | 39-74 s |
+| `cd src/rust && just test` | `215 tests run: 215 passed, 3 skipped` | 39-74 s |
 | `cd src/cpp && just test` | `1/1 Test #1: fcb_tests ... Passed`, `100% tests passed` | 6-22 s (after build) |
 | `cd src/py && just check` | `255 passed`, then `251 passed, 4 skipped` (numpy-less pass) | 20 s |
 | `cd src/ts && just check` | 244 Node tests, 3 browser tests, clean build | 30 s |
@@ -95,7 +95,7 @@ Expected:
 | `just lint` | clean (rustfmt, clippy, ruff, clang-format) | 30 s |
 
 Two of the 174 Rust tests (`http::test_read_http_file`,
-`http::test_read_http_file_attr`) hit a public Google Cloud Storage bucket, so
+`http::test_read_http_file_attr`) hit a public Cloudflare R2 bucket, so
 that suite needs network access. Everything else in this section is offline.
 
 If all six pass, the core of every implementation is green. Continue to §4–§7
@@ -111,7 +111,7 @@ for the cross-implementation and remote checks no recipe automates.
 cd src/rust
 just check          # lint + type + test + build
 # or individually:
-just test           # cargo nextest, 174 tests
+just test           # cargo nextest, 215 tests
 just lint           # cargo fmt --check + clippy
 just type           # cargo check
 ```
@@ -130,19 +130,52 @@ neither is an error. `just fix` is the mutating counterpart (`cargo fmt` +
 Sanity-check the CLI, which is also what you will use in §6:
 
 ```bash
-cd src/rust && just info ../../examples/data/delft.fcb
+cd src/rust && just inspect ../../examples/data/delft.fcb
 ```
 
 ```
+▶ File Details
+  Source: ../../examples/data/delft.fcb
+  Size: 7.31 MB
+  Version: 2.0
+  Title: 3DBAG
+
 ▶ Dataset
   Features: 1115
+  Columns: 44
   Geospatial Extent: Yes
     Min: [84501.55, 445805.03, -3.75]
     Max: [85675.23, 446983.47, 95.04]
+    Dimensions: 1173.68 × 1178.44 × 98.79
+
 ▶ Indices
-  Spatial R-tree: Yes
+  Spatial R-tree: Yes (node size: 16)
   Attribute Indices: 44 (B+Tree)
+    1. b3_bag_bag_overlap
+    2. b3_dak_type
+    3. b3_h_dak_50p
+    4. b3_h_dak_70p
+    5. b3_h_dak_max
+    6. b3_h_dak_min
+    7. b3_h_maaiveld
+    8. b3_kas_warenhuis
+    9. b3_mutatie_ahn3_ahn4
+    10. b3_nodata_fractie_ahn3
+    ... 34 more attributes...
+
+▶ Coordinate Reference System
+  CRS: EPSG:7415
+
+▶ Coordinate Transform
+  Scale: [0.001000, 0.001000, 0.001000]
+  Translate: [85088.390625, 446394.250000, 45.648003]
 ```
+
+The recipe is `fcb inspect <source> --static`. Drop `--static` and the same
+command browses the header in a full-screen terminal UI instead (it also
+accepts an `http(s)://` URL). The UI needs an interactive TTY; without one —
+piped, redirected, or in CI — `inspect` falls back to exactly the static report
+above and exits 0, which is why the checks below can capture it.
 
 ### 4.2 C++ — local
 
@@ -550,7 +583,7 @@ The bucket the web viewer defaults to is live and correctly configured:
 ```bash
 curl -sS -o /dev/null -D - -H "Range: bytes=0-31" \
   -H "Origin: http://localhost:5173" \
-  https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb | \
+  https://flatcitybuf.open3d.city/data/3dbag_subset_all_index.fcb | \
   grep -iE "^HTTP|accept-ranges|content-range|access-control-expose"
 ```
 
@@ -562,7 +595,11 @@ access-control-expose-headers: Accept-Ranges, Authorization, Content-Length, Con
 ```
 
 `Content-Range` **must** appear in `Access-Control-Expose-Headers` or a browser
-client cannot learn the file size and will refuse to guess.
+client cannot learn the file size and will refuse to guess. On the R2 bucket
+that means a CORS policy whose `ExposeHeaders` lists `Content-Range` and
+`Accept-Ranges`; check it with the command above before blaming the reader.
+(The header block above was recorded against the previous GCS host; only the
+`HTTP/2 206`, `accept-ranges` and `content-range` lines are host-independent.)
 
 **Python against 3.8 GB, remotely:**
 
@@ -570,7 +607,7 @@ client cannot learn the file size and will refuse to guess.
 cat > $FCBTMP/remote_py.py <<'EOF'
 import time
 import flatcitybuf as fcb
-URL = "https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb"
+URL = "https://flatcitybuf.open3d.city/data/3dbag_subset_all_index.fcb"
 t = time.time()
 reader = fcb.FcbReader.open(fcb.HttpRangeReader(URL))
 info = reader.header.info
@@ -596,7 +633,7 @@ first id: NL.IMBAG.Pand.0503100000000031
 ```bash
 cat > $FCBROOT/src/ts/remote_ts.mjs <<'EOF'
 import { FcbReader } from './dist/index.js'
-const URL_ = 'https://storage.googleapis.com/flatcitybuf/3dbag_subset_all_index.fcb'
+const URL_ = 'https://flatcitybuf.open3d.city/data/3dbag_subset_all_index.fcb'
 const reader = await FcbReader.fromUrl(URL_)
 console.log('features_count:', reader.header.info.featuresCount)
 const cur = await reader.select({
@@ -651,7 +688,9 @@ Open the printed URL and walk through:
    where one feature carries several CityObjects.
 
 If you see *"sent a 206 response without an accessible Content-Range header"*,
-the server is not exposing the header cross-origin. For GCS:
+the server is not exposing the header cross-origin. For an R2 bucket, add
+`Content-Range` and `Accept-Ranges` to `ExposeHeaders` in its CORS policy. For
+GCS:
 
 ```bash
 echo '[{"maxAgeSeconds":3600,"method":["GET","HEAD","OPTIONS"],"origin":["*"],
@@ -942,4 +981,4 @@ Executed end-to-end on 2026-07-23 against `develop` @ `06b8d38`, macOS 15
 | Four-way local cross-check, `delft.fcb` | ✅ C++/Python/TS each identical to Rust, 1116/1116 lines |
 | Round-trip (`ser` → re-read four ways) | ✅ identical, 1116/1116 lines |
 | Remote, local range server | ✅ Python and TS identical to the local oracle, 1116 lines; C++ 931/1115 features in 9 requests |
-| Remote, public GCS file | ✅ Python and TS both: 595762 features, 2064 bbox matches, same first id; C++ rejects — **issue 3** |
+| Remote, public hosted file | ✅ Python and TS both: 595762 features, 2064 bbox matches, same first id; C++ rejects — **issue 3** |

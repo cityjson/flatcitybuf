@@ -17,7 +17,8 @@ DELFT = Path(__file__).resolve().parents[3] / "examples" / "data" / "delft.fcb"
 
 # Expected values below were obtained two ways and cross-checked:
 #
-# 1. `cd src/rust && ./target/release/fcb info <file>` -- the Rust CLI,
+# 1. `cd src/rust && ./target/release/fcb inspect <file> --static` -- the
+#    Rust CLI (captured before `info` was merged into `inspect`),
 #    an oracle independent of this module, printed (rounded):
 #    features=3 (small) / 1115 (delft), version "2.0", title "3DBAG",
 #    extent min=[84501.55, 445805.03, -3.75] max=[85675.23, 446983.47,
@@ -32,8 +33,9 @@ DELFT = Path(__file__).resolve().parents[3] / "examples" / "data" / "delft.fcb"
 #    agree with the independent Rust CLI oracle above, which is the
 #    cross-check.
 #
-# The CRS ("EPSG:7415") was NOT printed by `fcb info` (it has no CRS
-# line) -- it was read the same way (generated bindings against the raw
+# The CRS ("EPSG:7415") did NOT come from the CLI report (the report of
+# the day had no CRS line; `fcb inspect --static` prints one now) -- it
+# was read the same way (generated bindings against the raw
 # file: ReferenceSystem.Authority()=b"EPSG", Code()=7415), but it does
 # have a second, independent oracle: conformance/small.expected.jsonl
 # and examples/data/delft.city.jsonl both carry
@@ -44,7 +46,7 @@ DELFT = Path(__file__).resolve().parents[3] / "examples" / "data" / "delft.fcb"
 # with the committed flatc-generated bindings
 # (header_generated.Header.Columns(0)) against the raw fixture bytes,
 # independently of flatcitybuf.header. Cross-checked against the Rust
-# CLI oracle above: `fcb info` walks `header.attribute_index()` (which
+# CLI oracle above: its report walks `header.attribute_index()` (which
 # writer/mod.rs:190-192 sorts ascending by schema/column index before
 # writing) and prints the matching column name first -- "1.
 # b3_bag_bag_overlap" -- confirming column index 0's name independently

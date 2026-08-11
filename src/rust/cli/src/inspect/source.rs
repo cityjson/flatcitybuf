@@ -22,20 +22,25 @@ pub fn load_model(source: &str) -> Result<InspectModel, CliError> {
     if is_url(source) {
         load_model_http(source)
     } else {
-        let reader = BufReader::new(File::open(source)?);
-        let fcb = FcbReader::open(reader)?;
-        Ok(from_header(&fcb.header()))
+        let file = File::open(source)?;
+        let size_bytes = file.metadata()?.len();
+        let fcb = FcbReader::open(BufReader::new(file))?;
+        Ok(from_header(&fcb.header(), source, Some(size_bytes)))
     }
 }
 
 /// Fetch just the header over HTTP on a short-lived current-thread runtime.
+///
+/// The total object size stays unknown: `HttpFcbReader` reads the header with
+/// range requests and exposes no content length, and asking for one would cost
+/// an extra HEAD round trip for a cosmetic line.
 fn load_model_http(url: &str) -> Result<InspectModel, CliError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     runtime.block_on(async {
         let reader = HttpFcbReader::open(url).await?;
-        Ok(from_header(&reader.header()))
+        Ok(from_header(&reader.header(), url, None))
     })
 }
 
@@ -69,8 +74,13 @@ mod tests {
     fn loads_model_from_local_file() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../conformance/inferable_types.fcb");
-        let model = load_model(path.to_str().unwrap()).expect("load model");
+        let source = path.to_str().unwrap();
+        let model = load_model(source).expect("load model");
         assert!(!model.version.is_empty());
+        assert_eq!(model.source, source);
+        // A local file's size comes straight from the filesystem metadata.
+        let on_disk = std::fs::metadata(&path).expect("stat fixture").len();
+        assert_eq!(model.size_bytes, Some(on_disk));
     }
 
     #[test]
