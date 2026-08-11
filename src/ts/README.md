@@ -56,7 +56,7 @@ guide has the full API mapping.
   — the canonical reference: full status, entry points, the query API, tooling
   and testing. Start here.
 - **[Runnable examples](https://github.com/cityjson/flatcitybuf/blob/main/src/ts/examples/README.md)**
-  — eight scripts, one per capability, each with its real output. They run and
+  — nine scripts, one per capability, each with its real output. They run and
   type-check as part of the test suite, so they cannot drift.
 - [Format specification](https://github.com/cityjson/flatcitybuf/blob/main/docs/specification.md)
 - [Testing guide](https://github.com/cityjson/flatcitybuf/blob/main/docs/TESTING.md)

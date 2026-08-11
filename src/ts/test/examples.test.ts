@@ -61,6 +61,7 @@ describe('examples', () => {
       .sort()
     expect(onDisk).toEqual([
       'custom-reader.ts',
+      'geometry-analysis.ts',
       'inspect-header.ts',
       'int64-policy.ts',
       'query-attributes.ts',
@@ -152,6 +153,32 @@ describe('examples', () => {
     // The same value under both policies: a number, then a string.
     expect(r.stdout).toContain('a_long=-42')
     expect(r.stdout).toContain('a_long="-42"')
+  })
+
+  withDelft('geometry-analysis agrees with the JSON path and the dataset', () => {
+    const r = run('geometry-analysis.ts', DELFT, '20', '2.2')
+    expect(r.status, r.stderr).toBe(0)
+    // The flat walk must match this library's own nested path...
+    expect(r.stdout).toContain('flat walk vs nested CityJSON: AGREE')
+    // ...and 3DBAG's published ground area, which this library did not
+    // produce. They differ only by the 1 mm coordinate quantisation.
+    const pct = Number(/\(([0-9.]+)% apart\)/.exec(r.stdout)?.[1])
+    expect(pct).toBeLessThan(0.05)
+    // Sloped roofs at lod 2.2 exceed the footprint they sit on.
+    const roof = Number(/RoofSurface\s+([0-9.]+)/.exec(r.stdout)?.[1])
+    const ground = Number(/GroundSurface\s+([0-9.]+)/.exec(r.stdout)?.[1])
+    expect(roof).toBeGreaterThan(ground)
+  })
+
+  withDelft('geometry-analysis at lod 1.2 has a flat roof equal to its footprint', () => {
+    // An LoD1.2 building is a flat extrusion of its footprint, so roof
+    // and ground area coincide. A walk that mis-grouped surfaces or
+    // mis-read the semantics would not reproduce that.
+    const r = run('geometry-analysis.ts', DELFT, '20', '1.2')
+    expect(r.status, r.stderr).toBe(0)
+    const roof = Number(/RoofSurface\s+([0-9.]+)/.exec(r.stdout)?.[1])
+    const ground = Number(/GroundSurface\s+([0-9.]+)/.exec(r.stdout)?.[1])
+    expect(Math.abs(roof - ground)).toBeLessThan(0.01)
   })
 
   it('read-http prints usage without arguments', () => {

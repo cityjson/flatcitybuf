@@ -38,7 +38,7 @@ earlier, whose API this does **not** drop-in replace) are all in the guide:
 - **[Python guide](https://github.com/cityjson/flatcitybuf/blob/main/docs/py.md)**
   — install, full API tour, tooling and testing.
 - **[Runnable examples](https://github.com/cityjson/flatcitybuf/blob/main/src/py/examples/README.md)**
-  — seven scripts, one per capability, each with its real output. They run as
+  — eight scripts, one per capability, each with its real output. They run as
   part of the test suite, so they cannot drift.
 - [Format specification](https://github.com/cityjson/flatcitybuf/blob/main/docs/specification.md)
 - [Project README](https://github.com/cityjson/flatcitybuf/blob/main/README.md)

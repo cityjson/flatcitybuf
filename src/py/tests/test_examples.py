@@ -12,6 +12,7 @@ network path is covered by test_http.py's opt-in remote test.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +28,15 @@ BBOX = ["84500", "445800", "85000", "446500"]
 needs_delft = pytest.mark.skipif(
     not DELFT.exists(), reason="examples/data/delft.fcb missing"
 )
+
+
+def number(pattern: str, text: str) -> float:
+    """The one capture group of `pattern`, as a float. Asserts rather
+    than returning Optional so a changed output line fails the test
+    loudly instead of silently skipping the comparison."""
+    m = re.search(pattern, text)
+    assert m is not None, f"{pattern!r} did not match:\n{text}"
+    return float(m.group(1))
 
 
 def run(script: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -50,6 +60,7 @@ def test_every_example_is_covered_here() -> None:
         "to_cityjson.py",
         "custom_reader.py",
         "read_http.py",
+        "geometry_analysis.py",
     }
     assert on_disk == covered
 
@@ -134,6 +145,33 @@ def test_custom_reader_reads_a_fraction_of_the_file_for_a_bbox() -> None:
     assert r.returncode == 0, r.stderr
     assert "170 hit(s)" in r.stdout
     assert "% of the file)" in r.stdout
+
+
+@needs_delft
+def test_geometry_analysis_agrees_with_json_and_with_the_dataset() -> None:
+    r = run("geometry_analysis.py", str(DELFT), "20", "2.2")
+    assert r.returncode == 0, r.stderr
+    # The flat walk must match this library's own nested path...
+    assert "flat walk vs nested CityJSON: AGREE" in r.stdout
+    # ...and 3DBAG's published ground area, a number this library did
+    # not produce. They differ only by the 1 mm coordinate quantisation.
+    assert number(r"\(([0-9.]+)% apart\)", r.stdout) < 0.05
+    # Sloped roofs at lod 2.2 exceed the footprint they sit on.
+    roof = number(r"RoofSurface\s+([0-9.]+)", r.stdout)
+    ground = number(r"GroundSurface\s+([0-9.]+)", r.stdout)
+    assert roof > ground
+
+
+@needs_delft
+def test_geometry_analysis_lod12_roof_equals_its_footprint() -> None:
+    # An LoD1.2 building is a flat extrusion of its footprint, so roof
+    # and ground area coincide. A walk that mis-grouped surfaces or
+    # mis-read the semantics would not reproduce that.
+    r = run("geometry_analysis.py", str(DELFT), "20", "1.2")
+    assert r.returncode == 0, r.stderr
+    roof = number(r"RoofSurface\s+([0-9.]+)", r.stdout)
+    ground = number(r"GroundSurface\s+([0-9.]+)", r.stdout)
+    assert abs(roof - ground) < 0.01
 
 
 def test_read_http_prints_usage_without_arguments() -> None:

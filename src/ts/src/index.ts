@@ -53,6 +53,28 @@ export { ColumnType } from './generated/column-type.js'
 export { CityObjectView, Feature, decodeAttributes } from './feature/index.js'
 export type { AttrValue, JsonValue } from './feature/index.js'
 
+// Raw geometry. `Feature.cityObjects()[i].rawObject()` hands back the
+// FlatBuffers table, whose `boundaries`/`strings`/`surfaces`/`shells`/`solids`
+// arrays are the format's own representation -- the one to walk for analysis,
+// since it needs no nesting and no JSON. Reaching it was already possible;
+// INTERPRETING it was not, because none of the enums or the null sentinel it
+// is read against were exported and the generated modules are not reachable by
+// subpath. Same reasoning as `ColumnType` above.
+//
+// NESTING DEPTH COMES FROM `Geometry.type()`, NEVER FROM THE ARRAYS: a Solid
+// with one shell and a MultiSolid with one solid flatten to byte-identical
+// arrays. Inferring depth from which array is populated is upstream finding #8.
+export { GeometryType } from './generated/geometry-type.js'
+export { SemanticSurfaceType } from './generated/semantic-surface-type.js'
+export type { CityObject } from './generated/city-object.js'
+export type { Geometry } from './generated/geometry.js'
+export type { SemanticObject } from './generated/semantic-object.js'
+export {
+  NULL_INDEX, decodeBoundaries, decodeSemantics, decodeSemanticsValues,
+  geometryTypeName, semanticSurfaceTypeName,
+} from './geometry/index.js'
+export type { IndexTree, SemanticSurface, SemanticsValue, UInts } from './geometry/index.js'
+
 // CityJSON emission.
 export { emitInt64, toCityJSONFeature, toCityJSONMetadata } from './cityjson/index.js'
 export type { Int64Policy } from './cityjson/index.js'

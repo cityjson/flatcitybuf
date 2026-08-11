@@ -35,6 +35,47 @@ def geometry_type_name(type_: int) -> str:
     return name
 
 
+# cityjson.py's _SEMANTIC_SURFACE_TYPE_NAMES, in the declaration order
+# of SemanticSurfaceType in src/fbs/geometry.fbs. Public because a
+# caller walking the ENCODED geometry (raw_city_object -> Geometry ->
+# Semantics/SemanticsObjects) reads a raw ubyte and has nothing else to
+# turn it into a name with.
+_SEMANTIC_SURFACE_TYPE_NAMES = [
+    "RoofSurface",
+    "GroundSurface",
+    "WallSurface",
+    "ClosureSurface",
+    "OuterCeilingSurface",
+    "OuterFloorSurface",
+    "Window",
+    "Door",
+    "InteriorWallSurface",
+    "CeilingSurface",
+    "FloorSurface",
+    "WaterSurface",
+    "WaterGroundSurface",
+    "WaterClosureSurface",
+    "TrafficArea",
+    "AuxiliaryTrafficArea",
+    "TransportationMarking",
+    "TransportationHole",
+    "ExtraSemanticSurface",
+]
+
+
+def semantic_surface_type_name(type_: int) -> str:
+    """The CityJSON name for a SemanticObject's raw `type` ubyte.
+
+    Unlike geometry_type_name this does NOT raise on an unknown tag: a
+    semantic surface has an extension form, so an out-of-range value is
+    "ExtraSemanticSurface" rather than a corrupt file (cityjson.py's
+    to_cityjson_feature makes the same choice).
+    """
+    if 0 <= type_ < len(_SEMANTIC_SURFACE_TYPE_NAMES):
+        return _SEMANTIC_SURFACE_TYPE_NAMES[type_]
+    return "ExtraSemanticSurface"
+
+
 def _overrun(what: str) -> None:
     raise FcbError(
         ErrorCode.INVALID_FLATBUFFER,

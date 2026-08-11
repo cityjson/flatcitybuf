@@ -1489,3 +1489,51 @@ this gap (37 and 34 requests end to end). TypeScript in particular wraps a
 single `BufferedRangeReader` around the source at open
 (`src/ts/src/reader.ts`), so every phase inherits buffering by construction
 rather than needing a wrapper per phase.
+
+## 35. The encoded geometry was reachable but not usable, in all three ports — FIXED (this branch)
+
+**Where:** `src/ts/src/index.ts`, `src/py/flatcitybuf/__init__.py`,
+`src/cpp/include/fcb/feature.hpp`.
+
+Every reader could produce CityJSON, and every reader could reach the
+FlatBuffers tables internally — but a *consumer* wanting to compute over the
+format's own representation (the five count arrays plus the flat vertex-index
+list, which is what you want for analysis: no nesting, no allocation, no JSON)
+could not. Each port blocked it differently, and none of them on purpose:
+
+| Port | What was wrong |
+|---|---|
+| C++ | `Feature::raw()` was **private**, reachable only through the `detail::FeatureAccess` friend |
+| Python | `raw_city_object`/`raw_city_feature` existed but were absent from `__all__` and documented "only cityjson.py should call this"; there was no public `semantic_surface_type_name` at all |
+| TypeScript | `rawObject()` was public, but every enum and constant needed to INTERPRET it — `GeometryType`, `SemanticSurfaceType`, `NULL_INDEX`, the name helpers — was unexported, and the generated modules are not reachable by subpath (`ERR_PACKAGE_PATH_NOT_EXPORTED`) |
+
+So the fastest path through the format was the one path a user could not take.
+
+**Fix:** each port now exposes it, with the same warning attached — NESTING
+DEPTH COMES FROM `Geometry.type()`, NEVER FROM THE ARRAYS (finding #8). C++
+moves `raw()` to the public section; Python exports the two gateways plus
+`geometry_type_name`/`semantic_surface_type_name` (the latter newly written,
+lifted from `cityjson.py`'s private list); TypeScript re-exports the enums,
+constants, decoders and table types, following the precedent already set by
+`ColumnType`.
+
+**Demonstrated and validated by** `geometry_analysis` in all three ports:
+surface area per semantic surface type, walked from the flat arrays. Each one
+self-checks two ways — against its own nested-CityJSON path, and against
+`b3_opp_grond`, 3DBAG's published ground area, which no implementation here
+produced.
+
+Cross-implementation agreement over 200 features of `delft.fcb`, all three
+byte-identical at every LoD:
+
+| lod | RoofSurface | GroundSurface | WallSurface |
+|---|---|---|---|
+| 1.2 | 144646.86 | 144646.86 | 256929.12 |
+| 1.3 | 144647.20 | 144647.20 | 279442.01 |
+| 2.2 | 160166.79 | 144649.17 | 269946.15 |
+
+The physics is a check in itself: at lod 1.2 and 1.3 the roof area *equals* the
+footprint, because those levels are flat extrusions; at lod 2.2 it exceeds it,
+because the roofs are sloped. A walk that mis-grouped surfaces or misread the
+semantics would not reproduce that, and both properties are asserted in the
+Python and TypeScript example tests.

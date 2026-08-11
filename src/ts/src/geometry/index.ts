@@ -13,7 +13,7 @@ import { ErrorCode, FcbError } from '../errors.js'
 export { decodeBoundaries } from './boundaries.js'
 export type { IndexTree, UInts } from './boundaries.js'
 export {
-  decodeSemantics, decodeSemanticsValues, semanticSurfaceTypeName,
+  NULL_INDEX, decodeSemantics, decodeSemanticsValues, semanticSurfaceTypeName,
 } from './semantics.js'
 export type { SemanticsValue, SemanticSurface } from './semantics.js'
 export { decodeMaterialValues, decodeTextureValues, sharedMaterialValue } from './appearance.js'
