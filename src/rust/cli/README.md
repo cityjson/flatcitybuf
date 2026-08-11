@@ -259,5 +259,4 @@ MIT License - see LICENSE file for details.
 ## Related
 
 - [FlatCityBuf Core Library](../fcb_core/)
-- [FlatCityBuf WASM](../wasm/)
 - [CityJSON Specification](https://cityjson.org/)

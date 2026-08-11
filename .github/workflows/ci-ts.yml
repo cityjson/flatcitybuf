@@ -61,9 +61,15 @@ jobs:
           python-version: "3.12"
 
       # lint + type + test + test-browser + build. Chromium is installed below
-      # so the browser project can run in the same job.
+      # so the browser project can run in the same job. `npm ci` must run
+      # FIRST: with no node_modules, npx fetches the latest playwright from
+      # the registry and installs that version's browser build, which the
+      # pinned playwright then can't find at run time (this is exactly how
+      # test-browser broke: chromium_headless_shell-1228 was missing).
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
 
       - name: just check
         run: just check

@@ -9,12 +9,15 @@
 default:
     @just --list
 
-# `build` runs last on purpose: examples/web resolves this package from dist/ via
-# a file: dependency, and the root justfile fans out in an order that relies on
-# dist/ existing by the time it reaches examples/web.
+# `build` runs before `type` and `test` on purpose: the examples (type-checked
+# via tsconfig.test.json and executed by the suite) resolve @cityjson/flatcitybuf
+# through the package.json self-reference, which points at dist/ — absent on a
+# fresh checkout until `build` has run. examples/web relies on the same dist/
+# via a file: dependency, so it must also exist by the time the root justfile
+# fan-out reaches examples/web.
 
-# Lint + type + tests (Node and browser) + build, read-only
-check: lint type test test-browser build
+# Lint + build + type + tests (Node and browser), read-only
+check: lint build type test test-browser
 
 # npm ci
 install:

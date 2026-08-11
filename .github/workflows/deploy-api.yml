@@ -2,10 +2,12 @@ name: Deploy API to Cloud Run
 
 # The workflow name below must match `name:` in ci.yml exactly -- a
 # workflow_run trigger matches on the workflow's NAME, not its filename, so
-# renaming ci.yml silently stops this from ever firing.
+# renaming ci.yml silently stops this from ever firing. The name is a GLOB
+# pattern, so `+` must be escaped: unescaped, GitHub fails to parse this
+# trigger and emits a startup_failure run on EVERY workflow completion.
 on:
   workflow_run:
-    workflows: ["CI (Rust + C++)"]
+    workflows: ['CI (Rust \+ C\+\+)']
     types:
       - completed
     branches: [main]
