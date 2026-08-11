@@ -52,7 +52,7 @@ addopts = "-m 'not benchmark'"
 
 [tool.mypy]
 strict = true
-files = ["flatcitybuf", "tests"]
+files = ["flatcitybuf", "tests", "examples"]
 
 # flatc-generated code is machine output: it never satisfies mypy strict
 # (untyped defs, untyped calls, etc). `exclude` alone would not be enough,

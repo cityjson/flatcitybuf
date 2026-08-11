@@ -1,6 +1,6 @@
 # C++ examples
 
-Eight self-contained programs, one per capability. Every command below was run
+Nine self-contained programs, one per capability. Every command below was run
 against `examples/data/delft.fcb` (1115 features, EPSG:7415) and the output is
 what it actually printed.
 
@@ -30,6 +30,7 @@ cmake --build build-curl         # -> build-curl/fcb_read_http
 | `fcb_read_features` | `read_features.cpp` | Raw feature access, no CityJSON conversion |
 | `fcb_custom_reader` | `custom_reader.cpp` | Implementing `fcb::RangeReader` yourself |
 | `fcb_read_http` | `read_http.cpp` | Remote reads over HTTP range requests |
+| `fcb_geometry_analysis` | `geometry_analysis.cpp` | **Walking the encoded geometry directly, for analysis** |
 | `fcb_write_cityjson` | `write_cityjson.cpp` | **Writing** a CityJSONSeq out as `.fcb` |
 
 Start with `fcb_inspect_header` on an unfamiliar file. If you just want to know
@@ -295,3 +296,63 @@ full-featured conversion tool (no bbox filter, no branching-factor override,
 no `--no-spatial-index` equivalent) — for that, the Rust CLI (`cd src/rust &&
 just ser <input.jsonl> <output.fcb>`) already covers the same ground this
 library exposes, and more.
+
+### `fcb_geometry_analysis <file.fcb> [max-features] [lod]`
+
+```
+$ ./build-native/fcb_geometry_analysis ../../examples/data/delft.fcb 20
+surface area at lod 2.2 over 20 feature(s), m^2
+  RoofSurface          42079.63
+  GroundSurface        36770.26
+  WallSurface          81615.17
+  TOTAL               160465.06
+
+flat walk vs nested CityJSON: AGREE
+GroundSurface vs the dataset's own b3_opp_grond: 36770.26 vs 36772.37 m^2 (0.006% apart)
+```
+
+Every other example converts to CityJSON first. This one does not: it reads the
+format's **own** representation -- five flat count arrays plus a flat
+vertex-index list -- and computes over them. That is the representation to use
+for analysis, because nothing has to be nested, allocated, or turned into JSON
+to get a number out of it.
+
+| array | meaning |
+|---|---|
+| `solids[i]` | shell count of solid i |
+| `shells[i]` | surface count of shell i |
+| `surfaces[i]` | ring count of surface i |
+| `strings[i]` | vertex count of ring i |
+| `boundaries` | the flat vertex-index list |
+| `semantics[i]` | semantic-object index of surface i (`u32::MAX` = none) |
+
+**The nesting depth comes from the geometry's `type`, never from the arrays.**
+A `Solid` with one shell and a `MultiSolid` with one solid flatten to
+byte-identical arrays -- only the type tells them apart. Inferring depth from
+which array is populated is upstream finding #8. This example never needs the
+depth at all: surface areas sum the same however the surfaces are grouped.
+Anything that *does* care about grouping (per-shell volume, say) must switch on
+the type.
+
+Vertices are quantised integers shared by the whole feature: multiply by
+`transform.scale` and add `transform.translate` for real-world coordinates.
+
+Two things make the output trustworthy rather than merely plausible.
+
+**The reader check** is the flat walk against the nested CityJSON path, compared
+per feature. These must agree exactly -- they are two routes through the same
+bytes, and any disagreement is a bug in one of them.
+
+**The data sanity check** is the computed `GroundSurface` area against
+`b3_opp_grond`, 3DBAG's own published ground area -- a number this library did
+not produce. Over the first 20 features they agree to 0.006%. Over 500, 495 of
+them still agree to within 1%, but the totals drift to ~4%: a handful of large
+multi-part buildings differ materially, because `b3_opp_grond` was derived from
+the source geometry by a different pipeline. That is a property of the dataset,
+not of the walk -- the flat and nested paths agree exactly on those same
+buildings.
+
+Pass a different LoD to see the geometry change: at lod 1.2 and 1.3 the roof
+area *equals* the footprint (a flat extrusion), while at lod 2.2 it exceeds it
+(sloped roofs). All three implementations -- C++, Python and TypeScript --
+produce identical totals for every LoD.

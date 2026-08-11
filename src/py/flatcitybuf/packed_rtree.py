@@ -6,7 +6,16 @@ from dataclasses import dataclass
 
 from flatcitybuf.errors import ErrorCode, FcbError
 from flatcitybuf.layout import NODE_ITEM_SIZE
-from flatcitybuf.range_reader import RangeReader
+from flatcitybuf.range_reader import BufferedRangeReader, RangeReader
+
+# http_reader/mod.rs:213 -- the bbox phase's combine threshold, reused
+# as the per-query buffering window, exactly as stree.py reuses the
+# attribute phase's (`_INDEX_FETCH_SIZE`) and reader.py the feature
+# phase's (`_FEATURE_FETCH_SIZE`). Without it this was the one phase of
+# the four issuing a physical read per R-tree node: over HTTP a bbox
+# query on the 68 GB 3DBAG file cost 240 requests where the C++ reader
+# cost 37, for byte-identical results.
+_NODE_FETCH_SIZE = 256 * 1024
 
 # packed_rtree.hpp / packed_rtree/mod.rs:23-33,56-77 -- 4 doubles then a
 # u64, all little-endian, 40 bytes, no padding. Decoded directly with
@@ -155,6 +164,12 @@ def search_rtree(
 
     level_bounds = _level_bounds(num_items, node_size)
     leaf_start, _leaf_end = level_bounds[0]
+
+    # Per-query buffering over the index section rather than a read per
+    # node, matching the other three phases. The window only ever widens
+    # a read the caller already asked for, so the bounds checks below
+    # still govern what is actually decoded.
+    reader = BufferedRangeReader(reader, _NODE_FETCH_SIZE)
 
     results: list[SearchResultItem] = []
     queue: deque[tuple[int, int]] = deque()

@@ -294,3 +294,30 @@ def test_search_rtree_rejects_a_child_index_misaligned_to_its_group() -> None:
     reader = InMemoryReader(buf)
     with pytest.raises(FcbError):
         search_rtree(reader, 0, 2, 2, (0.0, 0.0, 20.0, 20.0))
+
+
+def test_a_multi_level_search_buffers_instead_of_reading_per_node() -> None:
+    # The bbox phase is one of four that read over a RangeReader, and it
+    # was the only one not wrapping it in a BufferedRangeReader: every
+    # R-tree node cost its own physical read. Over HTTP that is one
+    # request per node -- a bbox query on the 68 GB 3DBAG file cost 240
+    # requests where the C++ reader cost 37, for identical results.
+    #
+    # Asserted as "strictly fewer physical reads than nodes visited"
+    # rather than an exact count, so the test pins the property (reads
+    # are combined) and not the window size.
+    reader = FileRangeReader(CORPUS / "small.fcb")
+    header = read_header(reader)
+
+    counting = InMemoryReader(Path(CORPUS / "small.fcb").read_bytes())
+    hits = search_rtree(
+        counting,
+        header.layout.rtree_begin,
+        header.info.features_count,
+        header.info.index_node_size,
+        (-1e9, -1e9, 1e9, 1e9),
+    )
+
+    assert len(hits) == 3
+    # One buffered window covers this whole tiny index.
+    assert len(counting.reads) == 1, counting.reads

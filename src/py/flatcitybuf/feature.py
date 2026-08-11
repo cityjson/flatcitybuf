@@ -172,17 +172,29 @@ class CityObjectView:
 
 
 def raw_city_object(view: CityObjectView) -> Any:
-    """Internal gateway to CityObjectView's generated CityObject table.
-    See the class docstring's `_raw` note -- only cityjson.py should
-    call this."""
+    """The generated CityObject table behind a CityObjectView.
+
+    This is the supported way to reach the ENCODED geometry -- the
+    format's own five count arrays plus a flat vertex-index list -- for
+    analysis that does not want CityJSON built first. Nothing has to be
+    nested or allocated to compute over them.
+
+    NESTING DEPTH COMES FROM Geometry.Type(), NEVER FROM THE ARRAYS: a
+    Solid with one shell and a MultiSolid with one solid flatten to
+    byte-identical arrays. Inferring depth from which array is populated
+    is upstream finding #8. See examples/geometry_analysis.py.
+    """
     return view._raw
 
 
 def raw_city_feature(feature: Feature) -> Any:
-    """Internal gateway to Feature's generated CityFeature table (for
-    `.Vertices()`/`.Appearance()`, which Task 7's public surface does
-    not expose). Mirrors detail::FeatureAccess::get in the C++ port --
-    only cityjson.py should call this."""
+    """The generated CityFeature table behind a Feature.
+
+    The feature-level counterpart of raw_city_object, for `.Vertices()`
+    (the quantised integers every geometry in the feature indexes into)
+    and `.Appearance()`. Mirrors detail::FeatureAccess::get in the C++
+    port and fcb::Feature::raw().
+    """
     return feature._raw
 
 

@@ -1381,3 +1381,159 @@ metadata-absent header carrying appearance or templates. Byte-identical-to-Rust
 would have meant byte-identical-to-the-bug. The C++ writer is clear here by
 construction, not by oracle agreement; a fixture exercising that shape would be
 needed to keep it that way.
+
+# Defects found while exercising the ports against live data
+
+## 33. Python: the bbox phase was the one read phase with no buffering — FIXED (this branch)
+
+**Where:** `src/py/flatcitybuf/packed_rtree.py`, `search_rtree`.
+
+Four phases read over a `RangeReader`, and three of them wrap it in a
+per-query `BufferedRangeReader` sized to the reference's own constant:
+
+| Phase | Wrapper | Window | Reference |
+|---|---|---|---|
+| open | `header.py:309` | `_OPEN_PREFETCH_SIZE` = 12944 | `http_reader/mod.rs:80-98` |
+| features | `reader.py:248`, `:300` | `_FEATURE_FETCH_SIZE` = 1 MiB | — |
+| attribute index | `stree.py:774` | `_INDEX_FETCH_SIZE` = 1 MiB | `http_reader/mod.rs:363` |
+| **bbox / R-tree** | **none** | — | `http_reader/mod.rs:213` says 256 KiB |
+
+`search_rtree` issued one physical `reader.read` per R-tree node. Against a
+`FileRangeReader` that is merely extra syscalls; over HTTP it is one request
+per node. The spec's "HTTP constants" table
+(`docs/specification.md:341`) documents a bbox combine threshold of
+`256*1024` — Python implemented the attribute one beside it but not this.
+
+**Measured** — the live 68 GB 3DBAG file, bbox `120000 486000 121000 487000`,
+identical results throughout (2762 features):
+
+| | open | R-tree traversal | wall clock |
+|---|---|---|---|
+| Python, before | 2 requests | **240 requests** | **32.4 s** |
+| Python, after | 2 requests | **10 requests** | **1.4 s** |
+
+These count the **index traversal only**, not the feature reads that follow.
+An earlier revision of this entry put C++'s 37 in the same table; that number
+is C++'s total for the whole query *including* decoding all 2762 features, so
+it was never comparable to a traversal-only figure. The end-to-end comparison
+belongs to finding #34, which is where the rest of the gap turned out to be.
+
+Not a correctness defect — the answer was always right, and matches C++ and
+Rust exactly (and on `delft.fcb`, all three agree on the same 170 features).
+It is a divergence in the one behaviour the format exists for: fetching only
+the bytes you need, in as few requests as possible.
+
+**Fix:** one `BufferedRangeReader(reader, _NODE_FETCH_SIZE)` at the top of
+`search_rtree`, mirroring `stree.py` exactly, with `_NODE_FETCH_SIZE =
+256 * 1024` cited to `http_reader/mod.rs:213`. The window only ever widens a
+read the caller already asked for, so the existing bounds checks still govern
+what is decoded.
+
+**Coverage:** `tests/test_packed_rtree.py::test_a_multi_level_search_buffers_instead_of_reading_per_node`
+asserts strictly fewer physical reads than nodes visited — the property, not
+the window size. Verified to fail without the fix (2 reads vs 1).
+
+**Ports:** C++ and Rust already combine on this path and are unaffected. The
+TypeScript reader has the same four phases and has **not** been checked for
+this — worth doing when it is next touched.
+
+## 34. Python: `feature_at` read through the raw reader, costing 2 HTTP requests per feature — FIXED (this branch)
+
+**Where:** `src/py/flatcitybuf/reader.py`, `FcbReader.feature_at`.
+
+`feature_at` is the documented way back from an index hit to a feature — both
+`search_rtree` and `select_attr` return byte offsets, and `docs/py.md` shows
+the loop:
+
+```python
+for hit in hits:
+    cj = fcb.to_cityjson_feature(reader.feature_at(hit), reader.header)
+```
+
+It read through `self._reader`, the **raw** reader. `select_all` and
+`select_attr`'s post-filter each wrapped that reader in a
+`BufferedRangeReader(_FEATURE_FETCH_SIZE)`, but `feature_at` did not — and a
+per-call wrapper could not have helped anyway, since one call has nothing to
+amortise. Every call therefore issued its own physical reads: a length prefix
+and a body, **2.0 HTTP requests per feature**, measured.
+
+This is the same class as finding #33 and was found immediately after it, by
+asking why the numbers there did not match C++'s once features were actually
+decoded rather than just counted.
+
+**Measured** — live 68 GB 3DBAG file, bbox `120000 486000 121000 487000`,
+2762 features, identical results throughout:
+
+| | requests | wall clock |
+|---|---|---|
+| Python, before | ~5764 (10 index + ~5524 features) | >10 min (timed out) |
+| Python, after | **39** | **9.2 s** |
+| C++ `fcb_read_http` | 37 | ~6.4 s |
+| TypeScript | 34 | 5.2 s |
+
+Before both fixes the same query was ~5764 requests; all four implementations
+now agree on 2762 features within a few requests of each other.
+
+**Fix:** one `BufferedRangeReader(reader, _FEATURE_FETCH_SIZE)` created in
+`FcbReader.__init__` and reused by every `feature_at` call, so walking a sorted
+hit list costs a fetch per window rather than per feature. An out-of-order or
+distant offset simply misses the window and refills it, exactly as a random
+read would — the method stays random-access.
+
+**Coverage:** `tests/test_public_api.py::test_walking_a_hit_list_with_feature_at_does_not_read_per_feature`
+asserts fewer physical reads than features walked — the property, not the
+window size.
+
+**Ports:** C++ and TypeScript were measured on the same query and do not have
+this gap (37 and 34 requests end to end). TypeScript in particular wraps a
+single `BufferedRangeReader` around the source at open
+(`src/ts/src/reader.ts`), so every phase inherits buffering by construction
+rather than needing a wrapper per phase.
+
+## 35. The encoded geometry was reachable but not usable, in all three ports — FIXED (this branch)
+
+**Where:** `src/ts/src/index.ts`, `src/py/flatcitybuf/__init__.py`,
+`src/cpp/include/fcb/feature.hpp`.
+
+Every reader could produce CityJSON, and every reader could reach the
+FlatBuffers tables internally — but a *consumer* wanting to compute over the
+format's own representation (the five count arrays plus the flat vertex-index
+list, which is what you want for analysis: no nesting, no allocation, no JSON)
+could not. Each port blocked it differently, and none of them on purpose:
+
+| Port | What was wrong |
+|---|---|
+| C++ | `Feature::raw()` was **private**, reachable only through the `detail::FeatureAccess` friend |
+| Python | `raw_city_object`/`raw_city_feature` existed but were absent from `__all__` and documented "only cityjson.py should call this"; there was no public `semantic_surface_type_name` at all |
+| TypeScript | `rawObject()` was public, but every enum and constant needed to INTERPRET it — `GeometryType`, `SemanticSurfaceType`, `NULL_INDEX`, the name helpers — was unexported, and the generated modules are not reachable by subpath (`ERR_PACKAGE_PATH_NOT_EXPORTED`) |
+
+So the fastest path through the format was the one path a user could not take.
+
+**Fix:** each port now exposes it, with the same warning attached — NESTING
+DEPTH COMES FROM `Geometry.type()`, NEVER FROM THE ARRAYS (finding #8). C++
+moves `raw()` to the public section; Python exports the two gateways plus
+`geometry_type_name`/`semantic_surface_type_name` (the latter newly written,
+lifted from `cityjson.py`'s private list); TypeScript re-exports the enums,
+constants, decoders and table types, following the precedent already set by
+`ColumnType`.
+
+**Demonstrated and validated by** `geometry_analysis` in all three ports:
+surface area per semantic surface type, walked from the flat arrays. Each one
+self-checks two ways — against its own nested-CityJSON path, and against
+`b3_opp_grond`, 3DBAG's published ground area, which no implementation here
+produced.
+
+Cross-implementation agreement over 200 features of `delft.fcb`, all three
+byte-identical at every LoD:
+
+| lod | RoofSurface | GroundSurface | WallSurface |
+|---|---|---|---|
+| 1.2 | 144646.86 | 144646.86 | 256929.12 |
+| 1.3 | 144647.20 | 144647.20 | 279442.01 |
+| 2.2 | 160166.79 | 144649.17 | 269946.15 |
+
+The physics is a check in itself: at lod 1.2 and 1.3 the roof area *equals* the
+footprint, because those levels are flat extrusions; at lod 2.2 it exceeds it,
+because the roofs are sloped. A walk that mis-grouped surfaces or misread the
+semantics would not reproduce that, and both properties are asserted in the
+Python and TypeScript example tests.

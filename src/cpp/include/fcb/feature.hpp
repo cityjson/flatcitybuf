@@ -80,9 +80,26 @@ class Feature {
     /// section, matching the offsets stored in the R-tree leaves.
     std::uint64_t byte_offset() const { return byte_offset_; }
 
+    /// The generated CityFeature table behind this Feature.
+    ///
+    /// This is the supported way to reach the ENCODED geometry -- the format's
+    /// own five count arrays (`solids`/`shells`/`surfaces`/`strings` plus the
+    /// flat `boundaries` index list) and the quantised `vertices` they index
+    /// into -- for analysis that does not want CityJSON built first. Nothing
+    /// has to be nested or allocated to compute over them. See
+    /// examples/geometry_analysis.cpp.
+    ///
+    /// NESTING DEPTH COMES FROM `Geometry::type()`, NEVER FROM THE ARRAYS: a
+    /// Solid with one shell and a MultiSolid with one solid flatten to
+    /// byte-identical arrays. Inferring depth from which array is populated is
+    /// upstream finding #8.
+    ///
+    /// Include `<fcb/generated/feature_generated.h>` for the complete type;
+    /// this header only forward-declares it.
+    const ::CityFeature* raw() const;
+
   private:
     friend struct detail::FeatureAccess;
-    const ::CityFeature* raw() const;
 
     std::shared_ptr<const std::vector<std::uint8_t>> buffer_;
     std::uint64_t byte_offset_ = 0;

@@ -66,7 +66,16 @@ from flatcitybuf.cityjson import (
     to_cityjson_metadata,
 )
 from flatcitybuf.errors import ErrorCode, FcbError
-from flatcitybuf.feature import CityObjectView, Feature
+from flatcitybuf.feature import (
+    CityObjectView,
+    Feature,
+    raw_city_feature,
+    raw_city_object,
+)
+from flatcitybuf.geometry import (
+    geometry_type_name,
+    semantic_surface_type_name,
+)
 from flatcitybuf.header import (
     AttrIndexInfo,
     ColumnInfo,
@@ -122,6 +131,14 @@ __all__ = [
     "to_cityjson_metadata",
     "to_cityjson_feature",
     "city_object_type_name",
+    # Encoded geometry, for analysis over the format's own arrays rather
+    # than over CityJSON. raw_city_object/raw_city_feature hand back the
+    # generated FlatBuffers tables; the two name helpers turn a raw
+    # ubyte type tag into its CityJSON name.
+    "raw_city_object",
+    "raw_city_feature",
+    "geometry_type_name",
+    "semantic_surface_type_name",
     # Queries
     "search_rtree",
     "search_stree",
