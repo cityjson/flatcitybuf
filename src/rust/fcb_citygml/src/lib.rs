@@ -8,6 +8,8 @@
 
 pub mod crs;
 mod error;
+pub mod gml;
+pub mod xml;
 
 pub use error::CityGmlError;
 
