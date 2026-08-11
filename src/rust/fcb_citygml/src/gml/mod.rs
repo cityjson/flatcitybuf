@@ -26,10 +26,17 @@ pub struct Polygon3 {
     pub sem_idx: Option<usize>,
 }
 
-/// Local names of the elements this module reads. Elements are matched on
-/// local name alone: CityGML 2.0 binds GML to
-/// `http://www.opengis.net/gml`, CityGML 3.0 to `.../gml/3.2`, and nothing
-/// here depends on which.
+/// The GML namespace this reader accepts.
+///
+/// CityGML 2.0 is built on GML 3.1.1, which is bound to this URI. GML 3.2
+/// (`http://www.opengis.net/gml/3.2`, used by CityGML 3.0) is deliberately
+/// *not* accepted: recognising its elements here would claim a conformance
+/// the rest of the converter does not have.
+const GML_NS: &str = "http://www.opengis.net/gml";
+
+/// Local names of the elements this module reads. A local name alone never
+/// identifies an element — an application schema is free to define its own
+/// `posList` — so every match pairs the local name with [`GML_NS`].
 const EXTERIOR: &str = "exterior";
 const INTERIOR: &str = "interior";
 const LINEAR_RING: &str = "LinearRing";
@@ -42,6 +49,13 @@ const POS_LIST: &str = "posList";
 const DIMS: usize = 3;
 
 /// Parse a `gml:Polygon` element into its repaired rings.
+///
+/// The boundary, ring and position elements inside it are recognised only in
+/// [`GML_NS`]; an element with a matching local name in any other namespace
+/// is not GML geometry and is passed over, which leaves the polygon looking
+/// as though that part were absent. Which element *is* the polygon is the
+/// caller's decision, so `node` itself is not checked — `gml:Triangle` and
+/// `gml:Rectangle` have the same content model and parse the same way.
 ///
 /// Returns `Ok(None)` when any of the polygon's rings collapses to fewer
 /// than three distinct points — the polygon carries no area and cannot be
@@ -87,10 +101,12 @@ pub fn parse_polygon(node: &XmlNode) -> Result<Option<Polygon3>, CityGmlError> {
     let mut exterior = None;
     let mut interiors = Vec::new();
     for boundary in &node.children {
-        let is_exterior = match boundary.local.as_str() {
-            EXTERIOR => true,
-            INTERIOR => false,
-            _ => continue,
+        let is_exterior = if is_gml(boundary, EXTERIOR) {
+            true
+        } else if is_gml(boundary, INTERIOR) {
+            false
+        } else {
+            continue;
         };
         let Some(ring) = parse_ring(boundary)? else {
             return Ok(None);
@@ -125,10 +141,10 @@ pub fn parse_polygon(node: &XmlNode) -> Result<Option<Polygon3>, CityGmlError> {
 ///
 /// Returns `Ok(None)` when the ring is degenerate.
 fn parse_ring(boundary: &XmlNode) -> Result<Option<Ring>, CityGmlError> {
-    let Some(linear_ring) = boundary.child(LINEAR_RING) else {
+    let Some(linear_ring) = gml_child(boundary, LINEAR_RING) else {
         return Err(CityGmlError::InvalidGeometry {
             context: element_context(boundary),
-            reason: format!("no <{LINEAR_RING}> child"),
+            reason: format!("no GML <{LINEAR_RING}> child"),
         });
     };
     let pts = parse_positions(linear_ring)?;
@@ -142,6 +158,9 @@ fn parse_ring(boundary: &XmlNode) -> Result<Option<Ring>, CityGmlError> {
 fn parse_positions(ring: &XmlNode) -> Result<Vec<[f64; 3]>, CityGmlError> {
     let mut pts = Vec::new();
     for child in &ring.children {
+        if child.ns != GML_NS {
+            continue;
+        }
         match child.local.as_str() {
             POS => {
                 let point = parse_coords(&child.text, child)?;
@@ -225,6 +244,16 @@ fn repair_ring(pts: Vec<[f64; 3]>) -> Option<Vec<[f64; 3]>> {
         repaired.pop();
     }
     (repaired.len() >= 3).then_some(repaired)
+}
+
+/// Whether a node is the named GML element — local name *and* namespace.
+fn is_gml(node: &XmlNode, local: &str) -> bool {
+    node.local == local && node.ns == GML_NS
+}
+
+/// The first direct child that is the named GML element.
+fn gml_child<'a>(node: &'a XmlNode, local: &str) -> Option<&'a XmlNode> {
+    node.children.iter().find(|child| is_gml(child, local))
 }
 
 /// A human-readable identifier for an element, for error messages.
@@ -390,6 +419,100 @@ mod tests {
             matches!(err, CityGmlError::InvalidGeometry { .. }),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn a_pos_list_outside_the_gml_namespace_is_not_a_pos_list() {
+        // Same local name, different namespace: an application schema is
+        // free to define its own <posList>, and it is not GML geometry.
+        // With no GML positions left the ring has no points at all, so the
+        // polygon is degenerate rather than silently half-parsed.
+        assert!(parse_polygon(&node(
+            r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"
+                     xmlns:other="urn:example:other">
+          <gml:exterior><gml:LinearRing>
+            <other:posList>0 0 0 10 0 0 10 10 0 0 0 0</other:posList>
+          </gml:LinearRing></gml:exterior>
+        </gml:Polygon>"#
+        ))
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn a_pos_outside_the_gml_namespace_is_ignored() {
+        // The GML positions are kept and the foreign ones do not join them.
+        let p = parse_polygon(&node(
+            r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"
+                     xmlns:other="urn:example:other">
+          <gml:exterior><gml:LinearRing>
+            <gml:pos>0 0 0</gml:pos>
+            <other:pos>99 99 99</other:pos>
+            <gml:pos>10 0 0</gml:pos>
+            <gml:pos>10 10 0</gml:pos>
+          </gml:LinearRing></gml:exterior>
+        </gml:Polygon>"#,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            p.rings[0].pts,
+            vec![[0., 0., 0.], [10., 0., 0.], [10., 10., 0.]]
+        );
+    }
+
+    #[test]
+    fn a_linear_ring_outside_the_gml_namespace_is_invalid_geometry() {
+        let err = parse_polygon(&node(
+            r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"
+                     xmlns:other="urn:example:other">
+          <gml:exterior><other:LinearRing>
+            <gml:posList>0 0 0 10 0 0 10 10 0 0 0 0</gml:posList>
+          </other:LinearRing></gml:exterior>
+        </gml:Polygon>"#,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, CityGmlError::InvalidGeometry { .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn boundaries_outside_the_gml_namespace_are_not_boundaries() {
+        let err = parse_polygon(&node(
+            r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"
+                     xmlns:other="urn:example:other">
+          <other:exterior><gml:LinearRing>
+            <gml:posList>0 0 0 10 0 0 10 10 0 0 0 0</gml:posList>
+          </gml:LinearRing></other:exterior>
+        </gml:Polygon>"#,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, CityGmlError::InvalidGeometry { .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn the_gml_3_2_namespace_is_not_accepted() {
+        // This reader targets CityGML 2.0, which binds GML 3.1.1. Accepting
+        // the GML 3.2 namespace here would claim a conformance the rest of
+        // the converter does not have.
+        assert!(parse_polygon(&node(
+            r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml/3.2">
+          <gml:exterior><gml:LinearRing>
+            <gml:posList>0 0 0 10 0 0 10 10 0 0 0 0</gml:posList>
+          </gml:LinearRing></gml:exterior>
+        </gml:Polygon>"#
+        ))
+        .is_err());
     }
 
     #[test]
