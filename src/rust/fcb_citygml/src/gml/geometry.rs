@@ -27,6 +27,21 @@ const SOLID: &str = "Solid";
 const MULTI_SOLID: &str = "MultiSolid";
 const COMPOSITE_SOLID: &str = "CompositeSolid";
 
+/// Local names of the two triangulated surfaces, and of the property holding
+/// their patches.
+///
+/// A `gml:Tin` *is* a `gml:TriangulatedSurface` — it adds the breaklines and
+/// the control points the triangulation was computed from, none of which
+/// CityJSON can hold — so the two are read alike.
+const TRIANGULATED_SURFACE: &str = "TriangulatedSurface";
+const TIN: &str = "Tin";
+const TRIANGLE_PATCHES: &str = "trianglePatches";
+const TRIANGLE: &str = "Triangle";
+
+/// The points a triangle has, once its ring has been repaired: the closing
+/// point is gone, so three remain.
+const TRIANGLE_POINTS: usize = 3;
+
 /// Local names of the member and patch properties inside them.
 const SURFACE_MEMBER: &str = "surfaceMember";
 const SURFACE_MEMBERS: &str = "surfaceMembers";
@@ -177,6 +192,111 @@ pub fn parse_geometry(
         _ => return Ok(None),
     };
     Ok(Some(geometry))
+}
+
+/// Parse the triangles of a `gml:TriangulatedSurface` or a `gml:Tin`.
+///
+/// Returns an empty vector, and records nothing, when `node` is neither —
+/// including when it carries one of those local names in another namespace —
+/// so a caller can offer it every child of a `dem:tin` property and let this
+/// function pick the one that is a triangulation.
+///
+/// A triangle is one polygon: `gml:Triangle` has the `gml:Polygon` content
+/// model, so it parses with [`parse_polygon`], and what makes it a triangle is
+/// checked afterwards — one ring, three points once the ring has been repaired.
+/// A patch that fails that check, that collapses to no area, or that is
+/// structurally malformed is recorded in `report` and dropped.
+///
+/// Nothing here fails the parse, which is why this returns the triangles
+/// rather than a `Result`: a terrain is a bag of independent triangles, and
+/// one bad patch out of thousands is a hole in the surface rather than a
+/// reason to lose the document.
+///
+/// # Examples
+///
+/// ```
+/// use fcb_citygml::gml::parse_triangles;
+/// use fcb_citygml::xml::XmlNode;
+/// use fcb_citygml::ParseReport;
+///
+/// // <gml:TriangulatedSurface><gml:trianglePatches><gml:Triangle>
+/// //   <gml:exterior><gml:LinearRing>
+/// //     <gml:posList>0 0 0 1 0 0 1 1 0 0 0 0</gml:posList>
+/// //   </gml:LinearRing></gml:exterior>
+/// // </gml:Triangle></gml:trianglePatches></gml:TriangulatedSurface>
+/// fn el(local: &str, text: &str, children: Vec<XmlNode>) -> XmlNode {
+///     XmlNode {
+///         ns: "http://www.opengis.net/gml".to_string(),
+///         local: local.to_string(),
+///         attrs: Vec::new(),
+///         text: text.to_string(),
+///         children,
+///     }
+/// }
+/// let ring = el("LinearRing", "", vec![el("posList", "0 0 0 1 0 0 1 1 0 0 0 0", vec![])]);
+/// let triangle = el("Triangle", "", vec![el("exterior", "", vec![ring])]);
+/// let patches = el("trianglePatches", "", vec![triangle]);
+/// let node = el("TriangulatedSurface", "", vec![patches]);
+///
+/// let mut report = ParseReport::default();
+/// let triangles = parse_triangles(&node, &mut report);
+/// assert_eq!(triangles.len(), 1);
+/// // The closing point is dropped, leaving the three corners.
+/// assert_eq!(triangles[0].rings[0].pts.len(), 3);
+/// assert!(report.skipped.is_empty());
+/// ```
+pub fn parse_triangles(node: &XmlNode, report: &mut ParseReport) -> Vec<Polygon3> {
+    let mut triangles = Vec::new();
+    if node.ns != GML_NS || ![TRIANGULATED_SURFACE, TIN].contains(&node.local.as_str()) {
+        return triangles;
+    }
+    for patches in &node.children {
+        if !is_gml(patches, TRIANGLE_PATCHES) {
+            continue;
+        }
+        for patch in &patches.children {
+            if patch.ns != GML_NS {
+                continue;
+            }
+            if patch.local != TRIANGLE {
+                report.skipped.push(unsupported(
+                    patch,
+                    format!("<{}> is not a GML <{TRIANGLE}>", patch.local),
+                ));
+                continue;
+            }
+            match parse_triangle(patch) {
+                Ok(triangle) => triangles.push(triangle),
+                Err(reason) => report.skipped.push(unsupported(patch, reason)),
+            }
+        }
+    }
+    triangles
+}
+
+/// One `gml:Triangle`, or why it is not one this converter can write.
+///
+/// The error is a reason rather than a [`CityGmlError`] because every way of
+/// failing here is one patch of a triangulation, and the caller records them
+/// all the same way.
+fn parse_triangle(patch: &XmlNode) -> Result<Polygon3, String> {
+    let triangle = match parse_polygon(patch) {
+        Ok(Some(triangle)) => triangle,
+        Ok(None) => return Err(DEGENERATE.to_string()),
+        Err(err) => return Err(err.to_string()),
+    };
+    // A `gml:Triangle` has exactly one ring by definition, and a repaired ring
+    // of three points is what makes it a triangle rather than a quadrangle
+    // that was written under the wrong name.
+    let points = triangle.rings.first().map_or(0, |ring| ring.pts.len());
+    if triangle.rings.len() != 1 || points != TRIANGLE_POINTS {
+        return Err(format!(
+            "<{TRIANGLE}> has {} ring(s) of which the first holds {points} distinct point(s), \
+             not one ring of {TRIANGLE_POINTS}",
+            triangle.rings.len()
+        ));
+    }
+    Ok(triangle)
 }
 
 /// Collect the polygons of a surface collection: the `surfaceMember`

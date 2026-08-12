@@ -1,40 +1,23 @@
 //! The building module: `bldg:Building`, and the objects nested in it.
 //!
-//! The geometry, the attributes and the boundary surfaces of a building are
-//! read here, and so are its `bldg:BuildingPart`s and its
-//! `bldg:BuildingInstallation`s — by the same reader, because CityGML
-//! describes all three the same way. A part may hold parts of its own, so the
-//! reading is recursive; the whole tree becomes one CityJSON feature, which is
-//! the converter's half of the arrangement.
-//!
-//! Each addition is additive: a property this reader does not recognise is
-//! passed over silently rather than reported, because at this stage nearly
-//! every property of a real building is one of those. A property that *is*
-//! recognised and still yields nothing — a `boundedBy` or a
-//! `consistsOfBuildingPart` that only references an object elsewhere — is
-//! reported, because that is content this converter lost.
+//! A building, its `bldg:BuildingPart`s and its `bldg:BuildingInstallation`s
+//! are read by [`super::construction`], which is the reader the building, the
+//! bridge and the tunnel modules share: CityGML describes all three families
+//! the same way and only the names differ. What is left here is the building's
+//! own half of that description — its namespaces, the objects it nests, and
+//! where it writes its thematic surfaces — and the tests that pin the shared
+//! reader's behaviour on the family it was first written for.
 
-use super::attributes::read_common_attributes;
-use super::semantics::{read_semantic_surfaces, SurfaceProperty, SurfaceSpec};
-use super::{member_object_id, read_lod_geometries};
-use crate::gml::XlinkRegistry;
-use crate::model::IntermediateObject;
-use crate::xml::XmlNode;
-use crate::{is_in, CityGmlError, ParseReport, Skipped};
+use super::construction::{
+    ChildKind, ConstructionSpec, BOUNDARY_SURFACES, BOUNDED_BY, OPENING, OPENINGS,
+};
+use super::semantics::{SurfaceProperty, SurfaceSpec};
 
 /// Namespace URIs of the CityGML building module, 2.0 and 1.0.
 const BUILDING_NS: [&str; 2] = [
     "http://www.opengis.net/citygml/building/2.0",
     "http://www.opengis.net/citygml/building/1.0",
 ];
-
-/// Local name of the one element this reader claims.
-const BUILDING: &str = "Building";
-
-/// Local name of the property holding a thematic boundary surface, and of the
-/// property holding one of that surface's openings.
-const BOUNDED_BY: &str = "boundedBy";
-const OPENING: &str = "opening";
 
 /// The properties holding a nested city object, and the element each of them
 /// holds.
@@ -43,25 +26,13 @@ const BUILDING_PART: &str = "BuildingPart";
 const OUTER_BUILDING_INSTALLATION: &str = "outerBuildingInstallation";
 const BUILDING_INSTALLATION: &str = "BuildingInstallation";
 
-/// One kind of nested object a building-family object may hold.
-struct ChildKind {
-    /// The property that carries the object.
-    property: &'static str,
-    /// The element that property holds.
-    element: &'static str,
-    /// The CityJSON type the object becomes.
-    co_type: cjseq::CityObjectType,
-    /// The word a generated id is built from: `b1-part-2`, `b1-inst-1`.
-    id_word: &'static str,
-}
-
-/// The nested objects this reader knows, in no particular order: a document
+/// The nested objects this module knows, in no particular order: a document
 /// may write them in any, and it is the document's order that is kept.
 ///
 /// `bldg:interiorBuildingInstallation` is deliberately absent. It is a
 /// property of a `bldg:Room`, and rooms — with their interior boundary
 /// surfaces — arrive with the reader that reads them.
-static CHILD_KINDS: [ChildKind; 2] = [
+static BUILDING_CHILDREN: [ChildKind; 2] = [
     ChildKind {
         property: CONSISTS_OF_BUILDING_PART,
         element: BUILDING_PART,
@@ -76,29 +47,8 @@ static CHILD_KINDS: [ChildKind; 2] = [
     },
 ];
 
-/// The thematic boundary surfaces of the building module, each of which is a
-/// CityJSON semantic surface type spelled the same way.
-///
-/// The interior surfaces — `InteriorWallSurface`, `CeilingSurface`,
-/// `FloorSurface` — are deliberately absent: they are boundaries of a
-/// `bldg:Room`, not of a building, and they arrive with the reader that reads
-/// rooms.
-const BOUNDARY_SURFACES: [&str; 6] = [
-    "RoofSurface",
-    "WallSurface",
-    "GroundSurface",
-    "ClosureSurface",
-    "OuterCeilingSurface",
-    "OuterFloorSurface",
-];
-
-/// The openings a boundary surface may hold. Each becomes a semantic surface
-/// of its own, pointing at the surface it opens.
-const OPENINGS: [&str; 2] = ["Window", "Door"];
-
 /// Where the building module writes its thematic surfaces: under
-/// `bldg:boundedBy`, with the openings of each under `bldg:opening`. It is
-/// the only module with openings.
+/// `bldg:boundedBy`, with the openings of each under `bldg:opening`.
 static BUILDING_SURFACES: SurfaceSpec = SurfaceSpec {
     namespaces: &BUILDING_NS,
     properties: &[SurfaceProperty {
@@ -112,158 +62,25 @@ static BUILDING_SURFACES: SurfaceSpec = SurfaceSpec {
     container: BOUNDED_BY,
 };
 
-/// Whether a node is a `bldg:Building`.
-pub(crate) fn is_building(node: &XmlNode) -> bool {
-    node.local == BUILDING && BUILDING_NS.contains(&node.ns.as_str())
-}
-
-/// Whether a node is one of the named elements of the building module.
-///
-/// The local name alone is not enough: an application schema may define a
-/// `WallSurface` of its own, and it is not the CityGML one.
-fn is_building_element(node: &XmlNode, locals: &[&str]) -> bool {
-    BUILDING_NS.contains(&node.ns.as_str()) && locals.contains(&node.local.as_str())
-}
-
-/// Read a `bldg:Building` into the intermediate model.
-///
-/// `registry` indexes the polygons of the whole `cityObjectMember`, so a
-/// solid whose faces are `xlink:href`s to polygons written elsewhere in the
-/// building resolves. `member_index` names the object when it carries no
-/// `gml:id`; the generated id is stable for a given document, which matters
-/// because it ends up as a CityJSON object key.
-///
-/// # Errors
-///
-/// Propagates the geometry reader's errors: malformed geometry, and
-/// references that name no polygon in the member.
-pub(crate) fn read_building(
-    node: &XmlNode,
-    registry: &XlinkRegistry,
-    member_index: usize,
-    report: &mut ParseReport,
-) -> Result<IntermediateObject, CityGmlError> {
-    let id = member_object_id(node, member_index);
-    read_building_object(node, id, cjseq::CityObjectType::Building, registry, report)
-}
-
-/// Read one object of the building family — a `Building`, a `BuildingPart`, a
-/// `BuildingInstallation` — into the intermediate model.
-///
-/// The three are read alike because CityGML describes them alike: each is an
-/// `_AbstractBuilding` or a feature shaped like one, with its own attributes,
-/// its own `lodX…` geometry properties, its own boundary surfaces and — for
-/// the first two — nested objects of its own. A `BuildingPart` may therefore
-/// hold parts and installations, which is what makes this recursive.
-///
-/// `id` is settled by the caller, because what names an object without a
-/// `gml:id` differs: a top-level building is named after its member's
-/// position, a nested object after its parent and its place among that
-/// parent's children.
-///
-/// The order of the three reading steps is not free. `read_lod_geometries`
-/// must run before `read_semantic_surfaces`, because the second pass
-/// deduplicates its diagnostics against the entries the first one recorded;
-/// reversed, one lost polygon would be reported twice.
-///
-/// # Errors
-///
-/// Propagates the geometry reader's errors, for this object and every object
-/// nested in it.
-fn read_building_object(
-    node: &XmlNode,
-    id: String,
-    co_type: cjseq::CityObjectType,
-    registry: &XlinkRegistry,
-    report: &mut ParseReport,
-) -> Result<IntermediateObject, CityGmlError> {
-    let mut object = IntermediateObject::new(id, co_type);
-    read_common_attributes(node, &mut object.attributes, report);
-    object.geometries = read_lod_geometries(node, registry, report)?;
-    read_semantic_surfaces(
-        node,
-        &BUILDING_SURFACES,
-        registry,
-        &mut object.geometries,
-        report,
-    )?;
-    object.children = read_children(node, &object.id, registry, report)?;
-    Ok(object)
-}
-
-/// Read the objects nested in one building-family object, in document order.
-///
-/// The order is the document's rather than one kind after the other: it is
-/// what the CityJSON `children` array is written in, and the source's own
-/// order is the only one that means anything.
-///
-/// A child with no `gml:id` is named `{parent}-{kind}-{n}`, where `n` counts
-/// the children of that kind under that parent from **one**, whether or not
-/// they carried an id themselves. Counting the named ones too keeps the
-/// generated ids stable against a document that gives one sibling an id and
-/// not another, and — because the parent's own id is in the name — a
-/// generated id nests: a part of `b1-part-1` is `b1-part-1-part-1`.
-///
-/// # Errors
-///
-/// Propagates the nested objects' errors, as [`read_building_object`] does.
-fn read_children(
-    node: &XmlNode,
-    parent_id: &str,
-    registry: &XlinkRegistry,
-    report: &mut ParseReport,
-) -> Result<Vec<IntermediateObject>, CityGmlError> {
-    let mut children = Vec::new();
-    let mut counts = [0usize; CHILD_KINDS.len()];
-    for property in &node.children {
-        let Some((index, kind)) = CHILD_KINDS
-            .iter()
-            .enumerate()
-            .find(|(_, kind)| is_in(property, &BUILDING_NS, kind.property))
-        else {
-            continue;
-        };
-        let mut read_any = false;
-        for child in &property.children {
-            if !is_building_element(child, &[kind.element]) {
-                continue;
-            }
-            counts[index] += 1;
-            let id = child
-                .gml_id()
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("{parent_id}-{}-{}", kind.id_word, counts[index]));
-            children.push(read_building_object(
-                child,
-                id,
-                kind.co_type.clone(),
-                registry,
-                report,
-            )?);
-            read_any = true;
-        }
-        if !read_any {
-            // As with `boundedBy`: a property this reader took nothing from is
-            // content that was lost — most often a reference to an object
-            // written elsewhere, which this converter does not follow.
-            report.skipped.push(Skipped {
-                element: property.local.clone(),
-                gml_id: property.gml_id().map(str::to_owned),
-                reason: format!(
-                    "<{}> holds no <{}> this reader can read",
-                    property.local, kind.element
-                ),
-            });
-        }
-    }
-    Ok(children)
-}
+/// The building module, as the shared construction reader takes it: the one
+/// element it claims as a root feature, and everything that element implies.
+pub(crate) static BUILDING: ConstructionSpec = ConstructionSpec {
+    namespaces: &BUILDING_NS,
+    element: "Building",
+    co_type: cjseq::CityObjectType::Building,
+    children: &BUILDING_CHILDREN,
+    surfaces: &BUILDING_SURFACES,
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::citygml::construction::{read_construction, spec_of};
     use crate::citygml::semantics::POLYGON;
-    use crate::model::IntermediateGeometry;
+    use crate::gml::XlinkRegistry;
+    use crate::model::{IntermediateGeometry, IntermediateObject};
+    use crate::xml::XmlNode;
+    use crate::{ParseReport, Skipped};
 
     fn node(xml: &str) -> XmlNode {
         crate::xml::parse_str_for_tests(xml).unwrap()
@@ -295,7 +112,7 @@ mod tests {
         let building = node(xml);
         let registry = XlinkRegistry::collect(&building);
         let mut report = ParseReport::default();
-        let object = read_building(&building, &registry, 0, &mut report)
+        let object = read_construction(&building, &BUILDING, &registry, 0, &mut report)
             .unwrap_or_else(|err| panic!("read failed: {err}"));
         (object, report)
     }
@@ -867,18 +684,21 @@ mod tests {
         assert_eq!(report.skipped[1].element, OUTER_BUILDING_INSTALLATION);
     }
 
+    /// The building is a member of the construction family, so it is the
+    /// shared dispatch that has to recognise it — in both module versions,
+    /// and by namespace as well as by name.
     #[test]
     fn a_building_is_recognised_in_both_module_versions() {
         for ns in BUILDING_NS {
-            assert!(is_building(&node(&format!(
-                r#"<bldg:Building xmlns:bldg="{ns}"/>"#
-            ))));
+            let building = node(&format!(r#"<bldg:Building xmlns:bldg="{ns}"/>"#));
+            let spec = spec_of(&building).unwrap_or_else(|| panic!("{ns}"));
+            assert_eq!(spec.co_type, cjseq::CityObjectType::Building);
         }
         // The local name alone is not a building.
-        assert!(!is_building(&node(r#"<Building/>"#)));
-        assert!(!is_building(&node(
-            r#"<b:Building xmlns:b="urn:example:other"/>"#
-        )));
-        assert!(!is_building(&bldg("BuildingPart")));
+        assert!(spec_of(&node(r#"<Building/>"#)).is_none());
+        assert!(spec_of(&node(r#"<b:Building xmlns:b="urn:example:other"/>"#)).is_none());
+        // A part is not a root feature: it is read through the building that
+        // holds it.
+        assert!(spec_of(&bldg("BuildingPart")).is_none());
     }
 }

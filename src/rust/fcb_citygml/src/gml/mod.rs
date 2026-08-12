@@ -6,7 +6,7 @@
 
 mod geometry;
 
-pub use geometry::{parse_geometry, GmlGeometry, XlinkRegistry};
+pub use geometry::{parse_geometry, parse_triangles, GmlGeometry, XlinkRegistry};
 
 use crate::xml::XmlNode;
 use crate::CityGmlError;

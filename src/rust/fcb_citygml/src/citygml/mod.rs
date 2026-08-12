@@ -9,16 +9,21 @@
 //! the parts of that shape none of them define differently: the scan for
 //! `lodX…` geometry properties lives here rather than in any one reader.
 //!
-//! [`building`] reads the building family, which is the only one with nested
-//! city objects; [`simple`] reads the modules whose objects are attributes,
-//! geometry and — for three of them — thematic surfaces.
+//! [`construction`] reads the families that nest city objects — buildings,
+//! bridges and tunnels — from a per-module descriptor, [`building`] being one
+//! of those descriptors; [`simple`] reads the modules whose objects are
+//! attributes, geometry and — for three of them — thematic surfaces; and
+//! [`relief`] reads terrain, which is the one module whose geometry is not a
+//! `lodX…` property.
 //!
 //! Namespaces are matched against both the CityGML 2.0 and the 1.0 URI of
 //! each module: the two differ only in ways this converter does not read, and
 //! files in the wild are still written against 1.0.
 
 mod attributes;
-pub(crate) mod building;
+mod building;
+mod construction;
+mod relief;
 mod semantics;
 mod simple;
 
@@ -63,9 +68,14 @@ const HIGHEST_LOD: u8 = 4;
 /// `member_index` is the position of this member among the document's
 /// members, and is used only to name an object whose `gml:id` is missing.
 ///
-/// Returns `Ok(None)` for a member this converter has no reader for, having
-/// recorded it in `report` — an unsupported city object is content that is
-/// valid CityGML, so it is skipped rather than fatal.
+/// Answers *every* top-level object the member yields, which is why it is a
+/// vector and not one object. It is one object for all but one element:
+/// a `dem:ReliefFeature` is a wrapper CityJSON has no type for, so each of the
+/// terrain components inside it becomes a top-level object of its own and the
+/// member yields as many objects as it holds readable components. It is empty
+/// for a member this converter has no reader for, which has been recorded in
+/// `report` — an unsupported city object is content that is valid CityGML, so
+/// it is skipped rather than fatal.
 ///
 /// # Errors
 ///
@@ -75,7 +85,7 @@ pub(crate) fn read_member(
     member: &XmlNode,
     member_index: usize,
     report: &mut ParseReport,
-) -> Result<Option<IntermediateObject>, CityGmlError> {
+) -> Result<Vec<IntermediateObject>, CityGmlError> {
     // A `cityObjectMember` holds exactly one city object. An empty one, or
     // one that only references an object elsewhere by `xlink:href`, holds
     // nothing this converter can read.
@@ -85,17 +95,24 @@ pub(crate) fn read_member(
             gml_id: member.gml_id().map(str::to_owned),
             reason: format!("{UNSUPPORTED}: the member holds no city object"),
         });
-        return Ok(None);
+        return Ok(Vec::new());
     };
 
-    if building::is_building(object) {
+    if let Some(spec) = construction::spec_of(object) {
         let registry = XlinkRegistry::collect(member);
-        return building::read_building(object, &registry, member_index, report).map(Some);
+        let object =
+            construction::read_construction(object, spec, &registry, member_index, report)?;
+        return Ok(vec![object]);
     }
 
     if let Some(kind) = simple::kind_of(object) {
         let registry = XlinkRegistry::collect(member);
-        return simple::read_simple_object(object, kind, &registry, member_index, report).map(Some);
+        let object = simple::read_simple_object(object, kind, &registry, member_index, report)?;
+        return Ok(vec![object]);
+    }
+
+    if relief::is_relief(object) {
+        return Ok(relief::read_relief(object, member_index, report));
     }
 
     report.skipped.push(Skipped {
@@ -103,7 +120,7 @@ pub(crate) fn read_member(
         gml_id: object.gml_id().map(str::to_owned),
         reason: format!("{UNSUPPORTED}: <{}> has no reader", object.local),
     });
-    Ok(None)
+    Ok(Vec::new())
 }
 
 /// The id of a top-level city object: its `gml:id`, or a stand-in built from

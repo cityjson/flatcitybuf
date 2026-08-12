@@ -233,9 +233,11 @@ impl Scan {
             if self.geometry_srs.is_none() {
                 self.geometry_srs = geometry_srs_name(&node);
             }
-            if let Some(object) = citygml::read_member(&node, index, &mut self.report)? {
-                self.objects.push(object);
-            }
+            // One member usually yields one object, but not always: the
+            // components of a `dem:ReliefFeature` each become a top-level
+            // object of their own. See [`citygml::read_member`].
+            self.objects
+                .extend(citygml::read_member(&node, index, &mut self.report)?);
             return Ok(());
         }
 

@@ -32,3 +32,13 @@ fn building_hierarchy() {
 fn thematic_modules() {
     common::assert_fixture("thematic_modules");
 }
+
+#[test]
+fn tin_relief() {
+    common::assert_fixture("tin_relief");
+}
+
+#[test]
+fn bridge_tunnel() {
+    common::assert_fixture("bridge_tunnel");
+}

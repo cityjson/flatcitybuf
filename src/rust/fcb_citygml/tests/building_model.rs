@@ -185,11 +185,12 @@ fn an_unknown_member_is_skipped_and_recorded() {
             r#" gml:id="b1""#,
             &format!("<bldg:lod1Solid>{}</bldg:lod1Solid>", cube_solid(""))
         ),
-        // A relief feature: valid CityGML, and a module this converter has no
-        // reader for.
+        // A raster relief: valid CityGML, and a terrain component this
+        // converter has no reader for — CityJSON can hold a TIN and nothing
+        // else.
         r#"<core:cityObjectMember>
-             <dem:ReliefFeature xmlns:dem="http://www.opengis.net/citygml/relief/2.0"
-                                gml:id="g1"/>
+             <dem:RasterRelief xmlns:dem="http://www.opengis.net/citygml/relief/2.0"
+                               gml:id="g1"/>
            </core:cityObjectMember>"#
     ));
 
@@ -199,7 +200,7 @@ fn an_unknown_member_is_skipped_and_recorded() {
     assert_eq!(objects.len(), 1);
     assert_eq!(objects[0].id, "b1");
     assert_eq!(report.skipped.len(), 1, "{report:?}");
-    assert_eq!(report.skipped[0].element, "ReliefFeature");
+    assert_eq!(report.skipped[0].element, "RasterRelief");
     assert_eq!(report.skipped[0].gml_id.as_deref(), Some("g1"));
     assert!(
         report.skipped[0].reason.contains("unsupported CityObject"),
