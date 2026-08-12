@@ -52,3 +52,8 @@ fn implicit_geometry() {
 fn material() {
     common::assert_fixture("material");
 }
+
+#[test]
+fn texture() {
+    common::assert_fixture("texture");
+}

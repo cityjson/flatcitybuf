@@ -17,13 +17,14 @@ use std::collections::{HashMap, HashSet};
 
 use cjseq::{
     GeographicalExtent, MaterialObject, MaterialReference, MaterialShell, MaterialValues, Metadata,
-    ReferenceSystem,
+    ReferenceSystem, TextureObject, TextureReference, TextureValues, TexturedRing, TexturedShell,
+    TexturedSurface,
 };
 use serde_json::Value;
 
 use crate::appearance::SurfaceData;
 use crate::crs::NormalizedCrs;
-use crate::gml::{GmlGeometry, Polygon3};
+use crate::gml::{GmlGeometry, Polygon3, Ring};
 use crate::model::{IntermediateGeometry, IntermediateObject, SemanticSurface};
 use crate::{CityGmlDocument, ParseOptions, ParseReport};
 
@@ -57,13 +58,17 @@ pub fn convert(
         translate: extent.map_or([0.0; 3], |extent| extent.min),
     };
 
-    let materials = MaterialIndex::of(&appearances, report);
-    let mut used = HashSet::new();
+    let index = AppearanceIndex {
+        materials: MaterialIndex::of(&appearances, report),
+        textures: TextureIndex::of(&appearances, report),
+    };
+    let mut used = Used::default();
     let features = objects
         .iter()
-        .map(|object| feature(object, &quantizer, &materials, &mut used))
+        .map(|object| feature(object, &quantizer, &index, &mut used, report))
         .collect();
-    materials.report_unused(&used, report);
+    index.materials.report_unused(&used.materials, report);
+    index.textures.report_unused(&used.textures, report);
 
     CityGmlDocument {
         metadata: metadata_line(&quantizer, extent, crs.as_ref(), report),
@@ -143,8 +148,9 @@ fn reference_system(crs: &NormalizedCrs, report: &mut ParseReport) -> Option<Ref
 /// it exists in the source, and a City Object with only a `type` is valid
 /// CityJSON.
 ///
-/// The materials a feature uses are pooled into that feature's own
-/// `appearance`, for the same reason its vertices are its own: a
+/// The materials, textures and texture vertices a feature uses are pooled
+/// into that feature's own `appearance`, for the same reason its vertices are
+/// its own: a
 /// CityJSONFeature is read on its own line, and an index into a palette some
 /// other line carries would resolve to nothing. `used` collects, across every
 /// feature, the surface data that painted something, so that appearance which
@@ -152,34 +158,73 @@ fn reference_system(crs: &NormalizedCrs, report: &mut ParseReport) -> Option<Ref
 fn feature(
     object: &IntermediateObject,
     quantizer: &Quantizer,
-    materials: &MaterialIndex,
-    used: &mut HashSet<usize>,
+    index: &AppearanceIndex,
+    used: &mut Used,
+    report: &mut ParseReport,
 ) -> cjseq::CityJSONFeature {
     let mut builder = FeatureBuilder {
         quantizer,
         vertices: VertexTable::default(),
-        materials: MaterialPool::new(materials),
+        materials: MaterialPool::new(&index.materials),
+        textures: TexturePool::new(&index.textures),
     };
     let mut city_objects = HashMap::new();
-    add_city_object(object, None, &mut builder, &mut city_objects);
-    used.extend(builder.materials.used.iter().copied());
+    add_city_object(object, None, &mut builder, &mut city_objects, report);
+    used.materials
+        .extend(builder.materials.used.iter().copied());
+    used.textures.extend(builder.textures.used.iter().copied());
 
     cjseq::CityJSONFeature {
         thetype: cjseq::CityJSONFeatureType::CityJSONFeature,
         id: object.id.clone(),
         city_objects,
         vertices: builder.vertices.vertices,
-        appearance: builder.materials.appearance(),
+        appearance: appearance(builder.materials, builder.textures),
     }
 }
 
+/// The feature's `appearance`, or `None` when nothing painted it: an
+/// appearance holding empty palettes says less than no appearance at all.
+///
+/// The palettes are the *feature's*, as its vertices are — a
+/// CityJSONFeature is read on its own line, and an index into a palette some
+/// other line carries would resolve to nothing.
+fn appearance(materials: MaterialPool, textures: TexturePool) -> Option<cjseq::Appearance> {
+    let materials = (!materials.materials.is_empty()).then_some(materials.materials);
+    let (textures, vertices_texture) = textures.palette();
+    (materials.is_some() || textures.is_some()).then_some(cjseq::Appearance {
+        materials,
+        textures,
+        vertices_texture,
+        default_theme_texture: None,
+        default_theme_material: None,
+    })
+}
+
 /// What one feature is assembled against: the document's transform, which
-/// every feature shares, and the vertex table and material palette, which are
-/// the feature's own.
+/// every feature shares, and the vertex table and appearance palettes, which
+/// are the feature's own.
 struct FeatureBuilder<'a> {
     quantizer: &'a Quantizer,
     vertices: VertexTable,
     materials: MaterialPool<'a>,
+    textures: TexturePool<'a>,
+}
+
+/// The document's surface data, indexed by the polygon each piece paints.
+struct AppearanceIndex<'a> {
+    materials: MaterialIndex<'a>,
+    textures: TextureIndex<'a>,
+}
+
+/// The index entries that painted something, across every feature, so that
+/// appearance which painted nothing at all can be reported once at the end.
+/// The two indices number their entries separately, so the two sets are
+/// separate too.
+#[derive(Default)]
+struct Used {
+    materials: HashSet<usize>,
+    textures: HashSet<usize>,
 }
 
 /// Write `object` into the feature's City Objects, then each of its children,
@@ -198,13 +243,14 @@ fn add_city_object(
     parent: Option<&str>,
     builder: &mut FeatureBuilder,
     city_objects: &mut HashMap<String, cjseq::CityObject>,
+    report: &mut ParseReport,
 ) {
     let mut city_object = cjseq::CityObject::new(object.co_type.clone());
 
     let geometry: Vec<cjseq::Geometry> = object
         .geometries
         .iter()
-        .map(|geometry| convert_geometry(geometry, builder))
+        .map(|geometry| convert_geometry(geometry, builder, report))
         .collect();
     // `geometry: []` and no `geometry` member differ, and the second is what
     // an object without geometry means. The same holds for `children`: an
@@ -239,7 +285,7 @@ fn add_city_object(
 
     city_objects.insert(object.id.clone(), city_object);
     for child in &object.children {
-        add_city_object(child, Some(&object.id), builder, city_objects);
+        add_city_object(child, Some(&object.id), builder, city_objects, report);
     }
 }
 
@@ -252,13 +298,13 @@ fn add_city_object(
 fn convert_geometry(
     geometry: &IntermediateGeometry,
     builder: &mut FeatureBuilder,
+    report: &mut ParseReport,
 ) -> cjseq::Geometry {
     let lod = Some(geometry.lod.clone());
-    // Textures are a later task; nothing here can fill them in yet.
     let common = cjseq::GeometryCommon {
         semantics: semantics(geometry),
         material: material(geometry, &mut builder.materials),
-        ..cjseq::GeometryCommon::default()
+        texture: texture(geometry, &mut builder.textures, report),
     };
     let quantizer = builder.quantizer;
     let vertices = &mut builder.vertices;
@@ -434,6 +480,66 @@ fn material(
     (!material.is_empty()).then_some(material)
 }
 
+/// The `texture` member of a geometry: one entry per theme that textures any
+/// ring of this geometry, or `None` when no theme textures any of them.
+///
+/// CityJSON's `texture.values` is nested exactly as deeply as the geometry's
+/// `boundaries`, with each *ring* replaced by `[texture index, one UV-vertex
+/// index per point of the ring]` — one entry more than the ring has points.
+/// A ring with no texture in that theme is `[null]`.
+///
+/// A theme is written only where it textured at least one ring here: a theme
+/// whose targets all failed to match would otherwise contribute an entry of
+/// nothing but `[null]`s, which says the same as no entry at all.
+fn texture(
+    geometry: &IntermediateGeometry,
+    pool: &mut TexturePool,
+    report: &mut ParseReport,
+) -> Option<HashMap<String, TextureReference>> {
+    // A shared reference to the index, so that reading the themes does not
+    // hold a borrow of the pool the values are then written into.
+    let index = pool.index;
+    let mut texture = HashMap::new();
+    for theme in &index.themes {
+        if !geometry
+            .geometry
+            .polygons()
+            .iter()
+            .any(|polygon| index.painted(theme, polygon).is_some())
+        {
+            continue;
+        }
+        let textured = pool.textured;
+        let values = match &geometry.geometry {
+            GmlGeometry::MultiSurface(polygons) | GmlGeometry::CompositeSurface(polygons) => {
+                TextureValues::Surface(pool.shell(theme, polygons, report))
+            }
+            GmlGeometry::Solid(solid) => TextureValues::Shell(pool.solid(theme, solid, report)),
+            GmlGeometry::MultiSolid(solids) | GmlGeometry::CompositeSolid(solids) => {
+                TextureValues::Solid(
+                    solids
+                        .iter()
+                        .map(|solid| pool.solid(theme, solid, report))
+                        .collect(),
+                )
+            }
+        };
+        // Every target of this theme matched a polygon and then failed at the
+        // ring: the values hold no texture index at all.
+        if pool.textured == textured {
+            continue;
+        }
+        texture.insert(
+            (*theme).to_string(),
+            TextureReference {
+                values: Some(values),
+                other: HashMap::new(),
+            },
+        );
+    }
+    (!texture.is_empty()).then_some(texture)
+}
+
 /// The document's surface data, indexed by the polygon each piece paints.
 ///
 /// The themes are kept in the order the document declares them, so that the
@@ -470,7 +576,10 @@ impl<'a> MaterialIndex<'a> {
                 theme,
                 material,
                 targets,
-            } = data;
+            } = data
+            else {
+                continue;
+            };
             let entry = index.entries.len();
             index.entries.push(MaterialEntry { theme, material });
             if !index.themes.contains(&theme.as_str()) {
@@ -591,19 +700,296 @@ impl<'a> MaterialPool<'a> {
         self.interned.insert(entry, pooled);
         pooled
     }
+}
 
-    /// The feature's `appearance`, or `None` when nothing painted it: an
-    /// appearance holding an empty palette says less than no appearance at
-    /// all.
-    fn appearance(self) -> Option<cjseq::Appearance> {
-        (!self.materials.is_empty()).then_some(cjseq::Appearance {
-            materials: Some(self.materials),
-            textures: None,
-            vertices_texture: None,
-            default_theme_texture: None,
-            default_theme_material: None,
-        })
+/// The document's textures, indexed by the polygon each one paints.
+///
+/// Shaped exactly as [`MaterialIndex`], one level deeper: a texture reaches
+/// the *rings* of the polygons it targets, not the polygons alone.
+struct TextureIndex<'a> {
+    entries: Vec<TextureEntry<'a>>,
+    /// Every theme named, in first-declared order, without repeats.
+    themes: Vec<&'a str>,
+    /// Theme, then polygon `gml:id`, to what textures it.
+    by_target: HashMap<&'a str, HashMap<&'a str, PaintedPolygon<'a>>>,
+}
+
+/// One piece of surface data: the texture, and the theme it was declared
+/// under.
+struct TextureEntry<'a> {
+    theme: &'a str,
+    texture: &'a TextureObject,
+}
+
+/// One polygon as one texture paints it: which texture, and the coordinates
+/// that texture states for each of the polygon's rings, as the document wrote
+/// them.
+struct PaintedPolygon<'a> {
+    entry: usize,
+    /// Ring `gml:id` to that ring's (u, v) pairs.
+    rings: HashMap<&'a str, &'a [[f64; 2]]>,
+}
+
+impl<'a> TextureIndex<'a> {
+    /// Index the document's textures.
+    ///
+    /// As with materials, a polygon textured twice in one theme keeps the
+    /// first texture — CityJSON holds one texture index per ring per theme —
+    /// and the second is reported rather than dropped in silence.
+    fn of(appearances: &'a [SurfaceData], report: &mut ParseReport) -> Self {
+        let mut index = Self {
+            entries: Vec::new(),
+            themes: Vec::new(),
+            by_target: HashMap::new(),
+        };
+        for data in appearances {
+            let SurfaceData::Texture {
+                theme,
+                texture,
+                targets,
+            } = data
+            else {
+                continue;
+            };
+            let entry = index.entries.len();
+            index.entries.push(TextureEntry { theme, texture });
+            if !index.themes.contains(&theme.as_str()) {
+                index.themes.push(theme);
+            }
+            let by_target = index.by_target.entry(theme).or_default();
+            for target in targets {
+                match by_target.entry(&target.polygon_id) {
+                    Entry::Vacant(untextured) => {
+                        untextured.insert(PaintedPolygon {
+                            entry,
+                            rings: rings_of(target),
+                        });
+                    }
+                    Entry::Occupied(_) => report.warnings.push(format!(
+                        "polygon {:?} is targeted by more than one texture in theme {theme:?}; \
+                         the first one wins",
+                        target.polygon_id
+                    )),
+                }
+            }
+        }
+        index
     }
+
+    /// What textures this polygon in this theme, if anything does.
+    ///
+    /// A polygon with no `gml:id` can be targeted by nothing, exactly as in
+    /// [`MaterialIndex::entry_of`].
+    fn painted(&self, theme: &str, polygon: &Polygon3) -> Option<&PaintedPolygon<'a>> {
+        let gml_id = polygon.gml_id.as_deref()?;
+        self.by_target.get(theme)?.get(gml_id)
+    }
+
+    /// Warn about every texture that painted no polygon of the document.
+    fn report_unused(&self, used: &HashSet<usize>, report: &mut ParseReport) {
+        for (entry, data) in self.entries.iter().enumerate() {
+            if !used.contains(&entry) {
+                report.warnings.push(format!(
+                    "texture {:?} of theme {:?} targets no polygon in the document; \
+                     it is left out of the appearance",
+                    data.texture.image.as_deref().unwrap_or_default(),
+                    data.theme
+                ));
+            }
+        }
+    }
+}
+
+/// One target's rings, by `gml:id`.
+///
+/// A ring named twice by one target keeps the first list, which is the rule
+/// the polygon level follows.
+fn rings_of(target: &crate::appearance::TextureTarget) -> HashMap<&str, &[[f64; 2]]> {
+    let mut rings = HashMap::new();
+    for (ring, coords) in &target.ring_coords {
+        rings.entry(ring.as_str()).or_insert(coords.as_slice());
+    }
+    rings
+}
+
+/// One feature's texture palette and texture-vertex table, filled in as the
+/// feature's geometries are converted.
+///
+/// Both are feature-local, for the reason [`MaterialPool`]'s palette is:
+/// `CityJSONFeature.appearance` is written on the same line as the geometry
+/// that indexes it.
+struct TexturePool<'a> {
+    index: &'a TextureIndex<'a>,
+    textures: Vec<TextureObject>,
+    /// Index entry to palette index, for the entries this feature has used.
+    interned: HashMap<usize, usize>,
+    /// The (u, v) pairs this feature refers to, in first-seen order.
+    uvs: Vec<[f64; 2]>,
+    /// Each pooled pair by its bit pattern: `f64` is not `Hash`, and two
+    /// coordinates are the same texture vertex exactly when the document
+    /// wrote the same number twice.
+    uv_index: HashMap<[u64; 2], usize>,
+    /// How many rings have been given a texture, for the caller that decides
+    /// whether a theme earned its `texture` entry at all.
+    textured: usize,
+    /// The index entries this feature used, for the document-wide report.
+    used: HashSet<usize>,
+}
+
+impl<'a> TexturePool<'a> {
+    fn new(index: &'a TextureIndex<'a>) -> Self {
+        Self {
+            index,
+            textures: Vec::new(),
+            interned: HashMap::new(),
+            uvs: Vec::new(),
+            uv_index: HashMap::new(),
+            textured: 0,
+            used: HashSet::new(),
+        }
+    }
+
+    /// One shell's worth of texture values: one entry per surface, itself one
+    /// entry per ring.
+    fn shell(
+        &mut self,
+        theme: &str,
+        polygons: &[Polygon3],
+        report: &mut ParseReport,
+    ) -> TexturedShell {
+        polygons
+            .iter()
+            .map(|polygon| self.surface(theme, polygon, report))
+            .collect()
+    }
+
+    /// One solid's worth: [`shell`](Self::shell) per shell.
+    fn solid(
+        &mut self,
+        theme: &str,
+        shells: &[Vec<Polygon3>],
+        report: &mut ParseReport,
+    ) -> Vec<TexturedShell> {
+        shells
+            .iter()
+            .map(|shell| self.shell(theme, shell, report))
+            .collect()
+    }
+
+    /// One polygon's worth: one entry per ring, exterior first, mirroring the
+    /// surface in `boundaries`.
+    fn surface(
+        &mut self,
+        theme: &str,
+        polygon: &Polygon3,
+        report: &mut ParseReport,
+    ) -> TexturedSurface {
+        polygon
+            .rings
+            .iter()
+            .map(|ring| self.ring(theme, polygon, ring, report))
+            .collect()
+    }
+
+    /// One ring: `[texture index, one UV-vertex index per point]`, or
+    /// `[null]` where this theme does not texture it.
+    ///
+    /// The coordinates are matched against the ring the *reader repaired*,
+    /// not the ring the document wrote: CityGML closes its rings and states
+    /// one coordinate per written point, so a list one longer than the
+    /// repaired ring is that closing point's coordinate and is dropped with
+    /// it. Any other disagreement is a fault in the source — a texture drawn
+    /// against a different geometry — and the ring is left untextured with a
+    /// warning rather than textured from the wrong end.
+    fn ring(
+        &mut self,
+        theme: &str,
+        polygon: &Polygon3,
+        ring: &Ring,
+        report: &mut ParseReport,
+    ) -> TexturedRing {
+        let untextured = vec![None];
+        let index = self.index;
+        let Some(painted) = index.painted(theme, polygon) else {
+            return untextured;
+        };
+        // The texture reached the polygon, so it painted something in this
+        // document whatever the rings then say.
+        self.used.insert(painted.entry);
+        let coords = ring
+            .gml_id
+            .as_deref()
+            .and_then(|gml_id| painted.rings.get(gml_id).copied());
+        let Some(coords) = coords else {
+            return untextured;
+        };
+        let Some(coords) = fit_to_ring(coords, ring.pts.len()) else {
+            report.warnings.push(format!(
+                "ring {:?} of polygon {:?} has {} texture coordinate(s) in theme {theme:?} for a \
+                 ring of {} point(s); the ring is left untextured",
+                ring.gml_id.as_deref().unwrap_or_default(),
+                polygon.gml_id.as_deref().unwrap_or_default(),
+                coords.len(),
+                ring.pts.len()
+            ));
+            return untextured;
+        };
+        let texture = self.intern(painted.entry);
+        self.textured += 1;
+        let mut values = Vec::with_capacity(1 + coords.len());
+        values.push(Some(texture));
+        values.extend(coords.iter().map(|uv| Some(self.uv_index_of(*uv))));
+        values
+    }
+
+    /// The palette index of one index entry's texture, adding it to the
+    /// palette if this is its first use here. Two entries holding equal
+    /// textures — the same image declared once per theme — share one entry.
+    fn intern(&mut self, entry: usize) -> usize {
+        if let Some(&pooled) = self.interned.get(&entry) {
+            return pooled;
+        }
+        let texture = self.index.entries[entry].texture;
+        let pooled = match self.textures.iter().position(|palette| palette == texture) {
+            Some(pooled) => pooled,
+            None => {
+                self.textures.push(texture.clone());
+                self.textures.len() - 1
+            }
+        };
+        self.interned.insert(entry, pooled);
+        pooled
+    }
+
+    /// The index of one (u, v) pair in the feature's texture-vertex table,
+    /// appending it if this is its first appearance.
+    fn uv_index_of(&mut self, uv: [f64; 2]) -> usize {
+        match self.uv_index.entry([uv[0].to_bits(), uv[1].to_bits()]) {
+            Entry::Occupied(seen) => *seen.get(),
+            Entry::Vacant(unseen) => {
+                self.uvs.push(uv);
+                *unseen.insert(self.uvs.len() - 1)
+            }
+        }
+    }
+
+    /// The feature's `textures` and `vertices-texture`, or a pair of `None`s
+    /// where nothing textured it.
+    fn palette(self) -> (Option<Vec<TextureObject>>, Option<Vec<[f64; 2]>>) {
+        if self.textures.is_empty() {
+            return (None, None);
+        }
+        (Some(self.textures), Some(self.uvs))
+    }
+}
+
+/// Texture coordinates cut to the length of the ring they belong to, or
+/// `None` when they are not that ring's coordinates at all.
+///
+/// One coordinate per point is the match; one more is the closing point the
+/// reader dropped, and its coordinate goes with it.
+fn fit_to_ring(coords: &[[f64; 2]], points: usize) -> Option<&[[f64; 2]]> {
+    (coords.len() == points || coords.len() == points + 1).then(|| &coords[..points])
 }
 
 /// A polygon as a CityJSON surface: exterior ring first, then the interior
@@ -1379,6 +1765,276 @@ mod tests {
         );
         // One warning for the conflict, one for the material it displaced.
         assert_eq!(report.warnings.len(), 2, "{:?}", report.warnings);
+    }
+
+    //-------------------------------------------------------------------
+    //-- the texture join
+    //-------------------------------------------------------------------
+
+    /// A triangle whose polygon *and* exterior ring carry ids, which is what
+    /// a texture needs to name it.
+    fn textured_face(gml_id: &str, ring_id: &str, z: f64) -> Polygon3 {
+        Polygon3 {
+            gml_id: Some(gml_id.to_string()),
+            rings: vec![Ring {
+                gml_id: Some(ring_id.to_string()),
+                pts: vec![[0.0, 0.0, z], [1.0, 0.0, z], [1.0, 1.0, z]],
+            }],
+            sem_idx: None,
+        }
+    }
+
+    /// One `app:ParameterizedTexture`'s worth of surface data, targeting one
+    /// ring of one polygon.
+    fn texture_data(
+        theme: &str,
+        image: &str,
+        polygon_id: &str,
+        ring_id: &str,
+        coords: &[[f64; 2]],
+    ) -> SurfaceData {
+        SurfaceData::Texture {
+            theme: theme.to_string(),
+            texture: TextureObject {
+                thetype: Some(cjseq::TextureFormat::JPG),
+                image: Some(image.to_string()),
+                wrap_mode: None,
+                texture_type: None,
+                border_color: None,
+            },
+            targets: vec![crate::appearance::TextureTarget {
+                polygon_id: polygon_id.to_string(),
+                ring_coords: vec![(ring_id.to_string(), coords.to_vec())],
+            }],
+        }
+    }
+
+    /// The three coordinates of a [`textured_face`]'s ring.
+    const UVS: [[f64; 2]; 3] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]];
+
+    /// `texture.values` is nested exactly as deeply as `boundaries`, one
+    /// entry per *ring*: the texture index and then one UV-vertex index per
+    /// point of the ring. A ring this theme does not texture is `[null]`.
+    #[test]
+    fn texture_values_are_nested_as_deeply_as_the_boundaries() {
+        let textured = || textured_face("painted", "painted-ring", 0.0);
+        for (geometry, expected) in [
+            (
+                GmlGeometry::MultiSurface(vec![textured(), face("bare", 1.0)]),
+                serde_json::json!([[[0, 0, 1, 2]], [[null]]]),
+            ),
+            (
+                GmlGeometry::CompositeSurface(vec![textured()]),
+                serde_json::json!([[[0, 0, 1, 2]]]),
+            ),
+            (
+                GmlGeometry::Solid(vec![vec![textured()]]),
+                serde_json::json!([[[[0, 0, 1, 2]]]]),
+            ),
+            (
+                GmlGeometry::MultiSolid(vec![vec![vec![textured()]]]),
+                serde_json::json!([[[[[0, 0, 1, 2]]]]]),
+            ),
+            (
+                GmlGeometry::CompositeSolid(vec![vec![vec![textured()]]]),
+                serde_json::json!([[[[[0, 0, 1, 2]]]]]),
+            ),
+        ] {
+            let (doc, report) = convert_painted(
+                vec![object(geometry)],
+                vec![texture_data(
+                    "rgb",
+                    "t/a.jpg",
+                    "painted",
+                    "painted-ring",
+                    &UVS,
+                )],
+            );
+            let json = serde_json::to_value(
+                &doc.features[0].city_objects["o1"]
+                    .geometry
+                    .as_ref()
+                    .unwrap()[0],
+            )
+            .unwrap();
+            assert_eq!(json["texture"]["rgb"]["values"], expected, "{json}");
+            assert_eq!(
+                serde_json::to_value(&doc.features[0].appearance).unwrap(),
+                serde_json::json!({
+                    "textures": [{"type": "JPG", "image": "t/a.jpg"}],
+                    "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]
+                })
+            );
+            assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        }
+    }
+
+    /// GML closes its rings and states one coordinate per written point,
+    /// where the reader drops the closing point: the coordinate that went
+    /// with it is dropped too, and never reaches `vertices-texture`.
+    #[test]
+    fn the_closing_point_takes_its_texture_coordinate_with_it() {
+        // A fourth pair that is *not* a repeat of the first, so that dropping
+        // it is visible rather than hidden by the pooling.
+        let closed = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [9.0, 9.0]];
+        let (doc, report) = convert_painted(
+            vec![object(GmlGeometry::MultiSurface(vec![textured_face(
+                "painted",
+                "painted-ring",
+                0.0,
+            )]))],
+            vec![texture_data(
+                "rgb",
+                "t/a.jpg",
+                "painted",
+                "painted-ring",
+                &closed,
+            )],
+        );
+        let json = serde_json::to_value(
+            &doc.features[0].city_objects["o1"]
+                .geometry
+                .as_ref()
+                .unwrap()[0],
+        )
+        .unwrap();
+        assert_eq!(
+            json["texture"]["rgb"]["values"],
+            serde_json::json!([[[0, 0, 1, 2]]])
+        );
+        assert_eq!(
+            serde_json::to_value(&doc.features[0].appearance).unwrap()["vertices-texture"],
+            serde_json::json!([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
+        );
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    /// Any other disagreement between the coordinates and the ring is a fault
+    /// in the source: the ring is left untextured with a warning rather than
+    /// textured from the wrong end. So is a ring the texture does not name,
+    /// and a ring with no `gml:id` for it to name.
+    #[test]
+    fn coordinates_that_do_not_fit_the_ring_leave_it_untextured() {
+        for (ring_id, coords) in [
+            // Two coordinates too many, and one too few.
+            ("painted-ring", vec![[0.0, 0.0]; 5]),
+            ("painted-ring", vec![[0.0, 0.0]; 2]),
+            // A ring of this polygon that the texture does not name.
+            ("another-ring", UVS.to_vec()),
+        ] {
+            let (doc, report) = convert_painted(
+                vec![object(GmlGeometry::MultiSurface(vec![textured_face(
+                    "painted",
+                    "painted-ring",
+                    0.0,
+                )]))],
+                vec![texture_data("rgb", "t/a.jpg", "painted", ring_id, &coords)],
+            );
+            let json = serde_json::to_value(
+                &doc.features[0].city_objects["o1"]
+                    .geometry
+                    .as_ref()
+                    .unwrap()[0],
+            )
+            .unwrap();
+            // No ring was textured, so the theme earned no entry at all and
+            // the palette stayed empty.
+            assert!(json.get("texture").is_none(), "{json}");
+            assert!(doc.features[0].appearance.is_none(), "{ring_id}");
+            // The count mismatch warns; the ring the texture never named is
+            // no fault of the source and does not.
+            let warnings = if ring_id == "painted-ring" { 1 } else { 0 };
+            assert_eq!(report.warnings.len(), warnings, "{:?}", report.warnings);
+        }
+    }
+
+    /// Equal textures share one palette entry, a coordinate written twice is
+    /// one texture vertex, and a texture that painted no polygon of the
+    /// document is reported rather than dropped in silence.
+    #[test]
+    fn equal_textures_and_repeated_coordinates_are_pooled() {
+        let (doc, report) = convert_painted(
+            vec![object(GmlGeometry::MultiSurface(vec![
+                textured_face("a", "a-ring", 0.0),
+                textured_face("b", "b-ring", 1.0),
+            ]))],
+            vec![
+                // The same image, declared once per polygon, with one
+                // coordinate in common.
+                texture_data("rgb", "t/a.jpg", "a", "a-ring", &UVS),
+                texture_data(
+                    "rgb",
+                    "t/a.jpg",
+                    "b",
+                    "b-ring",
+                    &[[0.0, 0.0], [0.5, 0.0], [0.5, 0.5]],
+                ),
+                // A texture naming a polygon the document does not hold.
+                texture_data("rgb", "t/b.jpg", "elsewhere", "no-ring", &UVS),
+            ],
+        );
+        let json = serde_json::to_value(
+            &doc.features[0].city_objects["o1"]
+                .geometry
+                .as_ref()
+                .unwrap()[0],
+        )
+        .unwrap();
+        assert_eq!(
+            json["texture"]["rgb"]["values"],
+            serde_json::json!([[[0, 0, 1, 2]], [[0, 0, 3, 4]]])
+        );
+        assert_eq!(
+            serde_json::to_value(&doc.features[0].appearance).unwrap(),
+            serde_json::json!({
+                "textures": [{"type": "JPG", "image": "t/a.jpg"}],
+                "vertices-texture": [
+                    [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.5, 0.0], [0.5, 0.5]
+                ]
+            })
+        );
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+        assert!(
+            report.warnings[0].contains("t/b.jpg"),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    /// Textures and materials share one `appearance`, each with its own
+    /// palette, and each geometry carries both members.
+    #[test]
+    fn a_feature_that_is_painted_and_textured_carries_both_palettes() {
+        let (doc, report) = convert_painted(
+            vec![object(GmlGeometry::MultiSurface(vec![textured_face(
+                "a", "a-ring", 0.0,
+            )]))],
+            vec![
+                surface_data("rgb", "grey", &["a"]),
+                texture_data("rgb", "t/a.jpg", "a", "a-ring", &UVS),
+            ],
+        );
+        let json = serde_json::to_value(
+            &doc.features[0].city_objects["o1"]
+                .geometry
+                .as_ref()
+                .unwrap()[0],
+        )
+        .unwrap();
+        assert_eq!(json["material"]["rgb"]["values"], serde_json::json!([0]));
+        assert_eq!(
+            json["texture"]["rgb"]["values"],
+            serde_json::json!([[[0, 0, 1, 2]]])
+        );
+        assert_eq!(
+            serde_json::to_value(&doc.features[0].appearance).unwrap(),
+            serde_json::json!({
+                "materials": [{"name": "grey", "diffuseColor": [0.5, 0.5, 0.5]}],
+                "textures": [{"type": "JPG", "image": "t/a.jpg"}],
+                "vertices-texture": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]
+            })
+        );
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
 
     /// Array levels between the outermost array and a vertex index.
