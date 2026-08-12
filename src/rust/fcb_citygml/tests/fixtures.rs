@@ -47,3 +47,8 @@ fn bridge_tunnel() {
 fn implicit_geometry() {
     common::assert_fixture("implicit_geometry");
 }
+
+#[test]
+fn material() {
+    common::assert_fixture("material");
+}

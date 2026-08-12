@@ -6,13 +6,16 @@
 //! [`ParseReport`] describing anything that was valid CityGML but could not be
 //! represented in CityJSON.
 //!
-//! Reading and converting are two halves. [`parse_to_model`] runs the first:
-//! it streams the document, buffers one `cityObjectMember` subtree at a time,
-//! and hands each to a module reader, which builds the
-//! [`IntermediateObject`] tree in real-world coordinates. Only the second
-//! half — the converter — quantises, which it cannot do earlier: the
-//! transform is not known until the last coordinate has been seen.
+//! Reading and converting are two halves. The first streams the document,
+//! buffers one `cityObjectMember` subtree at a time, and hands each to a
+//! module reader, which builds the [`IntermediateObject`] tree in real-world
+//! coordinates; [`parse_to_model`] exposes that half on its own. Only the
+//! second half — the converter — quantises, which it cannot do earlier: the
+//! transform is not known until the last coordinate has been seen. Appearance
+//! crosses the two: the surface data is collected by the reader and joined to
+//! the polygons it paints by the converter, which is the half that has them.
 
+pub mod appearance;
 mod citygml;
 mod convert;
 pub mod crs;
@@ -31,6 +34,7 @@ use std::io::BufRead;
 use quick_xml::events::Event;
 use quick_xml::NsReader;
 
+use crate::appearance::parse_appearances;
 use crate::crs::NormalizedCrs;
 use crate::gml::{gml_child, is_gml, GML_NS};
 use crate::xml::XmlNode;
@@ -60,6 +64,12 @@ const CITY_OBJECT_MEMBER: &str = "cityObjectMember";
 const APPEARANCE_MEMBER: &str = "appearanceMember";
 const BOUNDED_BY: &str = "boundedBy";
 const ENVELOPE: &str = "Envelope";
+
+/// Local name of the appearance element a city object carries its own
+/// appearance in. CityGML declares appearance in two places — as an
+/// `app:appearanceMember` of the `CityModel` and as an `app:appearance` of a
+/// city object — and the two mean the same thing, so both are collected.
+const APPEARANCE: &str = "Appearance";
 
 /// Local name of the GML attribute naming a coordinate reference system.
 const SRS_NAME_ATTR: &str = "srsName";
@@ -135,8 +145,9 @@ pub fn parse_citygml<R: BufRead>(
     reader: R,
     opts: &ParseOptions,
 ) -> Result<(CityGmlDocument, ParseReport), CityGmlError> {
-    let (objects, crs, mut report) = parse_to_model(reader, opts)?;
-    let document = convert(objects, crs, opts, &mut report);
+    let (objects, crs, appearances, mut report) = scan_city_model(reader)?;
+    let appearances = parse_appearances(&appearances, &mut report);
+    let document = convert(objects, crs, appearances, opts, &mut report);
     Ok((document, report))
 }
 
@@ -147,6 +158,12 @@ pub fn parse_citygml<R: BufRead>(
 /// can be tested on the model it builds rather than only on the CityJSON that
 /// comes out the far end. It is not a stable interface.
 ///
+/// Appearance is deliberately not part of what comes back, which is why the
+/// signature is unchanged now that appearance is read. The intermediate model
+/// describes city objects, and a CityGML appearance is not one: it is stated
+/// beside them and is joined to their polygons by the converter alone. A
+/// caller that wants the materials wants [`parse_citygml`].
+///
 /// # Errors
 ///
 /// As [`parse_citygml`], plus the module readers' errors: malformed geometry,
@@ -156,9 +173,6 @@ pub fn parse_to_model<R: BufRead>(
     reader: R,
     _opts: &ParseOptions,
 ) -> Result<(Vec<IntermediateObject>, Option<NormalizedCrs>, ParseReport), CityGmlError> {
-    // The appearance subtrees are collected but not yet read: materials and
-    // textures are a later task, and it is the scan — not the caller — that
-    // is positioned to pick them up as they stream past.
     let (objects, crs, _appearances, report) = scan_city_model(reader)?;
     Ok((objects, crs, report))
 }
@@ -216,7 +230,9 @@ struct Scan {
     /// The `srsName` of the first GML element inside a member that carries
     /// one, used only when no Envelope named a CRS.
     geometry_srs: Option<String>,
-    /// `app:appearanceMember` subtrees, kept whole for the appearance reader.
+    /// Appearance subtrees, kept whole for the appearance reader: the
+    /// `app:appearanceMember`s of the `CityModel`, and every `app:Appearance`
+    /// found inside a member, in document order.
     appearances: Vec<XmlNode>,
     /// How many `cityObjectMember`s have been seen, including skipped ones,
     /// so that a generated object id stays stable for a given document.
@@ -233,6 +249,18 @@ impl Scan {
             if self.geometry_srs.is_none() {
                 self.geometry_srs = geometry_srs_name(&node);
             }
+            // A city object may carry its own `app:appearance`, which means
+            // exactly what an `app:appearanceMember` of the CityModel means:
+            // its targets are `gml:id`s, and nothing scopes them to the
+            // object. So they join the document's appearances rather than
+            // travelling with the object, and the search is over descendants
+            // because the property may sit on a nested object — a building
+            // part, a boundary surface — as readily as on the root one.
+            self.appearances.extend(
+                node.descendants()
+                    .filter(|node| is_in(node, &APPEARANCE_NS, APPEARANCE))
+                    .cloned(),
+            );
             // One member usually yields one object, but not always: the
             // components of a `dem:ReliefFeature` each become a top-level
             // object of their own. See [`citygml::read_member`].

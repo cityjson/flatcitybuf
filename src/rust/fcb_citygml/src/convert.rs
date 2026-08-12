@@ -13,11 +13,15 @@
 //! produce indices no reader could resolve.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use cjseq::{GeographicalExtent, Metadata, ReferenceSystem};
+use cjseq::{
+    GeographicalExtent, MaterialObject, MaterialReference, MaterialShell, MaterialValues, Metadata,
+    ReferenceSystem,
+};
 use serde_json::Value;
 
+use crate::appearance::SurfaceData;
 use crate::crs::NormalizedCrs;
 use crate::gml::{GmlGeometry, Polygon3};
 use crate::model::{IntermediateGeometry, IntermediateObject, SemanticSurface};
@@ -29,14 +33,14 @@ use crate::{CityGmlDocument, ParseOptions, ParseReport};
 /// normalised; `objects` are the top-level city objects in document order,
 /// and the features come out in that same order.
 ///
-/// Appearances are not a parameter yet. The plan's signature has a
-/// `Vec<appearance::SurfaceData>` here, but that module does not exist until
-/// materials and textures are read, and a parameter that can only ever be
-/// given an empty vector documents nothing while forcing a type into
-/// existence for no reader. It is added when there is something to pass.
+/// `appearances` is the document's surface data, which reaches CityJSON only
+/// here: CityGML states a material beside the geometry and names the polygons
+/// it paints by `gml:id`, and turning that around into a palette plus one
+/// index per surface needs the polygons, which only the converter has.
 pub fn convert(
     mut objects: Vec<IntermediateObject>,
     crs: Option<NormalizedCrs>,
+    appearances: Vec<SurfaceData>,
     opts: &ParseOptions,
     report: &mut ParseReport,
 ) -> CityGmlDocument {
@@ -53,10 +57,13 @@ pub fn convert(
         translate: extent.map_or([0.0; 3], |extent| extent.min),
     };
 
+    let materials = MaterialIndex::of(&appearances, report);
+    let mut used = HashSet::new();
     let features = objects
         .iter()
-        .map(|object| feature(object, &quantizer))
+        .map(|object| feature(object, &quantizer, &materials, &mut used))
         .collect();
+    materials.report_unused(&used, report);
 
     CityGmlDocument {
         metadata: metadata_line(&quantizer, extent, crs.as_ref(), report),
@@ -135,18 +142,44 @@ fn reference_system(crs: &NormalizedCrs, report: &mut ParseReport) -> Option<Ref
 /// An object with neither geometry nor attributes still becomes a feature:
 /// it exists in the source, and a City Object with only a `type` is valid
 /// CityJSON.
-fn feature(object: &IntermediateObject, quantizer: &Quantizer) -> cjseq::CityJSONFeature {
-    let mut vertices = VertexTable::default();
+///
+/// The materials a feature uses are pooled into that feature's own
+/// `appearance`, for the same reason its vertices are its own: a
+/// CityJSONFeature is read on its own line, and an index into a palette some
+/// other line carries would resolve to nothing. `used` collects, across every
+/// feature, the surface data that painted something, so that appearance which
+/// painted nothing at all can be reported once at the end.
+fn feature(
+    object: &IntermediateObject,
+    quantizer: &Quantizer,
+    materials: &MaterialIndex,
+    used: &mut HashSet<usize>,
+) -> cjseq::CityJSONFeature {
+    let mut builder = FeatureBuilder {
+        quantizer,
+        vertices: VertexTable::default(),
+        materials: MaterialPool::new(materials),
+    };
     let mut city_objects = HashMap::new();
-    add_city_object(object, None, quantizer, &mut vertices, &mut city_objects);
+    add_city_object(object, None, &mut builder, &mut city_objects);
+    used.extend(builder.materials.used.iter().copied());
 
     cjseq::CityJSONFeature {
         thetype: cjseq::CityJSONFeatureType::CityJSONFeature,
         id: object.id.clone(),
         city_objects,
-        vertices: vertices.vertices,
-        appearance: None,
+        vertices: builder.vertices.vertices,
+        appearance: builder.materials.appearance(),
     }
+}
+
+/// What one feature is assembled against: the document's transform, which
+/// every feature shares, and the vertex table and material palette, which are
+/// the feature's own.
+struct FeatureBuilder<'a> {
+    quantizer: &'a Quantizer,
+    vertices: VertexTable,
+    materials: MaterialPool<'a>,
 }
 
 /// Write `object` into the feature's City Objects, then each of its children,
@@ -163,8 +196,7 @@ fn feature(object: &IntermediateObject, quantizer: &Quantizer) -> cjseq::CityJSO
 fn add_city_object(
     object: &IntermediateObject,
     parent: Option<&str>,
-    quantizer: &Quantizer,
-    vertices: &mut VertexTable,
+    builder: &mut FeatureBuilder,
     city_objects: &mut HashMap<String, cjseq::CityObject>,
 ) {
     let mut city_object = cjseq::CityObject::new(object.co_type.clone());
@@ -172,7 +204,7 @@ fn add_city_object(
     let geometry: Vec<cjseq::Geometry> = object
         .geometries
         .iter()
-        .map(|geometry| convert_geometry(geometry, quantizer, vertices))
+        .map(|geometry| convert_geometry(geometry, builder))
         .collect();
     // `geometry: []` and no `geometry` member differ, and the second is what
     // an object without geometry means. The same holds for `children`: an
@@ -207,7 +239,7 @@ fn add_city_object(
 
     city_objects.insert(object.id.clone(), city_object);
     for child in &object.children {
-        add_city_object(child, Some(&object.id), quantizer, vertices, city_objects);
+        add_city_object(child, Some(&object.id), builder, city_objects);
     }
 }
 
@@ -219,16 +251,17 @@ fn add_city_object(
 /// flattened to exactly those shapes.
 fn convert_geometry(
     geometry: &IntermediateGeometry,
-    quantizer: &Quantizer,
-    vertices: &mut VertexTable,
+    builder: &mut FeatureBuilder,
 ) -> cjseq::Geometry {
     let lod = Some(geometry.lod.clone());
-    // Materials and textures are a later task; nothing here can fill them in
-    // yet.
+    // Textures are a later task; nothing here can fill them in yet.
     let common = cjseq::GeometryCommon {
         semantics: semantics(geometry),
+        material: material(geometry, &mut builder.materials),
         ..cjseq::GeometryCommon::default()
     };
+    let quantizer = builder.quantizer;
+    let vertices = &mut builder.vertices;
     let surfaces = |polygons: &[Polygon3], vertices: &mut VertexTable| -> Vec<cjseq::Surface> {
         polygons
             .iter()
@@ -339,6 +372,238 @@ fn semantics_surface(surface: &SemanticSurface) -> cjseq::SemanticsSurface {
 fn surface_type(stype: &str) -> cjseq::SemanticSurfaceType {
     serde_json::from_value(Value::String(stype.to_string()))
         .unwrap_or_else(|_| cjseq::SemanticSurfaceType::Extension(stype.to_string()))
+}
+
+/// The `material` member of a geometry: one entry per theme that paints any
+/// of this geometry's polygons, or `None` when no theme paints any of them.
+///
+/// CityJSON's `material.values` is the geometry's `boundaries` with the *two*
+/// innermost levels — the rings of each surface, and the vertices of each ring
+/// — replaced by one index per surface, so it is nested exactly two levels
+/// less deeply than the boundaries are and one level less deeply than
+/// `semantics.values`. A surface no material of that theme targets is `null`
+/// there.
+///
+/// `values` is used rather than `value` even where every surface carries the
+/// same material: `value` states that the material paints the whole object,
+/// which is a different claim, and CityGML's per-polygon targets do not make
+/// it.
+///
+/// A theme that paints nothing here gets no entry at all rather than an entry
+/// of nulls, which is the same rule `semantics` follows.
+fn material(
+    geometry: &IntermediateGeometry,
+    pool: &mut MaterialPool,
+) -> Option<HashMap<String, MaterialReference>> {
+    // A shared reference to the index, so that reading the themes does not
+    // hold a borrow of the pool the values are then written into.
+    let index = pool.index;
+    let mut material = HashMap::new();
+    for theme in &index.themes {
+        if !geometry
+            .geometry
+            .polygons()
+            .iter()
+            .any(|polygon| index.entry_of(theme, polygon).is_some())
+        {
+            continue;
+        }
+        let values = match &geometry.geometry {
+            GmlGeometry::MultiSurface(polygons) | GmlGeometry::CompositeSurface(polygons) => {
+                MaterialValues::Surfaces(pool.shell(theme, polygons))
+            }
+            GmlGeometry::Solid(solid) => MaterialValues::Shells(pool.solid(theme, solid)),
+            GmlGeometry::MultiSolid(solids) | GmlGeometry::CompositeSolid(solids) => {
+                MaterialValues::Solids(
+                    solids
+                        .iter()
+                        .map(|solid| Some(pool.solid(theme, solid)))
+                        .collect(),
+                )
+            }
+        };
+        material.insert(
+            (*theme).to_string(),
+            MaterialReference {
+                values: Some(Some(values)),
+                value: None,
+                other: HashMap::new(),
+            },
+        );
+    }
+    (!material.is_empty()).then_some(material)
+}
+
+/// The document's surface data, indexed by the polygon each piece paints.
+///
+/// The themes are kept in the order the document declares them, so that the
+/// palette a feature builds is ordered by the source and not by a hash.
+struct MaterialIndex<'a> {
+    entries: Vec<MaterialEntry<'a>>,
+    /// Every theme named, in first-declared order, without repeats.
+    themes: Vec<&'a str>,
+    /// Theme, then polygon `gml:id`, to the entry that paints it.
+    by_target: HashMap<&'a str, HashMap<&'a str, usize>>,
+}
+
+/// One piece of surface data: the material, and the theme it was declared
+/// under.
+struct MaterialEntry<'a> {
+    theme: &'a str,
+    material: &'a MaterialObject,
+}
+
+impl<'a> MaterialIndex<'a> {
+    /// Index the document's surface data.
+    ///
+    /// A polygon painted twice in one theme keeps the first material: CityJSON
+    /// holds one index per surface per theme, so one of the two has to go, and
+    /// the second is reported rather than dropped in silence.
+    fn of(appearances: &'a [SurfaceData], report: &mut ParseReport) -> Self {
+        let mut index = Self {
+            entries: Vec::new(),
+            themes: Vec::new(),
+            by_target: HashMap::new(),
+        };
+        for data in appearances {
+            let SurfaceData::Material {
+                theme,
+                material,
+                targets,
+            } = data;
+            let entry = index.entries.len();
+            index.entries.push(MaterialEntry { theme, material });
+            if !index.themes.contains(&theme.as_str()) {
+                index.themes.push(theme);
+            }
+            let by_target = index.by_target.entry(theme).or_default();
+            for target in targets {
+                match by_target.entry(target) {
+                    Entry::Vacant(unpainted) => {
+                        unpainted.insert(entry);
+                    }
+                    Entry::Occupied(_) => report.warnings.push(format!(
+                        "polygon {target:?} is targeted by more than one material in theme \
+                         {theme:?}; the first one wins"
+                    )),
+                }
+            }
+        }
+        index
+    }
+
+    /// The entry painting this polygon in this theme, if any does.
+    ///
+    /// A polygon with no `gml:id` can be targeted by nothing: an
+    /// `app:target` names an id, so a polygon that has none is unreachable.
+    fn entry_of(&self, theme: &str, polygon: &Polygon3) -> Option<usize> {
+        let gml_id = polygon.gml_id.as_deref()?;
+        self.by_target.get(theme)?.get(gml_id).copied()
+    }
+
+    /// Warn about every piece of surface data that painted no polygon of the
+    /// document — one warning apiece, naming the material and its theme, so
+    /// that a file whose targets do not match its geometry says which ones.
+    fn report_unused(&self, used: &HashSet<usize>, report: &mut ParseReport) {
+        for (entry, data) in self.entries.iter().enumerate() {
+            if !used.contains(&entry) {
+                report.warnings.push(format!(
+                    "material {:?} of theme {:?} targets no polygon in the document; \
+                     it is left out of the appearance",
+                    data.material.name, data.theme
+                ));
+            }
+        }
+    }
+}
+
+/// One feature's material palette, filled in as the feature's geometries are
+/// converted.
+///
+/// Indices are feature-local, because `CityJSONFeature.appearance` is: the
+/// palette is written on the same line as the geometry that indexes it.
+/// Materials are pooled in the order they are first used, and two entries
+/// holding equal materials — the same colour declared once per theme, say —
+/// share one palette entry.
+struct MaterialPool<'a> {
+    index: &'a MaterialIndex<'a>,
+    materials: Vec<MaterialObject>,
+    /// Index entry to palette index, for the entries this feature has used.
+    interned: HashMap<usize, usize>,
+    /// The index entries this feature used, for the document-wide report.
+    used: HashSet<usize>,
+}
+
+impl<'a> MaterialPool<'a> {
+    fn new(index: &'a MaterialIndex<'a>) -> Self {
+        Self {
+            index,
+            materials: Vec::new(),
+            interned: HashMap::new(),
+            used: HashSet::new(),
+        }
+    }
+
+    /// One shell's worth of material indices: one per surface, `None` where
+    /// the theme paints none.
+    fn shell(&mut self, theme: &str, polygons: &[Polygon3]) -> Vec<Option<usize>> {
+        polygons
+            .iter()
+            .map(|polygon| self.index_of(theme, polygon))
+            .collect()
+    }
+
+    /// One solid's worth: [`shell`](Self::shell) per shell. The shells
+    /// themselves are always `Some` — a shell exists, whether or not anything
+    /// paints it.
+    fn solid(&mut self, theme: &str, shells: &[Vec<Polygon3>]) -> Vec<Option<MaterialShell>> {
+        shells
+            .iter()
+            .map(|shell| Some(self.shell(theme, shell)))
+            .collect()
+    }
+
+    /// The palette index for the material painting this polygon in this
+    /// theme, adding it to the palette if this is its first use here.
+    fn index_of(&mut self, theme: &str, polygon: &Polygon3) -> Option<usize> {
+        let entry = self.index.entry_of(theme, polygon)?;
+        self.used.insert(entry);
+        Some(self.intern(entry))
+    }
+
+    /// The palette index of one index entry's material.
+    fn intern(&mut self, entry: usize) -> usize {
+        if let Some(&pooled) = self.interned.get(&entry) {
+            return pooled;
+        }
+        let material = self.index.entries[entry].material;
+        let pooled = match self
+            .materials
+            .iter()
+            .position(|palette| palette == material)
+        {
+            Some(pooled) => pooled,
+            None => {
+                self.materials.push(material.clone());
+                self.materials.len() - 1
+            }
+        };
+        self.interned.insert(entry, pooled);
+        pooled
+    }
+
+    /// The feature's `appearance`, or `None` when nothing painted it: an
+    /// appearance holding an empty palette says less than no appearance at
+    /// all.
+    fn appearance(self) -> Option<cjseq::Appearance> {
+        (!self.materials.is_empty()).then_some(cjseq::Appearance {
+            materials: Some(self.materials),
+            textures: None,
+            vertices_texture: None,
+            default_theme_texture: None,
+            default_theme_material: None,
+        })
+    }
 }
 
 /// A polygon as a CityJSON surface: exterior ring first, then the interior
@@ -497,7 +762,13 @@ mod tests {
         crs: Option<NormalizedCrs>,
     ) -> CityGmlDocument {
         let mut report = ParseReport::default();
-        convert(objects, crs, &ParseOptions::default(), &mut report)
+        convert(
+            objects,
+            crs,
+            Vec::new(),
+            &ParseOptions::default(),
+            &mut report,
+        )
     }
 
     /// Half a scale unit either side of a coordinate must land on the same
@@ -870,6 +1141,244 @@ mod tests {
             panic!("expected a MultiSurface");
         };
         assert_eq!(boundaries, &vec![vec![vec![6, 7, 8]]]);
+    }
+
+    //-------------------------------------------------------------------
+    //-- the appearance join
+    //-------------------------------------------------------------------
+
+    /// The same square, with a `gml:id` an `app:target` can name.
+    fn identified(gml_id: &str, pts: Vec<[f64; 3]>) -> Polygon3 {
+        Polygon3 {
+            gml_id: Some(gml_id.to_string()),
+            ..polygon(pts)
+        }
+    }
+
+    /// A unit square at height `z`, identified by `gml_id`.
+    fn face(gml_id: &str, z: f64) -> Polygon3 {
+        identified(gml_id, vec![[0.0, 0.0, z], [1.0, 0.0, z], [1.0, 1.0, z]])
+    }
+
+    /// One `app:X3DMaterial`'s worth of surface data.
+    fn surface_data(theme: &str, name: &str, targets: &[&str]) -> SurfaceData {
+        SurfaceData::Material {
+            theme: theme.to_string(),
+            material: MaterialObject {
+                name: name.to_string(),
+                ambient_intensity: None,
+                diffuse_color: Some([0.5, 0.5, 0.5]),
+                emissive_color: None,
+                specular_color: None,
+                shininess: None,
+                transparency: None,
+                is_smooth: None,
+            },
+            targets: targets.iter().map(|target| target.to_string()).collect(),
+        }
+    }
+
+    /// Convert with appearance, keeping the report.
+    fn convert_painted(
+        objects: Vec<IntermediateObject>,
+        appearances: Vec<SurfaceData>,
+    ) -> (CityGmlDocument, ParseReport) {
+        let mut report = ParseReport::default();
+        let doc = convert(
+            objects,
+            None,
+            appearances,
+            &ParseOptions::default(),
+            &mut report,
+        );
+        (doc, report)
+    }
+
+    /// `material.values` is `boundaries` with its two innermost levels — the
+    /// rings, and their vertices — gone, so it is nested one level less
+    /// deeply than `semantics.values` and two less than the boundaries.
+    /// A polygon no material targets is `null` there.
+    #[test]
+    fn material_values_are_nested_two_levels_less_deeply_than_boundaries() {
+        for (geometry, expected) in [
+            (
+                GmlGeometry::MultiSurface(vec![face("painted", 0.0), face("bare", 1.0)]),
+                serde_json::json!([0, null]),
+            ),
+            (
+                GmlGeometry::CompositeSurface(vec![face("painted", 0.0)]),
+                serde_json::json!([0]),
+            ),
+            (
+                GmlGeometry::Solid(vec![vec![face("painted", 0.0), face("bare", 1.0)]]),
+                serde_json::json!([[0, null]]),
+            ),
+            (
+                GmlGeometry::MultiSolid(vec![vec![vec![face("painted", 0.0)]]]),
+                serde_json::json!([[[0]]]),
+            ),
+            (
+                GmlGeometry::CompositeSolid(vec![vec![vec![face("painted", 0.0)]]]),
+                serde_json::json!([[[0]]]),
+            ),
+        ] {
+            let (doc, report) = convert_painted(
+                vec![object(geometry)],
+                vec![surface_data("summer", "red", &["painted"])],
+            );
+            let json = serde_json::to_value(
+                &doc.features[0].city_objects["o1"]
+                    .geometry
+                    .as_ref()
+                    .unwrap()[0],
+            )
+            .unwrap();
+            assert_eq!(json["material"]["summer"]["values"], expected, "{json}");
+            // The assignment is per surface, so it is `values` and never the
+            // whole-object `value`.
+            assert!(json["material"]["summer"].get("value").is_none(), "{json}");
+            assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        }
+    }
+
+    /// Two themes over one geometry, and the palette they share: equal
+    /// materials are one entry, and a theme that paints nothing here is not
+    /// written at all.
+    #[test]
+    fn equal_materials_share_one_palette_entry_and_an_unused_theme_is_absent() {
+        let (doc, report) = convert_painted(
+            vec![object(GmlGeometry::MultiSurface(vec![
+                face("a", 0.0),
+                face("b", 1.0),
+            ]))],
+            vec![
+                // The same grey, declared once per theme.
+                surface_data("summer", "grey", &["a"]),
+                surface_data("winter", "grey", &["b"]),
+                // A third theme, painting a polygon this geometry does not
+                // hold.
+                surface_data("autumn", "grey", &["elsewhere"]),
+            ],
+        );
+        let json = serde_json::to_value(
+            &doc.features[0].city_objects["o1"]
+                .geometry
+                .as_ref()
+                .unwrap()[0],
+        )
+        .unwrap();
+        assert_eq!(
+            json["material"],
+            serde_json::json!({
+                "summer": {"values": [0, null]},
+                "winter": {"values": [null, 0]}
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&doc.features[0].appearance).unwrap(),
+            serde_json::json!({"materials": [{"name": "grey", "diffuseColor": [0.5, 0.5, 0.5]}]})
+        );
+        // Only the appearance that painted nothing is reported.
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+        assert!(
+            report.warnings[0].contains("autumn"),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    /// The palette is the *feature's*, as its vertices are: a feature nothing
+    /// paints carries no `appearance` at all, and one that is painted indexes
+    /// its own palette from zero.
+    #[test]
+    fn each_feature_carries_its_own_palette() {
+        let named = |id: &str, gml_id: &str| {
+            let mut object = object(GmlGeometry::MultiSurface(vec![face(gml_id, 0.0)]));
+            object.id = id.to_string();
+            object
+        };
+        let (doc, report) = convert_painted(
+            vec![named("o1", "first"), named("o2", "second")],
+            vec![
+                surface_data("summer", "grey-1", &["nothing"]),
+                surface_data("summer", "grey-2", &["second"]),
+            ],
+        );
+        assert!(doc.features[0].appearance.is_none());
+        assert_eq!(
+            serde_json::to_value(&doc.features[1].appearance).unwrap(),
+            serde_json::json!({"materials": [{"name": "grey-2", "diffuseColor": [0.5, 0.5, 0.5]}]})
+        );
+        let json = serde_json::to_value(
+            &doc.features[1].city_objects["o2"]
+                .geometry
+                .as_ref()
+                .unwrap()[0],
+        )
+        .unwrap();
+        // Feature-local: the second feature's only material is index 0, even
+        // though it is the second the document declares.
+        assert_eq!(json["material"]["summer"]["values"], serde_json::json!([0]));
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+    }
+
+    /// A geometry no theme paints has no `material` member — not an empty
+    /// one, and not an array of nulls. Nor has a polygon without a `gml:id`
+    /// any way of being targeted.
+    #[test]
+    fn an_unpainted_geometry_has_no_material_member() {
+        for (geometry, appearances) in [
+            // Nothing declared at all.
+            (
+                GmlGeometry::MultiSurface(vec![face("a", 0.0)]),
+                Vec::<SurfaceData>::new(),
+            ),
+            // Declared, but naming another polygon.
+            (
+                GmlGeometry::MultiSurface(vec![face("a", 0.0)]),
+                vec![surface_data("summer", "grey", &["b"])],
+            ),
+            // A polygon with no id cannot be the target of anything.
+            (
+                GmlGeometry::MultiSurface(vec![polygon(vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [1.0, 1.0, 0.0],
+                ])]),
+                vec![surface_data("summer", "grey", &["a"])],
+            ),
+        ] {
+            let (doc, _) = convert_painted(vec![object(geometry)], appearances);
+            let json = serde_json::to_value(
+                &doc.features[0].city_objects["o1"]
+                    .geometry
+                    .as_ref()
+                    .unwrap()[0],
+            )
+            .unwrap();
+            assert!(json.get("material").is_none(), "{json}");
+            assert!(doc.features[0].appearance.is_none());
+        }
+    }
+
+    /// One polygon, painted twice in one theme: CityJSON holds one index per
+    /// surface per theme, so the first material wins and the second is
+    /// reported rather than dropped in silence.
+    #[test]
+    fn a_polygon_painted_twice_in_one_theme_keeps_the_first_material() {
+        let (doc, report) = convert_painted(
+            vec![object(GmlGeometry::MultiSurface(vec![face("a", 0.0)]))],
+            vec![
+                surface_data("summer", "first", &["a"]),
+                surface_data("summer", "second", &["a"]),
+            ],
+        );
+        assert_eq!(
+            serde_json::to_value(&doc.features[0].appearance).unwrap(),
+            serde_json::json!({"materials": [{"name": "first", "diffuseColor": [0.5, 0.5, 0.5]}]})
+        );
+        // One warning for the conflict, one for the material it displaced.
+        assert_eq!(report.warnings.len(), 2, "{:?}", report.warnings);
     }
 
     /// Array levels between the outermost array and a vertex index.
