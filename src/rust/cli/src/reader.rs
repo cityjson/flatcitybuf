@@ -1,10 +1,13 @@
-//! Reader module for CityJSON and CityJSONSeq file reading
+//! Reader module for CityJSON, CityJSONSeq and CityGML file reading
 //!
-//! This module provides utilities to read CityJSON (`.json`) and
-//! CityJSONTextSequence (`.jsonl`) files and convert them to a unified
-//! in-memory representation of CityJSON metadata and features.
+//! This module provides utilities to read CityJSON (`.json`),
+//! CityJSONTextSequence (`.jsonl`) and CityGML 2.0 (`.gml` / `.xml`) files and
+//! convert them to a unified in-memory representation of CityJSON metadata and
+//! features. CityGML is converted on the way in by [`fcb_citygml`], so the
+//! rest of the pipeline never sees anything but CityJSON.
 
 use cjseq::{CityJSON, CityJSONFeature};
+use fcb_citygml::ParseOptions;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -18,6 +21,8 @@ pub enum InputFormat {
     CityJSON,
     /// CityJSONTextSequence file (`.jsonl`)
     CityJSONSeq,
+    /// CityGML 2.0 file (`.gml` or `.xml`)
+    CityGML,
 }
 
 impl InputFormat {
@@ -26,9 +31,10 @@ impl InputFormat {
         match path.extension().and_then(|e| e.to_str()) {
             Some("json") => Ok(InputFormat::CityJSON),
             Some("jsonl") => Ok(InputFormat::CityJSONSeq),
+            Some("gml") | Some("xml") => Ok(InputFormat::CityGML),
             _ => Err(CliError::UnsupportedFormat(
                 path.display().to_string(),
-                "expected .json or .jsonl extension".to_string(),
+                "expected .json, .jsonl, .gml or .xml extension".to_string(),
             )),
         }
     }
@@ -42,16 +48,18 @@ pub struct InputData {
     pub features: Vec<CityJSONFeature>,
 }
 
-/// Read a CityJSON or CityJSONSeq file and return unified data
+/// Read a CityJSON, CityJSONSeq or CityGML file and return unified data
 ///
 /// - `.json` files are parsed as CityJSON and converted to features
 /// - `.jsonl` files are parsed as CityJSONTextSequence directly
+/// - `.gml` / `.xml` files are parsed as CityGML 2.0 and converted
 pub fn read_input_file(path: &Path) -> Result<InputData, CliError> {
     let format = InputFormat::from_path(path)?;
 
     match format {
         InputFormat::CityJSON => read_cityjson_file(path),
         InputFormat::CityJSONSeq => read_cityjsonseq_file(path),
+        InputFormat::CityGML => read_citygml_file(path),
     }
 }
 
@@ -102,6 +110,42 @@ fn read_cityjsonseq_file(path: &Path) -> Result<InputData, CliError> {
     Ok(InputData { metadata, features })
 }
 
+/// Read a CityGML 2.0 file and convert it to CityJSON metadata + features
+///
+/// Content that is valid CityGML but has no CityJSON representation is not an
+/// error: the converter reports it, and it is logged here rather than dropped
+/// silently.
+fn read_citygml_file(path: &Path) -> Result<InputData, CliError> {
+    let file = File::open(path)?;
+    let (doc, report) = fcb_citygml::parse_citygml(BufReader::new(file), &ParseOptions::default())
+        .map_err(|e| CliError::CityGml(path.display().to_string(), e.to_string()))?;
+
+    for skipped in &report.skipped {
+        tracing::warn!(
+            file = %path.display(),
+            element = %skipped.element,
+            gml_id = ?skipped.gml_id,
+            reason = %skipped.reason,
+            "skipped CityGML element"
+        );
+    }
+    for warning in &report.warnings {
+        tracing::warn!(file = %path.display(), "{warning}");
+    }
+    if !report.skipped.is_empty() {
+        eprintln!(
+            "  ⚠ {}: skipped {} unsupported element(s)",
+            path.display(),
+            report.skipped.len()
+        );
+    }
+
+    Ok(InputData {
+        metadata: doc.metadata,
+        features: doc.features,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +167,18 @@ mod tests {
             InputFormat::from_path(&path).unwrap(),
             InputFormat::CityJSON
         );
+    }
+
+    #[test]
+    fn test_detect_format_gml() {
+        let path = PathBuf::from("city.gml");
+        assert_eq!(InputFormat::from_path(&path).unwrap(), InputFormat::CityGML);
+    }
+
+    #[test]
+    fn test_detect_format_xml() {
+        let path = PathBuf::from("city.xml");
+        assert_eq!(InputFormat::from_path(&path).unwrap(), InputFormat::CityGML);
     }
 
     #[test]

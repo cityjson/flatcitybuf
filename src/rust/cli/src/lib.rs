@@ -17,6 +17,10 @@
 //! Input and output are positional. `ser` takes any number of inputs before
 //! the output, so `fcb ser a.jsonl b.jsonl merged.fcb` merges as it converts.
 //!
+//! `ser` also accepts CityGML 2.0 (`.gml` / `.xml`), which [`fcb_citygml`]
+//! converts to CityJSON on the way in; everything downstream of
+//! [`reader::read_input_file`] sees only CityJSON.
+//!
 //! The modules below are `pub` so the integration tests can drive them
 //! directly; they are not a stable API. All the format work happens in
 //! [`fcb_core`].
@@ -52,6 +56,9 @@ pub enum CliError {
 
     #[error("Empty file: {0}")]
     EmptyFile(String),
+
+    #[error("CityGML parse error in {0}: {1}")]
+    CityGml(String, String),
 
     #[error("No input files specified or matched")]
     NoInputFiles,
