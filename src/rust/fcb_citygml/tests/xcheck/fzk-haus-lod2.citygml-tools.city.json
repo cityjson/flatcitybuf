@@ -1,0 +1,230 @@
+{
+  "type" : "CityJSON",
+  "version" : "2.0",
+  "CityObjects" : {
+    "UUID_d281adfc-4901-0f52-540b-4cc1a9325f82" : {
+      "type" : "Building",
+      "attributes" : {
+        "description" : "FZK-Haus (Forschungszentrum Karlsruhe, now KIT), created by Karl-Heinz\n                Haefele ",
+        "name" : "AC14-FZK-Haus",
+        "creationDate" : "2017-01-23T00:00:00+01:00",
+        "relativeToTerrain" : "entirelyAboveTerrain",
+        "GrossPlannedArea" : {
+          "value" : 120.0,
+          "uom" : "m2"
+        },
+        "ConstructionMethod" : "New Building",
+        "IsLandmarked" : "NO",
+        "dateOfConstruction" : "2020-01-01",
+        "measuredHeight" : 6.52,
+        "class" : "1000",
+        "function" : "1000",
+        "usage" : "1000",
+        "roofType" : "1030",
+        "storeysAboveGround" : 2,
+        "storeysBelowGround" : 0
+      },
+      "geometry" : [
+        {
+          "type" : "Solid",
+          "lod" : "2",
+          "boundaries" : [
+            [
+              [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ],
+              [
+                [
+                  5,
+                  4,
+                  3,
+                  6
+                ]
+              ],
+              [
+                [
+                  7,
+                  5,
+                  6,
+                  8,
+                  9
+                ]
+              ],
+              [
+                [
+                  0,
+                  7,
+                  9,
+                  1
+                ]
+              ],
+              [
+                [
+                  1,
+                  9,
+                  8,
+                  2
+                ]
+              ],
+              [
+                [
+                  5,
+                  7,
+                  0,
+                  4
+                ]
+              ],
+              [
+                [
+                  6,
+                  3,
+                  2,
+                  8
+                ]
+              ]
+            ]
+          ],
+          "semantics" : {
+            "surfaces" : [
+              {
+                "type" : "WallSurface",
+                "id" : "GML_5856d7ad-5e34-498a-817b-9544bfbb1475",
+                "name" : "Outer Wall 1 (West)"
+              },
+              {
+                "type" : "WallSurface",
+                "id" : "GML_d38cf762-c29d-4491-88c9-bdc89e141978",
+                "name" : "Outer Wall 2 (South)"
+              },
+              {
+                "type" : "WallSurface",
+                "id" : "GML_8e5db638-e46a-4739-a98a-2fc2d39c9069",
+                "name" : "Outer Wall 3 (East)"
+              },
+              {
+                "type" : "RoofSurface",
+                "id" : "GML_875d470b-32b4-4985-a4c8-0f02caa342a2",
+                "name" : "Roof 1 (North)"
+              },
+              {
+                "type" : "WallSurface",
+                "id" : "GML_0f30f604-e70d-4dfe-ba35-853bc69609cc",
+                "name" : "Outer Wall 4 (North)"
+              },
+              {
+                "type" : "RoofSurface",
+                "id" : "GML_eeb6796a-e261-4d3b-a6f2-475940cca80a",
+                "name" : "Roof 2 (South)"
+              },
+              {
+                "type" : "GroundSurface",
+                "id" : "GML_257a8dde-8194-4ca3-b581-abd591dcd6a3",
+                "description" : "Bodenplatte",
+                "name" : "Base Surface"
+              }
+            ],
+            "values" : [
+              [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ]
+            ]
+          }
+        }
+      ],
+      "address" : [
+        {
+          "locality" : "Eggenstein-Leopoldshafen",
+          "thoroughfareName" : "Spöcker Straße",
+          "thoroughfareNumber" : "4711",
+          "postalCode" : "76344"
+        }
+      ]
+    }
+  },
+  "transform" : {
+    "scale" : [
+      0.001,
+      0.001,
+      0.001
+    ],
+    "translate" : [
+      457842.0,
+      5439083.0,
+      111.8
+    ]
+  },
+  "vertices" : [
+    [
+      0,
+      5000,
+      6518
+    ],
+    [
+      0,
+      10000,
+      3631
+    ],
+    [
+      0,
+      10000,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      3631
+    ],
+    [
+      12000,
+      0,
+      3631
+    ],
+    [
+      12000,
+      0,
+      0
+    ],
+    [
+      12000,
+      5000,
+      6518
+    ],
+    [
+      12000,
+      10000,
+      0
+    ],
+    [
+      12000,
+      10000,
+      3631
+    ]
+  ],
+  "metadata" : {
+    "geographicalExtent" : [
+      457842.0,
+      5439083.0,
+      111.8,
+      457854.0,
+      5439093.0,
+      118.317669
+    ]
+  }
+}
