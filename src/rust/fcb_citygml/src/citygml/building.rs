@@ -77,7 +77,7 @@ mod tests {
     use super::*;
     use crate::citygml::construction::{read_construction, spec_of};
     use crate::citygml::semantics::POLYGON;
-    use crate::gml::XlinkRegistry;
+    use crate::gml::{GmlGeometry, XlinkRegistry};
     use crate::model::{IntermediateGeometry, IntermediateObject};
     use crate::xml::XmlNode;
     use crate::{ParseReport, Skipped};
@@ -329,18 +329,51 @@ mod tests {
         }
     }
 
-    /// Semantics with no geometry at their level of detail cannot be written
-    /// in CityJSON at all, so they are dropped — and said to be.
+    /// Boundary surfaces at a level of detail the building has no geometry of
+    /// its own at *become* its geometry there: their polygons are the only
+    /// LoD 3 in this document, and losing them would lose the LoD.
+    ///
+    /// The LoD 2 solid is untouched — the gathering is per LoD.
     #[test]
-    fn boundary_surfaces_at_a_lod_with_no_geometry_are_reported() {
+    fn boundary_surfaces_at_a_lod_with_no_geometry_become_a_multi_surface() {
         let (object, report) = read(&building(&format!(
             "<bldg:lod2Solid>{}</bldg:lod2Solid>{}",
             solid(&member(&polygon("f1", 0.0))),
             bounded_by("WallSurface", 3, &member(&polygon("w3", 1.0))),
         )));
 
+        assert_eq!(object.geometries.len(), 2);
+        assert_eq!(object.geometries[0].lod, "2");
+        assert!(matches!(
+            object.geometries[0].geometry,
+            GmlGeometry::Solid(_)
+        ));
         assert!(object.geometries[0].surfaces.is_empty());
         assert_eq!(sem_indices(&object.geometries[0]), vec![None]);
+
+        assert_eq!(object.geometries[1].lod, "3");
+        assert!(matches!(
+            object.geometries[1].geometry,
+            GmlGeometry::MultiSurface(ref polygons) if polygons.len() == 1
+        ));
+        assert_eq!(stypes(&object.geometries[1]), vec!["WallSurface"]);
+        assert_eq!(sem_indices(&object.geometries[1]), vec![Some(0)]);
+        assert!(report.skipped.is_empty(), "{report:?}");
+    }
+
+    /// Surfaces whose geometry property holds no polygon at all have nothing
+    /// to become, so they are dropped — and said to be.
+    #[test]
+    fn boundary_surfaces_with_no_polygons_at_all_are_reported() {
+        let (object, report) = read(&building(&format!(
+            "<bldg:lod2Solid>{}</bldg:lod2Solid>\
+             <bldg:boundedBy><bldg:WallSurface>\
+               <bldg:lod3MultiSurface><gml:MultiSurface/></bldg:lod3MultiSurface>\
+             </bldg:WallSurface></bldg:boundedBy>",
+            solid(&member(&polygon("f1", 0.0))),
+        )));
+
+        assert_eq!(object.geometries.len(), 1);
         assert_eq!(report.skipped.len(), 1);
         assert_eq!(report.skipped[0].element, BOUNDED_BY);
         assert!(report.skipped[0].reason.contains("LoD 3"), "{report:?}");

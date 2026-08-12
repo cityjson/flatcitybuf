@@ -24,6 +24,11 @@ fn semantic_surfaces() {
 }
 
 #[test]
+fn bounded_by_only() {
+    common::assert_fixture("bounded_by_only");
+}
+
+#[test]
 fn building_hierarchy() {
     common::assert_fixture("building_hierarchy");
 }

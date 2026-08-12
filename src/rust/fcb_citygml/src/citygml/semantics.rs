@@ -21,7 +21,7 @@ use serde_json::{Map, Value};
 
 use super::attributes::read_common_attributes;
 use super::{lod_of, read_geometry_property};
-use crate::gml::XlinkRegistry;
+use crate::gml::{GmlGeometry, Polygon3, XlinkRegistry};
 use crate::model::{IntermediateGeometry, SemanticSurface};
 use crate::xml::XmlNode;
 use crate::{is_in, CityGmlError, ParseReport, Skipped};
@@ -78,7 +78,7 @@ pub(crate) fn read_semantic_surfaces(
     node: &XmlNode,
     spec: &SurfaceSpec,
     registry: &XlinkRegistry,
-    geometries: &mut [IntermediateGeometry],
+    geometries: &mut Vec<IntermediateGeometry>,
     report: &mut ParseReport,
 ) -> Result<(), CityGmlError> {
     let mut boundary_report = ParseReport::default();
@@ -148,6 +148,23 @@ struct LodSurfaces {
     /// the object's geometry by that id, whichever side of the reference it
     /// was written on.
     surface_of_polygon: HashMap<String, usize>,
+    /// The boundary surfaces' own polygons, in document order, each already
+    /// labelled with the surface it belongs to.
+    ///
+    /// Ordinarily these are thrown away, because the same polygons reach
+    /// CityJSON through the object's own geometry. They are kept for the one
+    /// case where they do not: an object that states boundary surfaces at a
+    /// level of detail it has no geometry of its own at. See
+    /// [`attach_semantics`].
+    polygons: Vec<Polygon3>,
+    /// The `lodX…` properties that held a polygon with no `gml:id`, one entry
+    /// per such polygon.
+    ///
+    /// Whether that is a loss is not known until the LoD is placed: a polygon
+    /// with no id cannot be recognised in the object's own geometry, but it is
+    /// carried whole when the boundary polygons *become* that geometry. So the
+    /// reporting waits for [`attach_semantics`].
+    anonymous: Vec<String>,
 }
 
 impl BoundarySurfaces {
@@ -158,14 +175,19 @@ impl BoundarySurfaces {
         lod_surfaces.surfaces.len() - 1
     }
 
-    /// Record that the polygon with this `gml:id` belongs to surface `index`
-    /// at `lod`.
-    fn label(&mut self, lod: &str, polygon_id: &str, index: usize) {
-        self.by_lod
-            .entry(lod.to_string())
-            .or_default()
-            .surface_of_polygon
-            .insert(polygon_id.to_string(), index);
+    /// Record that `polygon` — written under `property` — belongs to surface
+    /// `index` at `lod`, keeping the polygon itself.
+    fn label(&mut self, lod: &str, property: &str, polygon: &Polygon3, index: usize) {
+        let lod_surfaces = self.by_lod.entry(lod.to_string()).or_default();
+        match &polygon.gml_id {
+            Some(id) => {
+                lod_surfaces.surface_of_polygon.insert(id.clone(), index);
+            }
+            None => lod_surfaces.anonymous.push(property.to_string()),
+        }
+        let mut polygon = polygon.clone();
+        polygon.sem_idx = Some(index);
+        lod_surfaces.polygons.push(polygon);
     }
 
     /// Note that surface `child` opens surface `parent`.
@@ -347,10 +369,11 @@ fn read_opening(
 /// Record every polygon of one `lodX…` property of a boundary surface as
 /// belonging to semantic surface `index`.
 ///
-/// The polygons themselves are not kept: they reach CityJSON through the
-/// object's own geometry, and this only has to be able to recognise them there
-/// — which is what a `gml:id` is for. A polygon written without one cannot be
-/// recognised, so its semantics are lost and the loss is reported.
+/// The polygons are kept as well as indexed. Ordinarily the index is all that
+/// is used — the same polygons reach CityJSON through the object's own
+/// geometry, and a `gml:id` is what recognises them there — but an object may
+/// have no geometry at this LoD to recognise them in, and then the polygons
+/// themselves are the geometry. See [`attach_semantics`].
 fn label_polygons(
     property: &XmlNode,
     lod: &str,
@@ -368,18 +391,7 @@ fn label_polygons(
         return Ok(());
     };
     for polygon in geometry.polygons() {
-        match &polygon.gml_id {
-            Some(id) => boundaries.label(lod, id, index),
-            None => report.skipped.push(Skipped {
-                element: POLYGON.to_string(),
-                gml_id: None,
-                reason: format!(
-                    "a polygon of <{}> has no gml:id, so no geometry can be matched to it; \
-                     its semantics are dropped",
-                    property.local
-                ),
-            }),
-        }
+        boundaries.label(lod, &property.local, polygon, index);
     }
     Ok(())
 }
@@ -391,13 +403,22 @@ fn label_polygons(
 /// [`sem_idx`](crate::gml::Polygon3::sem_idx) `None`, which is CityJSON's
 /// `null`: a surface with no semantics, not a surface with the wrong ones.
 ///
-/// Boundary surfaces at an LoD the object has no geometry for describe nothing
-/// this converter can write — CityJSON has no place for semantics without a
-/// geometry to hang them on — so they are dropped and reported.
+/// Boundary surfaces at an LoD the object has no geometry for are the object's
+/// geometry at that LoD: their own polygons are gathered into a `MultiSurface`
+/// of the object's, already carrying their semantics.
+///
+/// This is not a liberty. A `bldg:RoofSurface` is a part of the building, and
+/// an LoD 2 building written as boundary surfaces alone — no `bldg:lod2Solid`,
+/// no `bldg:lod2MultiSurface` — is the common shape of real CityGML, not a
+/// malformed one. Dropping those polygons would lose the whole of such a
+/// file's LoD 2, and it is what citygml-tools gathers them into as well.
+///
+/// An LoD with neither geometry nor polygons of its own is still reported: it
+/// describes nothing that can be written.
 fn attach_semantics(
     boundaries: BoundarySurfaces,
     spec: &SurfaceSpec,
-    geometries: &mut [IntermediateGeometry],
+    geometries: &mut Vec<IntermediateGeometry>,
     report: &mut ParseReport,
 ) {
     for (lod, lod_surfaces) in boundaries.by_lod {
@@ -413,7 +434,22 @@ fn attach_semantics(
             geometry.surfaces = lod_surfaces.surfaces.clone();
             carried = true;
         }
-        if !carried {
+        if carried {
+            // The object's own geometry names its polygons by `gml:id`, so a
+            // boundary polygon written without one could not be found in it.
+            for property in &lod_surfaces.anonymous {
+                report.skipped.push(Skipped {
+                    element: POLYGON.to_string(),
+                    gml_id: None,
+                    reason: format!(
+                        "a polygon of <{property}> has no gml:id, so no geometry can be \
+                         matched to it; its semantics are dropped"
+                    ),
+                });
+            }
+            continue;
+        }
+        if lod_surfaces.polygons.is_empty() {
             report.skipped.push(Skipped {
                 element: spec.container.to_string(),
                 gml_id: None,
@@ -423,6 +459,12 @@ fn attach_semantics(
                     lod_surfaces.surfaces.len()
                 ),
             });
+            continue;
         }
+        geometries.push(IntermediateGeometry {
+            lod,
+            geometry: GmlGeometry::MultiSurface(lod_surfaces.polygons),
+            surfaces: lod_surfaces.surfaces,
+        });
     }
 }
