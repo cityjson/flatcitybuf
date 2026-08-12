@@ -28,7 +28,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use fcb_citygml::{parse_citygml, CityGmlDocument, ParseOptions};
+use fcb_citygml::{parse_citygml, CityGmlDocument, ParseOptions, ParseReport};
 use serde_json::{Map, Value};
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,16 @@ use serde_json::{Map, Value};
 /// and an `xAL` address.
 #[test]
 fn fzk_haus_lod2() {
-    assert_sample("fzk-haus-lod2");
+    assert_sample(
+        "fzk-haus-lod2",
+        // `gml:name` on the CityModel is not one of its properties this
+        // converter reads.
+        &[("name", 1)],
+        &[
+            "srsName \"urn:adv:crs:ETRS89_UTM32*DE_DHHN92_NH\" is not a recognised EPSG \
+           reference; referenceSystem omitted",
+        ],
+    );
 }
 
 /// KIT's LoD 3 railway scene, CityGML 2.0, cut down to eight members: a
@@ -49,7 +58,15 @@ fn fzk_haus_lod2() {
 /// railway — with X3D materials and parameterised textures over all of it.
 #[test]
 fn railway_lod3() {
-    assert_sample("railway-lod3");
+    assert_sample(
+        "railway-lod3",
+        // Half the textures state an `app:borderColor`, which this converter
+        // does not carry over; see `appearance::read_texture`.
+        &[("ParameterizedTexture", 17)],
+        // The sample was cut out of a larger scene, and the boundedBy that
+        // named the CRS stayed behind.
+        &["no srsName found; referenceSystem omitted"],
+    );
 }
 
 /// A Den Haag tile, CityGML **1.0**, cut down to 25 buildings: LoD 2 solids
@@ -58,7 +75,18 @@ fn railway_lod3() {
 /// namespaces are part of what this checks.
 #[test]
 fn denhaag_lod2() {
-    assert_sample("denhaag-lod2");
+    assert_sample(
+        "denhaag-lod2",
+        // Every building states where it meets the ground, and CityJSON has
+        // no member for it: 90 surfaces dropped, one report entry apiece,
+        // which is the count that says how much of this tile went missing.
+        &[
+            ("description", 1),
+            ("lod2TerrainIntersection", 90),
+            ("name", 1),
+        ],
+        &[],
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -149,12 +177,21 @@ const VERTEX_SAMPLE: usize = 500;
 
 /// Parse `tests/xcheck/<name>.gml` and hold it against
 /// `tests/xcheck/<name>.citygml-tools.city.json`.
-fn assert_sample(name: &str) {
+///
+/// `skipped` is what the conversion must drop — one entry per element name,
+/// with how many times it is dropped — and `warnings` is what it must warn
+/// about, verbatim. Both are exact: a real city file is where a silent drop
+/// hides, so a sample that started dropping something new, or stopped
+/// dropping something it used to, fails here rather than quietly converting
+/// less of the city than it did before.
+fn assert_sample(name: &str, skipped: &[(&str, usize)], warnings: &[&str]) {
     let dir = corpus_dir();
     let gml = File::open(dir.join(format!("{name}.gml")))
         .unwrap_or_else(|err| panic!("opening {name}.gml: {err}"));
-    let (ours, _report) = parse_citygml(BufReader::new(gml), &ParseOptions::default())
+    let (ours, report) = parse_citygml(BufReader::new(gml), &ParseOptions::default())
         .unwrap_or_else(|err| panic!("converting {name}.gml: {err}"));
+
+    assert_report(&report, skipped, warnings, name);
 
     let path = dir.join(format!("{name}.citygml-tools.city.json"));
     let reference: Value = serde_json::from_reader(BufReader::new(
@@ -163,6 +200,23 @@ fn assert_sample(name: &str) {
     .unwrap_or_else(|err| panic!("parsing {}: {err}", path.display()));
 
     assert_structural_match(&ours, &reference);
+}
+
+/// Fail unless the conversion dropped and warned about exactly what it was
+/// meant to.
+fn assert_report(report: &ParseReport, skipped: &[(&str, usize)], warnings: &[&str], name: &str) {
+    let mut counted: BTreeMap<&str, usize> = BTreeMap::new();
+    for entry in &report.skipped {
+        *counted.entry(entry.element.as_str()).or_default() += 1;
+    }
+    let expected: BTreeMap<&str, usize> = skipped.iter().copied().collect();
+    assert_eq!(
+        counted, expected,
+        "{name}: the elements this converter skipped are not the ones expected"
+    );
+
+    let ours: Vec<&str> = report.warnings.iter().map(String::as_str).collect();
+    assert_eq!(ours, warnings, "{name}: the warnings differ");
 }
 
 fn corpus_dir() -> PathBuf {

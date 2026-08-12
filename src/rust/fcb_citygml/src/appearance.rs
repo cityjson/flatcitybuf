@@ -296,12 +296,12 @@ fn fragment(uri: &str) -> &str {
 /// in any other format cannot be written at all; dropping the whole surface
 /// data is the honest outcome, and it is recorded rather than silent.
 ///
-/// `app:borderColor` is not carried over. CityJSON has a `borderColor` of its
-/// own, and it would be a plain mapping — but the colour a CityGML border
-/// carries is RGBA where CityJSON's is RGB plus an alpha this converter has
-/// nowhere to put a fourth component of, and no file in the corpus states
-/// one to test the mapping against. So a texture that states it keeps its
-/// image and loses its border, and says so.
+/// `app:borderColor` is not carried over. CityJSON *has* a `borderColor`, in
+/// three components or four, so this is a mapping this converter has not
+/// written rather than one CityJSON cannot express — which is exactly why a
+/// texture that states one is reported: the texture keeps its image and its
+/// wrap mode, the border colour is lost, and the report says so instead of
+/// the loss going unnoticed. The railway sample states 17 of them.
 fn read_texture(node: &XmlNode, report: &mut ParseReport) -> Option<TextureObject> {
     let Some(image) = app_child(node, IMAGE_URI)
         .map(|uri| uri.text.trim())

@@ -13,6 +13,13 @@ fn lod1_building() {
     common::assert_fixture("lod1_building");
 }
 
+/// Geometry with no CityJSON counterpart: the document survives, keeps what
+/// it can write, and reports the rest.
+#[test]
+fn dropped_geometry() {
+    common::assert_fixture("dropped_geometry");
+}
+
 #[test]
 fn attributes() {
     common::assert_fixture("attributes");
