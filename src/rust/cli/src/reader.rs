@@ -113,11 +113,22 @@ fn read_cityjsonseq_file(path: &Path) -> Result<InputData, CliError> {
 /// Read a CityGML 2.0 file and convert it to CityJSON metadata + features
 ///
 /// Content that is valid CityGML but has no CityJSON representation is not an
-/// error: the converter reports it, and it is logged here rather than dropped
-/// silently.
+/// error: the converter reports it, and what it reports is written to stderr
+/// rather than dropped silently.
+///
+/// The file's stem becomes the prefix of any object id the converter has to
+/// invent, so that two files merged into one dataset cannot both name an
+/// object `citygml-obj-0`.
 fn read_citygml_file(path: &Path) -> Result<InputData, CliError> {
     let file = File::open(path)?;
-    let (doc, report) = fcb_citygml::parse_citygml(BufReader::new(file), &ParseOptions::default())
+    let opts = ParseOptions {
+        id_prefix: path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_owned),
+        ..ParseOptions::default()
+    };
+    let (doc, report) = fcb_citygml::parse_citygml(BufReader::new(file), &opts)
         .map_err(|e| CliError::CityGml(path.display().to_string(), e.to_string()))?;
 
     for skipped in &report.skipped {
@@ -129,21 +140,42 @@ fn read_citygml_file(path: &Path) -> Result<InputData, CliError> {
             "skipped CityGML element"
         );
     }
-    for warning in &report.warnings {
-        tracing::warn!(file = %path.display(), "{warning}");
-    }
-    if !report.skipped.is_empty() {
-        eprintln!(
-            "  ⚠ {}: skipped {} unsupported element(s)",
-            path.display(),
-            report.skipped.len()
-        );
-    }
+    // stderr as well as `tracing`, and not instead of it: nothing in this CLI
+    // installs a subscriber, so every `tracing` call above is a no-op today
+    // and a diagnostic that only went there would reach nobody.
+    let _ = write_diagnostics(path, &report, &mut std::io::stderr());
 
     Ok(InputData {
         metadata: doc.metadata,
         features: doc.features,
     })
+}
+
+/// Write what the converter reported about one file: every warning in full,
+/// and the skipped elements as a count.
+///
+/// The warnings are the ones a user can act on — an unrecognised `srsName`,
+/// an appearance that paints nothing — and there are few of them. Skips are
+/// counted instead: a real city file drops the same unsupported property
+/// hundreds of times over, and `tracing` has each in full for anyone who
+/// wants them.
+fn write_diagnostics(
+    path: &Path,
+    report: &fcb_citygml::ParseReport,
+    out: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    for warning in &report.warnings {
+        writeln!(out, "  ⚠ {}: {warning}", path.display())?;
+    }
+    if !report.skipped.is_empty() {
+        writeln!(
+            out,
+            "  ⚠ {}: skipped {} unsupported element(s)",
+            path.display(),
+            report.skipped.len()
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -185,6 +217,66 @@ mod tests {
     fn test_detect_format_invalid() {
         let path = PathBuf::from("test.txt");
         assert!(InputFormat::from_path(&path).is_err());
+    }
+
+    /// A CityGML document with no CRS and an unreadable member: the warning
+    /// and the skip both reach the user, on stderr, without a `tracing`
+    /// subscriber existing anywhere in this CLI.
+    #[test]
+    fn diagnostics_are_written_out_in_full() {
+        let report = fcb_citygml::ParseReport {
+            skipped: vec![fcb_citygml::Skipped {
+                element: "lod2TerrainIntersection".to_string(),
+                gml_id: Some("b1".to_string()),
+                reason: "no CityJSON counterpart for this property".to_string(),
+            }],
+            warnings: vec!["no srsName found; referenceSystem omitted".to_string()],
+        };
+        let mut out = Vec::new();
+        write_diagnostics(Path::new("city.gml"), &report, &mut out).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            concat!(
+                "  ⚠ city.gml: no srsName found; referenceSystem omitted\n",
+                "  ⚠ city.gml: skipped 1 unsupported element(s)\n",
+            )
+        );
+    }
+
+    #[test]
+    fn a_clean_document_says_nothing() {
+        let mut out = Vec::new();
+        write_diagnostics(
+            Path::new("city.gml"),
+            &fcb_citygml::ParseReport::default(),
+            &mut out,
+        )
+        .unwrap();
+        assert!(out.is_empty());
+    }
+
+    /// An object with no `gml:id` is named after the file it came from, so
+    /// that merging two such files does not have them both claim
+    /// `citygml-obj-0`.
+    #[test]
+    fn generated_object_ids_carry_the_file_stem() {
+        let gml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<core:CityModel xmlns:core="http://www.opengis.net/citygml/2.0"
+                xmlns:bldg="http://www.opengis.net/citygml/building/2.0">
+  <core:cityObjectMember><bldg:Building/></core:cityObjectMember>
+</core:CityModel>"#;
+        let dir = tempfile::tempdir().unwrap();
+        let ids = |name: &str| -> Vec<String> {
+            let path = dir.path().join(name);
+            std::fs::write(&path, gml).unwrap();
+            let data = read_input_file(&path).unwrap();
+            data.features
+                .iter()
+                .flat_map(|feature| feature.city_objects.keys().cloned())
+                .collect()
+        };
+        assert_eq!(ids("tile-a.gml"), vec!["tile-a-0".to_string()]);
+        assert_eq!(ids("tile-b.gml"), vec!["tile-b-0".to_string()]);
     }
 
     #[test]
