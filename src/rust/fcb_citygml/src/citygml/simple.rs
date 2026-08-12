@@ -92,24 +92,18 @@ static WATER_SURFACES: SurfaceSpec = SurfaceSpec {
 };
 
 /// What a city object element becomes in CityJSON.
-enum CityJsonType {
-    /// One of the types CityJSON names itself, which is the usual case: the
-    /// two standards agree on the spelling.
-    Known(cjseq::CityObjectType),
-    /// A CityJSON Extension type, carrying the name verbatim. CityJSON has no
-    /// type for a `gen:GenericCityObject` — an object that is deliberately
-    /// nothing in particular — and § 8 requires an Extension name to start
-    /// with `+`.
-    Extension(&'static str),
-}
+///
+/// Every element this file reads has a CityJSON type of its own — including
+/// `gen:GenericCityObject`, which CityJSON names `GenericCityObject` (CityJSON
+/// 2.0 § 3.2). None of them needs an Extension type, and inventing one would
+/// oblige the document to carry an `extensions` declaration this converter
+/// does not write.
+struct CityJsonType(cjseq::CityObjectType);
 
 impl CityJsonType {
     /// The cjseq type this stands for.
     fn co_type(&self) -> cjseq::CityObjectType {
-        match self {
-            Self::Known(co_type) => co_type.clone(),
-            Self::Extension(name) => cjseq::CityObjectType::Extension((*name).to_string()),
-        }
+        self.0.clone()
     }
 }
 
@@ -135,25 +129,25 @@ static KINDS: [SimpleKind; 11] = [
     SimpleKind {
         namespaces: &VEGETATION_NS,
         element: "SolitaryVegetationObject",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::SolitaryVegetationObject),
+        co_type: CityJsonType(cjseq::CityObjectType::SolitaryVegetationObject),
         surfaces: None,
     },
     SimpleKind {
         namespaces: &VEGETATION_NS,
         element: "PlantCover",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::PlantCover),
+        co_type: CityJsonType(cjseq::CityObjectType::PlantCover),
         surfaces: None,
     },
     SimpleKind {
         namespaces: &TRANSPORTATION_NS,
         element: "Road",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::Road),
+        co_type: CityJsonType(cjseq::CityObjectType::Road),
         surfaces: Some(&TRAFFIC_SURFACES),
     },
     SimpleKind {
         namespaces: &TRANSPORTATION_NS,
         element: "Railway",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::Railway),
+        co_type: CityJsonType(cjseq::CityObjectType::Railway),
         surfaces: Some(&TRAFFIC_SURFACES),
     },
     // CityGML spells a square `Square` and CityJSON spells the same thing
@@ -163,49 +157,46 @@ static KINDS: [SimpleKind; 11] = [
     SimpleKind {
         namespaces: &TRANSPORTATION_NS,
         element: "Square",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::TransportSquare),
+        co_type: CityJsonType(cjseq::CityObjectType::TransportSquare),
         surfaces: Some(&TRAFFIC_SURFACES),
     },
     SimpleKind {
         namespaces: &TRANSPORTATION_NS,
         element: "TransportSquare",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::TransportSquare),
+        co_type: CityJsonType(cjseq::CityObjectType::TransportSquare),
         surfaces: Some(&TRAFFIC_SURFACES),
     },
     SimpleKind {
         namespaces: &WATERBODY_NS,
         element: "WaterBody",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::WaterBody),
+        co_type: CityJsonType(cjseq::CityObjectType::WaterBody),
         surfaces: Some(&WATER_SURFACES),
     },
     SimpleKind {
         namespaces: &LANDUSE_NS,
         element: "LandUse",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::LandUse),
+        co_type: CityJsonType(cjseq::CityObjectType::LandUse),
         surfaces: None,
     },
     SimpleKind {
         namespaces: &CITYFURNITURE_NS,
         element: "CityFurniture",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::CityFurniture),
+        co_type: CityJsonType(cjseq::CityObjectType::CityFurniture),
         surfaces: None,
     },
     SimpleKind {
         namespaces: &GENERICS_NS,
         element: "GenericCityObject",
-        co_type: CityJsonType::Extension(GENERIC_CITY_OBJECT),
+        co_type: CityJsonType(cjseq::CityObjectType::GenericCityObject),
         surfaces: None,
     },
     SimpleKind {
         namespaces: &CITYOBJECTGROUP_NS,
         element: "CityObjectGroup",
-        co_type: CityJsonType::Known(cjseq::CityObjectType::CityObjectGroup),
+        co_type: CityJsonType(cjseq::CityObjectType::CityObjectGroup),
         surfaces: None,
     },
 ];
-
-/// The CityJSON Extension type a `gen:GenericCityObject` becomes.
-const GENERIC_CITY_OBJECT: &str = "+GenericCityObject";
 
 /// Local name of the property naming a member of a group, and of the
 /// attribute stating what that member is to the group.
@@ -395,10 +386,12 @@ mod tests {
         assert!(kind_of(&node(&format!("<tran:TrafficArea {NS}/>"))).is_none());
     }
 
-    /// A `gen:GenericCityObject` has no CityJSON type of its own, so it takes
-    /// an Extension type — which the spec requires to start with `+`.
+    /// CityJSON names a `GenericCityObject` of its own (CityJSON 2.0 § 3.2),
+    /// so a `gen:GenericCityObject` becomes that and not an Extension type: an
+    /// Extension type would oblige the document to declare the extension, and
+    /// this converter writes no `extensions` member.
     #[test]
-    fn a_generic_city_object_becomes_an_extension_type() {
+    fn a_generic_city_object_becomes_the_cityjson_generic_type() {
         let (object, report) = read(&format!(
             "<gen:GenericCityObject {NS} gml:id=\"g1\">\
                <gml:name>Retaining wall</gml:name>\
@@ -407,14 +400,11 @@ mod tests {
             multi_surface(&polygon("g1-p1", 0.0))
         ));
 
-        assert_eq!(
-            object.co_type,
-            cjseq::CityObjectType::Extension(GENERIC_CITY_OBJECT.to_string())
+        assert_eq!(object.co_type, cjseq::CityObjectType::GenericCityObject);
+        assert!(
+            !matches!(object.co_type, cjseq::CityObjectType::Extension(_)),
+            "an Extension type would need an `extensions` declaration"
         );
-        assert!(matches!(
-            object.co_type,
-            cjseq::CityObjectType::Extension(ref name) if name.starts_with('+')
-        ));
         assert_eq!(
             object.attributes["name"],
             serde_json::json!("Retaining wall")
