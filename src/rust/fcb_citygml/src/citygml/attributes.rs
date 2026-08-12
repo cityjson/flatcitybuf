@@ -18,6 +18,7 @@
 
 use serde_json::{Map, Number, Value};
 
+use super::is_citygml_module;
 use crate::gml::is_gml;
 use crate::xml::XmlNode;
 use crate::{is_in, ParseReport};
@@ -34,12 +35,6 @@ const GENERICS_NS: [&str; 2] = [
 
 /// Local name of the child holding a generic attribute's value.
 const VALUE: &str = "value";
-
-/// The prefix shared by every CityGML module namespace URI.
-const CITYGML_NS_PREFIX: &str = "http://www.opengis.net/citygml/";
-
-/// The CityGML versions whose module namespaces are accepted.
-const CITYGML_VERSIONS: [&str; 2] = ["2.0", "1.0"];
 
 /// How a property's text becomes a JSON value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,25 +234,6 @@ fn kind_of(table: &[(&str, Kind)], local: &str) -> Option<Kind> {
         .iter()
         .find(|(name, _)| *name == local)
         .map(|(_, kind)| *kind)
-}
-
-/// Whether a namespace URI is that of a CityGML module this converter reads.
-///
-/// Every module is accepted rather than only the calling reader's own, so that
-/// a further thematic reader needs no argument here and no second table. The
-/// looseness costs nothing in practice: the names in [`THEMATIC`] are unique
-/// across the CityGML modules, so a property that matches one is that property
-/// whichever module namespace it was written in.
-fn is_citygml_module(ns: &str) -> bool {
-    let Some(rest) = ns.strip_prefix(CITYGML_NS_PREFIX) else {
-        return false;
-    };
-    match rest.split_once('/') {
-        // A thematic module: `…/citygml/building/2.0`.
-        Some((module, version)) => !module.is_empty() && CITYGML_VERSIONS.contains(&version),
-        // The core module, which carries no name of its own: `…/citygml/2.0`.
-        None => CITYGML_VERSIONS.contains(&rest),
-    }
 }
 
 #[cfg(test)]

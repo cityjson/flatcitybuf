@@ -194,12 +194,12 @@ fn lod_of(property: &XmlNode) -> Option<&str> {
 
 /// Whether a namespace URI is that of a CityGML module this converter reads.
 ///
-/// Every module is accepted rather than only the calling reader's own, so that
-/// a further thematic reader needs no argument here and no second table. The
-/// looseness costs nothing in practice: no two modules give the same name to
-/// properties of different kinds, so a property that matches one of this
-/// converter's tables is that property whichever module namespace it was
-/// written in.
+/// Both callers — the attribute reader and [`lod_of`] — accept every module
+/// rather than only the calling reader's own, so that a further thematic
+/// reader needs no argument here and no second table. The looseness costs
+/// nothing in practice: no two modules give the same name to properties of
+/// different kinds, so a property that matches one of this converter's tables
+/// is that property whichever module namespace it was written in.
 fn is_citygml_module(ns: &str) -> bool {
     let Some(rest) = ns.strip_prefix(CITYGML_NS_PREFIX) else {
         return false;
