@@ -42,3 +42,8 @@ fn tin_relief() {
 fn bridge_tunnel() {
     common::assert_fixture("bridge_tunnel");
 }
+
+#[test]
+fn implicit_geometry() {
+    common::assert_fixture("implicit_geometry");
+}

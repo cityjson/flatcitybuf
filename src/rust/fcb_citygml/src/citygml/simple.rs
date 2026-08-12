@@ -240,6 +240,7 @@ pub(crate) fn kind_of(node: &XmlNode) -> Option<&'static SimpleKind> {
 pub(crate) fn read_simple_object(
     node: &XmlNode,
     kind: &SimpleKind,
+    member: &XmlNode,
     registry: &XlinkRegistry,
     member_index: usize,
     report: &mut ParseReport,
@@ -247,7 +248,7 @@ pub(crate) fn read_simple_object(
     let mut object =
         IntermediateObject::new(member_object_id(node, member_index), kind.co_type.co_type());
     read_common_attributes(node, &mut object.attributes, report);
-    object.geometries = read_lod_geometries(node, registry, report)?;
+    object.geometries = read_lod_geometries(node, member, registry, report)?;
     if let Some(spec) = kind.surfaces {
         read_semantic_surfaces(node, spec, registry, &mut object.geometries, report)?;
     }
@@ -327,7 +328,7 @@ mod tests {
         let kind = kind_of(&node).unwrap_or_else(|| panic!("no reader for <{}>", node.local));
         let registry = XlinkRegistry::collect(&node);
         let mut report = ParseReport::default();
-        let object = read_simple_object(&node, kind, &registry, 0, &mut report)
+        let object = read_simple_object(&node, kind, &node, &registry, 0, &mut report)
             .unwrap_or_else(|err| panic!("read failed: {err}"));
         (object, report)
     }

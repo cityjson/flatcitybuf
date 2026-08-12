@@ -5,8 +5,10 @@
 //! points.
 
 mod geometry;
+mod implicit;
 
 pub use geometry::{parse_geometry, parse_triangles, GmlGeometry, XlinkRegistry};
+pub(crate) use implicit::flatten_implicit;
 
 use crate::xml::XmlNode;
 use crate::CityGmlError;

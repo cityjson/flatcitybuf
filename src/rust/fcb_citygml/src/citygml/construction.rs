@@ -219,12 +219,21 @@ pub(crate) fn spec_of(node: &XmlNode) -> Option<&'static ConstructionSpec> {
 pub(crate) fn read_construction(
     node: &XmlNode,
     spec: &ConstructionSpec,
+    member: &XmlNode,
     registry: &XlinkRegistry,
     member_index: usize,
     report: &mut ParseReport,
 ) -> Result<IntermediateObject, CityGmlError> {
     let id = member_object_id(node, member_index);
-    read_construction_object(node, id, spec.co_type.clone(), spec, registry, report)
+    read_construction_object(
+        node,
+        id,
+        spec.co_type.clone(),
+        spec,
+        member,
+        registry,
+        report,
+    )
 }
 
 /// Read one object of a construction family — a `Bridge`, a `BridgePart`, a
@@ -254,12 +263,13 @@ fn read_construction_object(
     id: String,
     co_type: cjseq::CityObjectType,
     spec: &ConstructionSpec,
+    member: &XmlNode,
     registry: &XlinkRegistry,
     report: &mut ParseReport,
 ) -> Result<IntermediateObject, CityGmlError> {
     let mut object = IntermediateObject::new(id, co_type);
     read_common_attributes(node, &mut object.attributes, report);
-    object.geometries = read_lod_geometries(node, registry, report)?;
+    object.geometries = read_lod_geometries(node, member, registry, report)?;
     read_semantic_surfaces(
         node,
         spec.surfaces,
@@ -267,7 +277,7 @@ fn read_construction_object(
         &mut object.geometries,
         report,
     )?;
-    object.children = read_children(node, spec, &object.id, registry, report)?;
+    object.children = read_children(node, spec, &object.id, member, registry, report)?;
     Ok(object)
 }
 
@@ -292,6 +302,7 @@ fn read_children(
     node: &XmlNode,
     spec: &ConstructionSpec,
     parent_id: &str,
+    member: &XmlNode,
     registry: &XlinkRegistry,
     report: &mut ParseReport,
 ) -> Result<Vec<IntermediateObject>, CityGmlError> {
@@ -323,6 +334,7 @@ fn read_children(
                 id,
                 kind.co_type.clone(),
                 spec,
+                member,
                 registry,
                 report,
             )?);
@@ -367,7 +379,7 @@ mod tests {
         let spec = spec_of(&root).unwrap_or_else(|| panic!("no reader for <{}>", root.local));
         let registry = XlinkRegistry::collect(&root);
         let mut report = ParseReport::default();
-        let object = read_construction(&root, spec, &registry, 0, &mut report)
+        let object = read_construction(&root, spec, &root, &registry, 0, &mut report)
             .unwrap_or_else(|err| panic!("read failed: {err}"));
         (object, report)
     }

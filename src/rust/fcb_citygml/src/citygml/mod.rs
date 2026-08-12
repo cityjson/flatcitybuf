@@ -27,7 +27,7 @@ mod relief;
 mod semantics;
 mod simple;
 
-use crate::gml::{parse_geometry, GmlGeometry, XlinkRegistry};
+use crate::gml::{flatten_implicit, parse_geometry, GmlGeometry, XlinkRegistry};
 use crate::model::{IntermediateGeometry, IntermediateObject};
 use crate::xml::XmlNode;
 use crate::{CityGmlError, ParseReport, Skipped};
@@ -48,6 +48,11 @@ const CITYGML_VERSIONS: [&str; 2] = ["2.0", "1.0"];
 /// CityGML, but it is unambiguous, and rejecting it would lose geometry over a
 /// mislabelled property.
 const GEOMETRY_SUFFIXES: [&str; 4] = ["Solid", "MultiSolid", "MultiSurface", "Geometry"];
+
+/// The one other thing a `lodX…` property may hold: a *placement* of a
+/// prototype geometry rather than a geometry of its own. It reaches CityJSON
+/// as an ordinary geometry, flattened; see [`crate::gml::flatten_implicit`].
+const IMPLICIT_SUFFIX: &str = "ImplicitRepresentation";
 
 /// The prefix every geometry property name starts with.
 const LOD_PREFIX: &str = "lod";
@@ -101,13 +106,14 @@ pub(crate) fn read_member(
     if let Some(spec) = construction::spec_of(object) {
         let registry = XlinkRegistry::collect(member);
         let object =
-            construction::read_construction(object, spec, &registry, member_index, report)?;
+            construction::read_construction(object, spec, member, &registry, member_index, report)?;
         return Ok(vec![object]);
     }
 
     if let Some(kind) = simple::kind_of(object) {
         let registry = XlinkRegistry::collect(member);
-        let object = simple::read_simple_object(object, kind, &registry, member_index, report)?;
+        let object =
+            simple::read_simple_object(object, kind, member, &registry, member_index, report)?;
         return Ok(vec![object]);
     }
 
@@ -142,6 +148,13 @@ fn member_object_id(node: &XmlNode, member_index: usize) -> String {
 /// a further module therefore inherits this without an argument or a table of
 /// its own.
 ///
+/// A `lodXImplicitRepresentation` is read here too, and becomes a geometry of
+/// the object like any other: CityJSON has no implicit geometry, so the
+/// prototype is flattened into the object's own coordinates at the LoD the
+/// property names. `member` is the whole `cityObjectMember`, and is the scope
+/// a prototype named by `xlink:href` is looked for in; see
+/// [`flatten_implicit`].
+///
 /// A property that holds nothing this converter can read is recorded and
 /// passed over: the rest of the object is still worth having.
 ///
@@ -151,25 +164,35 @@ fn member_object_id(node: &XmlNode, member_index: usize) -> String {
 /// `xlink:href`s that name nothing in the member.
 fn read_lod_geometries(
     node: &XmlNode,
+    member: &XmlNode,
     registry: &XlinkRegistry,
     report: &mut ParseReport,
 ) -> Result<Vec<IntermediateGeometry>, CityGmlError> {
     let mut geometries = Vec::new();
     for property in &node.children {
-        let Some(lod) = lod_of(property) else {
-            continue;
-        };
-        match read_geometry_property(property, registry, report)? {
-            Some(geometry) => geometries.push(IntermediateGeometry {
-                lod: lod.to_string(),
-                geometry,
-                surfaces: Vec::new(),
-            }),
-            None => report.skipped.push(Skipped {
-                element: property.local.clone(),
-                gml_id: property.gml_id().map(str::to_owned),
-                reason: format!("no supported GML geometry in <{}>", property.local),
-            }),
+        if let Some(lod) = lod_of(property) {
+            match read_geometry_property(property, registry, report)? {
+                Some(geometry) => geometries.push(IntermediateGeometry {
+                    lod: lod.to_string(),
+                    geometry,
+                    surfaces: Vec::new(),
+                }),
+                None => report.skipped.push(Skipped {
+                    element: property.local.clone(),
+                    gml_id: property.gml_id().map(str::to_owned),
+                    reason: format!("no supported GML geometry in <{}>", property.local),
+                }),
+            }
+        } else if let Some(lod) = implicit_lod_of(property) {
+            // A placement this converter cannot flatten has already been
+            // recorded, with the reason, by `flatten_implicit`.
+            if let Some(geometry) = flatten_implicit(property, member, registry, report)? {
+                geometries.push(IntermediateGeometry {
+                    lod: lod.to_string(),
+                    geometry,
+                    surfaces: Vec::new(),
+                });
+            }
         }
     }
     Ok(geometries)
@@ -196,6 +219,24 @@ fn read_geometry_property(
 /// Returns `None` for any other element, including one with a matching name
 /// outside a CityGML module namespace.
 fn lod_of(property: &XmlNode) -> Option<&str> {
+    let (lod, suffix) = lod_property(property)?;
+    GEOMETRY_SUFFIXES.contains(&suffix).then_some(lod)
+}
+
+/// The level of detail a `lodXImplicitRepresentation` carries, e.g. `"2"` for
+/// `lod2ImplicitRepresentation`.
+///
+/// The digit range is [`lod_of`]'s, rather than the 1 to 4 that most modules
+/// declare: the generics module of CityGML 2.0 has a
+/// `lod0ImplicitRepresentation` too, and the scan is by name.
+fn implicit_lod_of(property: &XmlNode) -> Option<&str> {
+    let (lod, suffix) = lod_property(property)?;
+    (suffix == IMPLICIT_SUFFIX).then_some(lod)
+}
+
+/// A `lodX…` property name split into the LoD digit and what follows it, for
+/// an element of a CityGML module namespace.
+fn lod_property(property: &XmlNode) -> Option<(&str, &str)> {
     if !is_citygml_module(&property.ns) {
         return None;
     }
@@ -205,8 +246,7 @@ fn lod_of(property: &XmlNode) -> Option<&str> {
         return None;
     }
     // Splitting after an ASCII digit cannot land inside a character.
-    let (lod, suffix) = rest.split_at(1);
-    GEOMETRY_SUFFIXES.contains(&suffix).then_some(lod)
+    Some(rest.split_at(1))
 }
 
 /// Whether a namespace URI is that of a CityGML module this converter reads.
