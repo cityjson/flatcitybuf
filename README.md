@@ -220,9 +220,13 @@ inputs work the same way, so a directory of tiles becomes one `.fcb`. Scope:
 - `srsName` is normalised to the CityJSON `metadata.referenceSystem` URL form,
   swapping the axes when the source names them latitude-first. **There is no
   reprojection** — coordinates stay in the file's own CRS.
+- **3D geometry only.** A surface whose `srsDimension` says two is skipped;
+  the rest of the document still converts.
 
 Valid CityGML that has no CityJSON representation is skipped rather than
-failing the conversion, and each skip is logged.
+failing the conversion. Every warning is written to stderr in full, with a
+count of the skipped elements after it, so a conversion never loses anything
+without saying so.
 
 ### 🧪 Run Benchmarks
 
