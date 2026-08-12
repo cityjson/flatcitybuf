@@ -114,8 +114,8 @@ pub(crate) fn read_common_attributes(
             if let Some(text) = simple_text(child) {
                 insert(out, NAME, Value::String(text.to_string()), report);
             }
-        } else if GENERICS_NS.contains(&child.ns.as_str()) {
-            read_generic_attribute(child, out, report);
+        } else if let Some(kind) = generic_attribute_kind(child) {
+            read_generic_attribute(child, kind, out, report);
         } else if is_citygml_module(&child.ns) {
             read_thematic_attribute(child, out, report);
         }
@@ -137,12 +137,28 @@ fn read_thematic_attribute(node: &XmlNode, out: &mut Map<String, Value>, report:
     }
 }
 
+/// The type a node declares as a generic attribute, if that is what it is.
+///
+/// The namespace alone does not make one: the generics module also declares
+/// the properties of a `gen:GenericCityObject` — `gen:class`, `gen:function`
+/// — and those are thematic properties like any other module's, read by name
+/// from [`THEMATIC`]. Treating everything in the namespace as a generic
+/// attribute would drop them in silence.
+fn generic_attribute_kind(node: &XmlNode) -> Option<Kind> {
+    GENERICS_NS
+        .contains(&node.ns.as_str())
+        .then(|| kind_of(&GENERIC, &node.local))
+        .flatten()
+}
+
 /// Read one `gen:…Attribute`, whose name and type are in the document rather
 /// than in the schema.
-fn read_generic_attribute(node: &XmlNode, out: &mut Map<String, Value>, report: &mut ParseReport) {
-    let Some(kind) = kind_of(&GENERIC, &node.local) else {
-        return;
-    };
+fn read_generic_attribute(
+    node: &XmlNode,
+    kind: Kind,
+    out: &mut Map<String, Value>,
+    report: &mut ParseReport,
+) {
     let Some(name) = node.attr(NAME).filter(|name| !name.is_empty()) else {
         report.warnings.push(format!(
             "<{}> has no {NAME}; the generic attribute is skipped",
@@ -455,6 +471,25 @@ mod tests {
                <measuredHeight>9.5</measuredHeight>"#,
         );
         assert!(out.is_empty(), "{out:?}");
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    /// The generics module declares the properties of a
+    /// `gen:GenericCityObject` as well as the generic attributes, and those
+    /// properties are schema-declared like any other module's. Reading
+    /// everything in the namespace as a generic attribute would drop them:
+    /// they carry no `name`, so they would look like attributes that had lost
+    /// theirs.
+    #[test]
+    fn the_generics_modules_own_properties_are_thematic() {
+        let (out, report) = read(
+            r#"<gen:class>1000</gen:class>
+               <gen:function>1010</gen:function>
+               <gen:stringAttribute name="owner"><gen:value>Acme</gen:value></gen:stringAttribute>"#,
+        );
+        assert_eq!(out["class"], json!("1000"));
+        assert_eq!(out["function"], json!("1010"));
+        assert_eq!(out["owner"], json!("Acme"));
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
 

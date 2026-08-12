@@ -64,6 +64,17 @@ pub struct IntermediateObject {
     /// Building parts, installations and the like: objects that belong to
     /// this one and share its CityJSON feature.
     pub children: Vec<IntermediateObject>,
+    /// The members of a `grp:CityObjectGroup`: the id of each, and the role
+    /// the group gives it — `None` where the source stated none, which
+    /// CityJSON writes as `null` rather than as a missing entry.
+    ///
+    /// These are *references*, which is what makes them a field of their own
+    /// rather than [`children`](Self::children). A group's members are
+    /// ordinarily city objects of other features — a CityJSONSeq document is
+    /// one feature per line, and a group names its members by id across those
+    /// lines — so there is no object here to nest, and the id is carried
+    /// verbatim. Empty for every object but a group.
+    pub group_members: Vec<(String, Option<String>)>,
 }
 
 impl IntermediateObject {
@@ -75,6 +86,7 @@ impl IntermediateObject {
             attributes: Map::new(),
             geometries: Vec::new(),
             children: Vec::new(),
+            group_members: Vec::new(),
         }
     }
 }

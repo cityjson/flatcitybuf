@@ -181,11 +181,27 @@ fn add_city_object(
     city_object.attributes =
         (!object.attributes.is_empty()).then(|| Value::Object(object.attributes.clone()));
     city_object.parents = parent.map(|parent| vec![parent.to_string()]);
-    city_object.children = (!object.children.is_empty()).then(|| {
+
+    // A group's members are children too, and they are the ones that may name
+    // an object of another feature: CityJSON § 2.5 lets a CityObjectGroup
+    // refer to its members by id, and this converter keeps that id as it
+    // stands. They follow the nested objects rather than replacing them, so
+    // that an object which somehow had both keeps both, and `children_roles`
+    // — which the spec requires to be one entry per child, in the same order —
+    // is filled with `null` for the nested ones.
+    let children: Vec<String> = object
+        .children
+        .iter()
+        .map(|child| child.id.clone())
+        .chain(object.group_members.iter().map(|(id, _)| id.clone()))
+        .collect();
+    city_object.children = (!children.is_empty()).then_some(children);
+    city_object.children_roles = (!object.group_members.is_empty()).then(|| {
         object
             .children
             .iter()
-            .map(|child| child.id.clone())
+            .map(|_| None)
+            .chain(object.group_members.iter().map(|(_, role)| role.clone()))
             .collect()
     });
 

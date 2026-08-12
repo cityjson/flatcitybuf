@@ -27,3 +27,8 @@ fn semantic_surfaces() {
 fn building_hierarchy() {
     common::assert_fixture("building_hierarchy");
 }
+
+#[test]
+fn thematic_modules() {
+    common::assert_fixture("thematic_modules");
+}
