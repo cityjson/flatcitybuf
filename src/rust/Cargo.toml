@@ -5,6 +5,7 @@ resolver = "2"
 
 [workspace.dependencies]
 fcb_core = { version = "0.7.2", path = "fcb_core", default-features = false }
+fcb_citygml = { version = "0.1.0", path = "fcb_citygml" }
 bytemuck = "1.15.0"
 async-trait = { version = "0.1.85", default-features = true }
 flatbuffers = "25.9.23"
