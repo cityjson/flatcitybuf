@@ -22,7 +22,7 @@
 
 use super::attributes::read_common_attributes;
 use super::semantics::{read_semantic_surfaces, SurfaceProperty, SurfaceSpec};
-use super::{member_object_id, read_lod_geometries};
+use super::{member_object_id, read_lod_geometries, MemberId};
 use crate::gml::XlinkRegistry;
 use crate::model::IntermediateObject;
 use crate::xml::XmlNode;
@@ -208,7 +208,7 @@ pub(crate) fn spec_of(node: &XmlNode) -> Option<&'static ConstructionSpec> {
 ///
 /// `registry` indexes the polygons of the whole `cityObjectMember`, so a solid
 /// whose faces are `xlink:href`s to polygons written elsewhere in the feature
-/// resolves. `member_index` names the object when it carries no `gml:id`; the
+/// resolves. `member_id` names the object when it carries no `gml:id`; the
 /// generated id is stable for a given document, which matters because it ends
 /// up as a CityJSON object key.
 ///
@@ -221,10 +221,10 @@ pub(crate) fn read_construction(
     spec: &ConstructionSpec,
     member: &XmlNode,
     registry: &XlinkRegistry,
-    member_index: usize,
+    member_id: MemberId,
     report: &mut ParseReport,
 ) -> Result<IntermediateObject, CityGmlError> {
-    let id = member_object_id(node, member_index);
+    let id = member_object_id(node, member_id);
     read_construction_object(
         node,
         id,
@@ -379,8 +379,15 @@ mod tests {
         let spec = spec_of(&root).unwrap_or_else(|| panic!("no reader for <{}>", root.local));
         let registry = XlinkRegistry::collect(&root);
         let mut report = ParseReport::default();
-        let object = read_construction(&root, spec, &root, &registry, 0, &mut report)
-            .unwrap_or_else(|err| panic!("read failed: {err}"));
+        let object = read_construction(
+            &root,
+            spec,
+            &root,
+            &registry,
+            MemberId::for_tests(),
+            &mut report,
+        )
+        .unwrap_or_else(|err| panic!("read failed: {err}"));
         (object, report)
     }
 

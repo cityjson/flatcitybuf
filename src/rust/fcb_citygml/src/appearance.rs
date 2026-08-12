@@ -10,8 +10,8 @@
 //!
 //! So this module does the reading half only — surface data in, one
 //! [`SurfaceData`] apiece out, targets kept as the polygon and ring ids they
-//! name — and [`crate::convert`] does the join, which is the half that needs
-//! the geometry.
+//! name — and the converter does the join, which is the half that needs the
+//! geometry.
 //!
 //! An `app:Appearance` reaches here from either of the two places CityGML
 //! allows it: the `app:appearanceMember` property of the `CityModel`, and the
@@ -44,6 +44,10 @@ const IMAGE_URI: &str = "imageURI";
 const MIME_TYPE: &str = "mimeType";
 const WRAP_MODE: &str = "wrapMode";
 const TEXTURE_TYPE: &str = "textureType";
+
+/// The one property of an `app:ParameterizedTexture` this converter reads
+/// only to report that it is dropped; see [`read_texture`].
+const BORDER_COLOR: &str = "borderColor";
 
 /// Names of the attributes an `app:ParameterizedTexture` states its join in:
 /// the polygon a target paints, and the ring one list of texture coordinates
@@ -123,7 +127,7 @@ pub enum SurfaceData {
 ///
 /// The coordinates are as the document wrote them, in its own order and
 /// without its closing point removed — matching them against the ring the
-/// reader repaired is [`crate::convert`]'s job, because only the converter
+/// reader repaired is the converter's job, because only the converter
 /// has the geometry.
 ///
 /// CityGML texture space and CityJSON's `vertices-texture` are the same
@@ -292,9 +296,12 @@ fn fragment(uri: &str) -> &str {
 /// in any other format cannot be written at all; dropping the whole surface
 /// data is the honest outcome, and it is recorded rather than silent.
 ///
-/// `app:borderColor` is not read: CityJSON's `borderColor` applies to the
-/// `border` wrap mode alone, and nothing in this converter's corpus states
-/// one.
+/// `app:borderColor` is not carried over. CityJSON has a `borderColor` of its
+/// own, and it would be a plain mapping — but the colour a CityGML border
+/// carries is RGBA where CityJSON's is RGB plus an alpha this converter has
+/// nowhere to put a fourth component of, and no file in the corpus states
+/// one to test the mapping against. So a texture that states it keeps its
+/// image and loses its border, and says so.
 fn read_texture(node: &XmlNode, report: &mut ParseReport) -> Option<TextureObject> {
     let Some(image) = app_child(node, IMAGE_URI)
         .map(|uri| uri.text.trim())
@@ -316,6 +323,15 @@ fn read_texture(node: &XmlNode, report: &mut ParseReport) -> Option<TextureObjec
         ));
         return None;
     };
+    if app_child(node, BORDER_COLOR).is_some() {
+        report.skipped.push(skip(
+            node,
+            format!(
+                "<{BORDER_COLOR}> of <{PARAMETERIZED_TEXTURE}> is not carried over; the texture \
+                 keeps its image and wrap mode"
+            ),
+        ));
+    }
     Some(TextureObject {
         thetype: Some(thetype),
         // Verbatim: the URI is resolved against the document, and rewriting
@@ -992,6 +1008,31 @@ mod tests {
     /// All five CityGML wrap modes are CityJSON wrap modes under the same
     /// spelling; anything else is dropped with a warning rather than
     /// defaulted, because a wrong wrap mode is a visibly wrong texture.
+    /// A border colour is content the source states and this converter does
+    /// not write: the texture survives without it, and the drop is reported.
+    #[test]
+    fn a_border_colour_is_reported_rather_than_dropped_in_silence() {
+        let (data, report) = parse(&texture(
+            "<app:imageURI>a.png</app:imageURI>\
+             <app:wrapMode>border</app:wrapMode>\
+             <app:borderColor>1.0 0.0 0.0 1.0</app:borderColor>",
+        ));
+        let bordered = only_texture(&data).1;
+        assert_eq!(bordered.image.as_deref(), Some("a.png"));
+        assert_eq!(bordered.wrap_mode, Some(WrapMode::Border));
+        assert!(bordered.border_color.is_none());
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert!(
+            report.skipped[0].reason.contains("borderColor"),
+            "{}",
+            report.skipped[0].reason
+        );
+
+        // A texture without one says nothing.
+        let (_, report) = parse(&texture("<app:imageURI>a.png</app:imageURI>"));
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+    }
+
     #[test]
     fn every_wrap_mode_and_texture_type_maps_to_its_cityjson_name() {
         for (text, expected) in [

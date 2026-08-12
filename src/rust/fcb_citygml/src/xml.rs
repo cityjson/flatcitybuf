@@ -9,6 +9,16 @@
 //! Nodes carry the *resolved* namespace URI, never the prefix: a document is
 //! free to bind `gml:` to anything, or to make GML the default namespace, and
 //! the readers must not care.
+//!
+//! Attributes are resolved too, and it matters more than it looks. `gml:id`
+//! is what an `xlink:href` names and what an `app:target` paints, so an
+//! element that happens to carry an *unqualified* `id` — an application
+//! schema is free to define one — must not answer to [`XmlNode::gml_id`], or
+//! a reference would resolve to the wrong element. An attribute with no
+//! prefix is in no namespace (XML Namespaces § 6.2, unlike an element, which
+//! takes the default), so the two are kept apart by storing a qualified
+//! attribute under `{namespace}|{local name}` and an unqualified one under
+//! its local name alone.
 
 use std::io::BufRead;
 
@@ -19,6 +29,7 @@ use quick_xml::name::{QName, ResolveResult};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 
+use crate::gml::GML_NS;
 use crate::{xml_error, CityGmlError};
 
 /// One XML element, with its namespace resolved and its subtree owned.
@@ -29,7 +40,10 @@ pub struct XmlNode {
     pub ns: String,
     /// Local element name, with any prefix stripped.
     pub local: String,
-    /// Attributes as (local name, value); namespace declarations are dropped.
+    /// Attributes as (key, value), where the key is the local name for an
+    /// attribute in no namespace and `{namespace}|{local name}` for one in a
+    /// namespace. Namespace declarations are dropped. Reach them through
+    /// [`XmlNode::attr`] and [`XmlNode::attr_ns`] rather than by hand.
     pub attrs: Vec<(String, String)>,
     /// Direct text content, concatenated across text and CDATA runs and
     /// trimmed. Text belonging to child elements is not included.
@@ -39,27 +53,28 @@ pub struct XmlNode {
 }
 
 impl XmlNode {
-    /// The value of the attribute with this local name, if present.
+    /// The value of the attribute in *no namespace* with this local name.
     ///
-    /// Attributes are matched on their local name alone, so `gml:id` is
-    /// reached as `attr("id")` and `xlink:href` as `attr("href")`.
+    /// This is the one to reach an ordinary XML attribute by — `srsName`,
+    /// `orientation`, `uri` — which is written without a prefix and so is in
+    /// no namespace. A qualified attribute is reached by [`attr_ns`] instead,
+    /// and never answers here.
+    ///
+    /// [`attr_ns`]: XmlNode::attr_ns
     pub fn attr(&self, name: &str) -> Option<&str> {
+        self.value_of(name)
+    }
+
+    /// The value of the attribute in `ns` with this local name.
+    pub(crate) fn attr_ns(&self, ns: &str, local: &str) -> Option<&str> {
+        self.value_of(&attribute_key(ns, local))
+    }
+
+    fn value_of(&self, key: &str) -> Option<&str> {
         self.attrs
             .iter()
-            .find(|(key, _)| key == name)
+            .find(|(name, _)| name == key)
             .map(|(_, value)| value.as_str())
-    }
-
-    /// The first direct child element with this local name.
-    pub fn child(&self, local: &str) -> Option<&XmlNode> {
-        self.children.iter().find(|child| child.local == local)
-    }
-
-    /// Every direct child with this local name, in document order.
-    pub fn children_named<'a>(&'a self, local: &'a str) -> impl Iterator<Item = &'a XmlNode> {
-        self.children
-            .iter()
-            .filter(move |child| child.local == local)
     }
 
     /// This node and all its descendants, depth-first in document order.
@@ -68,13 +83,42 @@ impl XmlNode {
     }
 
     /// The `gml:id` of this element, if it has one.
+    ///
+    /// Only a properly qualified `gml:id` counts: this id is what an
+    /// `xlink:href` and an `app:target` name, and an `id` an application
+    /// schema defined means something else entirely.
     pub fn gml_id(&self) -> Option<&str> {
-        self.attr(GML_ID_ATTR)
+        self.attr_ns(GML_NS, GML_ID_ATTR)
+    }
+
+    /// The `xlink:href` of this element, if it has one.
+    ///
+    /// As with [`gml_id`](Self::gml_id), only the qualified attribute counts:
+    /// an unqualified `href` is not an XLink locator, and following one would
+    /// be following whatever a foreign schema meant by the word.
+    pub(crate) fn href(&self) -> Option<&str> {
+        self.attr_ns(XLINK_NS, HREF_ATTR)
     }
 }
 
-/// Local name of the GML identifier attribute.
+/// Local name of the GML identifier attribute, which is only ever read in
+/// [`GML_NS`].
 const GML_ID_ATTR: &str = "id";
+
+/// The XLink namespace, and the local name of the locator attribute CityGML
+/// shares geometry by.
+const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
+const HREF_ATTR: &str = "href";
+
+/// What separates an attribute's namespace from its local name in the key it
+/// is stored under. A local name cannot hold one, so the split is
+/// unambiguous, and an attribute in no namespace has no separator at all.
+const NS_SEPARATOR: char = '|';
+
+/// The key a qualified attribute is stored and looked up under.
+fn attribute_key(ns: &str, local: &str) -> String {
+    format!("{ns}{NS_SEPARATOR}{local}")
+}
 
 /// Prefix marking a namespace declaration rather than a real attribute.
 const XMLNS: &[u8] = b"xmlns";
@@ -233,10 +277,19 @@ fn node_from_start<R>(reader: &NsReader<R>, start: &BytesStart) -> Result<XmlNod
         let value = attr
             .decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
             .map_err(|source| xml_error(reader, source))?;
-        attrs.push((
-            String::from_utf8_lossy(name.local_name().as_ref()).into_owned(),
-            value.into_owned(),
-        ));
+        let (ns, local) = reader.resolver().resolve_attribute(name);
+        let local = String::from_utf8_lossy(local.as_ref()).into_owned();
+        // An unbound prefix is a namespace error, which quick-xml surfaces
+        // through the event itself; an attribute with no prefix is in no
+        // namespace by definition, and both are stored under the bare local
+        // name, where only an unqualified lookup can reach them.
+        let key = match ns {
+            ResolveResult::Bound(ns) => {
+                attribute_key(&String::from_utf8_lossy(ns.as_ref()), &local)
+            }
+            _ => local,
+        };
+        attrs.push((key, value.into_owned()));
     }
 
     Ok(XmlNode {
@@ -340,41 +393,64 @@ mod tests {
     }
 
     #[test]
-    fn child_and_children_named_match_across_prefixes() {
-        let n = node(
-            r#"<root xmlns:a="urn:x" xmlns:b="urn:y">
-                 <a:item>1</a:item>
-                 <b:item>2</b:item>
-                 <a:other>3</a:other>
-               </root>"#,
-        );
-        assert_eq!(n.child("item").unwrap().text, "1");
-        assert_eq!(n.child("other").unwrap().text, "3");
-        assert!(n.child("missing").is_none());
-
-        let items: Vec<&str> = n.children_named("item").map(|c| c.text.as_str()).collect();
-        assert_eq!(items, vec!["1", "2"]);
-        let namespaces: Vec<&str> = n.children_named("item").map(|c| c.ns.as_str()).collect();
-        assert_eq!(namespaces, vec!["urn:x", "urn:y"]);
-        assert_eq!(n.children_named("missing").count(), 0);
-    }
-
-    #[test]
-    fn attributes_are_stored_by_local_name() {
+    fn attributes_are_reached_by_namespace_and_local_name() {
         let n = node(
             r##"<Building xmlns:gml="http://www.opengis.net/gml"
                           xmlns:xlink="http://www.w3.org/1999/xlink"
                           gml:id="b1" xlink:href="#surface-7" plain="yes"/>"##,
         );
-        assert_eq!(n.attr("id"), Some("b1"));
         assert_eq!(n.gml_id(), Some("b1"));
-        assert_eq!(n.attr("href"), Some("#surface-7"));
+        assert_eq!(n.href(), Some("#surface-7"));
+        // An unprefixed attribute is in no namespace, which is what `attr`
+        // reads; the qualified ones are not reachable that way.
         assert_eq!(n.attr("plain"), Some("yes"));
+        assert_eq!(n.attr("id"), None);
+        assert_eq!(n.attr("href"), None);
         assert_eq!(n.attr("missing"), None);
         // Namespace declarations are not attributes of the element.
         assert_eq!(n.attr("gml"), None);
         assert_eq!(n.attr("xmlns"), None);
         assert_eq!(n.attrs.len(), 3);
+    }
+
+    /// An unqualified `id` is not a `gml:id`. An application schema is free
+    /// to define one, and treating it as the GML identifier would let an
+    /// `xlink:href` or an `app:target` resolve to an element the document
+    /// never named.
+    #[test]
+    fn an_unqualified_id_is_not_a_gml_id() {
+        let n = node(r#"<Building xmlns:gml="http://www.opengis.net/gml" id="b1"/>"#);
+        assert_eq!(n.gml_id(), None);
+        assert_eq!(n.attr("id"), Some("b1"));
+    }
+
+    /// Nor is an `id` an ADE put in a namespace of its own — and the two do
+    /// not shadow the real one when a document carries all three.
+    #[test]
+    fn an_id_in_a_foreign_namespace_is_not_a_gml_id() {
+        let n = node(
+            r#"<Building xmlns:gml="http://www.opengis.net/gml"
+                         xmlns:ade="urn:example:ade"
+                         ade:id="ade-1" id="plain" gml:id="b1"/>"#,
+        );
+        assert_eq!(n.gml_id(), Some("b1"));
+        assert_eq!(n.attr("id"), Some("plain"));
+        assert_eq!(n.attr_ns("urn:example:ade", "id"), Some("ade-1"));
+    }
+
+    /// The same rule for the locator: only `xlink:href` is one.
+    #[test]
+    fn only_an_xlink_href_is_a_locator() {
+        let n = node(
+            r##"<surfaceMember xmlns:ade="urn:example:ade"
+                               href="#unqualified" ade:href="#foreign"/>"##,
+        );
+        assert_eq!(n.href(), None);
+        assert_eq!(n.attr("href"), Some("#unqualified"));
+
+        // A prefix bound to the XLink namespace is one whatever it is called.
+        let n = node(r##"<surfaceMember xmlns:x="http://www.w3.org/1999/xlink" x:href="#p1"/>"##);
+        assert_eq!(n.href(), Some("#p1"));
     }
 
     #[test]
@@ -396,7 +472,7 @@ mod tests {
     fn text_of_children_does_not_leak_into_the_parent() {
         let n = node("<a>outer<b>inner</b></a>");
         assert_eq!(n.text, "outer");
-        assert_eq!(n.child("b").unwrap().text, "inner");
+        assert_eq!(n.children[0].text, "inner");
 
         // A parent holding only layout whitespace has empty text.
         let n = node("<a>\n  <b>inner</b>\n</a>");

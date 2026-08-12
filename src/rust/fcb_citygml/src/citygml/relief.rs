@@ -19,7 +19,7 @@
 //! nor the geometry scan of [`super`] applies, and both are read here.
 
 use super::attributes::read_common_attributes;
-use super::member_object_id;
+use super::{member_object_id, MemberId};
 use crate::gml::{parse_triangles, GmlGeometry};
 use crate::model::{IntermediateGeometry, IntermediateObject};
 use crate::xml::XmlNode;
@@ -73,13 +73,13 @@ pub(crate) fn is_relief(node: &XmlNode) -> bool {
 /// resolve.
 pub(crate) fn read_relief(
     node: &XmlNode,
-    member_index: usize,
+    member_id: MemberId,
     report: &mut ParseReport,
 ) -> Vec<IntermediateObject> {
     if is_in(node, &RELIEF_NS, TIN_RELIEF) {
         return vec![read_tin_relief(
             node,
-            member_object_id(node, member_index),
+            member_object_id(node, member_id),
             report,
         )];
     }
@@ -96,7 +96,7 @@ pub(crate) fn read_relief(
         ),
     });
 
-    let parent_id = member_object_id(node, member_index);
+    let parent_id = member_object_id(node, member_id);
     let mut objects = Vec::new();
     let mut components = 0usize;
     for property in &node.children {
@@ -218,7 +218,7 @@ mod tests {
         let node = node(xml);
         assert!(is_relief(&node), "<{}> is not a relief element", node.local);
         let mut report = ParseReport::default();
-        let objects = read_relief(&node, 0, &mut report);
+        let objects = read_relief(&node, MemberId::for_tests(), &mut report);
         (objects, report)
     }
 

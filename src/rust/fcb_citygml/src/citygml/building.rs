@@ -77,6 +77,7 @@ mod tests {
     use super::*;
     use crate::citygml::construction::{read_construction, spec_of};
     use crate::citygml::semantics::POLYGON;
+    use crate::citygml::MemberId;
     use crate::gml::{GmlGeometry, XlinkRegistry};
     use crate::model::{IntermediateGeometry, IntermediateObject};
     use crate::xml::XmlNode;
@@ -112,8 +113,15 @@ mod tests {
         let building = node(xml);
         let registry = XlinkRegistry::collect(&building);
         let mut report = ParseReport::default();
-        let object = read_construction(&building, &BUILDING, &building, &registry, 0, &mut report)
-            .unwrap_or_else(|err| panic!("read failed: {err}"));
+        let object = read_construction(
+            &building,
+            &BUILDING,
+            &building,
+            &registry,
+            MemberId::for_tests(),
+            &mut report,
+        )
+        .unwrap_or_else(|err| panic!("read failed: {err}"));
         (object, report)
     }
 

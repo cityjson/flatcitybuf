@@ -18,7 +18,7 @@
 
 use super::attributes::read_common_attributes;
 use super::semantics::{read_semantic_surfaces, SurfaceProperty, SurfaceSpec};
-use super::{member_object_id, read_lod_geometries};
+use super::{member_object_id, read_lod_geometries, MemberId};
 use crate::gml::XlinkRegistry;
 use crate::model::IntermediateObject;
 use crate::xml::XmlNode;
@@ -203,10 +203,6 @@ static KINDS: [SimpleKind; 11] = [
 const GROUP_MEMBER: &str = "groupMember";
 const ROLE_ATTR: &str = "role";
 
-/// Local name of the XLink locator attribute. Attributes are matched on their
-/// local name alone, so this reaches `xlink:href` under any prefix.
-const HREF_ATTR: &str = "href";
-
 /// The kind of object this node is, if it is one this file reads.
 pub(crate) fn kind_of(node: &XmlNode) -> Option<&'static SimpleKind> {
     KINDS
@@ -218,7 +214,7 @@ pub(crate) fn kind_of(node: &XmlNode) -> Option<&'static SimpleKind> {
 ///
 /// `registry` indexes the polygons of the whole `cityObjectMember`, so a
 /// road's surface resolves the polygons written under its traffic areas.
-/// `member_index` names the object when it carries no `gml:id`.
+/// `member_id` names the object when it carries no `gml:id`.
 ///
 /// The order of the steps is not free: the geometries must be read before the
 /// semantics, because the semantics pass deduplicates its diagnostics against
@@ -233,11 +229,11 @@ pub(crate) fn read_simple_object(
     kind: &SimpleKind,
     member: &XmlNode,
     registry: &XlinkRegistry,
-    member_index: usize,
+    member_id: MemberId,
     report: &mut ParseReport,
 ) -> Result<IntermediateObject, CityGmlError> {
     let mut object =
-        IntermediateObject::new(member_object_id(node, member_index), kind.co_type.co_type());
+        IntermediateObject::new(member_object_id(node, member_id), kind.co_type.co_type());
     read_common_attributes(node, &mut object.attributes, report);
     object.geometries = read_lod_geometries(node, member, registry, report)?;
     if let Some(spec) = kind.surfaces {
@@ -275,7 +271,7 @@ fn read_group_members(node: &XmlNode, report: &mut ParseReport) -> Vec<(String, 
         // a reference this converter cannot follow either way, and keeping it
         // as it stands says more than dropping it.
         let id = property
-            .attr(HREF_ATTR)
+            .href()
             .map(|href| href.strip_prefix('#').unwrap_or(href))
             .filter(|id| !id.is_empty());
         let Some(id) = id else {
@@ -319,8 +315,15 @@ mod tests {
         let kind = kind_of(&node).unwrap_or_else(|| panic!("no reader for <{}>", node.local));
         let registry = XlinkRegistry::collect(&node);
         let mut report = ParseReport::default();
-        let object = read_simple_object(&node, kind, &node, &registry, 0, &mut report)
-            .unwrap_or_else(|err| panic!("read failed: {err}"));
+        let object = read_simple_object(
+            &node,
+            kind,
+            &node,
+            &registry,
+            MemberId::for_tests(),
+            &mut report,
+        )
+        .unwrap_or_else(|err| panic!("read failed: {err}"));
         (object, report)
     }
 

@@ -57,8 +57,43 @@ const IMPLICIT_SUFFIX: &str = "ImplicitRepresentation";
 /// The prefix every geometry property name starts with.
 const LOD_PREFIX: &str = "lod";
 
+/// Reason recorded for a `lodX…` property whose suffix names something
+/// CityJSON has nowhere to put — `lod2TerrainIntersection`, `lod0FootPrint`,
+/// `lod0RoofEdge`, `tran:lod0Network`.
+///
+/// These are geometry the source states and this converter does not write, so
+/// they are reported rather than passed over in silence, one entry per
+/// occurrence: each is a real drop, and collapsing them would hide how much
+/// of a document went missing.
+const NO_COUNTERPART: &str = "no CityJSON counterpart for this property";
+
 /// The highest level of detail CityGML 2.0 defines.
 const HIGHEST_LOD: u8 = 4;
+
+/// Where a `cityObjectMember` sits in the document, and what to call an
+/// object in it that carries no `gml:id`.
+///
+/// The prefix travels with the index because the index alone is unique only
+/// within one document: two files converted into one dataset both start at
+/// zero, and the second `citygml-obj-0` would overwrite the first. See
+/// [`crate::ParseOptions::id_prefix`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MemberId<'a> {
+    pub prefix: &'a str,
+    pub index: usize,
+}
+
+#[cfg(test)]
+impl MemberId<'static> {
+    /// The first member of a document, named the default way: what a reader's
+    /// own tests pass when the generated id is not what they are testing.
+    fn for_tests() -> Self {
+        Self {
+            prefix: crate::DEFAULT_ID_PREFIX,
+            index: 0,
+        }
+    }
+}
 
 /// Read one `cityObjectMember` into the intermediate model.
 ///
@@ -70,8 +105,9 @@ const HIGHEST_LOD: u8 = 4;
 /// rather than in the caller, keeps that invariant with the code that depends
 /// on it.
 ///
-/// `member_index` is the position of this member among the document's
-/// members, and is used only to name an object whose `gml:id` is missing.
+/// `member_id` is the position of this member among the document's members
+/// and the prefix to go with it, and is used only to name an object whose
+/// `gml:id` is missing.
 ///
 /// Answers *every* top-level object the member yields, which is why it is a
 /// vector and not one object. It is one object for all but one element:
@@ -88,7 +124,7 @@ const HIGHEST_LOD: u8 = 4;
 /// `xlink:href`s that name nothing in the member.
 pub(crate) fn read_member(
     member: &XmlNode,
-    member_index: usize,
+    member_id: MemberId,
     report: &mut ParseReport,
 ) -> Result<Vec<IntermediateObject>, CityGmlError> {
     // A `cityObjectMember` holds exactly one city object. An empty one, or
@@ -106,19 +142,19 @@ pub(crate) fn read_member(
     if let Some(spec) = construction::spec_of(object) {
         let registry = XlinkRegistry::collect(member);
         let object =
-            construction::read_construction(object, spec, member, &registry, member_index, report)?;
+            construction::read_construction(object, spec, member, &registry, member_id, report)?;
         return Ok(vec![object]);
     }
 
     if let Some(kind) = simple::kind_of(object) {
         let registry = XlinkRegistry::collect(member);
         let object =
-            simple::read_simple_object(object, kind, member, &registry, member_index, report)?;
+            simple::read_simple_object(object, kind, member, &registry, member_id, report)?;
         return Ok(vec![object]);
     }
 
     if relief::is_relief(object) {
-        return Ok(relief::read_relief(object, member_index, report));
+        return Ok(relief::read_relief(object, member_id, report));
     }
 
     report.skipped.push(Skipped {
@@ -130,14 +166,15 @@ pub(crate) fn read_member(
 }
 
 /// The id of a top-level city object: its `gml:id`, or a stand-in built from
-/// its member's position in the document.
+/// its member's position in the document and the caller's prefix.
 ///
 /// The generated id is stable for a given document, which matters because it
 /// ends up as a CityJSON object key.
-fn member_object_id(node: &XmlNode, member_index: usize) -> String {
-    node.gml_id()
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("citygml-obj-{member_index}"))
+fn member_object_id(node: &XmlNode, member_id: MemberId) -> String {
+    node.gml_id().map(str::to_owned).unwrap_or_else(|| {
+        let MemberId { prefix, index } = member_id;
+        format!("{prefix}-{index}")
+    })
 }
 
 /// Read every geometry property of an object, in document order.
@@ -193,6 +230,21 @@ fn read_lod_geometries(
                     surfaces: Vec::new(),
                 });
             }
+        } else if lod_property(property).is_some() {
+            // A `lodX…` property of a kind CityJSON cannot hold. Only the
+            // `lod`-prefixed ones are reported: an unmapped *simple* property
+            // is an attribute this converter does not claim, which
+            // [`attributes`] passes over by design, but a property named
+            // after a level of detail is geometry, and geometry that goes
+            // missing has to say so.
+            report.skipped.push(Skipped {
+                element: property.local.clone(),
+                gml_id: property
+                    .gml_id()
+                    .or_else(|| node.gml_id())
+                    .map(str::to_owned),
+                reason: NO_COUNTERPART.to_string(),
+            });
         }
     }
     Ok(geometries)
@@ -331,16 +383,107 @@ mod tests {
         .is_none());
     }
 
+    /// A `lodX…` property CityJSON has nowhere to put is *reported*, once per
+    /// occurrence, rather than passed over in silence.
+    #[test]
+    fn a_lod_property_without_a_counterpart_is_reported() {
+        let object = node(
+            r#"<bldg:Building xmlns:bldg="http://www.opengis.net/citygml/building/2.0"
+                              xmlns:gml="http://www.opengis.net/gml" gml:id="b1">
+                 <bldg:lod2TerrainIntersection><gml:MultiCurve/></bldg:lod2TerrainIntersection>
+                 <bldg:lod2TerrainIntersection><gml:MultiCurve/></bldg:lod2TerrainIntersection>
+                 <bldg:lod0FootPrint><gml:MultiSurface/></bldg:lod0FootPrint>
+               </bldg:Building>"#,
+        );
+        let mut report = ParseReport::default();
+        let geometries =
+            read_lod_geometries(&object, &object, &XlinkRegistry::default(), &mut report).unwrap();
+        assert!(geometries.is_empty());
+
+        let skipped: Vec<(&str, Option<&str>, &str)> = report
+            .skipped
+            .iter()
+            .map(|skip| {
+                (
+                    skip.element.as_str(),
+                    skip.gml_id.as_deref(),
+                    skip.reason.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            skipped,
+            vec![
+                ("lod2TerrainIntersection", Some("b1"), NO_COUNTERPART),
+                ("lod2TerrainIntersection", Some("b1"), NO_COUNTERPART),
+                ("lod0FootPrint", Some("b1"), NO_COUNTERPART),
+            ]
+        );
+    }
+
+    /// Every module spells these the same way, and none of them is a geometry
+    /// CityJSON can hold.
+    #[test]
+    fn the_reported_lod_properties_are_the_ones_no_reader_claims() {
+        for (ns, name) in [
+            (
+                "http://www.opengis.net/citygml/transportation/2.0",
+                "lod0Network",
+            ),
+            (
+                "http://www.opengis.net/citygml/building/2.0",
+                "lod0RoofEdge",
+            ),
+            (
+                "http://www.opengis.net/citygml/building/1.0",
+                "lod3TerrainIntersection",
+            ),
+        ] {
+            let object = node(&format!(r#"<m:Thing xmlns:m="{ns}"><m:{name}/></m:Thing>"#));
+            let mut report = ParseReport::default();
+            read_lod_geometries(&object, &object, &XlinkRegistry::default(), &mut report).unwrap();
+            assert_eq!(report.skipped.len(), 1, "{name}");
+            assert_eq!(report.skipped[0].element, name);
+        }
+    }
+
+    /// The report is for geometry alone: an attribute, or an element outside
+    /// a CityGML module, is not a dropped `lodX…` property and says nothing.
+    #[test]
+    fn an_unmapped_simple_property_is_still_passed_over_in_silence() {
+        let object = node(
+            r#"<bldg:Building xmlns:bldg="http://www.opengis.net/citygml/building/2.0"
+                              xmlns:x="urn:example:ade">
+                 <bldg:measuredHeight>10.0</bldg:measuredHeight>
+                 <bldg:address/>
+                 <x:lod2Something/>
+               </bldg:Building>"#,
+        );
+        let mut report = ParseReport::default();
+        read_lod_geometries(&object, &object, &XlinkRegistry::default(), &mut report).unwrap();
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+    }
+
     #[test]
     fn an_object_without_a_gml_id_is_named_after_its_member() {
-        assert_eq!(member_object_id(&bldg("Building"), 7), "citygml-obj-7");
+        let member = |prefix| MemberId { prefix, index: 7 };
+        assert_eq!(
+            member_object_id(&bldg("Building"), member(crate::DEFAULT_ID_PREFIX)),
+            "citygml-obj-7"
+        );
+        // A caller that names the source keeps two documents' generated ids
+        // apart.
+        assert_eq!(
+            member_object_id(&bldg("Building"), member("tile-42")),
+            "tile-42-7"
+        );
         assert_eq!(
             member_object_id(
                 &node(
                     r#"<bldg:Building xmlns:bldg="http://www.opengis.net/citygml/building/2.0"
                                       xmlns:gml="http://www.opengis.net/gml" gml:id="b1"/>"#
                 ),
-                7
+                member(crate::DEFAULT_ID_PREFIX)
             ),
             "b1"
         );

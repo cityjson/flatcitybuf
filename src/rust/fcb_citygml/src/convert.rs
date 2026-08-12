@@ -283,7 +283,21 @@ fn add_city_object(
             .collect()
     });
 
-    city_objects.insert(object.id.clone(), city_object);
+    // A CityJSON `CityObjects` member is keyed by id, so two objects of one
+    // feature that share one cannot both be written. The first keeps it, as
+    // everywhere else here that a source states one thing twice, and the
+    // second is reported rather than silently overwriting it.
+    match city_objects.entry(object.id.clone()) {
+        Entry::Vacant(free) => {
+            free.insert(city_object);
+        }
+        Entry::Occupied(taken) => report.warnings.push(format!(
+            "more than one city object of this feature carries the id {:?}; the first one keeps \
+             it and the later {:?} is left out",
+            taken.key(),
+            object.co_type,
+        )),
+    }
     for child in &object.children {
         add_city_object(child, Some(&object.id), builder, city_objects, report);
     }
@@ -1461,6 +1475,47 @@ mod tests {
         assert_eq!(
             geometry_json(object)["semantics"]["values"],
             serde_json::json!([0, null])
+        );
+    }
+
+    /// Two objects of one feature cannot share an id: the CityJSON member
+    /// they are written into is keyed by it. The first keeps the key and the
+    /// second is reported, rather than replacing it without a word.
+    #[test]
+    fn a_repeated_city_object_id_is_reported_and_the_first_object_kept() {
+        let face = |z: f64| {
+            GmlGeometry::MultiSurface(vec![polygon(vec![
+                [0.0, 0.0, z],
+                [1.0, 0.0, z],
+                [1.0, 1.0, z],
+            ])])
+        };
+        let mut root = object(face(0.0));
+        let mut clash = object(face(1.0));
+        clash.co_type = cjseq::CityObjectType::BuildingPart;
+        root.children.push(clash);
+
+        let mut report = ParseReport::default();
+        let doc = convert(
+            vec![root],
+            None,
+            Vec::new(),
+            &ParseOptions::default(),
+            &mut report,
+        );
+
+        let feature = &doc.features[0];
+        assert_eq!(feature.city_objects.len(), 1);
+        // The first object, not the child that came after it.
+        assert_eq!(
+            feature.city_objects["o1"].thetype,
+            cjseq::CityObjectType::Building
+        );
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+        assert!(
+            report.warnings[0].contains("\"o1\""),
+            "{}",
+            report.warnings[0]
         );
     }
 

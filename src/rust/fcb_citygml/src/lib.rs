@@ -14,19 +14,29 @@
 //! transform is not known until the last coordinate has been seen. Appearance
 //! crosses the two: the surface data is collected by the reader and joined to
 //! the polygons it paints by the converter, which is the half that has them.
+//!
+//! The public interface is [`parse_citygml`], [`ParseOptions`] and what they
+//! answer with — [`CityGmlDocument`], [`ParseReport`], [`Skipped`] and
+//! [`CityGmlError`]. Everything else is this crate's own: the XML tree, the
+//! GML readers and the intermediate model are reachable only so that
+//! [`parse_to_model`] can be tested against them, and none of them is a
+//! stable interface.
 
-pub mod appearance;
+pub(crate) mod appearance;
 mod citygml;
 mod convert;
+#[doc(hidden)]
 pub mod crs;
 mod error;
-pub mod gml;
-pub mod model;
-pub mod xml;
-
 #[doc(hidden)]
-pub use convert::convert;
+pub mod gml;
+#[doc(hidden)]
+pub mod model;
+pub(crate) mod xml;
+
+use convert::convert;
 pub use error::CityGmlError;
+#[doc(hidden)]
 pub use model::{IntermediateGeometry, IntermediateObject, SemanticSurface};
 
 use std::io::BufRead;
@@ -36,7 +46,7 @@ use quick_xml::NsReader;
 
 use crate::appearance::parse_appearances;
 use crate::crs::NormalizedCrs;
-use crate::gml::{gml_child, is_gml, GML_NS};
+use crate::gml::{gml_child, is_gml, GML_NS, SRS_DIMENSION_ATTR};
 use crate::xml::XmlNode;
 
 /// Local name of the only supported root element.
@@ -77,19 +87,42 @@ const SRS_NAME_ATTR: &str = "srsName";
 /// The warning raised when a document names no CRS anywhere.
 const NO_SRS_NAME: &str = "no srsName found; referenceSystem omitted";
 
+/// Coordinates per position, which is the only shape CityJSON holds.
+const DIMS: usize = 3;
+
 /// Options controlling how a CityGML document is converted.
 #[derive(Debug, Clone)]
 pub struct ParseOptions {
     /// Quantisation scale written to the CityJSON `transform`, and used to
     /// quantise every coordinate.
     pub scale: [f64; 3],
+    /// What to call a top-level city object whose `gml:id` is missing: this
+    /// prefix, then the position of its `cityObjectMember` in the document.
+    ///
+    /// `None` is [`DEFAULT_ID_PREFIX`], which is unique within one document
+    /// and only within one. A caller that converts several documents into one
+    /// dataset — as `fcb ser` does — should pass something that names the
+    /// source, its file stem for choice, or the second file's
+    /// `citygml-obj-0` will collide with the first's.
+    pub id_prefix: Option<String>,
 }
+
+/// The prefix a generated object id carries when the caller names none.
+pub const DEFAULT_ID_PREFIX: &str = "citygml-obj";
 
 impl Default for ParseOptions {
     fn default() -> Self {
         Self {
             scale: [0.001, 0.001, 0.001],
+            id_prefix: None,
         }
+    }
+}
+
+impl ParseOptions {
+    /// The prefix generated ids are built from.
+    fn id_prefix(&self) -> &str {
+        self.id_prefix.as_deref().unwrap_or(DEFAULT_ID_PREFIX)
     }
 }
 
@@ -145,7 +178,7 @@ pub fn parse_citygml<R: BufRead>(
     reader: R,
     opts: &ParseOptions,
 ) -> Result<(CityGmlDocument, ParseReport), CityGmlError> {
-    let (objects, crs, appearances, mut report) = scan_city_model(reader)?;
+    let (objects, crs, appearances, mut report) = scan_city_model(reader, opts)?;
     let appearances = parse_appearances(&appearances, &mut report);
     let document = convert(objects, crs, appearances, opts, &mut report);
     Ok((document, report))
@@ -171,9 +204,9 @@ pub fn parse_citygml<R: BufRead>(
 #[doc(hidden)]
 pub fn parse_to_model<R: BufRead>(
     reader: R,
-    _opts: &ParseOptions,
+    opts: &ParseOptions,
 ) -> Result<(Vec<IntermediateObject>, Option<NormalizedCrs>, ParseReport), CityGmlError> {
-    let (objects, crs, _appearances, report) = scan_city_model(reader)?;
+    let (objects, crs, _appearances, report) = scan_city_model(reader, opts)?;
     Ok((objects, crs, report))
 }
 
@@ -189,12 +222,18 @@ type ScannedModel = (
 ///
 /// Only a single property's subtree is in memory at once, so a document
 /// costs its largest city object rather than its whole self.
-fn scan_city_model<R: BufRead>(reader: R) -> Result<ScannedModel, CityGmlError> {
+fn scan_city_model<R: BufRead>(
+    reader: R,
+    opts: &ParseOptions,
+) -> Result<ScannedModel, CityGmlError> {
     let mut reader = NsReader::from_reader(reader);
     let mut buf = Vec::new();
     read_root(&mut reader, &mut buf)?;
 
-    let mut scan = Scan::default();
+    let mut scan = Scan {
+        id_prefix: opts.id_prefix().to_string(),
+        ..Scan::default()
+    };
     loop {
         buf.clear();
         match reader.read_event_into(&mut buf) {
@@ -225,6 +264,8 @@ fn scan_city_model<R: BufRead>(reader: R) -> Result<ScannedModel, CityGmlError> 
 #[derive(Default)]
 struct Scan {
     objects: Vec<IntermediateObject>,
+    /// What a generated object id starts with; see [`ParseOptions`].
+    id_prefix: String,
     /// The `srsName` of the first top-level `gml:Envelope` that carries one.
     envelope_srs: Option<String>,
     /// The `srsName` of the first GML element inside a member that carries
@@ -264,16 +305,24 @@ impl Scan {
             // One member usually yields one object, but not always: the
             // components of a `dem:ReliefFeature` each become a top-level
             // object of their own. See [`citygml::read_member`].
+            let member_id = citygml::MemberId {
+                prefix: &self.id_prefix,
+                index,
+            };
             self.objects
-                .extend(citygml::read_member(&node, index, &mut self.report)?);
+                .extend(citygml::read_member(&node, member_id, &mut self.report)?);
             return Ok(());
         }
 
         if is_gml(&node, BOUNDED_BY) {
+            let envelope = gml_child(&node, ENVELOPE);
             if self.envelope_srs.is_none() {
-                self.envelope_srs = gml_child(&node, ENVELOPE)
+                self.envelope_srs = envelope
                     .and_then(|envelope| envelope.attr(SRS_NAME_ATTR))
                     .map(str::to_owned);
+            }
+            if let Some(envelope) = envelope {
+                self.check_envelope_dimension(envelope);
             }
             return Ok(());
         }
@@ -289,6 +338,31 @@ impl Scan {
             reason: format!("<{}> is not a supported CityModel property", node.local),
         });
         Ok(())
+    }
+
+    /// Warn when the document's `gml:Envelope` states that its coordinates
+    /// are not three-dimensional.
+    ///
+    /// The dimension a *geometry* declares is read where the geometry is, and
+    /// a ring in any dimension but three is skipped with a reason. This is
+    /// the other place CityGML may state it, and it cannot be honoured the
+    /// same way: the Envelope is one property of the document and the
+    /// geometry is read from another, so by the time a coordinate is grouped
+    /// the Envelope may not have been seen. Saying so is what can be done
+    /// here, and it is better than a file whose every polygon is silently
+    /// three-halves of itself.
+    fn check_envelope_dimension(&mut self, envelope: &XmlNode) {
+        let Some(dims) = envelope
+            .attr(SRS_DIMENSION_ATTR)
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .filter(|dims| *dims != DIMS)
+        else {
+            return;
+        };
+        self.report.warnings.push(format!(
+            "the document's <{ENVELOPE}> declares {SRS_DIMENSION_ATTR} {dims}: geometry that \
+             does not state a dimension of its own is read as {DIMS}D"
+        ));
     }
 
     /// Settle the document's CRS and hand back what the scan produced.

@@ -7,7 +7,8 @@
 mod geometry;
 mod implicit;
 
-pub use geometry::{parse_geometry, parse_triangles, GmlGeometry, XlinkRegistry};
+pub use geometry::GmlGeometry;
+pub(crate) use geometry::{parse_geometry, parse_triangles, XlinkRegistry};
 pub(crate) use implicit::flatten_implicit;
 
 use crate::xml::XmlNode;
@@ -49,10 +50,29 @@ const LINEAR_RING: &str = "LinearRing";
 const POS: &str = "pos";
 const POS_LIST: &str = "posList";
 
-/// Coordinates per position. CityGML geometry is 3D; a `srsDimension` of 2
-/// is not supported, and shows up as a coordinate count that is not a
-/// multiple of three.
+/// Coordinates per position when nothing says otherwise. CityGML geometry is
+/// 3D, and CityJSON has no other shape to write it in.
 const DIMS: usize = 3;
+
+/// Name of the GML attribute stating how many numbers make one position.
+///
+/// It may sit on the position element itself or on any element above it, and
+/// the nearest declaration wins (GML 3.1.1, `SRSReferenceGroup`). CityGML
+/// files put it on the `gml:posList` as a rule, and on the document's
+/// `gml:Envelope` when they state it once for the whole file.
+pub(crate) const SRS_DIMENSION_ATTR: &str = "srsDimension";
+
+/// Reason recorded for a polygon whose rings collapse to no area.
+pub(crate) const DEGENERATE: &str = "degenerate ring";
+
+/// A `gml:Polygon` as this converter reads it: the polygon, or the reason
+/// there is no CityJSON surface to write.
+///
+/// The two reasons are a ring that carries no area and coordinates stated in
+/// a dimension CityJSON cannot hold. Both are valid GML that simply cannot be
+/// written, so both are *reported* and neither is fatal — and the reason
+/// travels with the outcome because the caller cannot tell the two apart.
+pub(crate) type MaybePolygon = Result<Polygon3, String>;
 
 /// Parse a `gml:Polygon` element into its repaired rings.
 ///
@@ -63,46 +83,20 @@ const DIMS: usize = 3;
 /// caller's decision, so `node` itself is not checked — `gml:Triangle` and
 /// `gml:Rectangle` have the same content model and parse the same way.
 ///
-/// Returns `Ok(None)` when any of the polygon's rings collapses to fewer
-/// than three distinct points — the polygon carries no area and cannot be
-/// written as a CityJSON surface, so the caller records a skip.
+/// Returns the reason instead of a polygon when one of its rings collapses to
+/// fewer than three distinct points, and when the coordinates are stated in a
+/// `srsDimension` other than three: neither can be written as a CityJSON
+/// surface, and the caller records the reason as a skip.
 ///
 /// # Errors
 ///
 /// Returns [`CityGmlError::InvalidGeometry`] when the polygon is structurally
-/// wrong rather than merely degenerate: no exterior ring, a boundary with no
+/// wrong rather than merely unwritable: no exterior ring, a boundary with no
 /// `LinearRing`, a coordinate that is not a number, or a coordinate count
-/// that is not a multiple of three.
-///
-/// # Examples
-///
-/// ```
-/// use fcb_citygml::gml::parse_polygon;
-/// use fcb_citygml::xml::XmlNode;
-///
-/// // <gml:Polygon><gml:exterior><gml:LinearRing>
-/// //   <gml:posList>0 0 0 1 0 0 1 1 0 0 0 0</gml:posList>
-/// // </gml:LinearRing></gml:exterior></gml:Polygon>
-/// fn el(local: &str, text: &str, children: Vec<XmlNode>) -> XmlNode {
-///     XmlNode {
-///         ns: "http://www.opengis.net/gml".to_string(),
-///         local: local.to_string(),
-///         attrs: Vec::new(),
-///         text: text.to_string(),
-///         children,
-///     }
-/// }
-/// let pos_list = el("posList", "0 0 0 1 0 0 1 1 0 0 0 0", Vec::new());
-/// let ring = el("LinearRing", "", vec![pos_list]);
-/// let node = el("Polygon", "", vec![el("exterior", "", vec![ring])]);
-///
-/// let polygon = parse_polygon(&node)?.expect("the ring is not degenerate");
-/// // The closing point is dropped: CityJSON rings are not closed.
-/// assert_eq!(polygon.rings[0].pts, vec![[0., 0., 0.], [1., 0., 0.], [1., 1., 0.]]);
-/// # Ok::<(), fcb_citygml::CityGmlError>(())
-/// ```
-pub fn parse_polygon(node: &XmlNode) -> Result<Option<Polygon3>, CityGmlError> {
+/// that is not a multiple of the dimension the document declared.
+pub(crate) fn parse_polygon(node: &XmlNode) -> Result<MaybePolygon, CityGmlError> {
     let gml_id = node.gml_id().map(str::to_owned);
+    let dims = srs_dimension(node, DIMS);
 
     let mut exterior = None;
     let mut interiors = Vec::new();
@@ -114,8 +108,9 @@ pub fn parse_polygon(node: &XmlNode) -> Result<Option<Polygon3>, CityGmlError> {
         } else {
             continue;
         };
-        let Some(ring) = parse_ring(boundary)? else {
-            return Ok(None);
+        let ring = match parse_ring(boundary, dims)? {
+            Ok(ring) => ring,
+            Err(reason) => return Ok(Err(reason)),
         };
         if is_exterior && exterior.is_none() {
             exterior = Some(ring);
@@ -136,7 +131,7 @@ pub fn parse_polygon(node: &XmlNode) -> Result<Option<Polygon3>, CityGmlError> {
     let mut rings = Vec::with_capacity(1 + interiors.len());
     rings.push(exterior);
     rings.append(&mut interiors);
-    Ok(Some(Polygon3 {
+    Ok(Ok(Polygon3 {
         gml_id,
         rings,
         sem_idx: None,
@@ -145,54 +140,97 @@ pub fn parse_polygon(node: &XmlNode) -> Result<Option<Polygon3>, CityGmlError> {
 
 /// Parse the `LinearRing` inside a `gml:exterior` or `gml:interior`.
 ///
-/// Returns `Ok(None)` when the ring is degenerate.
-fn parse_ring(boundary: &XmlNode) -> Result<Option<Ring>, CityGmlError> {
+/// `inherited` is the coordinate dimension in force outside this boundary;
+/// the boundary and the ring may each override it.
+///
+/// Returns the reason instead of a ring when the ring is degenerate or is
+/// stated in a dimension this converter cannot write.
+fn parse_ring(boundary: &XmlNode, inherited: usize) -> Result<Result<Ring, String>, CityGmlError> {
+    let dims = srs_dimension(boundary, inherited);
     let Some(linear_ring) = gml_child(boundary, LINEAR_RING) else {
         return Err(CityGmlError::InvalidGeometry {
             context: element_context(boundary),
             reason: format!("no GML <{LINEAR_RING}> child"),
         });
     };
-    let pts = parse_positions(linear_ring)?;
-    Ok(repair_ring(pts).map(|pts| Ring {
-        gml_id: linear_ring.gml_id().map(str::to_owned),
-        pts,
-    }))
+    let pts = match parse_positions(linear_ring, srs_dimension(linear_ring, dims))? {
+        Ok(pts) => pts,
+        Err(reason) => return Ok(Err(reason)),
+    };
+    Ok(repair_ring(pts)
+        .map(|pts| Ring {
+            gml_id: linear_ring.gml_id().map(str::to_owned),
+            pts,
+        })
+        .ok_or_else(|| DEGENERATE.to_string()))
 }
 
 /// Collect the points of a `LinearRing` from its `pos` and `posList` children.
-fn parse_positions(ring: &XmlNode) -> Result<Vec<[f64; 3]>, CityGmlError> {
+///
+/// `inherited` is the coordinate dimension in force outside each position,
+/// which the position itself may override.
+fn parse_positions(
+    ring: &XmlNode,
+    inherited: usize,
+) -> Result<Result<Vec<[f64; 3]>, String>, CityGmlError> {
     let mut pts = Vec::new();
     for child in &ring.children {
         if child.ns != GML_NS {
             continue;
         }
+        let dims = srs_dimension(child, inherited);
         match child.local.as_str() {
             POS => {
-                let point = parse_coords(&child.text, child)?;
+                let point = match parse_coords(&child.text, child, dims)? {
+                    Ok(point) => point,
+                    Err(reason) => return Ok(Err(reason)),
+                };
                 if point.len() != 1 {
                     return Err(CityGmlError::InvalidGeometry {
                         context: element_context(child),
                         reason: format!(
-                            "<{POS}> holds {} coordinates, expected {DIMS}",
-                            point.len() * DIMS
+                            "<{POS}> holds {} coordinates, expected {dims}",
+                            point.len() * dims
                         ),
                     });
                 }
                 pts.extend(point);
             }
-            POS_LIST => pts.extend(parse_coords(&child.text, child)?),
+            POS_LIST => match parse_coords(&child.text, child, dims)? {
+                Ok(points) => pts.extend(points),
+                Err(reason) => return Ok(Err(reason)),
+            },
             _ => {}
         }
     }
-    Ok(pts)
+    Ok(Ok(pts))
 }
 
 /// Parse whitespace-separated coordinates into 3D points.
 ///
 /// Points are assembled as the tokens arrive rather than via an intermediate
 /// list of scalars: a single `posList` can hold tens of thousands of them.
-fn parse_coords(text: &str, owner: &XmlNode) -> Result<Vec<[f64; 3]>, CityGmlError> {
+///
+/// Returns the reason instead of the points when `dims` is not three: the
+/// coordinates are perfectly good, and there is simply no CityJSON to write
+/// them as. Grouping them into threes anyway is the failure this guards
+/// against — a 2D ring of six points divides by three as readily as a 3D ring
+/// of four, and the result is four points nowhere near the building.
+fn parse_coords(
+    text: &str,
+    owner: &XmlNode,
+    dims: usize,
+) -> Result<Result<Vec<[f64; 3]>, String>, CityGmlError> {
+    if dims != DIMS {
+        let count = text.split_ascii_whitespace().count();
+        return match count % dims {
+            0 => Ok(Err(format!(
+                "srsDimension {dims} is not supported; CityJSON holds 3D geometry alone"
+            ))),
+            _ => Err(not_a_multiple(owner, count, dims)),
+        };
+    }
+
     let mut pts = Vec::new();
     let mut point = [0.0; DIMS];
     let mut filled = 0;
@@ -205,15 +243,31 @@ fn parse_coords(text: &str, owner: &XmlNode) -> Result<Vec<[f64; 3]>, CityGmlErr
         }
     }
     if filled != 0 {
-        return Err(CityGmlError::InvalidGeometry {
-            context: element_context(owner),
-            reason: format!(
-                "{} coordinates is not a multiple of {DIMS}; only 3D geometry is supported",
-                pts.len() * DIMS + filled
-            ),
-        });
+        return Err(not_a_multiple(owner, pts.len() * DIMS + filled, dims));
     }
-    Ok(pts)
+    Ok(Ok(pts))
+}
+
+/// The error for a coordinate count that does not divide into whole
+/// positions, which is malformed geometry whatever the dimension.
+fn not_a_multiple(owner: &XmlNode, count: usize, dims: usize) -> CityGmlError {
+    CityGmlError::InvalidGeometry {
+        context: element_context(owner),
+        reason: format!("{count} coordinates is not a multiple of the srsDimension {dims}"),
+    }
+}
+
+/// The coordinate dimension an element declares, or `inherited` where it
+/// declares none.
+///
+/// A value that is not a positive whole number says nothing about the
+/// geometry, so the dimension already in force stands rather than a guess
+/// being made from it.
+fn srs_dimension(node: &XmlNode, inherited: usize) -> usize {
+    node.attr(SRS_DIMENSION_ATTR)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|dims| *dims > 0)
+        .unwrap_or(inherited)
 }
 
 /// Parse one coordinate, rejecting anything that is not a finite number.
@@ -322,7 +376,7 @@ mod tests {
         </gml:LinearRing></gml:exterior></gml:Polygon>"#
         ))
         .unwrap()
-        .is_none());
+        .is_err());
     }
     #[test]
     fn odd_coordinate_count_is_invalid_geometry() {
@@ -394,7 +448,7 @@ mod tests {
         </gml:Polygon>"#
         ))
         .unwrap()
-        .is_none());
+        .is_err());
     }
 
     #[test]
@@ -443,7 +497,7 @@ mod tests {
         </gml:Polygon>"#
         ))
         .unwrap()
-        .is_none());
+        .is_err());
     }
 
     #[test]
@@ -583,6 +637,122 @@ mod tests {
             p.rings[0].pts,
             vec![[0., 0., 0.], [10., 0., 0.], [10., 10., 0.]]
         );
+    }
+
+    /// A ring stated in two dimensions is content this converter cannot
+    /// write, not content that is wrong: the polygon is dropped with a reason
+    /// and the document survives.
+    #[test]
+    fn a_two_dimensional_ring_is_dropped_with_a_reason() {
+        let reason = parse_polygon(&node(
+            r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"><gml:exterior><gml:LinearRing>
+          <gml:posList srsDimension="2">0 0 10 0 10 10 0 0</gml:posList>
+        </gml:LinearRing></gml:exterior></gml:Polygon>"#,
+        ))
+        .unwrap()
+        .unwrap_err();
+        assert!(reason.contains("srsDimension 2"), "{reason}");
+    }
+
+    /// The case that used to pass silently: twelve coordinates divide by
+    /// three, so a 2D ring of six points was regrouped into four 3D points
+    /// that were nowhere near the building. The declared dimension is read
+    /// before the coordinates are grouped, so it cannot happen again.
+    #[test]
+    fn a_two_dimensional_ring_whose_count_divides_by_three_is_still_dropped() {
+        let polygon = parse_polygon(&node(
+            r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"><gml:exterior><gml:LinearRing>
+          <gml:posList srsDimension="2">0 0 10 0 10 10 5 15 0 10 0 0</gml:posList>
+        </gml:LinearRing></gml:exterior></gml:Polygon>"#,
+        ))
+        .unwrap();
+        assert!(polygon.is_err(), "{polygon:?}");
+    }
+
+    /// `srsDimension` is inherited from the nearest GML element above the
+    /// position that states one.
+    #[test]
+    fn srs_dimension_is_inherited_from_an_ancestor() {
+        for xml in [
+            r#"<gml:Polygon xmlns:gml="http://www.opengis.net/gml" srsDimension="2">
+                 <gml:exterior><gml:LinearRing>
+                   <gml:posList>0 0 10 0 10 10 0 0</gml:posList>
+                 </gml:LinearRing></gml:exterior></gml:Polygon>"#,
+            r#"<gml:Polygon xmlns:gml="http://www.opengis.net/gml">
+                 <gml:exterior><gml:LinearRing srsDimension="2">
+                   <gml:posList>0 0 10 0 10 10 0 0</gml:posList>
+                 </gml:LinearRing></gml:exterior></gml:Polygon>"#,
+            // The nearest declaration wins: 3D geometry inside a 2D document.
+            r#"<gml:Polygon xmlns:gml="http://www.opengis.net/gml" srsDimension="2">
+                 <gml:exterior><gml:LinearRing>
+                   <gml:posList srsDimension="3">0 0 0 10 0 0 10 10 0 0 0 0</gml:posList>
+                 </gml:LinearRing></gml:exterior></gml:Polygon>"#,
+        ] {
+            let outcome = parse_polygon(&node(xml)).unwrap();
+            assert_eq!(
+                outcome.is_ok(),
+                xml.contains(r#"posList srsDimension="3""#),
+                "{xml}"
+            );
+        }
+    }
+
+    /// A count that does not divide by the *declared* dimension is malformed
+    /// geometry however many dimensions were declared, and stays fatal.
+    #[test]
+    fn a_count_that_does_not_divide_by_the_declared_dimension_is_invalid_geometry() {
+        for pos_list in [
+            // No srsDimension: three, and five coordinates is not a multiple.
+            r#"<gml:posList>0 0 0 10 0</gml:posList>"#,
+            // Declared two, and five is not a multiple of that either.
+            r#"<gml:posList srsDimension="2">0 0 10 0 10</gml:posList>"#,
+        ] {
+            let err = parse_polygon(&node(&format!(
+                r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"><gml:exterior><gml:LinearRing>
+          {pos_list}
+        </gml:LinearRing></gml:exterior></gml:Polygon>"#
+            )))
+            .unwrap_err();
+            assert!(
+                matches!(err, CityGmlError::InvalidGeometry { .. }),
+                "{pos_list}: {err:?}"
+            );
+        }
+    }
+
+    /// A `gml:pos` follows the same rule as a `gml:posList`.
+    #[test]
+    fn a_two_dimensional_pos_is_dropped_with_a_reason() {
+        let reason = parse_polygon(&node(
+            r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"><gml:exterior><gml:LinearRing>
+          <gml:pos srsDimension="2">0 0</gml:pos>
+          <gml:pos srsDimension="2">1 0</gml:pos>
+          <gml:pos srsDimension="2">1 1</gml:pos>
+        </gml:LinearRing></gml:exterior></gml:Polygon>"#,
+        ))
+        .unwrap()
+        .unwrap_err();
+        assert!(reason.contains("srsDimension 2"), "{reason}");
+    }
+
+    /// An `srsDimension` that is not a positive number says nothing, and the
+    /// inherited dimension stands.
+    #[test]
+    fn an_unreadable_srs_dimension_leaves_the_inherited_one_alone() {
+        for value in ["", "three", "0", "-2"] {
+            let polygon = parse_polygon(&node(&format!(
+                r#"
+        <gml:Polygon xmlns:gml="http://www.opengis.net/gml"><gml:exterior><gml:LinearRing>
+          <gml:posList srsDimension="{value}">0 0 0 10 0 0 10 10 0 0 0 0</gml:posList>
+        </gml:LinearRing></gml:exterior></gml:Polygon>"#
+            )))
+            .unwrap();
+            assert!(polygon.is_ok(), "{value}: {polygon:?}");
+        }
     }
 
     #[test]

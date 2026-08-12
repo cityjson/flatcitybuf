@@ -26,10 +26,6 @@ const LIBRARY_OBJECT: &str = "libraryObject";
 const POINT: &str = "Point";
 const POS: &str = "pos";
 
-/// Local name of the XLink locator attribute. Attributes are matched on their
-/// local name alone, so this reaches `xlink:href` under any prefix.
-const HREF_ATTR: &str = "href";
-
 /// A transformation matrix is a 4x4 written row by row.
 const MATRIX_SIZE: usize = 4;
 const MATRIX_LEN: usize = MATRIX_SIZE * MATRIX_SIZE;
@@ -227,7 +223,7 @@ fn template(
         return Ok(None);
     };
 
-    if let Some(href) = property.attr(HREF_ATTR) {
+    if let Some(href) = property.href() {
         let Some(node) = href
             .strip_prefix('#')
             .and_then(|id| member.descendants().find(|node| node.gml_id() == Some(id)))

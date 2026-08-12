@@ -14,7 +14,8 @@
 use std::collections::HashMap;
 
 use super::{
-    element_context, gml_child, is_gml, parse_polygon, Polygon3, EXTERIOR, GML_NS, INTERIOR,
+    element_context, gml_child, is_gml, parse_polygon, MaybePolygon, Polygon3, EXTERIOR, GML_NS,
+    INTERIOR,
 };
 use crate::xml::XmlNode;
 use crate::{CityGmlError, ParseReport, Skipped};
@@ -59,18 +60,11 @@ const BASE_SURFACE: &str = "baseSurface";
 /// [`parse_polygon`].
 const PATCH_LOCAL_NAMES: [&str; 4] = [POLYGON, "PolygonPatch", "Triangle", "Rectangle"];
 
-/// Local name of the XLink locator attribute. Attributes are matched on their
-/// local name alone, so this reaches `xlink:href` under any prefix.
-const HREF_ATTR: &str = "href";
-
 /// The `gml:OrientableSurface` attribute that may reverse its base surface,
 /// and the one value of it that does. The default is `"+"`, which is why
 /// absence and `"+"` mean the same thing.
 const ORIENTATION_ATTR: &str = "orientation";
 const REVERSED: &str = "-";
-
-/// Reason recorded for a polygon whose rings carry no area.
-const DEGENERATE: &str = "degenerate ring";
 
 /// A GML geometry aggregate, in the shapes CityJSON can express.
 ///
@@ -141,41 +135,7 @@ impl GmlGeometry {
 /// [`CityGmlError::InvalidGeometry`] when a solid has no exterior shell, or
 /// one that holds no surfaces at all — a solid without a boundary is
 /// structurally wrong rather than merely unrepresentable.
-///
-/// # Examples
-///
-/// ```
-/// use fcb_citygml::gml::{parse_geometry, GmlGeometry, XlinkRegistry};
-/// use fcb_citygml::xml::XmlNode;
-/// use fcb_citygml::ParseReport;
-///
-/// // <gml:MultiSurface><gml:surfaceMember><gml:Polygon><gml:exterior>
-/// //   <gml:LinearRing><gml:posList>0 0 0 1 0 0 1 1 0 0 0 0</gml:posList>
-/// // </gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember></gml:MultiSurface>
-/// fn el(local: &str, text: &str, children: Vec<XmlNode>) -> XmlNode {
-///     XmlNode {
-///         ns: "http://www.opengis.net/gml".to_string(),
-///         local: local.to_string(),
-///         attrs: Vec::new(),
-///         text: text.to_string(),
-///         children,
-///     }
-/// }
-/// let ring = el("LinearRing", "", vec![el("posList", "0 0 0 1 0 0 1 1 0 0 0 0", vec![])]);
-/// let polygon = el("Polygon", "", vec![el("exterior", "", vec![ring])]);
-/// let member = el("surfaceMember", "", vec![polygon]);
-/// let node = el("MultiSurface", "", vec![member]);
-///
-/// let registry = XlinkRegistry::collect(&node);
-/// let mut report = ParseReport::default();
-/// let geometry = parse_geometry(&node, &registry, &mut report)?.expect("a MultiSurface");
-/// match geometry {
-///     GmlGeometry::MultiSurface(polygons) => assert_eq!(polygons.len(), 1),
-///     other => panic!("unexpected geometry: {other:?}"),
-/// }
-/// # Ok::<(), fcb_citygml::CityGmlError>(())
-/// ```
-pub fn parse_geometry(
+pub(crate) fn parse_geometry(
     node: &XmlNode,
     registry: &XlinkRegistry,
     report: &mut ParseReport,
@@ -211,41 +171,7 @@ pub fn parse_geometry(
 /// rather than a `Result`: a terrain is a bag of independent triangles, and
 /// one bad patch out of thousands is a hole in the surface rather than a
 /// reason to lose the document.
-///
-/// # Examples
-///
-/// ```
-/// use fcb_citygml::gml::parse_triangles;
-/// use fcb_citygml::xml::XmlNode;
-/// use fcb_citygml::ParseReport;
-///
-/// // <gml:TriangulatedSurface><gml:trianglePatches><gml:Triangle>
-/// //   <gml:exterior><gml:LinearRing>
-/// //     <gml:posList>0 0 0 1 0 0 1 1 0 0 0 0</gml:posList>
-/// //   </gml:LinearRing></gml:exterior>
-/// // </gml:Triangle></gml:trianglePatches></gml:TriangulatedSurface>
-/// fn el(local: &str, text: &str, children: Vec<XmlNode>) -> XmlNode {
-///     XmlNode {
-///         ns: "http://www.opengis.net/gml".to_string(),
-///         local: local.to_string(),
-///         attrs: Vec::new(),
-///         text: text.to_string(),
-///         children,
-///     }
-/// }
-/// let ring = el("LinearRing", "", vec![el("posList", "0 0 0 1 0 0 1 1 0 0 0 0", vec![])]);
-/// let triangle = el("Triangle", "", vec![el("exterior", "", vec![ring])]);
-/// let patches = el("trianglePatches", "", vec![triangle]);
-/// let node = el("TriangulatedSurface", "", vec![patches]);
-///
-/// let mut report = ParseReport::default();
-/// let triangles = parse_triangles(&node, &mut report);
-/// assert_eq!(triangles.len(), 1);
-/// // The closing point is dropped, leaving the three corners.
-/// assert_eq!(triangles[0].rings[0].pts.len(), 3);
-/// assert!(report.skipped.is_empty());
-/// ```
-pub fn parse_triangles(node: &XmlNode, report: &mut ParseReport) -> Vec<Polygon3> {
+pub(crate) fn parse_triangles(node: &XmlNode, report: &mut ParseReport) -> Vec<Polygon3> {
     let mut triangles = Vec::new();
     if node.ns != GML_NS || ![TRIANGULATED_SURFACE, TIN].contains(&node.local.as_str()) {
         return triangles;
@@ -281,8 +207,10 @@ pub fn parse_triangles(node: &XmlNode, report: &mut ParseReport) -> Vec<Polygon3
 /// all the same way.
 fn parse_triangle(patch: &XmlNode) -> Result<Polygon3, String> {
     let triangle = match parse_polygon(patch) {
-        Ok(Some(triangle)) => triangle,
-        Ok(None) => return Err(DEGENERATE.to_string()),
+        Ok(Ok(triangle)) => triangle,
+        // Valid GML with no CityJSON surface in it: the reason the polygon
+        // reader gives is the reason this patch is dropped.
+        Ok(Err(reason)) => return Err(reason),
         Err(err) => return Err(err.to_string()),
     };
     // A `gml:Triangle` has exactly one ring by definition, and a repaired ring
@@ -357,28 +285,32 @@ fn parse_surface_member(
     let mut property = member;
     let mut reversed = false;
     loop {
-        if let Some(href) = property.attr(HREF_ATTR) {
+        if let Some(href) = property.href() {
             let context = element_context(property);
             return match registry.lookup(href, &context)? {
-                Some(polygon) => Ok(Some(orient(polygon.clone(), reversed))),
-                // Indexed, but degenerate: the reference resolves, the
-                // polygon just carries no area, so it is skipped like an
-                // inline one.
-                None => {
+                Ok(polygon) => Ok(Some(orient(polygon.clone(), reversed))),
+                // Indexed, but unwritable: the reference resolves, the
+                // polygon just carries no CityJSON surface, so it is skipped
+                // like an inline one and for the same stated reason.
+                Err(reason) => {
+                    let reason = reason.to_string();
                     report
                         .skipped
-                        .push(degenerate(href.strip_prefix('#').map(str::to_owned)));
+                        .push(dropped(href.strip_prefix('#').map(str::to_owned), reason));
                     Ok(None)
                 }
             };
         }
 
         if let Some(node) = gml_child(property, POLYGON) {
-            let Some(polygon) = parse_polygon(node)? else {
-                report
-                    .skipped
-                    .push(degenerate(node.gml_id().map(str::to_owned)));
-                return Ok(None);
+            let polygon = match parse_polygon(node)? {
+                Ok(polygon) => polygon,
+                Err(reason) => {
+                    report
+                        .skipped
+                        .push(dropped(node.gml_id().map(str::to_owned), reason));
+                    return Ok(None);
+                }
             };
             return Ok(Some(orient(polygon, reversed)));
         }
@@ -448,10 +380,10 @@ fn parse_patches(
             continue;
         }
         match parse_polygon(patch)? {
-            Some(polygon) => polygons.push(polygon),
-            None => report
+            Ok(polygon) => polygons.push(polygon),
+            Err(reason) => report
                 .skipped
-                .push(degenerate(patch.gml_id().map(str::to_owned))),
+                .push(dropped(patch.gml_id().map(str::to_owned), reason)),
         }
     }
     Ok(())
@@ -552,7 +484,7 @@ fn parse_solids(
         }
         match child.local.as_str() {
             SOLID_MEMBER => {
-                if let Some(href) = child.attr(HREF_ATTR) {
+                if let Some(href) = child.href() {
                     report.skipped.push(unsupported(
                         child,
                         format!("xlink:href {href} to a <{SOLID}> is not supported"),
@@ -586,12 +518,13 @@ fn unsupported(node: &XmlNode, reason: String) -> Skipped {
     }
 }
 
-/// A skip for a polygon whose rings carry no area.
-fn degenerate(gml_id: Option<String>) -> Skipped {
+/// A skip for a polygon that yielded no CityJSON surface, with the reason the
+/// polygon reader gave.
+fn dropped(gml_id: Option<String>, reason: String) -> Skipped {
     Skipped {
         element: POLYGON.to_string(),
         gml_id,
-        reason: DEGENERATE.to_string(),
+        reason,
     }
 }
 
@@ -603,11 +536,12 @@ fn degenerate(gml_id: Option<String>) -> Skipped {
 /// round — and the reference may point backwards or forwards. The whole
 /// subtree is therefore indexed before any geometry is read.
 #[derive(Debug, Default)]
-pub struct XlinkRegistry {
-    /// Polygons by `gml:id`. `None` marks one that parsed as degenerate: it
-    /// is kept so that a reference to it can be told apart from a reference
-    /// to nothing at all.
-    polygons: HashMap<String, Option<Polygon3>>,
+pub(crate) struct XlinkRegistry {
+    /// Polygons by `gml:id`. A polygon that yielded no CityJSON surface is
+    /// kept as the reason it did, so that a reference to it can be told apart
+    /// from a reference to nothing at all — and so that the skip a reference
+    /// to it records says the same thing an inline one would.
+    polygons: HashMap<String, MaybePolygon>,
 }
 
 impl XlinkRegistry {
@@ -617,7 +551,7 @@ impl XlinkRegistry {
     /// out, and the error surfaces as an unresolvable reference if — and only
     /// if — something points at it. Where an id is used twice, which is not
     /// valid XML, the first polygon in document order wins.
-    pub fn collect(subtree: &XmlNode) -> Self {
+    pub(crate) fn collect(subtree: &XmlNode) -> Self {
         let mut polygons = HashMap::new();
         for node in subtree.descendants() {
             if !is_gml(node, POLYGON) {
@@ -633,7 +567,10 @@ impl XlinkRegistry {
         Self { polygons }
     }
 
-    /// Resolve an `xlink:href` to the polygon it names.
+    /// Resolve an `xlink:href` to the polygon it names, keeping "indexed but
+    /// unwritable" (`Ok(Err(the reason))`) apart from "not indexed at all"
+    /// (an error), which is the distinction between a skip and a failed
+    /// conversion.
     ///
     /// `context` describes the element that carries the reference, and is
     /// reported back in the error.
@@ -642,36 +579,15 @@ impl XlinkRegistry {
     ///
     /// Returns [`CityGmlError::UnresolvableXlink`] when `href` is not a
     /// same-document fragment — this converter reads one document and does
-    /// not fetch another — when no polygon in the indexed subtree carries
-    /// that `gml:id`, and when the polygon it names is degenerate and so has
-    /// no rings to hand back.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use fcb_citygml::gml::XlinkRegistry;
-    ///
-    /// // Nothing is indexed, so every reference is unresolvable.
-    /// let registry = XlinkRegistry::default();
-    /// let err = registry.resolve("#p1", "<surfaceMember>").unwrap_err();
-    /// assert!(err.to_string().contains("#p1"));
-    /// ```
-    pub fn resolve(&self, href: &str, context: &str) -> Result<Polygon3, CityGmlError> {
-        self.lookup(href, context)?
-            .cloned()
-            .ok_or_else(|| unresolvable(href, context))
-    }
-
-    /// Look a reference up, keeping "indexed but degenerate" (`Ok(None)`)
-    /// apart from "not indexed at all" (an error), which is the distinction
-    /// between a skip and a failed conversion.
-    fn lookup(&self, href: &str, context: &str) -> Result<Option<&Polygon3>, CityGmlError> {
+    /// not fetch another — and when no polygon in the indexed subtree carries
+    /// that `gml:id`.
+    fn lookup(&self, href: &str, context: &str) -> Result<Result<&Polygon3, &str>, CityGmlError> {
         let id = href
             .strip_prefix('#')
             .ok_or_else(|| unresolvable(href, context))?;
         self.polygons
             .get(id)
-            .map(Option::as_ref)
+            .map(|polygon| polygon.as_ref().map_err(String::as_str))
             .ok_or_else(|| unresolvable(href, context))
     }
 }
@@ -1208,7 +1124,7 @@ mod tests {
     fn an_href_without_a_fragment_is_unresolvable() {
         let registry = XlinkRegistry::default();
         let err = registry
-            .resolve("http://example.com/other.gml#p1", "<surfaceMember>")
+            .lookup("http://example.com/other.gml#p1", "<surfaceMember>")
             .unwrap_err();
         assert!(
             matches!(err, CityGmlError::UnresolvableXlink { .. }),
@@ -1217,7 +1133,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_returns_the_indexed_polygon() {
+    fn lookup_returns_the_indexed_polygon() {
         let root = node(
             r#"<root xmlns:gml="http://www.opengis.net/gml">
                  <gml:Polygon gml:id="p1"><gml:exterior><gml:LinearRing>
@@ -1226,7 +1142,10 @@ mod tests {
                </root>"#,
         );
         let registry = XlinkRegistry::collect(&root);
-        let polygon = registry.resolve("#p1", "<surfaceMember>").unwrap();
+        let polygon = registry
+            .lookup("#p1", "<surfaceMember>")
+            .unwrap()
+            .expect("the polygon is writable");
         assert_eq!(polygon.gml_id.as_deref(), Some("p1"));
         assert_eq!(polygon.rings[0].pts.len(), 3);
     }
@@ -1241,7 +1160,7 @@ mod tests {
                </root>"#,
         );
         let registry = XlinkRegistry::collect(&root);
-        assert!(registry.resolve("#p1", "<surfaceMember>").is_err());
+        assert!(registry.lookup("#p1", "<surfaceMember>").is_err());
     }
 
     #[test]
