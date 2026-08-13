@@ -36,11 +36,34 @@ describe('decodeAttributes', () => {
       .toEqual({ big: 3n })
   })
 
-  it('decodes Byte as u8, matching the WRITER (Rust reader disagrees)', () => {
-    // Deliberate divergence #1: the writer stores Byte as u8, the Rust
-    // reader decodes i8, so stored values > 127 come back negative there.
+  it('decodes Byte as u8, unsigned, like every other implementation', () => {
+    // The writer stores Byte as u8 and all four readers decode it as u8, so a
+    // stored 200 is 200 and not -56. The Rust reader used to decode i8 here;
+    // that divergence is closed (deserializer.rs), and this pins the agreed
+    // answer rather than a port-local choice.
     const schema = [col(0, 'b', ColumnType.Byte)]
     expect(decodeAttributes(concat(rec(0, [200])), schema)).toEqual({ b: 200 })
+  })
+
+  it('decodes Byte, UByte and Binary together, mirroring the Rust test', () => {
+    // The same fixture as `test_decode_attributes_byte_ubyte_binary`
+    // (src/rust/fcb_core/src/reader/deserializer.rs), which asserts
+    // {"b": 200, "ub": 200, "bin": [1, 255]}. Binary is a u32 LE byte length
+    // followed by that many bytes.
+    const schema = [
+      col(0, 'b', ColumnType.Byte),
+      col(1, 'ub', ColumnType.UByte),
+      col(2, 'bin', ColumnType.Binary),
+    ]
+    const blob = concat(
+      rec(0, [200]), rec(1, [200]), rec(2, [2, 0, 0, 0, 1, 255]),
+    )
+    const decoded = decodeAttributes(blob, schema)
+    expect(decoded).toEqual({ b: 200, ub: 200, bin: new Uint8Array([1, 255]) })
+    // The RAW decode API hands out bytes, not a number array: the conversion
+    // to Rust's `[1, 255]` JSON shape belongs to the CityJSON boundary, and
+    // conformance.test.ts pins it there. Keep the two apart deliberately.
+    expect(decoded['bin']).toBeInstanceOf(Uint8Array)
   })
 
   it('returns an empty object for an empty blob', () => {

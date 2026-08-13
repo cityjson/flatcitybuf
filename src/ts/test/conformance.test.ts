@@ -8,6 +8,8 @@ import { Feature } from '../src/feature/index.js'
 import { CityFeature } from '../src/generated/city-feature.js'
 import { CityObject } from '../src/generated/city-object.js'
 import { CityObjectType } from '../src/generated/city-object-type.js'
+import { Column } from '../src/generated/column.js'
+import { ColumnType } from '../src/generated/column-type.js'
 import { Geometry as FbGeometry } from '../src/generated/geometry.js'
 import { GeometryType } from '../src/generated/geometry-type.js'
 import { MaterialMapping } from '../src/generated/material-mapping.js'
@@ -132,6 +134,78 @@ describe('material mapping, at the emitter call site', () => {
       zero: { value: 0 },
       nullvalues: { values: null },
     })
+  })
+})
+
+/** A one-object CityFeature whose object declares its OWN Byte/UByte/Binary
+ *  schema and an attribute blob laid out by hand in the writer's wire format --
+ *  the same fixture as the Rust reader's `test_decode_attributes_byte_ubyte_
+ *  binary`, which asserts `{"b": 200, "ub": 200, "bin": [1, 255]}`.
+ *
+ *  The corpus cannot supply this: no `.fcb` in `conformance/` carries a Binary
+ *  column, and a Binary value is the one attribute type whose decoded form
+ *  (`Uint8Array`) does not survive `JSON.stringify` as itself. */
+function binaryAttrFeature(): Feature {
+  const b = new flatbuffers.Builder(1024)
+
+  const columns: flatbuffers.Offset[] = []
+  for (const [index, name, type] of [
+    [0, 'b', ColumnType.Byte],
+    [1, 'ub', ColumnType.UByte],
+    [2, 'bin', ColumnType.Binary],
+  ] as const) {
+    const nameOffset = b.createString(name)
+    Column.startColumn(b)
+    Column.addIndex(b, index)
+    Column.addName(b, nameOffset)
+    Column.addType(b, type)
+    columns.push(Column.endColumn(b))
+  }
+  const columnsVector = CityObject.createColumnsVector(b, columns)
+
+  // u16 column index then the value, back to back; Binary is a u32 LE length
+  // followed by that many bytes.
+  const attributes = CityObject.createAttributesVector(b, new Uint8Array([
+    0, 0, 200,
+    1, 0, 200,
+    2, 0, 2, 0, 0, 0, 1, 255,
+  ]))
+
+  const objectId = b.createString('o')
+  CityObject.startCityObject(b)
+  CityObject.addType(b, CityObjectType.Building)
+  CityObject.addId(b, objectId)
+  CityObject.addAttributes(b, attributes)
+  CityObject.addColumns(b, columnsVector)
+  const object = CityObject.endCityObject(b)
+
+  const featureId = b.createString('f')
+  const objects = CityFeature.createObjectsVector(b, [object])
+  CityFeature.startCityFeature(b)
+  CityFeature.addId(b, featureId)
+  CityFeature.addObjects(b, objects)
+  b.finishSizePrefixed(CityFeature.endCityFeature(b))
+
+  return new Feature(b.asUint8Array().slice(), [], 0)
+}
+
+describe('binary attributes, at the emitter call site', () => {
+  it('emits a Binary attribute as an ARRAY OF NUMBERS, as the Rust reader does', async () => {
+    const r = await FcbReader.fromBytes(
+      new Uint8Array(readFileSync(resolve(CORPUS, 'empty_appearance.fcb'))),
+    )
+    const attrs = toCityJSONFeature(binaryAttrFeature(), r.header)
+      .CityObjects['o']?.attributes
+
+    expect(attrs).toEqual({ b: 200, ub: 200, bin: [1, 255] })
+
+    // The decisive check, and the reason `attrToJson` calls `Array.from`:
+    // `JSON.stringify(new Uint8Array([1, 255]))` is `{"0":1,"1":255}`, an
+    // OBJECT keyed by index. A `Uint8Array` that reached the emitted document
+    // unconverted would therefore write a shape no other implementation emits
+    // and no consumer expects, while still passing a `toEqual` written
+    // loosely enough. Compare the serialized text.
+    expect(JSON.stringify(attrs)).toBe('{"b":200,"ub":200,"bin":[1,255]}')
   })
 })
 
