@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flatcitybuf"
-version = "0.5.0"
+version = "0.5.1"
 description = "Pure-Python reader for FlatCityBuf, a cloud-optimized binary format for 3D city models"
 # Without this the PyPI project page renders blank: the sdist/wheel carry no
 # Description metadata at all, so nothing of README.md reaches the registry.
