@@ -692,6 +692,12 @@ has the identical absent-vs-empty conflation but feeds no `throw` — see §19
 below, left as a disclosed, lower-severity limitation rather than fixed
 here.
 
+**Superseded (mechanism only, not behaviour):** §19/§20.11 later made
+those other fields `std::optional<std::string>` too, so the standalone
+`has_poc_email` flag was deleted — `poc_email.has_value()` is the same
+test on the field itself. The gate and its throw semantics are unchanged,
+and the test above still pins them.
+
 ---
 
 ## 17. Rust reader: `attr_query.rs` has no `ColumnType::Long` arm — NOT FIXED
@@ -765,20 +771,25 @@ cannot resolve per-object schema or geometry without it).
 
 ## 19. Known limitations left in place — NOT FIXED, disclosed
 
-- **C++ `FileInfo` conflates absent and empty-string for `identifier`,
+- ~~**C++ `FileInfo` conflates absent and empty-string for `identifier`,
   `title`, `crs`, and every `poc_*`/`poc_address_*` field except
-  `poc_email`** (which §16 above gave its own presence flag because it
-  alone escalates to a thrown error). These fields are plain
-  `std::string` members in `src/cpp/include/fcb/header.hpp`, populated in
-  `src/cpp/src/header.cpp`'s `fill_metadata`, and read via truthiness
-  (`if (!info.identifier.empty()) ...`) in `to_cityjson_metadata`. **What a
-  consumer sees:** a header field genuinely set to `""` is silently
-  indistinguishable from one that was never set — the JSON key is omitted
-  either way. No fixture in the repo exercises a legitimately-empty string
-  for any of these fields, so the gap is theoretical rather than observed,
-  but it is a real latent divergence from Rust's `Option<&str>` semantics,
-  the same class of bug §16 fixed for `poc_email` specifically because that
-  one field's conflation could also raise a wrong exception.
+  `poc_email`**~~ — **FIXED for every field except `crs`**, together with
+  §20.11 (see there for the full contract and the fix). `identifier`,
+  `title`, `reference_date` and `poc_contact_name`/`_contact_type`/`_role`/
+  `_phone`/`_email`/`_website` are now `std::optional<std::string>` in
+  `src/cpp/include/fcb/header.hpp`, populated from `fill_metadata`'s
+  existing `!= nullptr` guards, and gated on `has_value()` in
+  `to_cityjson_metadata`/`point_of_contact_to_json`; `has_poc_email` is
+  deleted, subsumed by `poc_email.has_value()`. Two exclusions are
+  deliberate, not oversights:
+  - `poc_address_*` stays `std::string`, because non-emptiness — not
+    presence — is what Rust itself checks there: `to_cj_address`
+    (`deserializer.rs:195-216`) emits each member iff non-empty and the
+    sub-object only when at least one member survives.
+  - `crs` stays `std::string`, because it is *derived* (authority + code
+    from `Header.reference_system`), not read from a schema-optional
+    string. Its own gating divergence is §20.10, still open, and needs
+    Rust/C++/Python treated together.
 - **`std::from_chars` rejects a leading `+` on the address thoroughfare
   number, where Rust's `i64::from_str` accepts it.** Confirmed by
   inspection of `point_of_contact_address_to_json`
@@ -937,7 +948,7 @@ either.
     a unilateral Python fix.
 
 11. **`identifier`/`title` are gated on non-emptiness, not presence,
-    identically in Python and C++.** Rust's `to_cj_metadata` reads
+    identically in Python and C++ — FIXED.** Rust's `to_cj_metadata` reads
     `header.identifier().map(|i| i.to_string())` and
     `header.title().map(|t| t.to_string())`
     (`src/rust/fcb_core/src/reader/deserializer.rs:85,89`) — both fields
@@ -983,6 +994,34 @@ either.
     exercises the input in the first place. Recommend the same follow-up
     as #10: one upstream finding covering all three implementations, not
     a unilateral Python change.
+
+    **Fix.** Both readers now gate on presence, and the fix reaches the
+    representation as this finding required, not only the gate:
+
+    - **Python.** `FileInfo.identifier`/`.title`
+      (`src/py/flatcitybuf/header.py`) are `str | None = None`;
+      `_fill_metadata`'s `is not None` guards were already
+      presence-aware and now survive into the dataclass. The gates in
+      `src/py/flatcitybuf/cityjson.py` became `if info.identifier is not
+      None:` / `if info.title is not None:`. `referenceDate` and
+      `pointOfContact` there already read the raw header through
+      presence-guarded accessors and were correct.
+    - **C++.** The nine schema-optional header strings became
+      `std::optional<std::string>` — see §19's first bullet for the
+      field list, the two deliberate exclusions (`crs`,
+      `poc_address_*`), and the deletion of `has_poc_email`.
+    - **TypeScript** was already correct (`hdr.identifier() ?? undefined`
+      into a `put()` that gates on `!== undefined`) but unpinned; it now
+      carries the same test.
+
+    Each implementation pins BOTH halves — present-but-empty emits `""`,
+    absent omits the key — against a hand-built header buffer, since the
+    corpus cannot express the input. The TS pin was verified to fail when
+    `?? undefined` is mutated to `|| undefined`.
+
+    Still open in the same class: `crs`/`referenceSystem` (§20.10), which
+    is derived rather than read from a schema-optional string and needs
+    Rust, C++ and Python changed together.
 
 ---
 

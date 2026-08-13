@@ -33,8 +33,8 @@ int main(int argc, char** argv) {
         std::printf("file          %s\n", argv[1]);
         std::printf("features      %llu\n", static_cast<unsigned long long>(info.features_count));
         std::printf("CityJSON      %s\n", info.cityjson_version.c_str());
-        if (!info.title.empty())
-            std::printf("title         %s\n", info.title.c_str());
+        if (info.title.has_value())
+            std::printf("title         %s\n", info.title->c_str());
         if (!info.crs.empty())
             std::printf("CRS           %s\n", info.crs.c_str());
 

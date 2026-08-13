@@ -775,7 +775,11 @@ def _to_cityjson_metadata_impl(header: HeaderView) -> Dict[str, Any]:
             else [0.0] * 6
         )
     }
-    if info.identifier:
+    # PRESENCE, not truthiness: Rust `.map()`s the Option accessor
+    # (deserializer.rs:86-93), so a present-but-empty string is Some("")
+    # and emits `"identifier": ""`; only an absent field omits the key.
+    # `if info.identifier:` treated "" as absent -- finding #20.11.
+    if info.identifier is not None:
         meta["identifier"] = info.identifier
     if hdr is not None:
         poc = _point_of_contact(hdr)
@@ -789,7 +793,8 @@ def _to_cityjson_metadata_impl(header: HeaderView) -> Dict[str, Any]:
         meta["referenceSystem"] = (
             f"https://www.opengis.net/def/crs/{authority}/0/{code}"
         )
-    if info.title:
+    # PRESENCE, as for `identifier` above.
+    if info.title is not None:
         meta["title"] = info.title
     cj["metadata"] = meta
 
