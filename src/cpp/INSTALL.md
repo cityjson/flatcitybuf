@@ -41,7 +41,7 @@ add a `vcpkg-configuration.json`:
     {
       "kind": "git",
       "repository": "https://github.com/HideBa/vcpkg",
-      "baseline": "215cc3b59bab5198f619c0a1c0ecdc8144624189",
+      "baseline": "5926be2ef7acd4371eaaf8dae1ffe507b71c5e58",
       "packages": ["flatcitybuf"]
     }
   ]
@@ -64,7 +64,7 @@ HTTP range-request reader. Configure with vcpkg's toolchain file
 integrate exactly as in [Use from CMake](#use-from-cmake) below — the port
 installs the same `flatcitybuf::flatcitybuf` target the manual build does.
 
-The port builds this directory from the `v0.8.0` tag with tests and examples
+The port builds this directory from the `cpp-v0.8.1` tag (C++ releases are tagged `cpp-v<version>`; bare `v<version>` names the Rust crate releases) with tests and examples
 off, JSON on. One packaging note: vcpkg ships a newer FlatBuffers than the
 generated headers' exact-version assert expects, so the port patches the
 assert to major-version-only.
