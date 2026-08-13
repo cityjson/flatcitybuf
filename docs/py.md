@@ -29,13 +29,8 @@ The distribution name is `flatcitybuf` (`src/py/pyproject.toml:6`).
 pip install flatcitybuf     # or: uv pip install flatcitybuf
 ```
 
-> **Today, prefer the source install.** PyPI currently serves `flatcitybuf`
-> 0.2.0 and 0.1.2 only, and both are the *retired PyO3 extension* — platform
-> wheels (`cp39…win_amd64`, `cp313…macosx_11_0_arm64`), not the pure-Python
-> reader. This reader is version 0.3.0 (`src/py/pyproject.toml:7`) and reaches
-> PyPI on the next run of `.github/workflows/publish-python.yml`. Until then,
-> `pip install flatcitybuf` gets you the old extension and the old API.
-> *(Delete this note once 0.3.0 is published.)*
+PyPI serves the pure-Python reader from `0.3.1` onwards; `0.2.0` and `0.1.2`
+are the *retired PyO3 extension* — platform wheels with a different API.
 
 From a checkout, with [uv](https://docs.astral.sh/uv/):
 
