@@ -32,6 +32,15 @@ not.
 
 ## Build and install
 
+The packaged route is vcpkg: the `flatcitybuf` port lives in a custom
+registry (github.com/HideBa/vcpkg), builds from the `cpp-v<version>` tag, and
+installs the same `flatcitybuf::flatcitybuf` target the manual build does —
+registry configuration and current baselines in
+[`src/cpp/INSTALL.md` § Install via vcpkg](../src/cpp/INSTALL.md#install-via-vcpkg).
+Feature `curl` adds the HTTP range-request reader.
+
+From source:
+
 ```bash
 cd src/cpp
 cmake -B build -S .
