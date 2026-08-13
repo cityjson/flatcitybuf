@@ -17,6 +17,8 @@ on:
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.extract_version.outputs.VERSION }}
       tag_exists: ${{ steps.check_tag.outputs.TAG_EXISTS }}
@@ -84,6 +86,11 @@ jobs:
       # actions/create-release@v1 was archived by GitHub and is unmaintained;
       # softprops/action-gh-release is the maintained replacement, and is
       # already what uploads the assets below.
+      #
+      # Auth: the action reads its `token` INPUT, which defaults to
+      # ${{ github.token }} -- a non-empty input always wins, so an
+      # `env: GITHUB_TOKEN:` here was never read. The job-level
+      # `permissions: contents: write` above is what authorizes this call.
       - name: Create GitHub Release
         if: steps.check_tag.outputs.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -93,13 +100,13 @@ jobs:
           body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GA_TOKEN }}
 
   build-cpp:
     name: C++ ${{ matrix.artifact_name }}
     needs: create-release
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -226,14 +233,16 @@ jobs:
           path: ${{ matrix.artifact_name }}.*
           retention-days: 90
 
+      # Auth: the action reads its `token` INPUT, which defaults to
+      # ${{ github.token }} -- a non-empty input always wins, so an
+      # `env: GITHUB_TOKEN:` here was never read. The job-level
+      # `permissions: contents: write` above is what authorizes this call.
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: ${{ matrix.artifact_name }}.*
           generate_release_notes: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GA_TOKEN }}
 
   # API documentation for all four languages, published to GitHub Pages and
   # attached to the release as a single tarball. Previously this job ran

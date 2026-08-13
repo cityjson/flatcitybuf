@@ -134,6 +134,10 @@ cargo install fcb_cli --locked
 
 This installs the `fcb` binary to your Cargo bin directory (usually `~/.cargo/bin/`).
 
+**C++**: Install via vcpkg
+
+The `flatcitybuf` port is served from a [custom vcpkg registry](https://github.com/HideBa/vcpkg): add the registry to your project's `vcpkg-configuration.json`, depend on `flatcitybuf` (feature `curl` for the HTTP reader), and link `flatcitybuf::flatcitybuf`. Registry configuration and current baselines: [`src/cpp/INSTALL.md`](src/cpp/INSTALL.md#install-via-vcpkg)
+
 **Python**: Install from PyPI
 
 ```bash
