@@ -118,10 +118,8 @@ jobs:
             artifact_name: flatcitybuf-cpp-macos-aarch64
           - os: windows-latest
             artifact_name: flatcitybuf-cpp-windows-x86_64
-            vcpkg_triplet: x64-windows
           - os: windows-11-arm
             artifact_name: flatcitybuf-cpp-windows-aarch64
-            vcpkg_triplet: arm64-windows
           # The musl row was dropped: it set CMAKE_C_COMPILER=musl-gcc for a
           # C++ project (musl-tools ships no C++ driver), and a static .a does
           # not carry a libc the way an executable does, so it had no consumer.
@@ -130,31 +128,62 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # CMake needs BOTH flatbuffers and nlohmann-json (FCB_WITH_JSON is ON by
-      # default). The previous workflow installed only nlohmann-json, so
-      # `find_package(flatbuffers CONFIG REQUIRED)` failed at configure time on
-      # every platform.
+      # nlohmann-json comes from the platform package manager where one
+      # exists; flatbuffers deliberately does NOT (see the pinned source
+      # build below).
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libflatbuffers-dev nlohmann-json3-dev
+          sudo apt-get install -y cmake nlohmann-json3-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install flatbuffers nlohmann-json
+        run: brew install nlohmann-json
 
-      # Manifest mode: src/cpp/vcpkg.json already declares flatbuffers and
-      # nlohmann-json, so vcpkg resolves them from the committed manifest
-      # instead of an ad-hoc package list that can drift. The previous
-      # workflow hardcoded `nlohmann-json:x64-windows`, which also named the
-      # wrong triplet on the arm64 runner and never installed flatbuffers.
-      - name: Configure vcpkg (Windows)
+      # Header-only, so a source install is quick. vcpkg is not used here on
+      # purpose: manifest mode reads src/cpp/vcpkg.json, which would drag in
+      # whatever flatbuffers version the port currently floats at.
+      - name: Install nlohmann-json (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          echo "CMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
-          echo "VCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }}" >> $GITHUB_ENV
+          TMP="$(echo "$RUNNER_TEMP" | tr '\\' '/')"
+          git init "$TMP/nlohmann-json"
+          git -C "$TMP/nlohmann-json" fetch --depth 1 \
+            https://github.com/nlohmann/json.git \
+            55f93686c01528224f448c19128836e7df245f72  # v3.12.0
+          git -C "$TMP/nlohmann-json" checkout FETCH_HEAD
+          cmake -S "$TMP/nlohmann-json" -B "$TMP/nlohmann-json/build" \
+            -DCMAKE_BUILD_TYPE=Release -DJSON_BuildTests=OFF
+          cmake --build "$TMP/nlohmann-json/build" --config Release
+          cmake --install "$TMP/nlohmann-json/build" --config Release \
+            --prefix "$TMP/deps"
+
+      # The committed generated headers static_assert the EXACT flatbuffers
+      # runtime version (25.9.23). Ubuntu's libflatbuffers-dev is 23.5.26 and
+      # ships no CMake config at all, and both brew's formula and vcpkg's port
+      # float with time (25.12.x trips the assert) -- so build the pinned
+      # version from source on every platform, exactly as ci.yml does.
+      # Installing to a prefix needs no elevation on any runner; --config
+      # Release is required by the multi-config VS generator on Windows and is
+      # ignored by the single-config generators elsewhere.
+      - name: Install flatbuffers 25.9.23
+        shell: bash
+        run: |
+          TMP="$(echo "$RUNNER_TEMP" | tr '\\' '/')"
+          echo "DEPS_PREFIX=$TMP/deps" >> "$GITHUB_ENV"
+          git init "$TMP/flatbuffers"
+          git -C "$TMP/flatbuffers" fetch --depth 1 \
+            https://github.com/google/flatbuffers.git \
+            187240970746d00bbd26b0f5873ed54d2477f9f3  # v25.9.23
+          git -C "$TMP/flatbuffers" checkout FETCH_HEAD
+          cmake -S "$TMP/flatbuffers" -B "$TMP/flatbuffers/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFLATBUFFERS_BUILD_TESTS=OFF -DFLATBUFFERS_BUILD_FLATC=OFF
+          cmake --build "$TMP/flatbuffers/build" --config Release -j 4
+          cmake --install "$TMP/flatbuffers/build" --config Release \
+            --prefix "$TMP/deps"
 
       # Tests and examples are OFF: both default to ON, and FCB_BUILD_TESTS=ON
       # additionally requires doctest, which is not installed here -- another
@@ -164,12 +193,9 @@ jobs:
         shell: bash
         working-directory: src/cpp
         run: |
-          ARGS="-B build -DCMAKE_BUILD_TYPE=Release -DFCB_BUILD_TESTS=OFF -DFCB_BUILD_EXAMPLES=OFF"
-          if [[ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]]; then
-            ARGS="$ARGS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
-            ARGS="$ARGS -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}"
-          fi
-          cmake $ARGS
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DFCB_BUILD_TESTS=OFF -DFCB_BUILD_EXAMPLES=OFF \
+            -DCMAKE_PREFIX_PATH="$DEPS_PREFIX"
 
       - name: Build
         shell: bash
