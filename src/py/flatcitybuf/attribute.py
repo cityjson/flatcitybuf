@@ -14,7 +14,15 @@ from flatcitybuf.header import ColumnInfo
 # u64 read with the *signed* format goes negative past 2**63, which
 # matters here directly since attribute values span every integer
 # width.
+#
+# Byte and UByte BOTH use the *unsigned* "<B": the writer stores a Byte
+# with `out[offset] = b as u8` and the B+tree index path reads it back as
+# a u8, so the feature-attribute path must match -- reading it signed
+# turned a stored 200 into -56 (reader/deserializer.rs, arm ColumnType::
+# Byte).
 _FIXED_WIDTH_FORMATS: dict[int, str] = {
+    ColumnType.Byte: "<B",
+    ColumnType.UByte: "<B",
     ColumnType.Short: "<h",
     ColumnType.UShort: "<H",
     ColumnType.Int: "<i",
@@ -33,13 +41,6 @@ _FIXED_WIDTH_FORMATS: dict[int, str] = {
 # 8's job when emitting CityJSON.
 _STRING_LIKE_TYPES = frozenset(
     {ColumnType.String, ColumnType.DateTime, ColumnType.Json}
-)
-
-# attribute.cpp:145-157 -- the writer can emit these, but the reference
-# reader rejects them: silently guessing a width would desynchronise the
-# rest of the blob, since records are not self-delimiting.
-_UNSUPPORTED_TYPES = frozenset(
-    {ColumnType.Byte, ColumnType.UByte, ColumnType.Binary}
 )
 
 
@@ -61,7 +62,10 @@ def decode_attributes(
     attribute.hpp:43-56): repeated records of a little-endian u16 column
     index, then the value encoded per that column's type. Fixed-width
     types are packed little-endian; String, DateTime and Json are a
-    little-endian u32 byte length then UTF-8 text.
+    little-endian u32 byte length then UTF-8 text; Binary is that same
+    u32 length then raw bytes, decoded to a list of ints (the JSON array
+    of numbers the Rust reader emits). Byte and UByte are both a single
+    UNSIGNED byte -- see the note on _FIXED_WIDTH_FORMATS.
 
     CRITICAL -- `schema` MUST be the schema of whichever CityObject
     actually owns `blob`: CityObject.columns overrides Header.columns
@@ -79,8 +83,8 @@ def decode_attributes(
 
     Raises FcbError(INVALID_ATTRIBUTE_VALUE) on a column index absent
     from `schema` or a truncated record, and
-    FcbError(UNSUPPORTED_COLUMN_TYPE) on Byte/UByte/Binary, or any
-    ColumnType value schema does not recognise.
+    FcbError(UNSUPPORTED_COLUMN_TYPE) on any ColumnType value this
+    schema does not recognise.
     """
     out: dict[str, Any] = {}
     if not blob:
@@ -120,12 +124,17 @@ def decode_attributes(
             _need(blob, at, length, "string body")
             value = blob[at : at + length].decode("utf-8", errors="replace")
             at += length
-        elif ctype in _UNSUPPORTED_TYPES:
-            raise FcbError(
-                ErrorCode.UNSUPPORTED_COLUMN_TYPE,
-                f"column '{col.name}' has type Byte/UByte/Binary, "
-                "which the reference reader does not support",
-            )
+        elif ctype == ColumnType.Binary:
+            # Same length prefix as the string-like types, but the body
+            # is raw bytes. Emitted as a list of ints, matching the JSON
+            # array of numbers the Rust reader produces -- and unlike
+            # `bytes`, a list survives JSON serialisation downstream.
+            _need(blob, at, 4, "binary length")
+            (length,) = struct.unpack_from("<I", blob, at)
+            at += 4
+            _need(blob, at, length, "binary body")
+            value = list(blob[at : at + length])
+            at += length
         else:
             raise FcbError(
                 ErrorCode.UNSUPPORTED_COLUMN_TYPE,

@@ -159,6 +159,37 @@ def test_ulong_decodes_unsigned_past_the_i64_boundary() -> None:
     assert decoded["a"] > 0
 
 
+def test_byte_ubyte_and_binary_decode_like_the_rust_reader() -> None:
+    # Hand-built bytes, mirroring the Rust reader's own unit test
+    # test_decode_attributes_byte_ubyte_binary (deserializer.rs) value
+    # for value. The writer emits all three, so the reader must decode
+    # them: rejecting them made a file unreadable by the implementation
+    # that wrote it (docs/upstream-findings.md).
+    #
+    # Byte is stored UNSIGNED -- the Rust writer does `out[offset] = b
+    # as u8` and the B+tree index path reads a u8 back -- so 200 stays
+    # 200 rather than becoming -56. Binary is a little-endian u32 byte
+    # length then that many raw bytes, surfaced as a list of ints,
+    # which is the JSON shape Rust emits (an array of numbers).
+    blob = (
+        struct.pack("<HB", 0, 200)
+        + struct.pack("<HB", 1, 200)
+        + struct.pack("<HI", 2, 2)
+        + bytes([1, 255])
+    )
+    schema = [
+        ColumnInfo(index=0, name="b", type=ColumnType.Byte, nullable=True),
+        ColumnInfo(index=1, name="ub", type=ColumnType.UByte, nullable=True),
+        ColumnInfo(index=2, name="bin", type=ColumnType.Binary, nullable=True),
+    ]
+    decoded = decode_attributes(blob, schema)
+    assert decoded == {"b": 200, "ub": 200, "bin": [1, 255]}
+
+    # These values flow straight into CityJSON output, so the Binary
+    # value must be JSON-serializable -- raw `bytes` would not be.
+    assert json.dumps(decoded) == '{"b": 200, "ub": 200, "bin": [1, 255]}'
+
+
 # --------------------------------------------- schema desync (trap) ---
 
 
@@ -222,14 +253,3 @@ def test_decode_attributes_rejects_a_truncated_record() -> None:
     with pytest.raises(FcbError) as exc_info:
         decode_attributes(blob, schema)
     assert exc_info.value.code is ErrorCode.INVALID_ATTRIBUTE_VALUE
-
-
-def test_decode_attributes_rejects_byte_ubyte_and_binary() -> None:
-    # attribute.cpp:145-157 -- the writer can emit these, but the
-    # reference reader rejects them rather than guess a width.
-    for bad_type in (ColumnType.Byte, ColumnType.UByte, ColumnType.Binary):
-        blob = struct.pack("<HB", 0, 7)
-        schema = [ColumnInfo(index=0, name="a", type=bad_type, nullable=True)]
-        with pytest.raises(FcbError) as exc_info:
-            decode_attributes(blob, schema)
-        assert exc_info.value.code is ErrorCode.UNSUPPORTED_COLUMN_TYPE
