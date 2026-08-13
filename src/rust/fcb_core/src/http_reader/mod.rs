@@ -445,6 +445,16 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
                     );
                     multi_index.add_index(col.name().to_string(), index);
                 }
+                ColumnType::Long => {
+                    let index = HttpIndex::<i64>::new(
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                        index_begin,
+                        feature_begin,
+                        1024 * 1024, // combine_request_threshold
+                    );
+                    multi_index.add_index(col.name().to_string(), index);
+                }
                 ColumnType::ULong => {
                     let index = HttpIndex::<u64>::new(
                         attr_info.num_unique_items() as usize,

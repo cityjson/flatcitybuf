@@ -107,6 +107,14 @@ pub fn add_indices_to_multi_memory_index<R: Read>(
                     )?;
                     multi_index.add_u32_index(col.name().to_string(), index);
                 }
+                ColumnType::Long => {
+                    let index = MemoryIndex::<i64>::from_buf(
+                        &mut buf,
+                        attr_info.num_unique_items() as usize,
+                        attr_info.branching_factor(),
+                    )?;
+                    multi_index.add_i64_index(col.name().to_string(), index);
+                }
                 ColumnType::ULong => {
                     let index = MemoryIndex::<u64>::from_buf(
                         &mut buf,
@@ -247,6 +255,15 @@ pub fn add_indices_to_multi_stream_index<R: Read + Seek>(
                     attr_info.length() as u64,
                 );
                 multi_index.add_u32_index(col.name().to_string(), index, attr_info.length() as u64);
+            }
+            ColumnType::Long => {
+                let index = StreamIndex::<i64>::new(
+                    attr_info.num_unique_items() as usize,
+                    attr_info.branching_factor(),
+                    index_begin,
+                    attr_info.length() as u64,
+                );
+                multi_index.add_i64_index(col.name().to_string(), index, attr_info.length() as u64);
             }
             ColumnType::ULong => {
                 let index = StreamIndex::<u64>::new(
