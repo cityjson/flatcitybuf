@@ -1211,6 +1211,11 @@ impl PackedRTree {
                     distance: f64,
                     level: usize,
                     nodes: Range<usize>,
+                    /// The final node of `nodes` was fetched only to size the
+                    /// previous feature (the `+1` extension below) and must not
+                    /// be evaluated as a nearest candidate — it is the first
+                    /// leaf of the adjacent sibling range.
+                    has_sizing_tail: bool,
                 }
 
                 impl Eq for QueueItem {}
@@ -1235,6 +1240,7 @@ impl PackedRTree {
                     distance: 0.0,
                     nodes: 0..1,
                     level: level_bounds.len() - 1,
+                    has_sizing_tail: false,
                 }));
 
                 while let Some(Reverse(next)) = queue.pop() {
@@ -1254,8 +1260,15 @@ impl PackedRTree {
                         queue.len()
                     );
                     let node_items = read_http_node_items(client, index_begin, &next.nodes).await?;
-
+                    // The trailing sizing node belongs to the next range: it is
+                    // still available to `node_items.get(node_pos + 1)` below,
+                    // but it is never a candidate of *this* range.
+                    let emit_len =
+                        node_items.len() - usize::from(next.level == 0 && next.has_sizing_tail);
                     for (node_pos, node_item) in node_items.iter().enumerate() {
+                        if node_pos >= emit_len {
+                            continue;
+                        }
                         let dist = node_item.min_distance_squared(x, y);
 
                         // If we have a nearest item, only consider this node if it's closer
@@ -1278,7 +1291,13 @@ impl PackedRTree {
                                     range: HttpRange::Range(start..end),
                                 }
                             } else {
-                                debug_assert_eq!(node_pos, num_items - 1);
+                                // See the note in the `Query::BBox` arm:
+                                // `node_pos` is a position within the fetched
+                                // range, not a leaf ordinal.
+                                debug_assert_eq!(
+                                    next.nodes.start + node_pos,
+                                    level_bounds[0].end - 1
+                                );
                                 HttpSearchResultItem {
                                     range: HttpRange::RangeFrom(start..),
                                 }
@@ -1297,18 +1316,25 @@ impl PackedRTree {
                             let mut children_nodes = node_item.offset as usize
                                 ..(node_item.offset + branching_factor as u64) as usize;
 
+                            let mut has_sizing_tail = false;
                             if children_level == 0 {
                                 children_nodes.end += 1;
+                                has_sizing_tail = true;
                             }
 
                             // Always stay within level bounds
-                            children_nodes.end =
+                            let clamped_end =
                                 min(children_nodes.end, level_bounds[children_level].end);
+                            // A clamped range ends at the last leaf of the
+                            // level, so the extra sizing node is not there.
+                            has_sizing_tail &= clamped_end == children_nodes.end;
+                            children_nodes.end = clamped_end;
 
                             queue.push(Reverse(QueueItem {
                                 distance: dist,
                                 nodes: children_nodes,
                                 level: children_level,
+                                has_sizing_tail,
                             }));
                         }
                     }
@@ -1935,6 +1961,129 @@ mod http_stream_search_tests {
                 let context = format!("threshold={threshold}, query={query:?}");
                 assert_eq!(actual, expected, "{context}: hit set mismatch");
                 assert_strictly_increasing(&actual, &context);
+            }
+        }
+    }
+
+    /// Exhaustive scan for the nearest leaf: the smallest centroid distance
+    /// wins, which is the measure `Query::PointNearest` ranks leaves by.
+    ///
+    /// Ties are returned as a set: `http_stream_search` keeps whichever tied
+    /// leaf it evaluates first, and the heap's order among equally distant
+    /// node ranges is not specified.
+    fn brute_force_nearest(
+        nodes: &[NodeItem],
+        feature_begin: usize,
+        x: f64,
+        y: f64,
+    ) -> Vec<NormalizedRange> {
+        let best = nodes
+            .iter()
+            .map(|node| node.centroid_distance_squared(x, y))
+            .fold(f64::INFINITY, f64::min);
+        nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.centroid_distance_squared(x, y) == best)
+            .map(|(i, node)| {
+                let start = feature_begin + node.offset as usize;
+                let end = nodes
+                    .get(i + 1)
+                    .map(|next| feature_begin + next.offset as usize);
+                (start, end)
+            })
+            .collect()
+    }
+
+    /// The nearest leaf is the **last** leaf of the level, and the only node
+    /// range that reaches it starts well past the first leaf — the exact shape
+    /// the `debug_assert_eq!(node_pos, num_items - 1)` in the `PointNearest`
+    /// arm got wrong, since `node_pos` is a position within the fetched range.
+    ///
+    /// With `num_items = 17` and `branching_factor = 4` the leaf level holds
+    /// nodes `8..25`, and the final level-1 node owns a single child, so the
+    /// range fetched for it is `24..25`: `node_pos` is `0`, never `16`.
+    #[tokio::test]
+    async fn nearest_search_reaches_the_final_leaf_through_a_non_initial_range() {
+        let (num_items, branching_factor) = (17usize, 4u16);
+        let nodes = hilbert_sorted_leaves(num_items);
+        let index = serialized_index(&nodes, branching_factor);
+        let feature_begin = PackedRTree::index_size(num_items, branching_factor);
+
+        let last = nodes.last().expect("17 leaves");
+        let (x, y) = (
+            (last.min_x + last.max_x) / 2.0,
+            (last.min_y + last.max_y) / 2.0,
+        );
+        let expected = brute_force_nearest(&nodes, feature_begin, x, y);
+        assert_eq!(
+            expected,
+            vec![(feature_begin + last.offset as usize, None)],
+            "the query point must single out the final leaf, whose length is \
+             unknown (a RangeFrom)"
+        );
+
+        for threshold in THRESHOLDS {
+            let actual = run_query(
+                &index,
+                num_items,
+                branching_factor,
+                Query::PointNearest(x, y),
+                threshold,
+            )
+            .await;
+            assert_eq!(actual, expected, "threshold={threshold}");
+        }
+    }
+
+    /// The nearest hit must be the brute-force nearest leaf *and* carry its
+    /// exact byte range.
+    ///
+    /// Without the `has_sizing_tail` guard, a hit that landed on a range's
+    /// borrowed sizing leaf — always the last node of the fetched batch, so
+    /// `get(node_pos + 1)` is `None` — came back as an unbounded
+    /// `HttpRange::RangeFrom`, a read to EOF, for a leaf that is not the
+    /// level's last: 126 of the 1506 queries below, every one of them with the
+    /// right start offset and a missing end.
+    #[tokio::test]
+    async fn nearest_search_matches_brute_force_at_leaf_boundaries() {
+        for (num_items, branching_factor) in [(5, 2u16), (17, 4), (100, 4), (129, 8)] {
+            let nodes = hilbert_sorted_leaves(num_items);
+            let index = serialized_index(&nodes, branching_factor);
+            let feature_begin = PackedRTree::index_size(num_items, branching_factor);
+
+            for query in boundary_points(&nodes) {
+                let Query::PointIntersects(x, y) = query else {
+                    unreachable!("boundary_points only yields point queries")
+                };
+                let query = Query::PointNearest(x, y);
+                let expected = brute_force_nearest(&nodes, feature_begin, x, y);
+
+                for threshold in THRESHOLDS {
+                    let actual =
+                        run_query(&index, num_items, branching_factor, query, threshold).await;
+                    let context = format!(
+                        "num_items={num_items}, branching_factor={branching_factor}, \
+                         threshold={threshold}, query={query:?}"
+                    );
+                    assert_eq!(actual.len(), 1, "{context}: exactly one nearest expected");
+                    assert!(
+                        expected.contains(&actual[0]),
+                        "{context}: got {actual:?}, expected one of {expected:?}"
+                    );
+                    // Stated separately from the equality above, because this
+                    // is the property the sizing-tail guard exists for: only
+                    // the level's final leaf may come back unbounded.
+                    if actual[0].1.is_none() {
+                        let last = nodes.last().expect("non-empty");
+                        assert_eq!(
+                            actual[0].0,
+                            feature_begin + last.offset as usize,
+                            "{context}: an unbounded RangeFrom is a read to EOF \
+                             and is only correct for the level's last leaf"
+                        );
+                    }
+                }
             }
         }
     }

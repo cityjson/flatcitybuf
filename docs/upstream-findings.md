@@ -1196,7 +1196,8 @@ string (`src/ts/src/post-filter.ts`); covered by `src/ts/test/stree.test.ts`
 ## 24. wasm: `index_node_size` from the header is ignored on the HTTP path — FIXED in `fcb_core` (crate removed; the twin file-reader bug is fixed too)
 
 **Where:** `wasm/src/lib.rs:275` (`select_spatial_paged`) — and the same hardcode
-still lives in `fcb_core/src/http_reader/mod.rs:220`.
+~~still lives in~~ was shared by `fcb_core/src/http_reader/mod.rs:220`, since
+fixed (see below).
 
 Both call `PackedRTree::http_stream_search(..., PackedRTree::DEFAULT_NODE_SIZE, ...)`,
 passing the compile-time default (16) instead of `header.index_node_size()`, even
@@ -1205,7 +1206,8 @@ is traversed as if its R-tree branched by 16, walking the wrong node ranges.
 
 **What a consumer saw:** a spatial query over HTTP against a file written with a
 non-default R-tree node size returned wrong or missing features. This is not just a
-wasm defect: `fcb_core`'s own HTTP reader shares the hardcode and is still live. The
+wasm defect: `fcb_core`'s own HTTP reader ~~shares the hardcode and is still
+live~~ shared the hardcode, since fixed — see below. The
 native reader threads `header.info.indexNodeSize` into every R-tree traversal
 (`src/ts/src/reader.ts`, `searchRtree`/`searchNearest`), and the corpus carries
 `appearance_depths_node8.fcb` (node size 8) precisely to exercise it — covered by
@@ -1258,7 +1260,7 @@ Content` with a `Content-Range` that matches what it asked for, and raises
 / "throws when the server returns a DIFFERENT range than requested") and the
 browser CORS test in `src/ts/test/browser/fetch.browser.test.ts`.
 
-## 26. `PackedRTree::http_stream_search` can emit the extra leaf node twice — FIXED (guard added; shown unreachable in practice)
+## 26. `PackedRTree::http_stream_search` can emit the extra leaf node twice — FIXED (guard added to all three arms; unreachable in the two intersect arms, reachable in `PointNearest`)
 
 **Where:** `fcb_core/src/packed_rtree/mod.rs:956-966`, with the `+1` at line 986.
 
@@ -1303,8 +1305,36 @@ loops, fixed in the same pass: `debug_assert_eq!(node_pos, num_items - 1)`
 compares a position *within the fetched range* against the global item
 count, so any hit of the final feature via a non-initial node range
 panicked in debug builds. Corrected to assert against the last leaf of the
-level. The C++/Python/TypeScript analogues of this assertion have not been
-checked — follow-up.
+level. The same wrong `debug_assert` also sat in the third arm,
+`Query::PointNearest`, and is now fixed there too, with its own oracle test
+(`nearest_search_reaches_the_final_leaf_through_a_non_initial_range`: 17
+leaves at branching factor 4, whose final level-1 node owns a single child,
+so the level's last leaf is only ever reached through the range `24..25` —
+`node_pos` is `0`, never `16`).
+
+That arm was **initially** left without the `has_sizing_tail` guard, on the
+reading that evaluating a borrowed sizing leaf as a nearest *candidate* is
+result-correct. That reading turned out to be only half right, so **the
+guard is now in all three arms.** A brute-force sweep over the same
+fixtures (`nearest_search_matches_brute_force_at_leaf_boundaries`) showed
+the nearest *feature* was indeed always identified correctly — 0 wrong
+features and no duplicates in 1506 boundary queries — but in 126 of them
+the hit landed on a range's sizing leaf, which by construction is the last
+node of the fetched batch, so `node_items.get(node_pos + 1)` was `None` and
+the arm emitted an unbounded `HttpRange::RangeFrom` instead of the bounded
+range: the right feature, read to EOF. That is exactly the latent worst
+case cited above as the reason the guard was added to the other two arms —
+except here it was not latent but reachable on ~8% of boundary queries, and
+it is what the corrected `debug_assert` caught once it started asserting
+the true invariant. `QueueItem` now carries the same `has_sizing_tail`
+marker, set when the leaf range is extended, cleared when clamping to
+`level_bounds[0].end` proves the extra node is not there, and honoured by
+the same `emit_len` skip; there is no merge-inheritance step to mirror,
+because the nearest search pushes every child range onto its heap
+separately and never merges two. The sweep additionally asserts, on its
+own, that an unbounded `RangeFrom` is only ever returned for the level's
+final leaf. The C++/Python/TypeScript analogues of this assertion — and of
+the sizing-tail handling — have not been checked; follow-up.
 
 ## 27. `HeaderWriter::new_with_options` overwrote the caller's `index_node_size` — FIXED (this branch, Task 2)
 
