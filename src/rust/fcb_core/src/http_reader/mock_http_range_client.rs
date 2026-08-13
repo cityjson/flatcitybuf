@@ -79,9 +79,15 @@ impl AsyncHttpRangeClient for MockHttpRangeClient {
         file_reader
             .seek(SeekFrom::Start(range.start))
             .expect("unable to seek test reader");
-        let mut output = vec![0; request_length as usize];
+        // A server answering a range whose end lies past the end of the
+        // resource returns the bytes it has, not an error, and the buffered
+        // client accounts for a short response. Reading exactly
+        // `request_length` here instead would make every speculative prefetch
+        // near the end of a small file panic.
+        let mut output = Vec::with_capacity(request_length as usize);
         file_reader
-            .read_exact(&mut output)
+            .take(request_length)
+            .read_to_end(&mut output)
             .expect("failed to read from test reader");
         Ok(Bytes::from(output))
     }

@@ -214,10 +214,12 @@ impl<R: Read + Seek> FcbReader<R> {
         if header.index_node_size() == 0 || header.features_count() == 0 {
             return Err(Error::NoIndex);
         }
+        // The R-tree branching factor is a per-file property: traversing with
+        // the compile-time default instead walks the wrong node ranges.
         let list = PackedRTree::stream_search(
             &mut self.reader,
             header.features_count() as usize,
-            PackedRTree::DEFAULT_NODE_SIZE,
+            header.index_node_size(),
             query,
         )?;
         let list: Vec<_> = list

@@ -207,6 +207,9 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             return Err(Error::NoIndex);
         }
         let count = header.features_count() as usize;
+        // The R-tree branching factor is a per-file property: traversing with
+        // the compile-time default instead walks the wrong node ranges.
+        let index_node_size = header.index_node_size();
         let header_len = self.header_len();
 
         // request up to this many extra bytes if it means we can eliminate an extra request
@@ -217,7 +220,7 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             header_len,
             attr_index_size,
             count,
-            PackedRTree::DEFAULT_NODE_SIZE,
+            index_node_size,
             query,
             combine_request_threshold,
         )
@@ -729,6 +732,97 @@ impl SelectAttr {
         feature_buffer.put(client.get_range(range.start() + 4, feature_size).await?);
         self.range_pos += 1;
         Ok(Some(feature_buffer.freeze()))
+    }
+}
+
+#[cfg(test)]
+mod index_node_size_tests {
+    //! The HTTP spatial path must traverse the R-tree with the branching
+    //! factor recorded in the header, not the compile-time default.
+    //!
+    //! These tests live inside the crate because `mock_from_file` (and the
+    //! `MockHttpRangeClient` it returns a reader over) is `#[cfg(test)]`-only
+    //! and therefore unreachable from `tests/`.
+
+    use super::*;
+    use crate::http_reader::mock_http_range_client::MockHttpRangeClient;
+    use std::path::PathBuf;
+
+    /// A fixture from the shared conformance corpus, resolved from the crate
+    /// root so the test does not depend on the process working directory.
+    fn conformance_fixture(name: &str) -> String {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../conformance")
+            .join(name)
+            .to_str()
+            .expect("fixture path is valid UTF-8")
+            .to_string()
+    }
+
+    async fn feature_ids(iter: &mut AsyncFeatureIter<MockHttpRangeClient>) -> Result<Vec<String>> {
+        let mut ids = Vec::new();
+        while let Some(feature) = iter.next().await? {
+            ids.push(feature.cj_feature()?.id);
+        }
+        Ok(ids)
+    }
+
+    /// `appearance_depths_node8.fcb` holds 12 features at node size 8, so its
+    /// level bounds are `[12, 2, 1]` — three levels and two sibling leaf
+    /// ranges. Read with the default node size 16 the same 12 features imply
+    /// `[12, 1]`, a different node count and different level boundaries, so a
+    /// hardcoded 16 walks the wrong ranges.
+    ///
+    /// The oracle is `select_all`, which never touches the R-tree: a bbox
+    /// covering the whole extent must return exactly the same feature set.
+    #[tokio::test]
+    async fn http_spatial_query_honours_header_index_node_size() -> Result<()> {
+        let path = conformance_fixture("appearance_depths_node8.fcb");
+
+        let (reader, _stats) = HttpFcbReader::mock_from_file(&path).await?;
+        let (node_size, feature_count, minx, miny, maxx, maxy) = {
+            let header = reader.header();
+            let extent = header
+                .geographical_extent()
+                .expect("fixture carries a geographical extent");
+            (
+                header.index_node_size(),
+                header.features_count() as usize,
+                extent.min().x(),
+                extent.min().y(),
+                extent.max().x(),
+                extent.max().y(),
+            )
+        };
+        assert_eq!(
+            node_size, 8,
+            "fixture must have a NON-default node size, else a hardcoded 16 passes vacuously"
+        );
+        assert_eq!(feature_count, 12);
+
+        // Oracle: the full feature set, read sequentially without the R-tree.
+        let (all_reader, _stats) = HttpFcbReader::mock_from_file(&path).await?;
+        let mut all_iter = all_reader.select_all().await?;
+        let mut expected_ids = feature_ids(&mut all_iter).await?;
+        expected_ids.sort();
+        assert_eq!(expected_ids.len(), feature_count);
+
+        let mut query_iter = reader
+            .select_query(Query::BBox(minx, miny, maxx, maxy))
+            .await?;
+        assert_eq!(query_iter.features_count(), Some(feature_count));
+        let mut hit_ids = feature_ids(&mut query_iter).await?;
+        assert_eq!(
+            hit_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            hit_ids.len(),
+            "a spatial query must return a set, not duplicates"
+        );
+        hit_ids.sort();
+        assert_eq!(hit_ids, expected_ids);
+        Ok(())
     }
 }
 
