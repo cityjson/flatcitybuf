@@ -13,7 +13,8 @@ implementations produce `.fcb` files) — and this reader is less settled than
 those two. It passes all 14 shared conformance cases against the Rust reader's
 own output, but JavaScript has no FlatBuffers verifier, so **input files must be
 trusted**: framing is bounds-checked, the tables inside are not. Attribute
-queries also carry four deliberate divergences from the Rust reader. All of it
+queries also carry three deliberate divergences from the Rust reader (a
+fourth, `Byte` signedness, was resolved upstream). All of it
 is spelled out, with citations, in the
 **[TypeScript guide](https://github.com/cityjson/flatcitybuf/blob/main/docs/ts.md)**.
 

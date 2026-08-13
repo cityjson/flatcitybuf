@@ -13,11 +13,12 @@
  *  (documented in the Format Reference under "Known divergences"; also
  *  followed by the C++ and Python ports):
  *
- *   1. `Byte` columns decode as UNSIGNED `u8`. The writer stores `Byte` as
- *      `u8` and builds its index as `MemoryIndex<u8>`, but Rust's OWN reader
- *      decodes that index as `i8` -- so for stored values > 127 Rust's reader
- *      returns a negative number that was never written. This port matches
- *      the WRITER, not Rust's reader bug.
+ *   1. RESOLVED -- no longer a divergence. `Byte` columns decode as UNSIGNED
+ *      `u8`, and Rust now agrees on every path: its index reader always did
+ *      (`attr_query.rs` builds `MemoryIndex<u8>`; the earlier claim here that
+ *      it decoded `i8` conflated the index path with the value path), and its
+ *      feature-value decode was fixed upstream (upstream finding #2a). `u8`
+ *      is simply the shared answer in all four implementations.
  *   2. `Json`/`Binary` columns are classified here (`str100`) so the query
  *      layer (Task 14) can REJECT index queries against them, matching
  *      Rust's `UnsupportedColumnType`: they are `FixedStringKey<100>` over a

@@ -5,16 +5,17 @@
  *  `FcbReader.select`, deliberately NOT here; see `searchAttributes`.
  *
  *  ---------------------------------------------------------------------
- *  FOUR DELIBERATE DIVERGENCES FROM THE RUST READER, VISIBLE FROM HERE
+ *  FOUR DIVERGENCE NOTES AGAINST THE RUST READER (THE FIRST NOW RESOLVED)
  *  ---------------------------------------------------------------------
  *  These were documented in `key.ts` when the key layer landed, because the
  *  query API did not exist yet. This is that API: a caller who reads one
  *  docstring before writing a query should read them here.
  *
- *   1. `Byte` columns are treated as UNSIGNED `u8`. The writer stores `Byte`
- *      as `u8` and indexes it as `MemoryIndex<u8>`, but Rust's own reader
- *      decodes that index as `i8`, so for stored values > 127 it returns a
- *      negative number that was never written. This port matches the WRITER.
+ *   1. RESOLVED -- no longer a divergence. `Byte` columns are treated as
+ *      UNSIGNED `u8`, and Rust now agrees on every path: its index reader
+ *      always read `u8` (the earlier claim here conflated the index path
+ *      with the value path), and its feature-value decode was fixed
+ *      upstream (finding #2a). `u8` is the shared answer everywhere.
  *   2. `Json` and `Binary` columns are REJECTED here with
  *      `ErrorCode.UnsupportedColumnType`. Their index is a
  *      `FixedStringKey<100>` over a JSON or binary blob, so a hit means
