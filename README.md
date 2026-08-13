@@ -13,7 +13,7 @@
 
 _Bringing the semantic richness of CityJSON with the performance of FlatBuffers_
 
-[🚀 Getting Started](#-getting-started) • [📊 Benchmarks](#-performance--benchmarks) • [📖 Documentation](#-documentation) • [🤝 Contributing](#-contributing)
+[🚀 Getting Started](#-getting-started) • [📊 Benchmarks](#-performance--benchmarks) • [📖 Documentation](#-documentation) • [📚 API Reference](https://cityjson.github.io/flatcitybuf/) • [🤝 Contributing](#-contributing)
 
 </div>
 
@@ -224,8 +224,8 @@ cargo bench -p fcb_core --bench read -- --release
 | **[Upstream findings](docs/upstream-findings.md)**   | Permanent record of defects found across the implementations, each cited and reproduced |
 | **[Contributing](CONTRIBUTING.md)**                  | How to report bugs, request features and submit pull requests                           |
 
-- **[API Documentation](https://docs.rs/fcb_core)** - Comprehensive API reference
-- **[API reference, all languages](https://cityjson.github.io/flatcitybuf/)** - Rust, C++, Python and TypeScript docs, rebuilt on every push to `main`
+- **[API reference, all languages](https://cityjson.github.io/flatcitybuf/)** — [Rust](https://cityjson.github.io/flatcitybuf/rust/), [C++](https://cityjson.github.io/flatcitybuf/cpp/), [Python](https://cityjson.github.io/flatcitybuf/python/) and [TypeScript](https://cityjson.github.io/flatcitybuf/typescript/), rebuilt on every push to `main`
+- **[docs.rs/fcb_core](https://docs.rs/fcb_core)** - the Rust crate's reference on docs.rs
 - **[MSc thesis at TU Delft](https://resolver.tudelft.nl/uuid:6727c979-5e46-4fe0-9349-a7803e825d02)** - FlatCityBuf was developed by @hideba for his MSc thesis in Geomatics, read all the details!
 
 ---
