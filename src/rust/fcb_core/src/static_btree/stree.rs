@@ -49,6 +49,31 @@ impl<K: Key> NodeItem<K> {
     }
 }
 
+/// Tests a leaf key against a range whose bounds are independently strict
+/// (exclusive) or inclusive.
+///
+/// Shared by the in-memory, streaming and HTTP range scans so that all three
+/// agree on what `Gt`/`Lt`/`Ne` mean.
+fn in_bounds<K: Key>(
+    key: &K,
+    lower: &K,
+    lower_strict: bool,
+    upper: &K,
+    upper_strict: bool,
+) -> bool {
+    let lower_ok = if lower_strict {
+        key > lower
+    } else {
+        key >= lower
+    };
+    let upper_ok = if upper_strict {
+        key < upper
+    } else {
+        key <= upper
+    };
+    lower_ok && upper_ok
+}
+
 /// Read full capacity of vec from data stream
 fn read_node_vec<K: Key>(node_items: &mut Vec<NodeItem<K>>, mut data: impl Read) -> Result<()> {
     node_items.clear();
@@ -963,6 +988,28 @@ impl<K: Key> Stree<K> {
     /// - If lower > upper, returns an empty result (invalid range)
     /// - If lower == upper, delegates to find_exact for consistent behavior
     pub fn find_range(&self, lower: K, upper: K) -> Result<Vec<SearchResultItem>> {
+        self.find_range_strict(lower, false, upper, false)
+    }
+
+    /// Finds all items whose key lies within the range, with each bound
+    /// independently strict (exclusive) or inclusive.
+    ///
+    /// This is what `Gt`/`Lt`/`Ne` lower to. They must NOT be expressed as an
+    /// inclusive range minus `find_exact`: the subtraction removes FEATURE
+    /// OFFSETS, but a feature's CityObjects can carry several values of the
+    /// same indexed attribute and the writer indexes each occurrence, so one
+    /// feature offset appears under several keys. A feature holding both `k`
+    /// and some `k' > k` is returned by the range scan (via `k'`) and also by
+    /// `find_exact(k)` (via `k`), so subtracting deletes a genuine match.
+    /// Filtering by bound strictness at the leaf cannot make that mistake, and
+    /// costs one traversal instead of two.
+    pub fn find_range_strict(
+        &self,
+        lower: K,
+        lower_strict: bool,
+        upper: K,
+        upper_strict: bool,
+    ) -> Result<Vec<SearchResultItem>> {
         let leaf_nodes_offset = self
             .level_bounds
             .first()
@@ -973,9 +1020,13 @@ impl<K: Key> Stree<K> {
             return Ok(Vec::new());
         }
 
-        // Special case for exact matches (when lower == upper)
-        // Use find_exact for single-item ranges to ensure consistent behavior
         if lower == upper {
+            // A strict bound on a degenerate range admits nothing.
+            if lower_strict || upper_strict {
+                return Ok(Vec::new());
+            }
+            // Special case for exact matches (when lower == upper)
+            // Use find_exact for single-item ranges to ensure consistent behavior
             return self.find_exact(lower);
         }
 
@@ -998,8 +1049,8 @@ impl<K: Key> Stree<K> {
         // entry sits at exactly upper_idx + node_size -- one past the old
         // scan end -- and was silently dropped, making the inclusive upper
         // bound exclusive for roughly 1-in-branching_factor of keys.
-        // Widening is safe: the loop below filters `lower <= key <= upper`,
-        // so at most one extra node is read.
+        // Widening is safe: the loop below re-checks every key against both
+        // bounds, so at most one extra node is read.
         let end_idx = min(upper_idx + 2 * node_size, leaf_end);
 
         // Process all leaf nodes from lower to upper bound
@@ -1010,7 +1061,7 @@ impl<K: Key> Stree<K> {
 
             // Add items that fall within the range
             for (_i, item) in node_items.iter().enumerate() {
-                if item.key >= lower && item.key <= upper {
+                if in_bounds(&item.key, &lower, lower_strict, &upper, upper_strict) {
                     let off = item.offset;
                     let idx = current_idx + _i - leaf_nodes_offset;
                     if self.payload_initialized && (off & PAYLOAD_TAG) != 0 {
@@ -1045,6 +1096,30 @@ impl<K: Key> Stree<K> {
         lower: K,
         upper: K,
     ) -> Result<Vec<SearchResultItem>> {
+        Self::stream_find_range_strict(
+            data,
+            num_items,
+            branching_factor,
+            lower,
+            false,
+            upper,
+            false,
+        )
+    }
+
+    /// Streaming counterpart of [`Stree::find_range_strict`]: each bound is
+    /// independently strict (exclusive) or inclusive, so `Gt`/`Lt`/`Ne` need
+    /// no unsound subtraction on feature offsets.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stream_find_range_strict<R: Read + Seek + ?Sized>(
+        data: &mut R,
+        num_items: usize, // number of items in the tree, not the number of entries of original data
+        branching_factor: u16,
+        lower: K,
+        lower_strict: bool,
+        upper: K,
+        upper_strict: bool,
+    ) -> Result<Vec<SearchResultItem>> {
         let node_size = branching_factor as usize - 1;
         let level_bounds = Stree::<K>::generate_level_bounds(num_items, branching_factor);
 
@@ -1063,9 +1138,13 @@ impl<K: Key> Stree<K> {
             return Ok(Vec::new());
         }
 
-        // Special case for exact matches (when lower == upper)
-        // Use find_exact for single-item ranges to ensure consistent behavior
         if lower == upper {
+            // A strict bound on a degenerate range admits nothing.
+            if lower_strict || upper_strict {
+                return Ok(Vec::new());
+            }
+            // Special case for exact matches (when lower == upper)
+            // Use find_exact for single-item ranges to ensure consistent behavior
             return Stree::stream_find_exact(data, num_items, branching_factor, lower);
         }
 
@@ -1089,8 +1168,8 @@ impl<K: Key> Stree<K> {
         // entry sits at exactly upper_idx + node_size -- one past the old
         // scan end -- and was silently dropped, making the inclusive upper
         // bound exclusive for roughly 1-in-branching_factor of keys.
-        // Widening is safe: the loop below filters `lower <= key <= upper`,
-        // so at most one extra node is read.
+        // Widening is safe: the loop below re-checks every key against both
+        // bounds, so at most one extra node is read.
         let end_idx = min(upper_idx + 2 * node_size, leaf_end);
 
         let index_base: u64 = data.stream_position()?;
@@ -1104,7 +1183,7 @@ impl<K: Key> Stree<K> {
 
             // Add items that fall within the range
             for (_i, item) in node_items.iter().enumerate() {
-                if item.key >= lower && item.key <= upper {
+                if in_bounds(&item.key, &lower, lower_strict, &upper, upper_strict) {
                     let off = item.offset;
                     let idx = current_idx + _i - leaf_nodes_offset;
                     if (off & PAYLOAD_TAG) != 0 {
@@ -1600,6 +1679,38 @@ impl<K: Key> Stree<K> {
         upper: K,
         combine_request_threshold: usize,
     ) -> Result<Vec<HttpSearchResultItem>> {
+        Self::http_stream_find_range_strict(
+            client,
+            index_begin,
+            feature_begin,
+            num_items,
+            branching_factor,
+            lower,
+            false,
+            upper,
+            false,
+            combine_request_threshold,
+        )
+        .await
+    }
+
+    /// HTTP counterpart of [`Stree::find_range_strict`]: each bound is
+    /// independently strict (exclusive) or inclusive, so `Gt`/`Lt`/`Ne` need
+    /// no unsound subtraction on feature offsets.
+    #[cfg(feature = "http")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn http_stream_find_range_strict<T: AsyncHttpRangeClient>(
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        index_begin: usize,
+        feature_begin: usize,
+        num_items: usize,
+        branching_factor: u16,
+        lower: K,
+        lower_strict: bool,
+        upper: K,
+        upper_strict: bool,
+        combine_request_threshold: usize,
+    ) -> Result<Vec<HttpSearchResultItem>> {
         debug!("http_stream_find_range starts: index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, lower: {lower:?}, upper: {upper:?}");
 
         // Return empty result if invalid range
@@ -1607,9 +1718,13 @@ impl<K: Key> Stree<K> {
             return Ok(Vec::new());
         }
 
-        // Special case for exact matches (when lower == upper)
-        // Use find_exact for single-item ranges to ensure consistent behavior
         if lower == upper {
+            // A strict bound on a degenerate range admits nothing.
+            if lower_strict || upper_strict {
+                return Ok(Vec::new());
+            }
+            // Special case for exact matches (when lower == upper)
+            // Use find_exact for single-item ranges to ensure consistent behavior
             return Self::http_stream_find_exact(
                 client,
                 index_begin,
@@ -1678,8 +1793,8 @@ impl<K: Key> Stree<K> {
         // entry sits at exactly upper_idx + node_size -- one past the old
         // scan end -- and was silently dropped, making the inclusive upper
         // bound exclusive for roughly 1-in-branching_factor of keys.
-        // Widening is safe: the loop below filters `lower <= key <= upper`,
-        // so at most one extra node is read.
+        // Widening is safe: the loop below re-checks every key against both
+        // bounds, so at most one extra node is read.
         let end_idx = min(upper_idx + 2 * node_size, leaf_end);
 
         // Collect payload references instead of immediately resolving them
@@ -1701,7 +1816,7 @@ impl<K: Key> Stree<K> {
 
             // Collect payload references from items that fall within the range
             for item in node_items.iter() {
-                if item.key >= lower && item.key <= upper {
+                if in_bounds(&item.key, &lower, lower_strict, &upper, upper_strict) {
                     let off = item.offset;
 
                     if (off & PAYLOAD_TAG) != 0 {
@@ -2155,6 +2270,121 @@ mod tests {
                 "find_range(0, {upper}) returned the wrong count"
             );
         }
+        Ok(())
+    }
+
+    /// A strict bound must hold on every key, including the level-1
+    /// separators. Those are the keys find_partition descends LEFT on, so the
+    /// matching leaf entry sits in the extra node the scan window is widened
+    /// by: strictness has to compose with that widening, not be defeated by it.
+    #[test]
+    fn test_range_strict_bounds_on_separator_keys() -> Result<()> {
+        let nodes: Vec<Entry<i64>> = (0..19)
+            .map(|i| Entry {
+                key: i as i64,
+                offset: (i * 100) as u64,
+            })
+            .collect();
+        let tree = Stree::build(&nodes, 4)?;
+
+        let keys_of = |list: Vec<SearchResultItem>| -> Vec<i64> {
+            list.iter().map(|r| (r.offset / 100) as i64).collect()
+        };
+
+        for bound in 0..19i64 {
+            // (bound, 18] must drop `bound` itself and keep everything above.
+            let above = keys_of(tree.find_range_strict(bound, true, 18, false)?);
+            assert_eq!(
+                above,
+                ((bound + 1)..19).collect::<Vec<_>>(),
+                "find_range_strict(({bound}, 18]) is wrong"
+            );
+
+            // [0, bound) must drop `bound` itself and keep everything below.
+            let below = keys_of(tree.find_range_strict(0, false, bound, true)?);
+            assert_eq!(
+                below,
+                (0..bound).collect::<Vec<_>>(),
+                "find_range_strict([0, {bound})) is wrong"
+            );
+        }
+        Ok(())
+    }
+
+    /// A degenerate range keeps delegating to find_exact while both bounds are
+    /// inclusive, and admits nothing as soon as either bound turns strict.
+    #[test]
+    fn test_range_strict_degenerate_bounds() -> Result<()> {
+        let nodes = vec![
+            NodeItem::new(8_i64, 80_u64),
+            NodeItem::new(9_i64, 90_u64),
+            NodeItem::new(9_i64, 91_u64), // duplicate key, so find_exact matters
+            NodeItem::new(10_i64, 100_u64),
+            NodeItem::new(11_i64, 110_u64),
+            NodeItem::new(12_i64, 120_u64),
+        ];
+        let tree = Stree::build(&nodes, 4)?;
+
+        let offsets = |list: Vec<SearchResultItem>| -> Vec<usize> {
+            let mut offs: Vec<usize> = list.iter().map(|r| r.offset).collect();
+            offs.sort_unstable();
+            offs
+        };
+
+        assert_eq!(
+            offsets(tree.find_range_strict(9, false, 9, false)?),
+            offsets(tree.find_exact(9)?),
+            "[9, 9] must agree with find_exact(9)"
+        );
+        assert!(tree.find_range_strict(9, true, 9, false)?.is_empty());
+        assert!(tree.find_range_strict(9, false, 9, true)?.is_empty());
+        assert!(tree.find_range_strict(9, true, 9, true)?.is_empty());
+
+        // An inverted range stays empty whatever the strictness.
+        assert!(tree.find_range_strict(10, false, 9, false)?.is_empty());
+        assert!(tree.find_range_strict(10, true, 9, true)?.is_empty());
+
+        Ok(())
+    }
+
+    /// The streaming scan applies strictness exactly like the in-memory one.
+    #[test]
+    fn test_stream_find_range_strict() -> Result<()> {
+        let nodes = vec![
+            NodeItem::new(1_i64, 10_u64),
+            NodeItem::new(1_i64, 20_u64),
+            NodeItem::new(2_i64, 30_u64),
+            NodeItem::new(3_i64, 40_u64),
+            NodeItem::new(4_i64, 50_u64),
+            NodeItem::new(5_i64, 60_u64),
+        ];
+        let tree = Stree::build(&nodes, 3)?;
+        let mut buf = Vec::new();
+        tree.stream_write(&mut buf)?;
+
+        let scan = |lower, lower_strict, upper, upper_strict| -> Result<Vec<usize>> {
+            let mut cursor = std::io::Cursor::new(&buf);
+            let res = Stree::<i64>::stream_find_range_strict(
+                &mut cursor,
+                tree.num_leaf_nodes,
+                3,
+                lower,
+                lower_strict,
+                upper,
+                upper_strict,
+            )?;
+            let mut offs: Vec<usize> = res.iter().map(|r| r.offset).collect();
+            offs.sort_unstable();
+            Ok(offs)
+        };
+
+        assert_eq!(scan(1, false, 5, false)?, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(scan(1, true, 5, false)?, vec![30, 40, 50, 60]);
+        assert_eq!(scan(1, false, 5, true)?, vec![10, 20, 30, 40, 50]);
+        assert_eq!(scan(1, true, 5, true)?, vec![30, 40, 50]);
+        assert!(scan(3, true, 3, false)?.is_empty());
+        assert_eq!(scan(3, false, 3, false)?, vec![40]);
+
         Ok(())
     }
 

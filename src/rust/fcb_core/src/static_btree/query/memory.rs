@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 
 use crate::static_btree::entry::Entry;
 use crate::static_btree::error::{Error, Result};
-use crate::static_btree::key::{FixedStringKey, Key, KeyType, Max, Min};
+use crate::static_btree::key::{FixedStringKey, Key, KeyType};
 use crate::static_btree::query::types::{Operator, SearchIndex};
 use crate::static_btree::stree::Stree;
 
@@ -59,6 +59,29 @@ impl<K: Key> MemoryIndex<K> {
 
     pub fn payload_size(&self) -> usize {
         self.stree.payload_size()
+    }
+
+    /// Find all items in the range, with each bound independently strict
+    /// (exclusive) or inclusive. A `None` bound is the type's min/max sentinel
+    /// and is never strict.
+    ///
+    /// `Gt`/`Lt`/`Ne` lower to this instead of subtracting `find_exact` from
+    /// an inclusive range: the subtraction removes feature offsets, and one
+    /// feature can be indexed under several keys, so it deletes features that
+    /// match through a different key.
+    pub fn find_range_strict(
+        &self,
+        start: Option<K>,
+        start_strict: bool,
+        end: Option<K>,
+        end_strict: bool,
+    ) -> Result<Vec<u64>> {
+        let lower = start.unwrap_or_else(K::min_value);
+        let upper = end.unwrap_or_else(K::max_value);
+        let results = self
+            .stree
+            .find_range_strict(lower, start_strict, upper, end_strict)?;
+        Ok(results.into_iter().map(|item| item.offset as u64).collect())
     }
 }
 
@@ -117,30 +140,20 @@ macro_rules! impl_typed_search_index {
                 // Execute query based on operator
                 match condition.operator {
                     Operator::Eq => self.find_exact(key),
+                    // Two half-open scans rather than a full scan minus the
+                    // equal set: subtraction on feature offsets is wrong when
+                    // one feature carries several values of the attribute.
                     Operator::Ne => {
-                        let min = <$key_type>::min_value();
-                        let max = <$key_type>::max_value();
-                        let all_items = self.find_range(Some(min), Some(max))?;
-                        let matching_items = self.find_exact(key)?;
-                        Ok(all_items
-                            .into_iter()
-                            .filter(|item| !matching_items.contains(item))
-                            .collect())
-                    }
-                    Operator::Gt => {
-                        let mut results = self.find_range(Some(key.clone()), None)?;
-                        let exact_matches = self.find_exact(key)?;
-                        results.retain(|item| !exact_matches.contains(item));
+                        let mut results =
+                            self.find_range_strict(None, false, Some(key.clone()), true)?;
+                        let above = self.find_range_strict(Some(key), true, None, false)?;
+                        results.extend(above);
                         Ok(results)
                     }
-                    Operator::Lt => {
-                        let mut results = self.find_range(None, Some(key.clone()))?;
-                        let exact_matches = self.find_exact(key)?;
-                        results.retain(|item| !exact_matches.contains(item));
-                        Ok(results)
-                    }
-                    Operator::Ge => self.find_range(Some(key), None),
-                    Operator::Le => self.find_range(None, Some(key)),
+                    Operator::Gt => self.find_range_strict(Some(key), true, None, false),
+                    Operator::Lt => self.find_range_strict(None, false, Some(key), true),
+                    Operator::Ge => self.find_range_strict(Some(key), false, None, false),
+                    Operator::Le => self.find_range_strict(None, false, Some(key), false),
                 }
             }
         }
