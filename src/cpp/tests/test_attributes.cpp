@@ -95,13 +95,41 @@ TEST_CASE("an unknown column index throws") {
     CHECK_THROWS_AS(decode_attributes(bytes_view(blob), schema), Error);
 }
 
-TEST_CASE("Byte/UByte/Binary are rejected, matching the reference reader") {
-    // The writer emits these but deserializer.rs:372 is unreachable!() for
-    // them, so no such file has ever been read back successfully.
+TEST_CASE("Byte/UByte/Binary decode, matching the reference reader") {
+    // Byte is stored UNSIGNED by the writer, so 200 must come back as 200,
+    // not -56; Binary is a u32 LE length then that many raw bytes. Mirrors
+    // the Rust reader's own test (deserializer.rs,
+    // test_decode_attributes_byte_ubyte_binary).
     std::vector<ColumnInfo> schema = {
-        {0, "b", static_cast<std::uint8_t>(::ColumnType::Byte), true}};
-    std::vector<std::uint8_t> blob = {0, 0, 200};
-    CHECK_THROWS_AS(decode_attributes(bytes_view(blob), schema), Error);
+        {0, "b", static_cast<std::uint8_t>(::ColumnType::Byte), true},
+        {1, "ub", static_cast<std::uint8_t>(::ColumnType::UByte), true},
+        {2, "bin", static_cast<std::uint8_t>(::ColumnType::Binary), true}};
+    // column 0 -> 200; column 1 -> 200; column 2 -> len 2, bytes {1, 255}.
+    std::vector<std::uint8_t> blob = {0, 0, 200, 1, 0, 200, 2, 0, 2, 0, 0, 0, 1, 255};
+
+    auto decoded = decode_attributes(bytes_view(blob), schema);
+    REQUIRE(decoded.size() == 3);
+
+    CHECK(decoded[0].first == "b");
+    CHECK(decoded[0].second.type == AttrValue::Type::UInt);
+    CHECK(decoded[0].second.u == 200);
+
+    CHECK(decoded[1].first == "ub");
+    CHECK(decoded[1].second.type == AttrValue::Type::UInt);
+    CHECK(decoded[1].second.u == 200);
+
+    CHECK(decoded[2].first == "bin");
+    CHECK(decoded[2].second.type == AttrValue::Type::Binary);
+    REQUIRE(decoded[2].second.s.size() == 2);
+    CHECK(static_cast<std::uint8_t>(decoded[2].second.s[0]) == 1);
+    CHECK(static_cast<std::uint8_t>(decoded[2].second.s[1]) == 255);
+
+#ifdef FCB_WITH_JSON
+    // Rust emits {"b":200,"ub":200,"bin":[1,255]} -- Binary as an array of
+    // numbers, so nlohmann must not turn it into its own binary value type.
+    const nlohmann::json j = attributes_to_json(bytes_view(blob), schema);
+    CHECK(j.dump() == "{\"b\":200,\"bin\":[1,255],\"ub\":200}");
+#endif
 }
 
 #ifdef FCB_WITH_JSON
