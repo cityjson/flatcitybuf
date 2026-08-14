@@ -115,11 +115,13 @@ jobs:
             artifact_name: flatcitybuf-cpp-linux-x86_64
           - os: ubuntu-24.04-arm
             artifact_name: flatcitybuf-cpp-linux-aarch64
-          # macos-13 is the last x86_64 image; macos-14 and newer (including
-          # macos-latest) are Apple Silicon. The previous matrix labelled a
-          # macos-15 build "x86_64", so that artifact was arm64 under an
-          # x86_64 name and no genuine x86_64 macOS build existed.
-          - os: macos-13
+          # macos-13, the last plain x86_64 image, was retired in December
+          # 2025: jobs targeting it now queue forever instead of failing.
+          # macos-15-intel is GitHub's explicit Intel label (supported until
+          # August 2027). macos-latest and every macos-14+ image are Apple
+          # Silicon, and a past matrix labelled such an arm64 build "x86_64",
+          # so do not substitute them here.
+          - os: macos-15-intel
             artifact_name: flatcitybuf-cpp-macos-x86_64
           - os: macos-latest
             artifact_name: flatcitybuf-cpp-macos-aarch64
