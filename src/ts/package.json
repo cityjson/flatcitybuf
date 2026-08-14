@@ -1,6 +1,6 @@
 {
   "name": "@cityjson/flatcitybuf",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "Pure TypeScript reader for FlatCityBuf, a cloud-optimized binary format for 3D city models",
   "author": {
