@@ -1708,3 +1708,115 @@ footprint, because those levels are flat extrusions; at lod 2.2 it exceeds it,
 because the roofs are sloped. A walk that mis-grouped surfaces or misread the
 semantics would not reproduce that, and both properties are asserted in the
 Python and TypeScript example tests.
+
+## 36. Writer diagnostics go to stdout, corrupting `ser <input> -` — FIXED (this branch)
+
+**Where:** `fcb_core/src/writer/attribute.rs:266`.
+
+Library code in the attribute-index builder prints a diagnostic with
+`println!` — that is, to **stdout**:
+
+```rust
+None => {
+    println!("Attribute {attr} not found in schema");
+    continue;
+}
+```
+
+It fires once per (indexed attribute, feature) whenever a feature lacks a
+column that is in the header schema — the *normal* case for heterogeneous
+real-world data. `fcb_cli ser` documents `<OUTPUT>` as "use '-' for stdout",
+so on that path the diagnostic lines interleave with the binary stream.
+
+**Reproduction** (first 2000 features of `data/cjseq_data/3dbag_subset.city.jsonl`):
+
+```
+$ head -n 2001 3dbag_subset.city.jsonl > slice.jsonl
+$ fcb ser slice.jsonl slice.fcb -A -g          # 8 416 814 B, inspects fine
+$ fcb ser slice.jsonl -        -A -g > bad.fcb # 8 481 920 B, exit 0
+$ fcb inspect bad.fcb --static
+FCB core error: Missing magic bytes in FCB file header
+$ od -c bad.fcb | head -1
+0000000  A t t r i b u t e   b 3 _ b a g _ b a g _ o v e r l a p ...
+```
+
+65 106 bytes of diagnostic text injected, exit status 0, no warning. The CLI's
+own progress banner correctly uses stderr; only this library `println!` was
+wrong (it also violated the crate's "use `tracing`" rule). Scope is limited to
+inputs with per-feature attribute variation — `delft.city.jsonl` emits no
+diagnostics, and `ser delft.city.jsonl -` was byte-identical to the file-output
+path even before the fix.
+
+The fix routes the diagnostic through `tracing`, so it is emitted only where a
+subscriber asks for it — and the destination becomes the embedder's choice, not
+the library's. It also corrects the message, which described the wrong
+condition: the attribute *is* in the schema, it is the feature that lacks it:
+
+```rust
+None => {
+    // Never `println!`: library diagnostics on stdout corrupt
+    // `fcb_cli ser <input> -`, which writes the binary there.
+    debug!("feature is missing indexed attribute {attr}");
+    continue;
+}
+```
+
+After the fix, `ser slice.jsonl -` emits 8 416 814 B — the same size as the
+file-output path — and `inspect --static` reads 2 000 features from it.
+`fcb_cli` installs no `tracing` subscriber, so for CLI users the diagnostic
+now vanishes entirely; it was per-feature noise on normal heterogeneous input,
+and library code has no business writing to a stream the caller owns.
+Two sibling `println!`s of the same defect class went in the same pass:
+`attribute.rs`'s "not supported for indexing" arm is now `debug!`, and
+`attr_index.rs`'s "Unsupported column type for indexing" line is deleted
+outright — it was redundant with the `Error::UnsupportedColumnType` returned on
+the next line. The `eprintln!` in the DateTime-parse fallback is now a `warn!`,
+since silently defaulting a bad timestamp to the epoch is worth surfacing.
+
+Note that `cmp`-ing the two outputs is **not** a valid check here: the writer is
+not byte-reproducible run to run (file→file twice with the same binary differs
+at the same offset, in header column-name territory), so the equality evidence
+above is size, `inspect`, and a `deser` round-trip compared line by line.
+
+**What a consumer saw:** piping the writer's output (`ser … - | …`) on real
+heterogeneous data produced a file that no reader can open, with a clean exit
+status. No justfile recipe uses the `-` path, which is why it went unnoticed.
+
+## 37. The writer silently drops `null` attribute values — oracle behaviour, but undocumented
+
+**Where:** `fcb_core/src/writer/attribute.rs:34` (schema building) and
+`fcb_core/src/writer/attribute.rs:121-123` (encoding).
+
+JSON `null` attribute values do not survive a round-trip, by construction:
+null-valued keys are kept out of the inferred schema —
+
+```rust
+if !self.contains_key(key) && !val.is_null() {
+```
+
+— and skipped at encode time:
+
+```rust
+if val.is_null() {
+    continue;
+}
+```
+
+**Reproduction:** `ser` + `deser` of `data/cjseq_data/3DBAG.city.jsonl`; every
+feature carrying nulls comes back without those keys:
+
+```
+input : ..."documentnummer":"1098447","eindgeldigheid":null,"eindregistratie":null,"geconstateerd":false...
+output: ..."documentnummer":"1098447","geconstateerd":false...
+```
+
+Across the 1110-feature round-trip this is the **only** content difference —
+1110/1110 features compare identical once null-valued attributes are dropped
+from the input.
+
+**Why it is a finding:** Rust is the oracle, so dropping nulls *defines* the
+format — the defect is that neither `docs/specification.md` nor this file said
+so. The attribute encoding has no null representation (absence is the only
+"null"), which the three ports and any writer of test expectations need to
+know: "key present with `null`" and "key absent" are indistinguishable after a
+round-trip, deliberately.
