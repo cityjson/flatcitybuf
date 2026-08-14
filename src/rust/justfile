@@ -15,8 +15,9 @@ default:
 # Lint + type + test + build, read-only
 check: lint type test build
 
-# NOTE: two tests (fcb_core::http) fetch from a public Google Cloud Storage
-# bucket, so this needs network access.
+# NOTE: the fcb_core::http tests fetch from the public bucket at
+# flatcitybuf.open3d.city; they are `#[ignore]`d, so this recipe stays offline
+# (see `test-remote` below).
 
 # Unit + integration tests (cargo nextest, whole workspace)
 test:
