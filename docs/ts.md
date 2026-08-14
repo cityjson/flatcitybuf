@@ -39,11 +39,13 @@ settled than Rust or C++:
   `just type` (`tsc --noEmit`, both configs) is the only static gate; `just
   lint` and `just fix` are deliberate no-ops that exist so every language
   exposes the same five verbs ([`src/ts/justfile:51-65`](../src/ts/justfile)).
-- **Four deliberate divergences from the Rust reader** in attribute-query
+- **Four divergence notes against the Rust reader** (the first now resolved)
+  in attribute-query
   behaviour, each documented with its rationale in the module docstring of
   [`src/ts/src/static-btree/query.ts:7-33`](../src/ts/src/static-btree/query.ts):
-  1. `Byte` columns are treated as **unsigned** `u8`, matching the writer — Rust's
-     own reader decodes that index as `i8` and goes negative above 127.
+  1. *Resolved — no longer a divergence.* `Byte` columns are treated as
+     **unsigned** `u8`, and Rust now agrees on every path (its feature-value
+     decode was fixed upstream, finding #2a; its index reader always read `u8`).
   2. `Json` and `Binary` columns are **rejected** with
      `ErrorCode.UnsupportedColumnType` rather than answered with near-meaningless
      100-byte-prefix collisions.

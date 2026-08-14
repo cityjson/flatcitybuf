@@ -95,13 +95,59 @@ TEST_CASE("an unknown column index throws") {
     CHECK_THROWS_AS(decode_attributes(bytes_view(blob), schema), Error);
 }
 
-TEST_CASE("Byte/UByte/Binary are rejected, matching the reference reader") {
-    // The writer emits these but deserializer.rs:372 is unreachable!() for
-    // them, so no such file has ever been read back successfully.
+TEST_CASE("Byte/UByte/Binary decode, matching the reference reader") {
+    // Byte is stored UNSIGNED by the writer, so 200 must come back as 200,
+    // not -56; Binary is a u32 LE length then that many raw bytes. Mirrors
+    // the Rust reader's own test (deserializer.rs,
+    // test_decode_attributes_byte_ubyte_binary).
+    //
+    // The Binary record is deliberately NOT last: a fixed-width Int follows
+    // it, so the walk has to land exactly on that record's column index. A
+    // length read that is off by even one byte desynchronises the rest of the
+    // blob -- with Binary at the end there is nothing left to desynchronise
+    // and a wrong length goes unnoticed.
     std::vector<ColumnInfo> schema = {
-        {0, "b", static_cast<std::uint8_t>(::ColumnType::Byte), true}};
-    std::vector<std::uint8_t> blob = {0, 0, 200};
-    CHECK_THROWS_AS(decode_attributes(bytes_view(blob), schema), Error);
+        {0, "b", static_cast<std::uint8_t>(::ColumnType::Byte), true},
+        {1, "ub", static_cast<std::uint8_t>(::ColumnType::UByte), true},
+        {2, "bin", static_cast<std::uint8_t>(::ColumnType::Binary), true},
+        {3, "i", static_cast<std::uint8_t>(::ColumnType::Int), true}};
+    std::vector<std::uint8_t> blob = {
+        0, 0, 200,                        // col 0, Byte:   200
+        1, 0, 200,                        // col 1, UByte:  200
+        2, 0, 2,   0,   0,   0,  1, 255,  // col 2, Binary: u32 len 2, then {1, 255}
+        3, 0, 249, 255, 255, 255          // col 3, Int:    -7, LE two's complement
+    };
+
+    auto decoded = decode_attributes(bytes_view(blob), schema);
+    REQUIRE(decoded.size() == 4);
+
+    CHECK(decoded[0].first == "b");
+    CHECK(decoded[0].second.type == AttrValue::Type::UInt);
+    CHECK(decoded[0].second.u == 200);
+
+    CHECK(decoded[1].first == "ub");
+    CHECK(decoded[1].second.type == AttrValue::Type::UInt);
+    CHECK(decoded[1].second.u == 200);
+
+    CHECK(decoded[2].first == "bin");
+    CHECK(decoded[2].second.type == AttrValue::Type::Binary);
+    REQUIRE(decoded[2].second.s.size() == 2);
+    CHECK(static_cast<std::uint8_t>(decoded[2].second.s[0]) == 1);
+    CHECK(static_cast<std::uint8_t>(decoded[2].second.s[1]) == 255);
+
+    // The record after the Binary payload: reached only if the u32 length was
+    // read correctly and the walk resumed on the right byte.
+    CHECK(decoded[3].first == "i");
+    CHECK(decoded[3].second.type == AttrValue::Type::Int);
+    CHECK(decoded[3].second.i == -7);
+
+#ifdef FCB_WITH_JSON
+    // Rust emits {"b":200,"ub":200,"bin":[1,255],"i":-7} -- Binary as an array
+    // of numbers, so nlohmann must not turn it into its own binary value type.
+    // nlohmann orders object keys alphabetically on dump.
+    const nlohmann::json j = attributes_to_json(bytes_view(blob), schema);
+    CHECK(j.dump() == "{\"b\":200,\"bin\":[1,255],\"i\":-7,\"ub\":200}");
+#endif
 }
 
 #ifdef FCB_WITH_JSON

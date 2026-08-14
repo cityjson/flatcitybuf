@@ -100,10 +100,22 @@ class FileInfo:
     scale: tuple[float, float, float] | None = None
     translate: tuple[float, float, float] | None = None
 
+    # Derived from Header.reference_system rather than read from a
+    # string field, so it has no absent-vs-empty distinction of its own
+    # to preserve. (Its gating is upstream finding #20.10, still open.)
     crs: str = ""
+    # `(required)` in header.fbs, so never absent in a valid file.
     cityjson_version: str = ""
-    identifier: str = ""
-    title: str = ""
+
+    # None means the FlatBuffers field is genuinely ABSENT; "" means it
+    # is PRESENT but empty. Rust distinguishes the two --
+    # `header.identifier().map(|i| i.to_string())` and the same shape
+    # for title (deserializer.rs:86-93) -- so Some("") is emitted as ""
+    # and only None omits the CityJSON key. Defaulting these to "" made
+    # absent and empty indistinguishable, silently dropping a key the
+    # oracle keeps: upstream finding #20.11.
+    identifier: str | None = None
+    title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -222,6 +234,10 @@ def _fill_metadata(hdr: Any, info: FileInfo) -> None:
         )
     info.cityjson_version = _decode_str(version_bytes)
 
+    # These `is not None` guards ARE the presence test, and the targets
+    # are `str | None`, so the distinction survives into FileInfo: a
+    # None accessor result stays None (key omitted downstream), a
+    # present-but-empty b"" becomes "" (key emitted as "").
     identifier_bytes = hdr.Identifier()
     if identifier_bytes is not None:
         info.identifier = _decode_str(identifier_bytes)

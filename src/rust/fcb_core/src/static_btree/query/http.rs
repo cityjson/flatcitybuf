@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use crate::static_btree::error::{Error, Result};
-use crate::static_btree::key::{Key, KeyType, Max, Min};
+use crate::static_btree::key::{Key, KeyType};
 use crate::static_btree::query::types::{Operator, QueryCondition};
 use crate::static_btree::stree::http::HttpSearchResultItem;
 use crate::static_btree::stree::Stree;
@@ -96,6 +96,42 @@ impl<K: Key> HttpIndex<K> {
 
         Ok(items)
     }
+
+    /// Find all items in the range via HTTP, with each bound independently
+    /// strict (exclusive) or inclusive. A `None` bound is the type's min/max
+    /// sentinel and is never strict.
+    ///
+    /// `Gt`/`Lt`/`Ne` lower to this instead of subtracting `find_exact` from
+    /// an inclusive range: the subtraction removes feature offsets, and one
+    /// feature can be indexed under several keys, so it deletes features that
+    /// match through a different key.
+    pub async fn find_range_strict<T: AsyncHttpRangeClient>(
+        &self,
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        start: Option<K>,
+        start_strict: bool,
+        end: Option<K>,
+        end_strict: bool,
+    ) -> Result<Vec<HttpSearchResultItem>> {
+        let lower = start.unwrap_or_else(K::min_value);
+        let upper = end.unwrap_or_else(K::max_value);
+
+        let items: Vec<HttpSearchResultItem> = Stree::http_stream_find_range_strict(
+            client,
+            self.index_begin,
+            self.feature_begin,
+            self.num_items,
+            self.branching_factor,
+            lower,
+            start_strict,
+            upper,
+            end_strict,
+            self.combine_request_threshold,
+        )
+        .await?;
+
+        Ok(items)
+    }
 }
 
 /// Trait for HTTP indices with heterogeneous key support
@@ -152,31 +188,35 @@ macro_rules! impl_typed_http_search_index {
                 // Dispatch to exact or range methods
                 let results = match condition.operator {
                     Operator::Eq => self.find_exact(client, key.clone()).await?,
+                    // Two half-open scans rather than a full scan minus the
+                    // equal set: subtraction on feature offsets is wrong when
+                    // one feature carries several values of the attribute.
                     Operator::Ne => {
-                        let all = self
-                            .find_range(
-                                client,
-                                Some(<$key_type>::min_value()),
-                                Some(<$key_type>::max_value()),
-                            )
+                        let mut below = self
+                            .find_range_strict(client, None, false, Some(key.clone()), true)
                             .await?;
-                        let eq = self.find_exact(client, key.clone()).await?;
-                        all.into_iter().filter(|x| !eq.contains(x)).collect()
+                        let above = self
+                            .find_range_strict(client, Some(key.clone()), true, None, false)
+                            .await?;
+                        below.extend(above);
+                        below
                     }
                     Operator::Gt => {
-                        let mut v = self.find_range(client, Some(key.clone()), None).await?;
-                        let eq = self.find_exact(client, key.clone()).await?;
-                        v.retain(|x| !eq.contains(x));
-                        v
+                        self.find_range_strict(client, Some(key.clone()), true, None, false)
+                            .await?
                     }
                     Operator::Lt => {
-                        let mut v = self.find_range(client, None, Some(key.clone())).await?;
-                        let eq = self.find_exact(client, key.clone()).await?;
-                        v.retain(|x| !eq.contains(x));
-                        v
+                        self.find_range_strict(client, None, false, Some(key.clone()), true)
+                            .await?
                     }
-                    Operator::Ge => self.find_range(client, Some(key.clone()), None).await?,
-                    Operator::Le => self.find_range(client, None, Some(key.clone())).await?,
+                    Operator::Ge => {
+                        self.find_range_strict(client, Some(key.clone()), false, None, false)
+                            .await?
+                    }
+                    Operator::Le => {
+                        self.find_range_strict(client, None, false, Some(key.clone()), false)
+                            .await?
+                    }
                 };
                 Ok(results)
             }
@@ -205,31 +245,35 @@ macro_rules! impl_typed_http_search_index {
                 // Dispatch to exact or range methods
                 let results = match condition.operator {
                     Operator::Eq => self.find_exact(client, key.clone()).await?,
+                    // Two half-open scans rather than a full scan minus the
+                    // equal set: subtraction on feature offsets is wrong when
+                    // one feature carries several values of the attribute.
                     Operator::Ne => {
-                        let all = self
-                            .find_range(
-                                client,
-                                Some(<$key_type>::min_value()),
-                                Some(<$key_type>::max_value()),
-                            )
+                        let mut below = self
+                            .find_range_strict(client, None, false, Some(key.clone()), true)
                             .await?;
-                        let eq = self.find_exact(client, key.clone()).await?;
-                        all.into_iter().filter(|x| !eq.contains(x)).collect()
+                        let above = self
+                            .find_range_strict(client, Some(key.clone()), true, None, false)
+                            .await?;
+                        below.extend(above);
+                        below
                     }
                     Operator::Gt => {
-                        let mut v = self.find_range(client, Some(key.clone()), None).await?;
-                        let eq = self.find_exact(client, key.clone()).await?;
-                        v.retain(|x| !eq.contains(x));
-                        v
+                        self.find_range_strict(client, Some(key.clone()), true, None, false)
+                            .await?
                     }
                     Operator::Lt => {
-                        let mut v = self.find_range(client, None, Some(key.clone())).await?;
-                        let eq = self.find_exact(client, key.clone()).await?;
-                        v.retain(|x| !eq.contains(x));
-                        v
+                        self.find_range_strict(client, None, false, Some(key.clone()), true)
+                            .await?
                     }
-                    Operator::Ge => self.find_range(client, Some(key.clone()), None).await?,
-                    Operator::Le => self.find_range(client, None, Some(key.clone())).await?,
+                    Operator::Ge => {
+                        self.find_range_strict(client, Some(key.clone()), false, None, false)
+                            .await?
+                    }
+                    Operator::Le => {
+                        self.find_range_strict(client, None, false, Some(key.clone()), false)
+                            .await?
+                    }
                 };
                 Ok(results)
             }

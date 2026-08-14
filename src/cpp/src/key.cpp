@@ -387,12 +387,12 @@ KeyValue key_max(KeyKind kind) {
 KeyKind key_kind_for_column(std::uint8_t column_type) {
     switch (static_cast<::ColumnType>(column_type)) {
         // Byte -> UInt8, deliberately. The writer stores Byte as u8
-        // (writer/attribute.rs:209) and builds MemoryIndex<u8>
-        // (writer/attr_index.rs:240); only the Rust READER decodes i8
-        // (reader/attr_query.rs:118), so it returns negative numbers for
-        // stored values above 127. We match the writer, and therefore
-        // decode files correctly, at the cost of disagreeing with the Rust
-        // reader on those values. See "Known divergences" in the plan.
+        // (writer/attribute.rs) and builds MemoryIndex<u8>
+        // (writer/attr_index.rs), so it must be read back unsigned or every
+        // stored value above 127 comes back negative. Rust now agrees on
+        // both paths -- its index reader (reader/attr_query.rs) and its
+        // value reader (reader/deserializer.rs) each decode u8 -- so this is
+        // no longer a divergence.
         case ::ColumnType::Byte:
             return KeyKind::UInt8;
         case ::ColumnType::UByte:

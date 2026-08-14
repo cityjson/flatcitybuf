@@ -223,6 +223,163 @@ mod tests {
         Ok(())
     }
 
+    /// Upstream finding #17: the writer indexes a `Long` (i64) column but the
+    /// reader had no `ColumnType::Long` arm, so any query touching such a
+    /// column failed with `Error::UnsupportedColumnType`.
+    ///
+    /// `guess_type` (writer/attribute.rs) maps a JSON number to `ULong` when
+    /// it fits in a `u64`, so only a *negative* integer is inferred as `Long`.
+    /// The test therefore injects a negative integer attribute and asserts on
+    /// `col.type_()` before querying, so it cannot silently drift to another
+    /// column type.
+    #[test]
+    fn test_attr_index_long_column() -> Result<()> {
+        use fcb_core::ColumnType;
+
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let input_file = manifest_dir
+            .join("tests")
+            .join("data")
+            .join("small.city.jsonl");
+
+        let input_file = File::open(input_file)?;
+        let input_reader = BufReader::new(input_file);
+        let mut original_cj_seq = match read_cityjson_from_reader(input_reader, CJTypeKind::Seq)? {
+            CJType::Seq(seq) => seq,
+            _ => panic!("Expected CityJSONSeq"),
+        };
+
+        // Give every feature a distinct negative integer attribute: -10 for
+        // the first feature, -20 for the second, -30 for the third.
+        const LONG_COLUMN: &str = "elevation_offset";
+        for (i, feature) in original_cj_seq.features.iter_mut().enumerate() {
+            for co in feature.city_objects.values_mut() {
+                let Some(attrs) = co.attributes.as_mut() else {
+                    continue;
+                };
+                let Some(map) = attrs.as_object_mut() else {
+                    continue;
+                };
+                if map.is_empty() {
+                    continue;
+                }
+                map.insert(
+                    LONG_COLUMN.to_string(),
+                    serde_json::Value::from(-10 * (i as i64 + 1)),
+                );
+            }
+        }
+
+        let mut attr_schema = AttributeSchema::new();
+        for feature in original_cj_seq.features.iter() {
+            for (_, co) in feature.city_objects.iter() {
+                if let Some(attributes) = &co.attributes {
+                    attr_schema.add_attributes(attributes);
+                }
+            }
+        }
+        assert_eq!(
+            attr_schema.get(LONG_COLUMN).map(|(_, t)| *t),
+            Some(ColumnType::Long),
+            "the injected column must be inferred as ColumnType::Long"
+        );
+
+        let attr_indices = vec![(LONG_COLUMN.to_string(), None)];
+        let mut fcb = FcbWriter::new(
+            original_cj_seq.cj.clone(),
+            Some(HeaderWriterOptions {
+                write_index: true,
+                feature_count: original_cj_seq.features.len() as u64,
+                index_node_size: 16,
+                attribute_indices: Some(attr_indices),
+                geographical_extent: None,
+            }),
+            Some(attr_schema),
+            None,
+        )?;
+        for feature in original_cj_seq.features.iter() {
+            fcb.add_feature(feature)?;
+        }
+        let mut memory_buffer = Cursor::new(Vec::new());
+        fcb.write(&mut memory_buffer)?;
+        let fcb_data = memory_buffer.get_ref().clone();
+
+        // The written header must really declare the column as `Long`.
+        {
+            let reader = FcbReader::open(Cursor::new(fcb_data.clone()))?;
+            let header = reader.header();
+            let columns = header.columns().expect("header must carry columns");
+            let col = columns
+                .iter()
+                .find(|c| c.name() == LONG_COLUMN)
+                .expect("the indexed column must be in the header");
+            assert_eq!(col.type_(), ColumnType::Long);
+        }
+
+        /// Collect the values of `LONG_COLUMN` carried by a feature.
+        fn long_values(feature: &CityJSONFeature) -> Vec<i64> {
+            feature
+                .city_objects
+                .values()
+                .filter_map(|co| co.attributes.as_ref())
+                .filter_map(|attrs| attrs.get(LONG_COLUMN))
+                .filter_map(|val| val.as_i64())
+                .collect()
+        }
+
+        fn run_seekable(data: &[u8], query: &[(String, Operator, KeyType)]) -> Result<Vec<i64>> {
+            let mut cursor = Cursor::new(data.to_vec());
+            cursor.seek(SeekFrom::Start(0))?;
+            let mut reader = FcbReader::open(cursor)?.select_attr_query(query.to_vec())?;
+            let feat_count = reader.header().features_count();
+            let mut values = Vec::new();
+            let mut feat_num = 0;
+            while let Ok(Some(feat_buf)) = reader.next() {
+                values.extend(long_values(&feat_buf.cur_cj_feature()?));
+                feat_num += 1;
+                if feat_num >= feat_count {
+                    break;
+                }
+            }
+            Ok(values)
+        }
+
+        fn run_sequential(data: &[u8], query: &[(String, Operator, KeyType)]) -> Result<Vec<i64>> {
+            let cursor = Cursor::new(data.to_vec());
+            let mut reader = FcbReader::open(cursor)?.select_attr_query_seq(query.to_vec())?;
+            let feat_count = reader.header().features_count();
+            let mut values = Vec::new();
+            let mut feat_num = 0;
+            while let Ok(Some(feat_buf)) = reader.next() {
+                values.extend(long_values(&feat_buf.cur_cj_feature()?));
+                feat_num += 1;
+                if feat_num >= feat_count {
+                    break;
+                }
+            }
+            Ok(values)
+        }
+
+        let eq_query: Vec<(String, Operator, KeyType)> =
+            vec![(LONG_COLUMN.to_string(), Operator::Eq, KeyType::Int64(-20))];
+        let ge_query: Vec<(String, Operator, KeyType)> =
+            vec![(LONG_COLUMN.to_string(), Operator::Ge, KeyType::Int64(-20))];
+
+        // Seekable (streaming index) path.
+        assert_eq!(run_seekable(&fcb_data, &eq_query)?, vec![-20]);
+        let mut ge_values = run_seekable(&fcb_data, &ge_query)?;
+        ge_values.sort_unstable();
+        assert_eq!(ge_values, vec![-20, -10]);
+
+        // Sequential (in-memory index) path.
+        assert_eq!(run_sequential(&fcb_data, &eq_query)?, vec![-20]);
+        let mut ge_values = run_sequential(&fcb_data, &ge_query)?;
+        ge_values.sort_unstable();
+        assert_eq!(ge_values, vec![-20, -10]);
+
+        Ok(())
+    }
+
     #[test]
     fn test_attr_index_multiple_queries() -> Result<()> {
         // --- Prepare FCB data ---

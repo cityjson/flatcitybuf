@@ -72,6 +72,64 @@ def _read(path: Path) -> HeaderView:
     return read_header(FileRangeReader(path))
 
 
+# Byte 3 is the format version and byte 7 is never validated
+# (layout.check_magic_bytes), so this is the exact preamble the writer
+# emits: b"fcb\x01fcb\x00".
+_MAGIC = b"fcb\x01fcb\x00"
+
+
+def _header_only_file(
+    tmp_path: Path,
+    *,
+    identifier: str | None = None,
+    title: str | None = None,
+) -> Path:
+    """A minimal, well-formed .fcb carrying nothing but a header.
+
+    `None` leaves the FlatBuffers field genuinely ABSENT; `""` stores a
+    PRESENT-but-empty string. No corpus fixture has the latter, and the
+    two are indistinguishable through the generated accessors' return
+    value alone -- `Identifier()` gives `None` vs `b""` -- which is the
+    whole point of the tests below. `version` is `(required)` in
+    header.fbs, so it is always set.
+    """
+    # flatbuffers ships no py.typed marker and the flatc-generated
+    # builders are untyped, hence the narrow per-call ignores -- the
+    # same accommodation flatcitybuf.header makes for
+    # `_Header.GetRootAs`.
+    import flatbuffers  # type: ignore[import-untyped]
+
+    from flatcitybuf.generated import header_generated as hg
+
+    builder = flatbuffers.Builder(1024)
+    version_off = builder.CreateString("2.0")
+    identifier_off = (
+        None if identifier is None else builder.CreateString(identifier)
+    )
+    title_off = None if title is None else builder.CreateString(title)
+
+    hg.HeaderStart(builder)  # type: ignore[no-untyped-call]
+    hg.HeaderAddVersion(builder, version_off)  # type: ignore[no-untyped-call]
+    hg.HeaderAddIndexNodeSize(  # type: ignore[no-untyped-call]
+        builder, 16
+    )
+    if identifier_off is not None:
+        hg.HeaderAddIdentifier(  # type: ignore[no-untyped-call]
+            builder, identifier_off
+        )
+    if title_off is not None:
+        hg.HeaderAddTitle(  # type: ignore[no-untyped-call]
+            builder, title_off
+        )
+    builder.FinishSizePrefixed(
+        hg.HeaderEnd(builder)  # type: ignore[no-untyped-call]
+    )
+
+    path = tmp_path / "header_only.fcb"
+    path.write_bytes(_MAGIC + bytes(builder.Output()))
+    return path
+
+
 # --------------------------------------------------------- the trap ---
 
 
@@ -100,6 +158,30 @@ def test_small_title_and_crs() -> None:
     view = _read(CORPUS / "small.fcb")
     assert view.info.title == "3DBAG"
     assert view.info.crs == "EPSG:7415"
+
+
+def test_present_but_empty_identifier_and_title_are_kept(
+    tmp_path: Path,
+) -> None:
+    # Rust reads both through an Option accessor and .map()s it
+    # (deserializer.rs:86-93), so a present-but-empty FlatBuffers string
+    # is Some("") -- a real value that must survive into FileInfo as
+    # "", NOT collapse into the same "" a defaulted field would carry.
+    # A str field defaulting to "" cannot express the difference, which
+    # is upstream finding #20.11.
+    path = _header_only_file(tmp_path, identifier="", title="")
+    info = _read(path).info
+    assert info.identifier == ""
+    assert info.title == ""
+
+
+def test_absent_identifier_and_title_stay_none(tmp_path: Path) -> None:
+    # The other half of the distinction: absent is None, so the CityJSON
+    # emitter can omit the key rather than emitting "".
+    path = _header_only_file(tmp_path)
+    info = _read(path).info
+    assert info.identifier is None
+    assert info.title is None
 
 
 def test_small_transform() -> None:

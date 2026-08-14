@@ -4,11 +4,11 @@ Five defects in `fcb_core` surfaced during the native C++ port. Each is
 reproducible, each caused a deliberate divergence in the C++ reader, and none
 is caught by the existing Rust test suite.
 
-**Status: all six are now FIXED in this branch** except #5, which is a
-structural change to the query lowering that the C++ reader demonstrates the
-alternative for. Each fix has a regression test. #1 turned out to be an
-upstream `flatbuffers` bug and is fixed by a version bump, which **changes the
-written file layout**.
+**Status: all of #1-#6 (including #2a and #5) are now FIXED in this branch.**
+Each fix has a regression test. #1 turned out to be an upstream `flatbuffers`
+bug and is fixed by a version bump, which **changes the written file layout**.
+#5 — long deferred as a structural change — now adopts the leaf-level
+strict-bound design the C++ reader demonstrated; see its entry.
 
 A seventh defect surfaced while regenerating fixtures: indexing an attribute
 with no values panicked (`assert!(num_leaf_nodes > 0, "Cannot create empty
@@ -92,7 +92,7 @@ same family.
 
 ---
 
-## 2a. `Byte` feature-attribute value decode: still decodes as `i8` — NOT FIXED
+## 2a. `Byte` feature-attribute value decode: still decodes as `i8` — FIXED
 
 **Where:** `reader/deserializer.rs:375-383`, inside `decode_attributes`
 (the function that turns a `CityObject`'s raw attribute bytes into the
@@ -168,8 +168,31 @@ stored Byte value: 200
 decode_attributes() result: {"b":-56}
 ```
 
-**Not fixed:** out of scope for this task (documentation only); recorded
-here, with the exact citation, for whoever picks up the Rust-side fix.
+**Fixed:** `decode_attributes`' `Byte` arm now reads `bytes[offset]` (u8),
+matching the writer and the already-`u8` index path — the decision of record
+for `Byte` is *unsigned, matching the writer*, the same direction item 2's
+fix and the ports had already taken. Pinned by
+`test_decode_attributes_byte_ubyte_binary` (`reader/deserializer.rs`), the
+first direct unit test `decode_attributes` has ever had; it also pins the
+`UByte` and `Binary` arms against the writer's wire format.
+
+The three-way disagreement recorded below is resolved in the same pass: C++
+(`src/cpp/src/attribute.cpp`) and Python (`src/py/flatcitybuf/attribute.py`)
+now DECODE all three types instead of rejecting them, each mirroring the
+Rust test's values (`b=200, ub=200, bin=[1,255]`) and each emitting `Binary`
+in Rust's JSON shape (an array of numbers). TypeScript already decoded them;
+its stale "the Rust reader disagrees" notes are retired and its
+`Array.from` conversion at the CityJSON boundary is now pinned by test. All
+four implementations agree. No conformance fixture exercises these types —
+cross-language agreement rests on the mirrored unit tests; a shared corpus
+fixture (requiring `.fcb` regeneration) is worthwhile follow-up.
+
+A writer-side gap remains, recorded here rather than silently: the writer
+reads a `Byte` source value via `as_i64` and wraps it to `u8` without
+validation (`writer/attribute.rs`), so a *negative* JSON input, e.g. `-56`,
+is stored as `200` and now reads back as `200` in all four implementations.
+Round-trip of in-range values is correct; rejecting out-of-range input at
+write time is the open improvement.
 
 ---
 
@@ -183,14 +206,12 @@ containing such an attribute is unreadable by the implementation that wrote it.
 **C++ divergence:** decodes all three. Their widths are unambiguous (1, 1, and
 `u32` length + bytes), so there is no reason to refuse them.
 
-> **NOTE — this C++ divergence is stale; see item 2a.** Current
-> `src/cpp/src/attribute.cpp` and `src/py/flatcitybuf/attribute.py` both
-> *reject* `Byte`/`UByte`/`Binary` with `UnsupportedColumnType`, each still
-> citing the `unreachable!()` this item records as fixed. The source comments
-> at `src/cpp/src/attribute.cpp` and `src/py/flatcitybuf/attribute.py` carry
-> the same stale justification, as does `src/cpp/src/key.cpp`'s mirror-image
-> claim about `reader/attr_query.rs:118`. A future pass should reconcile all
-> four together.
+> **NOTE — resolved.** The C++/Python rejections described here, and the
+> stale comments citing this item's `unreachable!()` (in
+> `src/cpp/src/attribute.cpp`, `src/py/flatcitybuf/attribute.py`, and
+> `src/cpp/src/key.cpp`'s mirror-image claim about `attr_query.rs`), were
+> all reconciled in item 2a's fix pass: both ports now decode all three
+> types, matching this item's fixed Rust reader.
 
 ---
 
@@ -221,7 +242,7 @@ already rejects out-of-range keys; costs at most one extra node read.
 
 ---
 
-## 5. `Gt`/`Lt`/`Ne` can drop genuine matches — NOT FIXED upstream
+## 5. `Gt`/`Lt`/`Ne` can drop genuine matches — FIXED
 
 **Where:** `static_btree/query/stream.rs:161-191`.
 
@@ -234,11 +255,33 @@ A feature holding both `k` and `k' > k` is returned by the range scan (via
 `k'`) and also by `find_exact(k)` (via `k`), so the subtraction deletes it. It
 is a false negative for a feature that genuinely matches.
 
-**C++ divergence (still live):** evaluates strict-or-inclusive bounds at the
-leaf instead of subtracting. One traversal, no subtraction, no false negatives.
+**C++ divergence (no longer a divergence):** evaluates strict-or-inclusive
+bounds at the leaf instead of subtracting. One traversal, no subtraction, no
+false negatives.
 
-Not fixed upstream: it is a structural change to the query lowering rather
-than a localised correction, and the C++ reader demonstrates the alternative.
+**Fixed** by adopting exactly that design. All three tree traversal families
+(`find_range`, `stream_find_range`, `http_stream_find_range` in
+`static_btree/stree.rs`) gained strict-bound variants sharing one
+`in_bounds` leaf predicate; the inclusive methods remain as thin wrappers.
+All four lowering sites (`query/memory.rs`, `query/stream.rs`, and both cfg
+copies in `query/http.rs`) now lower `Gt`/`Lt` to one strict-bound traversal
+and `Ne` to two half-open traversals concatenated — the offset subtraction
+is gone. The regression tests build the exact scenario this finding
+describes (one feature indexed under two keys) and run it through the
+memory, stream and http paths; they are also the first `Operator::Ne`
+coverage anywhere in the Rust suite.
+
+Two notes for the record:
+
+- String `Gt`/`Lt`/`Ne` semantics on truncation-colliding keys are
+  *unchanged*: Rust applies strict bounds uniformly and has no candidate
+  post-filter (unlike C++ and TypeScript), so index keys remain its
+  contract. C++'s string widening was deliberately not ported.
+- The new tests exposed an unrelated pre-existing defect, fixed in the same
+  pass: `StreamMultiIndex::query`'s empty-result early return skipped the
+  cursor restore, so the *next* query on the same reader resolved index
+  offsets from the wrong base (a hard `UnexpectedEof` once any query
+  follows an empty-result one).
 
 ---
 
@@ -692,9 +735,15 @@ has the identical absent-vs-empty conflation but feeds no `throw` — see §19
 below, left as a disclosed, lower-severity limitation rather than fixed
 here.
 
+**Superseded (mechanism only, not behaviour):** §19/§20.11 later made
+those other fields `std::optional<std::string>` too, so the standalone
+`has_poc_email` flag was deleted — `poc_email.has_value()` is the same
+test on the field itself. The gate and its throw semantics are unchanged,
+and the test above still pins them.
+
 ---
 
-## 17. Rust reader: `attr_query.rs` has no `ColumnType::Long` arm — NOT FIXED
+## 17. Rust reader: `attr_query.rs` has no `ColumnType::Long` arm — FIXED
 
 **Confirmed directly from source, both sides, for this write-up:**
 
@@ -722,11 +771,16 @@ attribute query against an indexed `i64` column gets
 `Error::UnsupportedColumnType` for data the writer happily indexed and that
 both C++ and (per the plan's divergence policy) Python answer correctly.
 
-**Not fixed:** out of scope for this task (documentation only); recorded
-here, with the exact citations, for whoever picks up the Rust-side fix. This
-is distinct from the plan's four *deliberate* Rust/C++/Python divergences
-(§20) — nothing chose this behaviour, it is a straightforward missing match
-arm.
+**Fixed:** the `Long` arm was added to all *three* sites — the two matches in
+`reader/attr_query.rs` this entry cites, plus a third with the same gap in
+`http_reader/mod.rs`'s `add_indices_to_multi_http_index`. Regression test
+`test_attr_index_long_column` (`fcb_core/tests/attr_index.rs`) covers the
+seekable and sequential query paths; the http arm has compile-time coverage
+only (the mock client is `#[cfg(test)]`-gated away from `tests/`). One
+nuance worth keeping: `guess_type` checks `is_u64()` before `is_i64()`, so
+plain *positive* JSON integers infer as `ULong` — only a negative integer
+produces a `Long` column, which is why the test injects negative values and
+asserts `col.type_()` on the written header.
 
 ## 18. Tooling: `flatc --gen-onefile` emits no cross-schema-file imports — FIXED (generation-time workaround)
 
@@ -765,32 +819,41 @@ cannot resolve per-object schema or geometry without it).
 
 ## 19. Known limitations left in place — NOT FIXED, disclosed
 
-- **C++ `FileInfo` conflates absent and empty-string for `identifier`,
+- ~~**C++ `FileInfo` conflates absent and empty-string for `identifier`,
   `title`, `crs`, and every `poc_*`/`poc_address_*` field except
-  `poc_email`** (which §16 above gave its own presence flag because it
-  alone escalates to a thrown error). These fields are plain
-  `std::string` members in `src/cpp/include/fcb/header.hpp`, populated in
-  `src/cpp/src/header.cpp`'s `fill_metadata`, and read via truthiness
-  (`if (!info.identifier.empty()) ...`) in `to_cityjson_metadata`. **What a
-  consumer sees:** a header field genuinely set to `""` is silently
-  indistinguishable from one that was never set — the JSON key is omitted
-  either way. No fixture in the repo exercises a legitimately-empty string
-  for any of these fields, so the gap is theoretical rather than observed,
-  but it is a real latent divergence from Rust's `Option<&str>` semantics,
-  the same class of bug §16 fixed for `poc_email` specifically because that
-  one field's conflation could also raise a wrong exception.
-- **`std::from_chars` rejects a leading `+` on the address thoroughfare
-  number, where Rust's `i64::from_str` accepts it.** Confirmed by
-  inspection of `point_of_contact_address_to_json`
-  (`src/cpp/src/cityjson.cpp:352-369`), which parses
-  `info.poc_address_thoroughfare_number` via `std::from_chars`. This is a
-  narrow, disclosed gap (noted in the Task 15 report as "did not chase the
-  `+42` edge case") rather than a re-derived-from-scratch finding here: no
-  fixture in the repo carries a `+`-prefixed thoroughfare number, so the
-  consequence — a legitimately `+`-prefixed number causing the whole
-  `address` sub-object (not the whole `pointOfContact`, per §10's "an
-  unparseable number omits just the address" rule) to be silently omitted —
-  is unexercised in practice.
+  `poc_email`**~~ — **FIXED for every field except `crs`**, together with
+  §20.11 (see there for the full contract and the fix). `identifier`,
+  `title`, `reference_date` and `poc_contact_name`/`_contact_type`/`_role`/
+  `_phone`/`_email`/`_website` are now `std::optional<std::string>` in
+  `src/cpp/include/fcb/header.hpp`, populated from `fill_metadata`'s
+  existing `!= nullptr` guards, and gated on `has_value()` in
+  `to_cityjson_metadata`/`point_of_contact_to_json`; `has_poc_email` is
+  deleted, subsumed by `poc_email.has_value()`. Two exclusions are
+  deliberate, not oversights:
+  - `poc_address_*` stays `std::string`, because non-emptiness — not
+    presence — is what Rust itself checks there: `to_cj_address`
+    (`deserializer.rs:195-216`) emits each member iff non-empty and the
+    sub-object only when at least one member survives.
+  - `crs` stays `std::string`, because it is *derived* (authority + code
+    from `Header.reference_system`), not read from a schema-optional
+    string. Its own gating divergence is §20.10, still open, and needs
+    Rust/C++/Python treated together.
+- ~~**`std::from_chars` rejects a leading `+` on the address thoroughfare
+  number, where Rust's `i64::from_str` accepts it.**~~ — **STALE on both
+  premises; struck rather than fixed (2026-08-13 pass, verified against
+  the tree).** The parsing reader this bullet cites no longer exists: the
+  address model became all-strings (cjseq2 0.2.0-alpha.1), so
+  `point_of_contact_address_to_json` (now `src/cpp/src/cityjson.cpp`,
+  `~467-481`) does no parsing at all — non-empty test plus verbatim string
+  copy, mirroring Rust's `to_cj_address` arm for arm. `thoroughfareNumber`
+  is a *string* in the schema (`src/fbs/header.fbs:157`), so no parse can
+  reach it on the writer side either: both writers pass `"+42"`, `""`, and
+  non-numeric strings through identically. The one `from_chars` remaining
+  in `src/cpp` is `parse_i32_whole` on the unrelated `referenceSystem` URL
+  path (`src/cpp/src/writer/header_serializer.cpp:72-91`), and it already
+  strips a leading `+` to match Rust's `parse::<i32>()`, with regression
+  tests (`src/cpp/tests/test_writer_header.cpp:64-81`) — nine edge cases
+  checked, C++ and Rust agree on every one.
 
 ---
 
@@ -819,15 +882,13 @@ docstring, `src/py/flatcitybuf/stree.py:732+`):
    Python's index-key choice and Rust's current index reader now agree,
    and there is no live divergence at this layer to record.
 
-   A live divergence in the same family does still exist, but one layer
-   up, in feature-attribute *value* decoding rather than index-key
-   encoding: Rust's `decode_attributes` (`reader/deserializer.rs:375`,
-   distinct code path from `attr_query.rs`, itself never fixed) still
-   returns `-56` for a stored `200` when reading a feature's attributes —
-   see item 2a at the top of this document, which also covers Python's
-   own behaviour at that layer (Python's `attribute.py` does not reproduce
-   `-56` either, but only because it rejects `Byte` there outright, for an
-   unrelated reason).
+   The one remaining divergence in this family — Rust's feature-attribute
+   *value* decode returning `-56` for a stored `200`, one layer up from the
+   index-key encoding this point is about — is now fixed too; see item 2a,
+   whose fix pass also replaced Python's outright `Byte` rejection at that
+   layer with a real (unsigned) decode. As of this branch there is no live
+   divergence anywhere in the Byte family: writer, index path and value
+   path all agree on `u8` in all four implementations.
 2. **Json/Binary index queries are rejected** —
    `stree.py::_resolve` (`src/py/flatcitybuf/stree.py:663`, its own comment
    labels this "DIVERGENCE 2"), checked before the "is it indexed" lookup,
@@ -925,6 +986,13 @@ either.
     unhelpful literal empty path segment) rather than a contract worth
     porting faithfully.
 
+    **Deliberately deferred (2026-08-13 fix pass):** every other open item
+    in this document that was decision-free was closed in that pass; this
+    one was left untouched *because* the right contract is a maintainer
+    decision — whether Rust's URL construction (actual `version`, empty
+    authority segment, `code == 0` emitted) is the behaviour to port, or
+    itself the defect to fix in all three implementations at once.
+
     No test catches any of this because `small.fcb` — the only corpus
     case with a `referenceSystem` at all — happens to carry `EPSG:7415`
     with `version == 0` and a non-zero `code`, the one configuration
@@ -937,7 +1005,7 @@ either.
     a unilateral Python fix.
 
 11. **`identifier`/`title` are gated on non-emptiness, not presence,
-    identically in Python and C++.** Rust's `to_cj_metadata` reads
+    identically in Python and C++ — FIXED.** Rust's `to_cj_metadata` reads
     `header.identifier().map(|i| i.to_string())` and
     `header.title().map(|t| t.to_string())`
     (`src/rust/fcb_core/src/reader/deserializer.rs:85,89`) — both fields
@@ -983,6 +1051,34 @@ either.
     exercises the input in the first place. Recommend the same follow-up
     as #10: one upstream finding covering all three implementations, not
     a unilateral Python change.
+
+    **Fix.** Both readers now gate on presence, and the fix reaches the
+    representation as this finding required, not only the gate:
+
+    - **Python.** `FileInfo.identifier`/`.title`
+      (`src/py/flatcitybuf/header.py`) are `str | None = None`;
+      `_fill_metadata`'s `is not None` guards were already
+      presence-aware and now survive into the dataclass. The gates in
+      `src/py/flatcitybuf/cityjson.py` became `if info.identifier is not
+      None:` / `if info.title is not None:`. `referenceDate` and
+      `pointOfContact` there already read the raw header through
+      presence-guarded accessors and were correct.
+    - **C++.** The nine schema-optional header strings became
+      `std::optional<std::string>` — see §19's first bullet for the
+      field list, the two deliberate exclusions (`crs`,
+      `poc_address_*`), and the deletion of `has_poc_email`.
+    - **TypeScript** was already correct (`hdr.identifier() ?? undefined`
+      into a `put()` that gates on `!== undefined`) but unpinned; it now
+      carries the same test.
+
+    Each implementation pins BOTH halves — present-but-empty emits `""`,
+    absent omits the key — against a hand-built header buffer, since the
+    corpus cannot express the input. The TS pin was verified to fail when
+    `?? undefined` is mutated to `|| undefined`.
+
+    Still open in the same class: `crs`/`referenceSystem` (§20.10), which
+    is derived rather than read from a schema-optional string and needs
+    Rust, C++ and Python changed together.
 
 ---
 
@@ -1097,10 +1193,11 @@ string (`src/ts/src/post-filter.ts`); covered by `src/ts/test/stree.test.ts`
 ("string keys are truncated, so the index returns candidates") and
 `post-filter.test.ts`.
 
-## 24. wasm: `index_node_size` from the header is ignored on the HTTP path — NOT FIXED (crate removed; the same bug is live in `fcb_core`)
+## 24. wasm: `index_node_size` from the header is ignored on the HTTP path — FIXED in `fcb_core` (crate removed; the twin file-reader bug is fixed too)
 
 **Where:** `wasm/src/lib.rs:275` (`select_spatial_paged`) — and the same hardcode
-still lives in `fcb_core/src/http_reader/mod.rs:220`.
+~~still lives in~~ was shared by `fcb_core/src/http_reader/mod.rs:220`, since
+fixed (see below).
 
 Both call `PackedRTree::http_stream_search(..., PackedRTree::DEFAULT_NODE_SIZE, ...)`,
 passing the compile-time default (16) instead of `header.index_node_size()`, even
@@ -1109,12 +1206,31 @@ is traversed as if its R-tree branched by 16, walking the wrong node ranges.
 
 **What a consumer saw:** a spatial query over HTTP against a file written with a
 non-default R-tree node size returned wrong or missing features. This is not just a
-wasm defect: `fcb_core`'s own HTTP reader shares the hardcode and is still live. The
+wasm defect: `fcb_core`'s own HTTP reader ~~shares the hardcode and is still
+live~~ shared the hardcode, since fixed — see below. The
 native reader threads `header.info.indexNodeSize` into every R-tree traversal
 (`src/ts/src/reader.ts`, `searchRtree`/`searchNearest`), and the corpus carries
 `appearance_depths_node8.fcb` (node size 8) precisely to exercise it — covered by
 `src/ts/test/packed-rtree.test.ts` ("honours a NON-DEFAULT index_node_size from the
 header").
+
+**FIXED in `fcb_core` — and the defect was wider than recorded here.** While
+fixing the cited HTTP-path hardcode (`http_reader/mod.rs`,
+`select_query_paged`), an undocumented *twin* surfaced: the seekable FILE
+reader (`reader/mod.rs`, `select_query`) passed the identical
+`PackedRTree::DEFAULT_NODE_SIZE` to its traversal, so the defect was
+reachable via `FcbReader::open(File).select_query` and through `fcb_api`,
+not only over HTTP. The non-seekable `select_query_seq` was never affected.
+Both sites now pass `header.index_node_size()`. Regression tests
+(`http_spatial_query_honours_header_index_node_size` in-crate,
+`read_bbox_honours_header_index_node_size` in `tests/read.rs`) drive
+`appearance_depths_node8.fcb` — whose 12 features at node size 8 have level
+bounds `[12, 2, 1]` where a hardcoded 16 implies `[12, 1]` — against a
+`select_all` oracle. Enabling in-crate HTTP tests over small local fixtures
+required teaching the mock range client to truncate at EOF like a real
+server instead of panicking. In release builds the pre-fix symptom was
+silently wrong results; only debug builds panicked on the
+sorted-by-construction assertion.
 
 ## 25. wasm: the gloo range client accepts a `200` full-body response as the requested range — NOT FIXED (crate removed)
 
@@ -1144,7 +1260,7 @@ Content` with a `Content-Range` that matches what it asked for, and raises
 / "throws when the server returns a DIFFERENT range than requested") and the
 browser CORS test in `src/ts/test/browser/fetch.browser.test.ts`.
 
-## 26. `PackedRTree::http_stream_search` can emit the extra leaf node twice — NOT FIXED (live in `fcb_core`)
+## 26. `PackedRTree::http_stream_search` can emit the extra leaf node twice — FIXED (guard added to all three arms; unreachable in the two intersect arms, reachable in `PointNearest`)
 
 **Where:** `fcb_core/src/packed_rtree/mod.rs:956-966`, with the `+1` at line 986.
 
@@ -1164,6 +1280,61 @@ half-open range of each node group and never re-evaluates the sizing leaf, so it
 not duplicate — covered by the bbox brute-force oracle tests in
 `src/ts/test/packed-rtree.test.ts`, which compare the hit *set* against an exhaustive
 scan.
+
+**FIXED — with a correction to this entry's premise.** The static analysis
+above is accurate (no guard existed), but the double emission turns out to
+be **unreachable in practice**: an intersecting sizing leaf implies its own
+parent also intersects (a parent's bounds are the union of its children's),
+so the sibling range starting at that leaf is always enqueued next and
+always takes the overlap-merge branch (`wasted_bytes = 0`, never above any
+threshold) — the two ranges become one before the leaf is evaluated twice.
+An oracle sweep (~700 boundary-targeted plus 250 random queries against
+brute force, `combine_request_threshold = 0`, multi-level trees) found no
+duplicate pre-fix, and instrumentation showed the guard path is reached
+constantly but never suppresses a hit. The guard was added anyway — each
+`NodeRange` now carries a `has_sizing_tail` marker excluding its final node
+from candidate evaluation, in **both** the `Query::BBox` and
+`Query::PointIntersects` arms (this entry only cited BBox; the same shape
+existed in both) — because it encodes the invariant explicitly and closes
+the latent worst case: an unguarded sizing-node hit at the end of the last
+range would have emitted an unbounded `HttpRange::RangeFrom`, a
+read-to-EOF.
+
+The reproduction attempt also exposed a real, unrecorded defect in the same
+loops, fixed in the same pass: `debug_assert_eq!(node_pos, num_items - 1)`
+compares a position *within the fetched range* against the global item
+count, so any hit of the final feature via a non-initial node range
+panicked in debug builds. Corrected to assert against the last leaf of the
+level. The same wrong `debug_assert` also sat in the third arm,
+`Query::PointNearest`, and is now fixed there too, with its own oracle test
+(`nearest_search_reaches_the_final_leaf_through_a_non_initial_range`: 17
+leaves at branching factor 4, whose final level-1 node owns a single child,
+so the level's last leaf is only ever reached through the range `24..25` —
+`node_pos` is `0`, never `16`).
+
+That arm was **initially** left without the `has_sizing_tail` guard, on the
+reading that evaluating a borrowed sizing leaf as a nearest *candidate* is
+result-correct. That reading turned out to be only half right, so **the
+guard is now in all three arms.** A brute-force sweep over the same
+fixtures (`nearest_search_matches_brute_force_at_leaf_boundaries`) showed
+the nearest *feature* was indeed always identified correctly — 0 wrong
+features and no duplicates in 1506 boundary queries — but in 126 of them
+the hit landed on a range's sizing leaf, which by construction is the last
+node of the fetched batch, so `node_items.get(node_pos + 1)` was `None` and
+the arm emitted an unbounded `HttpRange::RangeFrom` instead of the bounded
+range: the right feature, read to EOF. That is exactly the latent worst
+case cited above as the reason the guard was added to the other two arms —
+except here it was not latent but reachable on ~8% of boundary queries, and
+it is what the corrected `debug_assert` caught once it started asserting
+the true invariant. `QueueItem` now carries the same `has_sizing_tail`
+marker, set when the leaf range is extended, cleared when clamping to
+`level_bounds[0].end` proves the extra node is not there, and honoured by
+the same `emit_len` skip; there is no merge-inheritance step to mirror,
+because the nearest search pushes every child range onto its heap
+separately and never merges two. The sweep additionally asserts, on its
+own, that an unbounded `RangeFrom` is only ever returned for the level's
+final leaf. The C++/Python/TypeScript analogues of this assertion — and of
+the sizing-tail handling — have not been checked; follow-up.
 
 ## 27. `HeaderWriter::new_with_options` overwrote the caller's `index_node_size` — FIXED (this branch, Task 2)
 

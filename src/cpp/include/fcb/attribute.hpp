@@ -45,7 +45,8 @@ struct AttrValue {
 /// Wire format (reader/deserializer.rs:249-372): repeated records of a
 /// `u16` little-endian column index followed by the value, encoded per the
 /// column's type. Fixed-width types are packed little-endian; String,
-/// DateTime and Json are a `u32` little-endian byte length then UTF-8.
+/// DateTime and Json are a `u32` little-endian byte length then UTF-8, and
+/// Binary is that same length prefix followed by raw bytes.
 ///
 /// Throws on a column index absent from the schema, a truncated record, or
 /// an out-of-range ColumnType (whose width is unknown, so the rest of the

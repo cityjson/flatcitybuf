@@ -60,11 +60,18 @@ function readLengthPrefixed(
  *   * Long/ULong always decode to `bigint`, never to `number`. A
  *     data-dependent type would make sorting and serialization change
  *     behaviour the first day a value above 2**53 appears.
- *   * Byte decodes as an UNSIGNED u8. The writer stores u8; the Rust reader
- *     decodes i8 (deserializer.rs:405), so values above 127 come back
- *     negative there. This port matches the writer.
- *   * Byte/UByte/Binary are decoded at all, unlike the C++ reader, which
- *     rejects them outright (attribute.cpp:145-156). The writer emits them.
+ *   * Byte and UByte BOTH decode as an UNSIGNED u8, so a stored 200 is 200
+ *     and never -56. This used to be a deliberate divergence: the writer
+ *     stored u8 and the Rust reader decoded i8, so values above 127 came back
+ *     negative there. That defect is fixed (deserializer.rs) and all four
+ *     implementations now agree, so this is the shared answer rather than a
+ *     port-local choice.
+ *   * Byte, UByte and Binary are DECODED, not rejected -- the writer emits all
+ *     three, and refusing them would drop attributes a valid file carries.
+ *     Binary comes back as a `Uint8Array`; converting it to the array of
+ *     numbers the Rust reader emits happens at the CityJSON boundary
+ *     (`attrToJson`, cityjson/index.ts), not here, so the raw decode API keeps
+ *     handing out bytes.
  *   * DateTime is a length-prefixed STRING on the wire (ISO-8601), not a
  *     packed instant, and stays a string here -- a JS `Date` cannot hold the
  *     nanoseconds the B+tree key form carries, so converting would lose data.

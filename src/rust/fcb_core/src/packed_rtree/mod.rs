@@ -940,12 +940,18 @@ impl PackedRTree {
                 struct NodeRange {
                     level: usize,
                     nodes: Range<usize>,
+                    /// The final node of `nodes` was fetched only to size the
+                    /// previous feature (the `+1` extension below) and must not
+                    /// be evaluated as a candidate hit — it is the first leaf of
+                    /// the adjacent sibling range.
+                    has_sizing_tail: bool,
                 }
 
                 let mut queue = VecDeque::new();
                 queue.push_back(NodeRange {
                     nodes: 0..1,
                     level: level_bounds.len() - 1,
+                    has_sizing_tail: false,
                 });
                 let mut results = Vec::new();
 
@@ -953,7 +959,15 @@ impl PackedRTree {
                     debug!("next: {node_range:?}. {} items left in queue", queue.len());
                     let node_items =
                         read_http_node_items(client, index_begin, &node_range.nodes).await?;
+                    // The trailing sizing node belongs to the next range: it is
+                    // still available to `node_items.get(node_pos + 1)` below,
+                    // but it is never a candidate hit of *this* range.
+                    let emit_len = node_items.len()
+                        - usize::from(node_range.level == 0 && node_range.has_sizing_tail);
                     for (node_pos, node_item) in node_items.iter().enumerate() {
+                        if node_pos >= emit_len {
+                            continue;
+                        }
                         if !bounds.intersects(node_item) {
                             continue;
                         }
@@ -967,7 +981,16 @@ impl PackedRTree {
                                     range: HttpRange::Range(start..end),
                                 });
                             } else {
-                                debug_assert_eq!(node_pos, num_items - 1);
+                                // `node_pos` is a position *within the fetched
+                                // range*, not a leaf ordinal, so it only equals
+                                // `num_items - 1` for a range starting at the
+                                // first leaf. The invariant is that a leaf with
+                                // no following node is the last leaf of the
+                                // level.
+                                debug_assert_eq!(
+                                    node_range.nodes.start + node_pos,
+                                    level_bounds[0].end - 1
+                                );
                                 results.push(HttpSearchResultItem {
                                     range: HttpRange::RangeFrom(start..),
                                 });
@@ -976,6 +999,7 @@ impl PackedRTree {
                             let children_level = node_range.level - 1;
                             let mut children_nodes = node_item.offset as usize
                                 ..(node_item.offset + branching_factor as u64) as usize;
+                            let mut has_sizing_tail = false;
                             if children_level == 0 {
                                 // These children are leaf nodes.
                                 //
@@ -984,14 +1008,20 @@ impl PackedRTree {
                                 // To infer the length of *this* feature, we need the start of the *next*
                                 // feature, so we get an extra node here.
                                 children_nodes.end += 1;
+                                has_sizing_tail = true;
                             }
                             // always stay within level's bounds
-                            children_nodes.end =
+                            let clamped_end =
                                 min(children_nodes.end, level_bounds[children_level].end);
+                            // A clamped range ends at the last leaf of the
+                            // level, so the extra sizing node is not there.
+                            has_sizing_tail &= clamped_end == children_nodes.end;
+                            children_nodes.end = clamped_end;
 
                             let children_range = NodeRange {
                                 nodes: children_nodes,
                                 level: children_level,
+                                has_sizing_tail,
                             };
 
                             let Some(tail) = queue.back_mut() else {
@@ -1037,6 +1067,9 @@ impl PackedRTree {
                             // Merge the ranges to avoid an extra request
                             debug!("Extending existing request {tail:?} with nearby children: {:?} (wastes {wasted_bytes} bytes)", &children_range.nodes);
                             tail.nodes.end = children_range.nodes.end;
+                            // The merged range now ends where the incoming one
+                            // does, so it inherits its sizing tail (if any).
+                            tail.has_sizing_tail = children_range.has_sizing_tail;
                         }
                     }
                 }
@@ -1049,12 +1082,18 @@ impl PackedRTree {
                 struct NodeRange {
                     level: usize,
                     nodes: Range<usize>,
+                    /// The final node of `nodes` was fetched only to size the
+                    /// previous feature (the `+1` extension below) and must not
+                    /// be evaluated as a candidate hit — it is the first leaf of
+                    /// the adjacent sibling range.
+                    has_sizing_tail: bool,
                 }
 
                 let mut queue = VecDeque::new();
                 queue.push_back(NodeRange {
                     nodes: 0..1,
                     level: level_bounds.len() - 1,
+                    has_sizing_tail: false,
                 });
                 let mut results = Vec::new();
 
@@ -1062,7 +1101,15 @@ impl PackedRTree {
                     debug!("next: {node_range:?}. {} items left in queue", queue.len());
                     let node_items =
                         read_http_node_items(client, index_begin, &node_range.nodes).await?;
+                    // The trailing sizing node belongs to the next range: it is
+                    // still available to `node_items.get(node_pos + 1)` below,
+                    // but it is never a candidate hit of *this* range.
+                    let emit_len = node_items.len()
+                        - usize::from(node_range.level == 0 && node_range.has_sizing_tail);
                     for (node_pos, node_item) in node_items.iter().enumerate() {
+                        if node_pos >= emit_len {
+                            continue;
+                        }
                         if !node_item.contains_point(x, y) {
                             continue;
                         }
@@ -1076,7 +1123,13 @@ impl PackedRTree {
                                     range: HttpRange::Range(start..end),
                                 });
                             } else {
-                                debug_assert_eq!(node_pos, num_items - 1);
+                                // See the note in the `Query::BBox` arm:
+                                // `node_pos` is a position within the fetched
+                                // range, not a leaf ordinal.
+                                debug_assert_eq!(
+                                    node_range.nodes.start + node_pos,
+                                    level_bounds[0].end - 1
+                                );
                                 results.push(HttpSearchResultItem {
                                     range: HttpRange::RangeFrom(start..),
                                 });
@@ -1085,15 +1138,22 @@ impl PackedRTree {
                             let children_level = node_range.level - 1;
                             let mut children_nodes = node_item.offset as usize
                                 ..(node_item.offset + branching_factor as u64) as usize;
+                            let mut has_sizing_tail = false;
                             if children_level == 0 {
                                 children_nodes.end += 1;
+                                has_sizing_tail = true;
                             }
-                            children_nodes.end =
+                            let clamped_end =
                                 min(children_nodes.end, level_bounds[children_level].end);
+                            // A clamped range ends at the last leaf of the
+                            // level, so the extra sizing node is not there.
+                            has_sizing_tail &= clamped_end == children_nodes.end;
+                            children_nodes.end = clamped_end;
 
                             let children_range = NodeRange {
                                 nodes: children_nodes,
                                 level: children_level,
+                                has_sizing_tail,
                             };
 
                             let Some(tail) = queue.back_mut() else {
@@ -1132,6 +1192,9 @@ impl PackedRTree {
                             }
 
                             tail.nodes.end = children_range.nodes.end;
+                            // The merged range now ends where the incoming one
+                            // does, so it inherits its sizing tail (if any).
+                            tail.has_sizing_tail = children_range.has_sizing_tail;
                         }
                     }
                 }
@@ -1148,6 +1211,11 @@ impl PackedRTree {
                     distance: f64,
                     level: usize,
                     nodes: Range<usize>,
+                    /// The final node of `nodes` was fetched only to size the
+                    /// previous feature (the `+1` extension below) and must not
+                    /// be evaluated as a nearest candidate — it is the first
+                    /// leaf of the adjacent sibling range.
+                    has_sizing_tail: bool,
                 }
 
                 impl Eq for QueueItem {}
@@ -1172,6 +1240,7 @@ impl PackedRTree {
                     distance: 0.0,
                     nodes: 0..1,
                     level: level_bounds.len() - 1,
+                    has_sizing_tail: false,
                 }));
 
                 while let Some(Reverse(next)) = queue.pop() {
@@ -1191,8 +1260,15 @@ impl PackedRTree {
                         queue.len()
                     );
                     let node_items = read_http_node_items(client, index_begin, &next.nodes).await?;
-
+                    // The trailing sizing node belongs to the next range: it is
+                    // still available to `node_items.get(node_pos + 1)` below,
+                    // but it is never a candidate of *this* range.
+                    let emit_len =
+                        node_items.len() - usize::from(next.level == 0 && next.has_sizing_tail);
                     for (node_pos, node_item) in node_items.iter().enumerate() {
+                        if node_pos >= emit_len {
+                            continue;
+                        }
                         let dist = node_item.min_distance_squared(x, y);
 
                         // If we have a nearest item, only consider this node if it's closer
@@ -1215,7 +1291,13 @@ impl PackedRTree {
                                     range: HttpRange::Range(start..end),
                                 }
                             } else {
-                                debug_assert_eq!(node_pos, num_items - 1);
+                                // See the note in the `Query::BBox` arm:
+                                // `node_pos` is a position within the fetched
+                                // range, not a leaf ordinal.
+                                debug_assert_eq!(
+                                    next.nodes.start + node_pos,
+                                    level_bounds[0].end - 1
+                                );
                                 HttpSearchResultItem {
                                     range: HttpRange::RangeFrom(start..),
                                 }
@@ -1234,18 +1316,25 @@ impl PackedRTree {
                             let mut children_nodes = node_item.offset as usize
                                 ..(node_item.offset + branching_factor as u64) as usize;
 
+                            let mut has_sizing_tail = false;
                             if children_level == 0 {
                                 children_nodes.end += 1;
+                                has_sizing_tail = true;
                             }
 
                             // Always stay within level bounds
-                            children_nodes.end =
+                            let clamped_end =
                                 min(children_nodes.end, level_bounds[children_level].end);
+                            // A clamped range ends at the last leaf of the
+                            // level, so the extra sizing node is not there.
+                            has_sizing_tail &= clamped_end == children_nodes.end;
+                            children_nodes.end = clamped_end;
 
                             queue.push(Reverse(QueueItem {
                                 distance: dist,
                                 nodes: children_nodes,
                                 level: children_level,
+                                has_sizing_tail,
                             }));
                         }
                     }
@@ -1645,5 +1734,384 @@ mod tests {
                 .intersects(&NodeItem::bounds(690407.0, 6063692.0, 811682.0, 6176467.0)));
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "http"))]
+mod http_stream_search_tests {
+    //! Oracle tests for [`PackedRTree::http_stream_search`].
+    //!
+    //! The HTTP search descends the tree one node range at a time and, at the
+    //! leaf level, fetches **one node more** than the range it is interested in
+    //! so it can size the last feature of the batch (`children_nodes.end += 1`).
+    //! That extra node is the first leaf of the *adjacent* sibling group, so it
+    //! must never be emitted as a hit by the range that only borrowed it for
+    //! sizing. These tests compare the emitted ranges against an exhaustive scan
+    //! over the same leaves and assert the result ranges stay strictly
+    //! increasing and non-overlapping.
+
+    use super::*;
+    use crate::static_btree::mocked_http_range_client::MockHttpRangeClient;
+
+    /// Byte size given to every synthetic feature, so a leaf's `offset` and the
+    /// range it must produce are trivially predictable.
+    const FEATURE_SIZE: usize = 64;
+
+    /// A normalized search result: `(start, end)`, where `None` is a
+    /// `RangeFrom` (the last feature, whose length is unknown).
+    type NormalizedRange = (usize, Option<usize>);
+
+    /// A deterministic grid of non-overlapping boxes, hilbert-sorted and given
+    /// running feature offsets — the same shape the writer produces.
+    fn hilbert_sorted_leaves(num_items: usize) -> Vec<NodeItem> {
+        let side = (num_items as f64).sqrt().ceil().max(1.0) as usize;
+        let mut nodes: Vec<NodeItem> = (0..num_items)
+            .map(|i| {
+                let x = (i % side) as f64 * 10.0;
+                let y = (i / side) as f64 * 10.0;
+                NodeItem::bounds(x, y, x + 6.0, y + 6.0)
+            })
+            .collect();
+        let extent = calc_extent(&nodes);
+        hilbert_sort(&mut nodes, &extent);
+        for (i, node) in nodes.iter_mut().enumerate() {
+            node.offset = (i * FEATURE_SIZE) as u64;
+        }
+        nodes
+    }
+
+    fn serialized_index(nodes: &[NodeItem], branching_factor: u16) -> Vec<u8> {
+        let extent = calc_extent(nodes);
+        let tree = PackedRTree::build(nodes, &extent, branching_factor).unwrap();
+        let mut buf = Vec::new();
+        tree.stream_write(&mut buf).unwrap();
+        buf
+    }
+
+    /// Exhaustive scan over the leaves: the answer `http_stream_search` owes us.
+    fn brute_force(
+        nodes: &[NodeItem],
+        feature_begin: usize,
+        hits: impl Fn(&NodeItem) -> bool,
+    ) -> Vec<NormalizedRange> {
+        nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| hits(node))
+            .map(|(i, node)| {
+                let start = feature_begin + node.offset as usize;
+                let end = nodes
+                    .get(i + 1)
+                    .map(|next| feature_begin + next.offset as usize);
+                (start, end)
+            })
+            .collect()
+    }
+
+    fn normalize(results: &[HttpSearchResultItem]) -> Vec<NormalizedRange> {
+        results
+            .iter()
+            .map(|item| (item.range.start(), item.range.end()))
+            .collect()
+    }
+
+    fn assert_strictly_increasing(actual: &[NormalizedRange], context: &str) {
+        for pair in actual.windows(2) {
+            let (prev, next) = (pair[0], pair[1]);
+            assert!(
+                prev.0 < next.0,
+                "{context}: results must be strictly increasing, got {actual:?}"
+            );
+            if let Some(prev_end) = prev.1 {
+                assert!(
+                    prev_end <= next.0,
+                    "{context}: results must not overlap, got {actual:?}"
+                );
+            }
+        }
+    }
+
+    async fn run_query(
+        index: &[u8],
+        num_items: usize,
+        branching_factor: u16,
+        query: Query,
+        combine_request_threshold: usize,
+    ) -> Vec<NormalizedRange> {
+        let mut client = MockHttpRangeClient::new_mock_http_range_client(index);
+        let results = PackedRTree::http_stream_search(
+            &mut client,
+            0,
+            0,
+            num_items,
+            branching_factor,
+            query,
+            combine_request_threshold,
+        )
+        .await
+        .expect("http_stream_search should succeed");
+        normalize(&results)
+    }
+
+    /// Query boxes aimed squarely at leaf-group boundaries: the box of every
+    /// single leaf (which includes each group's first leaf — the one borrowed
+    /// for sizing by the *previous* group) and the box spanning each adjacent
+    /// leaf pair.
+    fn boundary_bboxes(nodes: &[NodeItem]) -> Vec<Query> {
+        let mut queries = Vec::new();
+        for (i, node) in nodes.iter().enumerate() {
+            queries.push(Query::BBox(node.min_x, node.min_y, node.max_x, node.max_y));
+            if let Some(next) = nodes.get(i + 1) {
+                queries.push(Query::BBox(
+                    node.min_x.min(next.min_x),
+                    node.min_y.min(next.min_y),
+                    node.max_x.max(next.max_x),
+                    node.max_y.max(next.max_y),
+                ));
+            }
+        }
+        queries
+    }
+
+    /// One point inside every leaf, plus each leaf's corners — the corners land
+    /// on boundaries and are the point-query analogue of a straddling box.
+    fn boundary_points(nodes: &[NodeItem]) -> Vec<Query> {
+        nodes
+            .iter()
+            .flat_map(|node| {
+                [
+                    Query::PointIntersects(
+                        (node.min_x + node.max_x) / 2.0,
+                        (node.min_y + node.max_y) / 2.0,
+                    ),
+                    Query::PointIntersects(node.min_x, node.min_y),
+                    Query::PointIntersects(node.max_x, node.max_y),
+                ]
+            })
+            .collect()
+    }
+
+    /// `combine_request_threshold = 0` forbids every non-adjacent merge, which
+    /// is the configuration that splits sibling leaf groups into separate
+    /// requests and therefore exercises the sizing node hardest.
+    const THRESHOLDS: [usize; 2] = [0, 4096];
+
+    #[tokio::test]
+    async fn bbox_search_matches_brute_force_at_leaf_boundaries() {
+        for (num_items, branching_factor) in [(5, 2u16), (17, 4), (100, 4), (100, 16), (129, 8)] {
+            let nodes = hilbert_sorted_leaves(num_items);
+            let index = serialized_index(&nodes, branching_factor);
+            let feature_begin = PackedRTree::index_size(num_items, branching_factor);
+
+            for query in boundary_bboxes(&nodes) {
+                let Query::BBox(min_x, min_y, max_x, max_y) = query else {
+                    unreachable!("boundary_bboxes only yields bbox queries")
+                };
+                let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
+                let expected = brute_force(&nodes, feature_begin, |node| bounds.intersects(node));
+
+                for threshold in THRESHOLDS {
+                    let actual =
+                        run_query(&index, num_items, branching_factor, query, threshold).await;
+                    let context = format!(
+                        "num_items={num_items}, branching_factor={branching_factor}, \
+                         threshold={threshold}, query={query:?}"
+                    );
+                    assert_eq!(actual, expected, "{context}: hit set mismatch");
+                    assert_strictly_increasing(&actual, &context);
+                }
+            }
+        }
+    }
+
+    /// A deterministic linear congruential generator, so the sweep below is
+    /// reproducible without pulling `rand` into the library's test surface.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next_f64(&mut self, max: f64) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64 * max
+        }
+    }
+
+    #[tokio::test]
+    async fn bbox_search_matches_brute_force_over_random_boxes() {
+        let (num_items, branching_factor) = (200usize, 4u16);
+        let nodes = hilbert_sorted_leaves(num_items);
+        let index = serialized_index(&nodes, branching_factor);
+        let feature_begin = PackedRTree::index_size(num_items, branching_factor);
+        let extent = calc_extent(&nodes);
+        let mut rng = Lcg(0x5EED);
+
+        for _ in 0..250 {
+            let min_x = extent.min_x + rng.next_f64(extent.width());
+            let min_y = extent.min_y + rng.next_f64(extent.height());
+            let max_x = min_x + rng.next_f64(extent.width() / 4.0);
+            let max_y = min_y + rng.next_f64(extent.height() / 4.0);
+            let query = Query::BBox(min_x, min_y, max_x, max_y);
+            let bounds = NodeItem::bounds(min_x, min_y, max_x, max_y);
+            let expected = brute_force(&nodes, feature_begin, |node| bounds.intersects(node));
+
+            for threshold in THRESHOLDS {
+                let actual = run_query(&index, num_items, branching_factor, query, threshold).await;
+                let context = format!("threshold={threshold}, query={query:?}");
+                assert_eq!(actual, expected, "{context}: hit set mismatch");
+                assert_strictly_increasing(&actual, &context);
+            }
+        }
+    }
+
+    /// Exhaustive scan for the nearest leaf: the smallest centroid distance
+    /// wins, which is the measure `Query::PointNearest` ranks leaves by.
+    ///
+    /// Ties are returned as a set: `http_stream_search` keeps whichever tied
+    /// leaf it evaluates first, and the heap's order among equally distant
+    /// node ranges is not specified.
+    fn brute_force_nearest(
+        nodes: &[NodeItem],
+        feature_begin: usize,
+        x: f64,
+        y: f64,
+    ) -> Vec<NormalizedRange> {
+        let best = nodes
+            .iter()
+            .map(|node| node.centroid_distance_squared(x, y))
+            .fold(f64::INFINITY, f64::min);
+        nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.centroid_distance_squared(x, y) == best)
+            .map(|(i, node)| {
+                let start = feature_begin + node.offset as usize;
+                let end = nodes
+                    .get(i + 1)
+                    .map(|next| feature_begin + next.offset as usize);
+                (start, end)
+            })
+            .collect()
+    }
+
+    /// The nearest leaf is the **last** leaf of the level, and the only node
+    /// range that reaches it starts well past the first leaf — the exact shape
+    /// the `debug_assert_eq!(node_pos, num_items - 1)` in the `PointNearest`
+    /// arm got wrong, since `node_pos` is a position within the fetched range.
+    ///
+    /// With `num_items = 17` and `branching_factor = 4` the leaf level holds
+    /// nodes `8..25`, and the final level-1 node owns a single child, so the
+    /// range fetched for it is `24..25`: `node_pos` is `0`, never `16`.
+    #[tokio::test]
+    async fn nearest_search_reaches_the_final_leaf_through_a_non_initial_range() {
+        let (num_items, branching_factor) = (17usize, 4u16);
+        let nodes = hilbert_sorted_leaves(num_items);
+        let index = serialized_index(&nodes, branching_factor);
+        let feature_begin = PackedRTree::index_size(num_items, branching_factor);
+
+        let last = nodes.last().expect("17 leaves");
+        let (x, y) = (
+            (last.min_x + last.max_x) / 2.0,
+            (last.min_y + last.max_y) / 2.0,
+        );
+        let expected = brute_force_nearest(&nodes, feature_begin, x, y);
+        assert_eq!(
+            expected,
+            vec![(feature_begin + last.offset as usize, None)],
+            "the query point must single out the final leaf, whose length is \
+             unknown (a RangeFrom)"
+        );
+
+        for threshold in THRESHOLDS {
+            let actual = run_query(
+                &index,
+                num_items,
+                branching_factor,
+                Query::PointNearest(x, y),
+                threshold,
+            )
+            .await;
+            assert_eq!(actual, expected, "threshold={threshold}");
+        }
+    }
+
+    /// The nearest hit must be the brute-force nearest leaf *and* carry its
+    /// exact byte range.
+    ///
+    /// Without the `has_sizing_tail` guard, a hit that landed on a range's
+    /// borrowed sizing leaf — always the last node of the fetched batch, so
+    /// `get(node_pos + 1)` is `None` — came back as an unbounded
+    /// `HttpRange::RangeFrom`, a read to EOF, for a leaf that is not the
+    /// level's last: 126 of the 1506 queries below, every one of them with the
+    /// right start offset and a missing end.
+    #[tokio::test]
+    async fn nearest_search_matches_brute_force_at_leaf_boundaries() {
+        for (num_items, branching_factor) in [(5, 2u16), (17, 4), (100, 4), (129, 8)] {
+            let nodes = hilbert_sorted_leaves(num_items);
+            let index = serialized_index(&nodes, branching_factor);
+            let feature_begin = PackedRTree::index_size(num_items, branching_factor);
+
+            for query in boundary_points(&nodes) {
+                let Query::PointIntersects(x, y) = query else {
+                    unreachable!("boundary_points only yields point queries")
+                };
+                let query = Query::PointNearest(x, y);
+                let expected = brute_force_nearest(&nodes, feature_begin, x, y);
+
+                for threshold in THRESHOLDS {
+                    let actual =
+                        run_query(&index, num_items, branching_factor, query, threshold).await;
+                    let context = format!(
+                        "num_items={num_items}, branching_factor={branching_factor}, \
+                         threshold={threshold}, query={query:?}"
+                    );
+                    assert_eq!(actual.len(), 1, "{context}: exactly one nearest expected");
+                    assert!(
+                        expected.contains(&actual[0]),
+                        "{context}: got {actual:?}, expected one of {expected:?}"
+                    );
+                    // Stated separately from the equality above, because this
+                    // is the property the sizing-tail guard exists for: only
+                    // the level's final leaf may come back unbounded.
+                    if actual[0].1.is_none() {
+                        let last = nodes.last().expect("non-empty");
+                        assert_eq!(
+                            actual[0].0,
+                            feature_begin + last.offset as usize,
+                            "{context}: an unbounded RangeFrom is a read to EOF \
+                             and is only correct for the level's last leaf"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn point_search_matches_brute_force_at_leaf_boundaries() {
+        for (num_items, branching_factor) in [(5, 2u16), (17, 4), (100, 4), (129, 8)] {
+            let nodes = hilbert_sorted_leaves(num_items);
+            let index = serialized_index(&nodes, branching_factor);
+            let feature_begin = PackedRTree::index_size(num_items, branching_factor);
+
+            for query in boundary_points(&nodes) {
+                let Query::PointIntersects(x, y) = query else {
+                    unreachable!("boundary_points only yields point queries")
+                };
+                let expected = brute_force(&nodes, feature_begin, |node| node.contains_point(x, y));
+
+                for threshold in THRESHOLDS {
+                    let actual =
+                        run_query(&index, num_items, branching_factor, query, threshold).await;
+                    let context = format!(
+                        "num_items={num_items}, branching_factor={branching_factor}, \
+                         threshold={threshold}, query={query:?}"
+                    );
+                    assert_eq!(actual, expected, "{context}: hit set mismatch");
+                    assert_strictly_increasing(&actual, &context);
+                }
+            }
+        }
     }
 }

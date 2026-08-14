@@ -109,6 +109,12 @@ void fill_metadata(const ::Header* hdr, FileInfo& info) {
 
     if (hdr->version() != nullptr)
         info.cityjson_version = hdr->version()->str();
+
+    // Every `!= nullptr` guard below IS the presence test, and the target is a
+    // std::optional so it survives into FileInfo: `nullptr` maps to Rust's
+    // `None` (key omitted downstream), a present-but-empty string to
+    // `Some("")` (key emitted as ""). Collapsing the two into a plain
+    // std::string was upstream finding #20.11.
     if (hdr->identifier() != nullptr)
         info.identifier = hdr->identifier()->str();
     if (hdr->title() != nullptr)
@@ -126,10 +132,8 @@ void fill_metadata(const ::Header* hdr, FileInfo& info) {
         info.poc_role = hdr->poc_role()->str();
     if (hdr->poc_phone() != nullptr)
         info.poc_phone = hdr->poc_phone()->str();
-    if (hdr->poc_email() != nullptr) {
+    if (hdr->poc_email() != nullptr)
         info.poc_email = hdr->poc_email()->str();
-        info.has_poc_email = true;
-    }
     if (hdr->poc_website() != nullptr)
         info.poc_website = hdr->poc_website()->str();
     if (hdr->poc_address_thoroughfare_number() != nullptr) {
