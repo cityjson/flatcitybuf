@@ -42,7 +42,7 @@ until proven otherwise.
 | `python3` | the range-request test server (used by C++, Python **and** TS suites) | 3.12.12 |
 | Node ≥ 22.12 + npm | TS suite, web example | 24.11.1 / 11.7.0 |
 | Chromium via Playwright | TS **browser** suite — `cd src/ts && npx playwright install chromium` | 1.61.1 |
-| Network access | remote-file tests (§7) and two Rust HTTP tests | — |
+| Network access | remote-file tests (§7), including the `#[ignore]`d Rust HTTP tests | — |
 
 ### Three things that will bite you
 
@@ -94,9 +94,11 @@ Expected:
 | `just type` | clean across all five directories | 60 s |
 | `just lint` | clean (rustfmt, clippy, ruff, clang-format) | 30 s |
 
-Two of the 174 Rust tests (`http::test_read_http_file`,
-`http::test_read_http_file_attr`) hit a public Cloudflare R2 bucket, so
-that suite needs network access. Everything else in this section is offline.
+Three Rust tests (`http::remote_3dbag_attr_query`,
+`http::remote_3dbag_opens_and_counts_a_bbox`, `http::remote_3dbag_bbox_scan`)
+hit the public bucket at flatcitybuf.open3d.city; they are `#[ignore]`d, so a
+plain `cargo nextest run` skips them and everything in this section stays
+offline. Run them with `just test-remote` — see §7.4.
 
 If all six pass, the core of every implementation is green. Continue to §4–§7
 for the cross-implementation and remote checks no recipe automates.
@@ -595,9 +597,10 @@ access-control-expose-headers: Accept-Ranges, Authorization, Content-Length, Con
 ```
 
 `Content-Range` **must** appear in `Access-Control-Expose-Headers` or a browser
-client cannot learn the file size and will refuse to guess. On the R2 bucket
-that means a CORS policy whose `ExposeHeaders` lists `Content-Range` and
-`Accept-Ranges`; check it with the command above before blaming the reader.
+client cannot learn the file size and will refuse to guess. On the public
+bucket at flatcitybuf.open3d.city that means a CORS policy whose
+`ExposeHeaders` lists `Content-Range` and `Accept-Ranges`; check it with the
+command above before blaming the reader.
 (The header block above was recorded against the previous GCS host; only the
 `HTTP/2 206`, `accept-ranges` and `content-range` lines are host-independent.)
 

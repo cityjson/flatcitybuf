@@ -301,9 +301,6 @@ pub(super) fn build_attribute_index_for_attr(
             },
             branching_factor,
         ),
-        _ => {
-            println!("Unsupported column type for indexing: {coltype:?}");
-            Err(Error::UnsupportedColumnType(format!("{coltype:?}")))
-        }
+        _ => Err(Error::UnsupportedColumnType(format!("{coltype:?}"))),
     }
 }

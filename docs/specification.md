@@ -304,6 +304,31 @@ attributes are stored as a binary blob with values encoded according to their ty
 - **json**: length-prefixed json string
 - **binary**: length-prefixed binary data
 
+### null values — absence is the only null
+
+the attribute encoding has **no null representation**: a record holds
+(column index, value) pairs, and "null" can only be expressed by not writing
+the pair at all. the rust writer enforces this on both sides of the schema:
+
+- null-valued keys are kept out of the inferred column schema
+  (`src/rust/fcb_core/src/writer/attribute.rs:34` —
+  `if !self.contains_key(key) && !val.is_null()`), and
+- keys that are in the schema but null on a given object are skipped at encode
+  time (`src/rust/fcb_core/src/writer/attribute.rs:121-123` —
+  `if val.is_null() { continue; }`).
+
+consequently a round-trip through the format drops null-valued attributes:
+`"eindgeldigheid": null` in the input CityJSONSeq comes back as no
+`eindgeldigheid` key at all. `"key": null` and "key absent" are
+indistinguishable after encoding, **deliberately** — readers, ports and test
+expectations must not treat the dropped keys as data loss, and must not invent
+a null when a schema column is missing from an object's blob.
+
+(this is unrelated to the `u32::MAX` = 4294967295 sentinel, which marks "no
+value" in semantics values and appearance index arrays — that sentinel exists
+because those are fixed-width index arrays where absence cannot be expressed
+by omission.)
+
 ### attribute schema resolution — per object, not per file
 
 attributes must be decoded against the schema of the `CityObject` that owns them, not blindly against `Header.columns`:

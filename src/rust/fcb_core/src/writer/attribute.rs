@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use cjseq::CityJSONFeature;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use tracing::{debug, warn};
 
 // Schema for attributes. The key is the attribute name, the value is a tuple of the column index and the column type.
 //
@@ -263,7 +264,9 @@ pub fn attribute_to_index_entries(
         let val: &Value = match map.get(attr) {
             Some(val) => val,
             None => {
-                println!("Attribute {attr} not found in schema");
+                // Never `println!`: library diagnostics on stdout corrupt
+                // `fcb_cli ser <input> -`, which writes the binary there.
+                debug!("feature is missing indexed attribute {attr}");
                 continue;
             }
         };
@@ -331,7 +334,7 @@ pub fn attribute_to_index_entries(
                     {
                         Ok(dt) => dt.to_utc(),
                         Err(e) => {
-                            eprintln!("Failed to parse DateTime: {e}");
+                            warn!("failed to parse DateTime for {attr}, defaulting to epoch: {e}");
                             // Choose whether to skip, default, or handle differently
                             // For example, default to 1970-01-01:
                             DateTime::<Utc>::from_timestamp(0, 0).unwrap()
@@ -344,7 +347,7 @@ pub fn attribute_to_index_entries(
                 }
                 _ => {
                     //Byte, Ubyte,
-                    println!("Attribute {attr} is not supported for indexing");
+                    debug!("attribute {attr} is not supported for indexing");
                 }
             }
         }
