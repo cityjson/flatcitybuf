@@ -205,3 +205,72 @@ fn read_bbox_nonseekable() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// The seekable file path must traverse the R-tree with the branching factor
+/// recorded in the header, not the compile-time default -- the twin of the
+/// HTTP-path defect (upstream finding #24).
+///
+/// `appearance_depths_node8.fcb` holds 12 features at node size 8, so its
+/// level bounds are `[12, 2, 1]` -- three levels and two sibling leaf ranges.
+/// Read with the default node size 16 the same 12 features imply `[12, 1]`, a
+/// different node count and different level boundaries, so a hardcoded 16
+/// walks the wrong ranges.
+///
+/// The oracle is `select_all`, which never touches the R-tree: a bbox covering
+/// the whole extent must return exactly the same feature set.
+#[test]
+fn read_bbox_honours_header_index_node_size() -> Result<()> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../conformance/appearance_depths_node8.fcb");
+    let open = || -> Result<FcbReader<BufReader<File>>> {
+        Ok(FcbReader::open(BufReader::new(File::open(&path)?))?)
+    };
+
+    let reader = open()?;
+    let (node_size, feature_count, minx, miny, maxx, maxy) = {
+        let header = reader.header();
+        let extent = header
+            .geographical_extent()
+            .expect("fixture carries a geographical extent");
+        (
+            header.index_node_size(),
+            header.features_count() as usize,
+            extent.min().x(),
+            extent.min().y(),
+            extent.max().x(),
+            extent.max().y(),
+        )
+    };
+    assert_eq!(
+        node_size, 8,
+        "fixture must have a NON-default node size, else a hardcoded 16 passes vacuously"
+    );
+    assert_eq!(feature_count, 12);
+
+    // Oracle: the full feature set, read sequentially without the R-tree.
+    let mut all_iter = open()?.select_all()?;
+    let mut expected_ids = Vec::new();
+    while let Some(feature) = all_iter.next()? {
+        expected_ids.push(feature.cur_cj_feature()?.id);
+    }
+    expected_ids.sort();
+    assert_eq!(expected_ids.len(), feature_count);
+
+    let mut query_iter = reader.select_query(Query::BBox(minx, miny, maxx, maxy), None, None)?;
+    assert_eq!(query_iter.features_count(), Some(feature_count));
+    let mut hit_ids = Vec::new();
+    while let Some(feature) = query_iter.next()? {
+        hit_ids.push(feature.cur_cj_feature()?.id);
+    }
+    assert_eq!(
+        hit_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        hit_ids.len(),
+        "a spatial query must return a set, not duplicates"
+    );
+    hit_ids.sort();
+    assert_eq!(hit_ids, expected_ids);
+    Ok(())
+}

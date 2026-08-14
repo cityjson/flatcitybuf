@@ -3,7 +3,8 @@ pub mod error;
 pub mod key;
 #[cfg(feature = "http")]
 #[cfg(test)]
-mod mocked_http_range_client;
+// Also used by the `packed_rtree` HTTP tests.
+pub(crate) mod mocked_http_range_client;
 pub mod payload;
 pub mod query;
 pub mod stree;

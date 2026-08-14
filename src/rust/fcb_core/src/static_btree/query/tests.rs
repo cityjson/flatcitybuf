@@ -200,6 +200,107 @@ fn create_datetime_index(branching_factor: u16) -> Result<MemoryIndex<DateTime<U
     Ok(index)
 }
 
+/// One feature, several keys.
+///
+/// A feature's CityObjects can carry different values of the same indexed
+/// attribute, and the writer indexes every occurrence, so one feature offset
+/// legitimately appears under several keys. Here feature offset 10 is reached
+/// through both key 1 and key 2:
+///
+/// | key | feature offsets |
+/// |-----|-----------------|
+/// | 1   | 10              |
+/// | 2   | 10, 20          |
+/// | 3   | 30              |
+///
+/// Lowering `Gt`/`Lt`/`Ne` as "inclusive range minus `find_exact`" subtracts
+/// FEATURE OFFSETS and therefore deletes offset 10 from `Gt(1)`, even though
+/// it genuinely matches via key 2.
+fn create_multi_key_index(branching_factor: u16) -> Result<MemoryIndex<i64>> {
+    let entries = vec![
+        Entry::new(1_i64, 10_u64),
+        Entry::new(2_i64, 10_u64),
+        Entry::new(2_i64, 20_u64),
+        Entry::new(3_i64, 30_u64),
+    ];
+    let index = MemoryIndex::<i64>::build(&entries, branching_factor)?;
+    Ok(index)
+}
+
+/// Query expectations for the multi-key index, shared by the memory, stream
+/// and http paths through `test_cases()`.
+fn multi_key_cases() -> Vec<(Vec<QueryCondition>, Vec<u64>)> {
+    vec![
+        (
+            // Offset 10 must survive: it matches through key 2.
+            vec![QueryCondition {
+                field: "multi".to_string(),
+                operator: Operator::Gt,
+                key: KeyType::Int64(1),
+            }],
+            vec![10, 20, 30],
+        ),
+        (
+            vec![QueryCondition {
+                field: "multi".to_string(),
+                operator: Operator::Lt,
+                key: KeyType::Int64(2),
+            }],
+            vec![10],
+        ),
+        (
+            // Offset 10 matches through key 1, offset 30 through key 3.
+            vec![QueryCondition {
+                field: "multi".to_string(),
+                operator: Operator::Ne,
+                key: KeyType::Int64(2),
+            }],
+            vec![10, 30],
+        ),
+        (
+            vec![QueryCondition {
+                field: "multi".to_string(),
+                operator: Operator::Ge,
+                key: KeyType::Int64(2),
+            }],
+            vec![10, 20, 30],
+        ),
+        (
+            vec![QueryCondition {
+                field: "multi".to_string(),
+                operator: Operator::Le,
+                key: KeyType::Int64(2),
+            }],
+            vec![10, 10, 20],
+        ),
+    ]
+}
+
+#[test]
+fn test_multi_key_feature_operators() -> Result<()> {
+    let mut multi_index = MemoryMultiIndex::new();
+    multi_index.add_i64_index("multi".to_string(), create_multi_key_index(4)?);
+
+    let mut mismatches = Vec::new();
+    for (query, expected) in multi_key_cases() {
+        let results = multi_index.query(&query)?;
+        if results != expected {
+            mismatches.push(format!(
+                "{:?} {:?}: got {results:?}, expected {expected:?}",
+                query[0].operator, query[0].key
+            ));
+        }
+    }
+
+    assert!(
+        mismatches.is_empty(),
+        "multi-key feature offsets were lost:\n  {}",
+        mismatches.join("\n  ")
+    );
+
+    Ok(())
+}
+
 fn create_test_multi_index() -> Result<MemoryMultiIndex> {
     // Build indices
     let id_index = create_id_index(4)?;
@@ -225,7 +326,7 @@ struct TreeInfo {
 }
 
 fn test_cases() -> Vec<(Vec<QueryCondition>, Vec<u64>)> {
-    vec![
+    let mut cases = vec![
         (
             vec![
                 QueryCondition {
@@ -298,7 +399,9 @@ fn test_cases() -> Vec<(Vec<QueryCondition>, Vec<u64>)> {
         //     ],
         //     vec![],
         // ),
-    ]
+    ];
+    cases.extend(multi_key_cases());
+    cases
 }
 
 #[test]
@@ -308,14 +411,17 @@ fn test_memory_stream_multi_index() -> Result<()> {
     let name_index = create_name_index(4)?;
     let score_index = create_score_index(4)?;
     let datetime_index = create_datetime_index(4)?;
+    let multi_key_index = create_multi_key_index(4)?;
 
     let id_index2 = id_index.clone();
     let name_index2 = name_index.clone();
     let score_index2 = score_index.clone();
     let datetime_index2 = datetime_index.clone();
+    let multi_key_index2 = multi_key_index.clone();
 
     // Create a multi-index with different key types
     let mut multi_index = MemoryMultiIndex::new();
+    multi_index.add_i64_index("multi".to_string(), multi_key_index);
     multi_index.add_i64_index("id".to_string(), id_index);
     multi_index.add_string_index20("name".to_string(), name_index);
     multi_index.add_f32_index("score".to_string(), score_index);
@@ -374,7 +480,17 @@ fn test_memory_stream_multi_index() -> Result<()> {
             payload_size: datetime_index2.payload_size(),
         },
     );
-    _ = datetime_index2.serialize(&mut index_buffer)?;
+    total_written += datetime_index2.serialize(&mut index_buffer)?;
+    index_offset.insert(
+        "multi",
+        TreeInfo {
+            num_items: multi_key_index2.num_items(),
+            branching_factor: multi_key_index2.branching_factor(),
+            index_offset: total_written,
+            payload_size: multi_key_index2.payload_size(),
+        },
+    );
+    _ = multi_key_index2.serialize(&mut index_buffer)?;
 
     // This is for stream query test
     let mut index_buffer_for_stream = index_buffer.clone();
@@ -406,15 +522,24 @@ fn test_memory_stream_multi_index() -> Result<()> {
         index_offset: datetime_start,
         payload_size: datetime_payload_size,
     } = index_offset.get("datetime").unwrap();
+    let TreeInfo {
+        num_items: multi_num_items,
+        branching_factor: multi_b,
+        index_offset: multi_start,
+        payload_size: multi_payload_size,
+    } = index_offset.get("multi").unwrap();
 
-    // create another buffer from 0..id_start, *name_start.., *score_start.., *datetime_start..
+    // create another buffer from 0..id_start, *name_start.., *score_start..,
+    // *datetime_start.., *multi_start..
     let mut id_index_buffer = Cursor::new(index_buffer.get_ref()[*id_start..*name_start].to_vec());
 
     let mut name_index_buffer =
         Cursor::new(index_buffer.get_ref()[*name_start..*score_start].to_vec());
     let mut score_index_buffer =
         Cursor::new(index_buffer.get_ref()[*score_start..*datetime_start].to_vec());
-    let mut datetime_index_buffer = Cursor::new(index_buffer.get_ref()[*datetime_start..].to_vec());
+    let mut datetime_index_buffer =
+        Cursor::new(index_buffer.get_ref()[*datetime_start..*multi_start].to_vec());
+    let mut multi_index_buffer = Cursor::new(index_buffer.get_ref()[*multi_start..].to_vec());
 
     let id_index = MemoryIndex::<i64>::from_buf(&mut id_index_buffer, *id_num_items, *id_b)?;
     let name_index = MemoryIndex::<FixedStringKey<20>>::from_buf(
@@ -432,8 +557,11 @@ fn test_memory_stream_multi_index() -> Result<()> {
         *datetime_num_items,
         *datetime_b,
     )?;
+    let multi_key_index =
+        MemoryIndex::<i64>::from_buf(&mut multi_index_buffer, *multi_num_items, *multi_b)?;
 
     let mut multi_index = MemoryMultiIndex::new();
+    multi_index.add_i64_index("multi".to_string(), multi_key_index);
     multi_index.add_i64_index("id".to_string(), id_index);
     multi_index.add_string_index20("name".to_string(), name_index);
     multi_index.add_f32_index("score".to_string(), score_index);
@@ -486,6 +614,18 @@ fn test_memory_stream_multi_index() -> Result<()> {
         stream_datetime_index,
         datetime_index_length,
     );
+    let stream_multi_key_index = StreamIndex::<i64>::new(
+        *multi_num_items,
+        *multi_b,
+        *multi_start as u64,
+        Stree::<i64>::index_size(*multi_num_items, *multi_b, *multi_payload_size) as u64,
+    );
+    let multi_key_index_length = stream_multi_key_index.length();
+    stream_multi_index.add_i64_index(
+        "multi".to_string(),
+        stream_multi_key_index,
+        multi_key_index_length,
+    );
     for (query, expected_results) in &test_cases {
         let results = stream_multi_index.query(&mut index_buffer_for_stream, query)?;
         assert_eq!(results, *expected_results);
@@ -513,6 +653,7 @@ mod http_tests {
         let name_index = create_name_index(4)?;
         let score_index = create_score_index(4)?;
         let datetime_index = create_datetime_index(4)?;
+        let multi_key_index = create_multi_key_index(4)?;
 
         // Create a buffer for serializing all indices
         let mut index_buffer = Vec::new();
@@ -551,6 +692,14 @@ mod http_tests {
             payload_size: datetime_index.payload_size(),
         };
         total_written += datetime_index.serialize(&mut index_buffer)?;
+
+        let multi_key_index_info = TreeInfo {
+            num_items: multi_key_index.num_items(),
+            branching_factor: multi_key_index.branching_factor(),
+            index_offset: total_written,
+            payload_size: multi_key_index.payload_size(),
+        };
+        total_written += multi_key_index.serialize(&mut index_buffer)?;
 
         // Create HTTP client with the serialized data
         let client = MockHttpRangeClient::new_with_bytes(
@@ -597,8 +746,17 @@ mod http_tests {
             1024, // combine_request_threshold
         );
 
+        let http_multi_key_index = HttpIndex::<i64>::new(
+            multi_key_index_info.num_items,
+            multi_key_index_info.branching_factor,
+            multi_key_index_info.index_offset,
+            attr_index_size,
+            1024, // combine_request_threshold
+        );
+
         // Create HTTP multi-index
         let mut multi_index = HttpMultiIndex::new();
+        multi_index.add_index("multi".to_string(), http_multi_key_index);
         multi_index.add_index("id".to_string(), http_id_index);
         multi_index.add_index("name".to_string(), http_name_index);
         multi_index.add_index("score".to_string(), http_score_index);

@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
 
 use crate::static_btree::error::{Error, Result};
-use crate::static_btree::key::{FixedStringKey, Key, KeyType, Max, Min};
+use crate::static_btree::key::{FixedStringKey, Key, KeyType};
 use crate::static_btree::query::types::{Operator, QueryCondition};
 use crate::static_btree::stree::Stree;
 
@@ -68,6 +68,41 @@ impl<K: Key> StreamIndex<K> {
         let results = Stree::stream_find_exact(reader, self.num_items, self.branching_factor, key)?;
 
         Ok(results.into_iter().map(|item| item.offset as u64).collect())
+    }
+
+    /// Find all items in the range using a reader, with each bound
+    /// independently strict (exclusive) or inclusive. A `None` bound is the
+    /// type's min/max sentinel and is never strict.
+    ///
+    /// `Gt`/`Lt`/`Ne` lower to this instead of subtracting `find_exact` from
+    /// an inclusive range: the subtraction removes feature offsets, and one
+    /// feature can be indexed under several keys, so it deletes features that
+    /// match through a different key.
+    pub fn find_range_strict_with_reader<R: Read + Seek + ?Sized>(
+        &self,
+        reader: &mut R,
+        start: Option<K>,
+        start_strict: bool,
+        end: Option<K>,
+        end_strict: bool,
+    ) -> Result<Vec<u64>> {
+        let start_position = reader.stream_position()?;
+        let lower = start.unwrap_or_else(K::min_value);
+        let upper = end.unwrap_or_else(K::max_value);
+        let results = Stree::stream_find_range_strict(
+            reader,
+            self.num_items,
+            self.branching_factor,
+            lower,
+            start_strict,
+            upper,
+            end_strict,
+        );
+        reader.seek(SeekFrom::Start(start_position))?;
+        Ok(results?
+            .into_iter()
+            .map(|item| item.offset as u64)
+            .collect())
     }
 
     /// Find range matches using a reader
@@ -160,34 +195,39 @@ macro_rules! impl_typed_stream_search_index {
                 // Execute query based on operator
                 let items = match condition.operator {
                     Operator::Eq => self.find_exact_with_reader(reader, key)?,
+                    // Two half-open scans rather than a full scan minus the
+                    // equal set: subtraction on feature offsets is wrong when
+                    // one feature carries several values of the attribute.
                     Operator::Ne => {
-                        let all_items = self.find_range_with_reader(
+                        let mut results = self.find_range_strict_with_reader(
                             reader,
-                            Some(<$key_type>::min_value()),
-                            Some(<$key_type>::max_value()),
+                            None,
+                            false,
+                            Some(key.clone()),
+                            true,
                         )?;
-                        let matching_items = self.find_exact_with_reader(reader, key.clone())?;
-                        all_items
-                            .into_iter()
-                            .filter(|item| !matching_items.contains(item))
-                            .collect()
+                        let above = self.find_range_strict_with_reader(
+                            reader,
+                            Some(key),
+                            true,
+                            None,
+                            false,
+                        )?;
+                        results.extend(above);
+                        results
                     }
                     Operator::Gt => {
-                        let mut results =
-                            self.find_range_with_reader(reader, Some(key.clone()), None)?;
-                        let exact_matches = self.find_exact_with_reader(reader, key.clone())?;
-                        results.retain(|item| !exact_matches.contains(item));
-                        results
+                        self.find_range_strict_with_reader(reader, Some(key), true, None, false)?
                     }
                     Operator::Lt => {
-                        let mut results =
-                            self.find_range_with_reader(reader, None, Some(key.clone()))?;
-                        let exact_matches = self.find_exact_with_reader(reader, key.clone())?;
-                        results.retain(|item| !exact_matches.contains(item));
-                        results
+                        self.find_range_strict_with_reader(reader, None, false, Some(key), true)?
                     }
-                    Operator::Ge => self.find_range_with_reader(reader, Some(key), None)?,
-                    Operator::Le => self.find_range_with_reader(reader, None, Some(key))?,
+                    Operator::Ge => {
+                        self.find_range_strict_with_reader(reader, Some(key), false, None, false)?
+                    }
+                    Operator::Le => {
+                        self.find_range_strict_with_reader(reader, None, false, Some(key), false)?
+                    }
                 };
                 reader.seek(SeekFrom::Start(start_position))?;
                 Ok(items)
@@ -393,11 +433,13 @@ impl StreamMultiIndex {
         reader.seek(SeekFrom::Start(start_position + index_range.start as u64))?;
 
         let mut result_set = indexer.execute_query_condition(reader, first)?;
+        // Restore the cursor BEFORE the early return: leaving it parked on
+        // this index's start would make the next query resolve every index
+        // offset relative to the wrong base.
+        reader.seek(SeekFrom::Start(start_position))?;
         if result_set.is_empty() {
             return Ok(vec![]);
         }
-        // set cursor to the start of the index
-        reader.seek(SeekFrom::Start(start_position))?;
 
         for cond in &conditions[1..] {
             let start_position = reader.stream_position()?;
@@ -414,12 +456,12 @@ impl StreamMultiIndex {
             println!("start_position: {start_position}");
             println!("query condition: {cond:?}");
             let condition_results = indexer.execute_query_condition(reader, cond)?;
+            // set cursor to the start of the index, before any early return
+            reader.seek(SeekFrom::Start(start_position))?;
             result_set.retain(|offset| condition_results.contains(offset));
             if result_set.is_empty() {
                 return Ok(vec![]); // no results found for this condition, return early so we don't waste time intersecting empty sets
             }
-            // set cursor to the start of the index
-            reader.seek(SeekFrom::Start(start_position))?;
         }
         // set cursor to the start of the index
         reader.seek(SeekFrom::Start(start_position))?;

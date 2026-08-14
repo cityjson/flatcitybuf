@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -55,35 +56,43 @@ struct FileInfo {
     std::array<double, 3> scale{};
     std::array<double, 3> translate{};
 
+    /// Derived from Header.reference_system, so it has no absent-vs-empty
+    /// distinction of its own to preserve: it is assembled from an authority
+    /// plus a code, and stays empty when the header carries no reference
+    /// system at all. (Its gating is upstream finding #20.10, still open.)
     std::string crs;
+    /// `(required)` in header.fbs, so never absent in a valid file.
     std::string cityjson_version;
-    std::string identifier;
-    std::string title;
-    std::string reference_date;
+
+    /// Schema-optional strings, held as std::optional because the Rust oracle
+    /// distinguishes ABSENT from PRESENT-BUT-EMPTY for every one of them:
+    /// `identifier: header.identifier().map(|i| i.to_string())` and the same
+    /// shape for reference_date/title (deserializer.rs:86-93), and `.map()`
+    /// over the poc members (deserializer.rs:184-192). `Some("")` is emitted
+    /// as `""`; only `None` omits the key. A plain std::string would flatten
+    /// both cases to `""` and silently drop a key the oracle keeps (upstream
+    /// finding #20.11).
+    std::optional<std::string> identifier;
+    std::optional<std::string> title;
+    std::optional<std::string> reference_date;
 
     /// Point of contact, all optional (header.fbs:151-161). Presence of
     /// pointOfContact in CityJSON metadata hinges on poc_contact_name being
-    /// set (deserializer.rs:77-78); the rest are its optional members.
-    std::string poc_contact_name;
-    std::string poc_contact_type;
-    std::string poc_role;
-    std::string poc_phone;
-    std::string poc_email;
-    /// Whether `poc_email` was actually present in the header, as opposed to
-    /// absent. `poc_email` alone cannot tell those apart: a present-but-empty
-    /// flatbuffer string and an absent one both flatten to `""`. This flag
-    /// exists solely so the required-field check in
-    /// `point_of_contact_to_json` (cityjson.cpp) can match Rust's
-    /// `poc_email().ok_or(...)`, which succeeds on `Some("")`. It does not
-    /// extend to the other `poc_*`/top-level string fields, whose
-    /// absent-vs-empty conflation remains a disclosed, out-of-scope
-    /// limitation (they only ever cause a silently omitted key, not a
-    /// throw).
-    bool has_poc_email = false;
-    std::string poc_website;
-    /// Address sub-object: emitted only when ALL FIVE are present AND the
-    /// thoroughfare number parses as an integer (deserializer.rs:172-182,
-    /// `to_cj_address`'s chained `?`/`and_then`).
+    /// SET -- not on it being non-empty -- matching Rust's
+    /// `match header.poc_contact_name() { Some(_) => ..., None => None }`
+    /// (deserializer.rs:81-84). `poc_email` is likewise required only in the
+    /// presence sense: `poc_email().ok_or(...)` succeeds on `Some("")` and
+    /// throws only on `None`, so `poc_email.has_value()` is the gate.
+    std::optional<std::string> poc_contact_name;
+    std::optional<std::string> poc_contact_type;
+    std::optional<std::string> poc_role;
+    std::optional<std::string> poc_phone;
+    std::optional<std::string> poc_email;
+    std::optional<std::string> poc_website;
+    /// Address sub-object: each member is emitted iff NON-EMPTY, independently
+    /// of the others, and the sub-object is omitted only when every member is
+    /// empty (`to_cj_address`, deserializer.rs:195-216). Emptiness -- not
+    /// presence -- IS the contract here, so these stay plain strings.
     std::string poc_address_thoroughfare_number;
     std::string poc_address_thoroughfare_name;
     std::string poc_address_locality;

@@ -408,10 +408,14 @@ pub fn decode_attributes(
             // These are emitted by the writer, so the reader must handle
             // them: panicking here made any file containing such an attribute
             // unreadable by the implementation that wrote it.
+            // `Byte` is stored as `u8` by the writer (`writer/attribute.rs`
+            // writes `out[offset] = b as u8`) and the index path
+            // (`reader/attr_query.rs`) already reads it back as `u8`, so this
+            // arm must too: decoding it as `i8` turned a stored 200 into -56.
             ColumnType::Byte => {
                 map.insert(
                     column.name().to_string(),
-                    serde_json::Value::Number(serde_json::Number::from(bytes[offset] as i8)),
+                    serde_json::Value::Number(serde_json::Number::from(bytes[offset])),
                 );
                 offset += size_of::<u8>();
             }
@@ -1068,6 +1072,81 @@ mod tests {
             }
             _ => panic!("Expected InvalidAttributeValue error for multiple boundaries"),
         }
+
+        Ok(())
+    }
+
+    /// `Byte`, `UByte` and `Binary` attributes must decode exactly as the
+    /// writer stored them. `writer/attribute.rs` emits one entry as
+    /// `[u16 LE column index][payload]`, where the payload is a single raw
+    /// byte for `Byte`/`UByte` (`out[offset] = b as u8`) and a `u32` LE
+    /// length followed by that many raw bytes for `Binary`. `Byte` in
+    /// particular is stored *unsigned*, so 200 must come back as 200 and not
+    /// as -56.
+    #[test]
+    fn test_decode_attributes_byte_ubyte_binary() -> Result<()> {
+        let mut fbb = FlatBufferBuilder::new();
+
+        let byte_name = fbb.create_string("b");
+        let ubyte_name = fbb.create_string("ub");
+        let binary_name = fbb.create_string("bin");
+        let byte_col = Column::create(
+            &mut fbb,
+            &ColumnArgs {
+                index: 0,
+                name: Some(byte_name),
+                type_: ColumnType::Byte,
+                ..Default::default()
+            },
+        );
+        let ubyte_col = Column::create(
+            &mut fbb,
+            &ColumnArgs {
+                index: 1,
+                name: Some(ubyte_name),
+                type_: ColumnType::UByte,
+                ..Default::default()
+            },
+        );
+        let binary_col = Column::create(
+            &mut fbb,
+            &ColumnArgs {
+                index: 2,
+                name: Some(binary_name),
+                type_: ColumnType::Binary,
+                ..Default::default()
+            },
+        );
+        let columns = fbb.create_vector(&[byte_col, ubyte_col, binary_col]);
+
+        // The attribute blob, laid out by hand in the writer's wire format.
+        let mut blob: Vec<u8> = Vec::new();
+        blob.extend_from_slice(&0u16.to_le_bytes()); // column 0: b
+        blob.push(200);
+        blob.extend_from_slice(&1u16.to_le_bytes()); // column 1: ub
+        blob.push(200);
+        blob.extend_from_slice(&2u16.to_le_bytes()); // column 2: bin
+        blob.extend_from_slice(&2u32.to_le_bytes());
+        blob.extend_from_slice(&[1, 255]);
+        let attributes = fbb.create_vector(&blob);
+
+        let id = fbb.create_string("obj-1");
+        let city_object = CityObject::create(
+            &mut fbb,
+            &CityObjectArgs {
+                id: Some(id),
+                attributes: Some(attributes),
+                columns: Some(columns),
+                ..Default::default()
+            },
+        );
+        fbb.finish(city_object, None);
+
+        let city_object = flatbuffers::root::<CityObject>(fbb.finished_data()).unwrap();
+        let columns = city_object.columns().unwrap();
+        let decoded = decode_attributes(&columns, city_object.attributes().unwrap());
+
+        assert_eq!(decoded, json!({"b": 200, "ub": 200, "bin": [1, 255]}));
 
         Ok(())
     }

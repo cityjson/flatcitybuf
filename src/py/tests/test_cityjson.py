@@ -130,6 +130,47 @@ def test_metadata_defaults_when_the_header_declares_nothing() -> None:
     }
 
 
+def _metadata_only(info: FileInfo) -> dict[str, Any]:
+    header = HeaderView(
+        info=info,
+        layout=FileLayout(
+            header_len=0,
+            rtree_begin=0,
+            rtree_size=0,
+            attr_index_begin=0,
+            attr_index_size=0,
+            feature_begin=0,
+        ),
+        attr_indices=[],
+    )
+    meta = to_cityjson_metadata(header)["metadata"]
+    assert isinstance(meta, dict)
+    return meta
+
+
+def test_present_but_empty_identifier_and_title_are_emitted() -> None:
+    # Rust gates both on PRESENCE, not truthiness: `identifier:
+    # header.identifier().map(|i| i.to_string())` (deserializer.rs:86-93)
+    # turns Some("") into Some("".to_string()), and serde emits
+    # `"identifier": ""`. `if info.identifier:` is falsy for "" and
+    # silently dropped a key the oracle keeps -- upstream finding
+    # #20.11. No corpus fixture carries an empty-but-present string, so
+    # widening test_conformance.py cannot catch this.
+    meta = _metadata_only(
+        FileInfo(cityjson_version="2.0", identifier="", title="")
+    )
+    assert meta["identifier"] == ""
+    assert meta["title"] == ""
+
+
+def test_absent_identifier_and_title_are_omitted() -> None:
+    # The other half: None -> the key is omitted entirely, so the fix
+    # above cannot be "emit unconditionally".
+    meta = _metadata_only(FileInfo(cityjson_version="2.0"))
+    assert "identifier" not in meta
+    assert "title" not in meta
+
+
 # ------------------------------------------------------------ feature ---
 
 

@@ -141,18 +141,35 @@ decode_attributes(bytes_view blob, const std::vector<ColumnInfo>& schema) {
                 break;
             }
 
+            // Byte is UNSIGNED on the wire: the writer stores it as a raw u8
+            // (writer/attribute.rs) and indexes it as u8 (writer/attr_index.rs),
+            // so a stored 200 must read back as 200, not -56. The Rust reader
+            // agrees on both its value and its index path.
             case ::ColumnType::Byte:
+                need(blob, at, 1, "Byte");
+                v.type = AttrValue::Type::UInt;
+                v.u = get_le<std::uint8_t>(blob, at);
+                at += 1;
+                break;
             case ::ColumnType::UByte:
-            case ::ColumnType::Binary:
-                // The writer can emit these, but the Rust reader hits
-                // `unreachable!()` on them (deserializer.rs:372), so no file
-                // in the wild has ever had them read back. Rejecting is
-                // honest; silently guessing a width would desynchronise the
-                // whole blob, since records are not self-delimiting.
-                throw Error(ErrorCode::UnsupportedColumnType,
-                            "column '" + col.name +
-                                "' has type Byte/UByte/Binary, which the reference "
-                                "reader does not support");
+                need(blob, at, 1, "UByte");
+                v.type = AttrValue::Type::UInt;
+                v.u = get_le<std::uint8_t>(blob, at);
+                at += 1;
+                break;
+
+            case ::ColumnType::Binary: {
+                // u32 LE byte length, then that many raw bytes -- the same
+                // framing as String, but the payload is not text.
+                need(blob, at, 4, "binary length");
+                const std::uint32_t len = get_le<std::uint32_t>(blob, at);
+                at += 4;
+                need(blob, at, len, "binary body");
+                v.type = AttrValue::Type::Binary;
+                v.s.assign(reinterpret_cast<const char*>(blob.data()) + at, len);
+                at += len;
+                break;
+            }
         }
 
         out.emplace_back(col.name, std::move(v));

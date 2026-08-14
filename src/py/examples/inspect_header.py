@@ -26,7 +26,9 @@ def main(path: str) -> int:
     print(f"file          {path}")
     print(f"features      {info.features_count}")
     print(f"CityJSON      {info.cityjson_version}")
-    if info.title:
+    # Presence, not truthiness: a present-but-empty title is a real
+    # value the reader now preserves (see FileInfo.title).
+    if info.title is not None:
         print(f"title         {info.title}")
     if info.crs:
         print(f"CRS           {info.crs}")

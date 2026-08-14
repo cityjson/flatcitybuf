@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import * as flatbuffers from 'flatbuffers'
 import { describe, expect, it } from 'vitest'
+import { toCityJSONMetadata } from '../src/cityjson/index.js'
+import { Header as FbHeader } from '../src/generated/header.js'
 import { BytesRangeReader } from '../src/io/range-reader.js'
 import { readHeader } from '../src/header/index.js'
 
@@ -132,5 +135,65 @@ describe('AttributeIndex struct', () => {
     }
     // The cumulative sum must land EXACTLY on the feature section.
     expect(expected).toBe(layout.featureBegin)
+  })
+})
+
+/** A minimal, well-formed .fcb byte stream carrying nothing but a header.
+ *
+ *  `undefined` leaves the FlatBuffers field genuinely ABSENT; `''` stores a
+ *  PRESENT-but-empty string. No corpus fixture carries the latter -- which is
+ *  exactly why the conformance suite cannot pin the behaviour below --
+ *  and the generated accessor returns `''` for it against `null` for absent.
+ *  `version` is `(required)` in header.fbs, so it is always set.
+ */
+function headerOnlyFile(fields: { identifier?: string; title?: string }): Uint8Array {
+  const b = new flatbuffers.Builder(1024)
+  const version = b.createString('2.0')
+  const identifier = fields.identifier === undefined ? null : b.createString(fields.identifier)
+  const title = fields.title === undefined ? null : b.createString(fields.title)
+
+  FbHeader.startHeader(b)
+  FbHeader.addVersion(b, version)
+  FbHeader.addIndexNodeSize(b, 16)
+  if (identifier !== null) FbHeader.addIdentifier(b, identifier)
+  if (title !== null) FbHeader.addTitle(b, title)
+  b.finishSizePrefixed(FbHeader.endHeader(b))
+
+  // MAGIC_BYTES = {'f','c','b',0x01,'f','c','b',0x00} (const_vars.rs:5).
+  const magic = new Uint8Array([0x66, 0x63, 0x62, 0x01, 0x66, 0x63, 0x62, 0x00])
+  const body = b.asUint8Array()
+  const out = new Uint8Array(magic.length + body.length)
+  out.set(magic, 0)
+  out.set(body, magic.length)
+  return out
+}
+
+describe('present-but-empty header metadata strings', () => {
+  // Rust gates these on PRESENCE, not emptiness:
+  // `identifier: header.identifier().map(|i| i.to_string())`, likewise
+  // reference_date and title (deserializer.rs:86-93). `Some("")` survives the
+  // `.map` and serializes as `"identifier": ""`; only `None` makes
+  // `skip_serializing_if = "Option::is_none"` drop the key. TypeScript already
+  // matches -- `hdr.identifier() ?? undefined` keeps `''` and `put()` gates on
+  // `!== undefined` -- but nothing pinned it, and this is upstream finding
+  // #20.11, which C++ and Python both got wrong by gating on emptiness.
+  it('emits an empty identifier and title as "", not as absent', async () => {
+    const { metadata } = toCityJSONMetadata(
+      await readHeader(new BytesRangeReader(headerOnlyFile({ identifier: '', title: '' }))),
+    )
+    expect(metadata).toBeDefined()
+    expect(metadata).toHaveProperty('identifier', '')
+    expect(metadata).toHaveProperty('title', '')
+  })
+
+  it('omits identifier and title entirely when they are absent', async () => {
+    // The other half of the distinction: without this, "emit unconditionally"
+    // would pass the case above and still diverge from the oracle.
+    const { metadata } = toCityJSONMetadata(
+      await readHeader(new BytesRangeReader(headerOnlyFile({}))),
+    )
+    expect(metadata).toBeDefined()
+    expect(metadata).not.toHaveProperty('identifier')
+    expect(metadata).not.toHaveProperty('title')
   })
 })

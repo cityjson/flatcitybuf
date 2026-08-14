@@ -496,31 +496,34 @@ nlohmann::json point_of_contact_address_to_json(const FileInfo& info) {
 /// metadata line. C++ must match that rather than silently emitting an
 /// incomplete object.
 ///
-/// The gate below is on `info.has_poc_email`, NOT `info.poc_email.empty()`.
-/// Rust's check is `header.poc_email().ok_or(...)`  a present-but-empty
-/// flatbuffer string is `Some("")`, which satisfies `ok_or` and yields
-/// `email_address: ""`; only a genuinely absent field is `None` and throws.
-/// `poc_email.empty()` cannot make that distinction on its own, since both
-/// "absent" and "present but empty" flatten to the same empty
-/// `std::string`, so a separate presence flag is required here.
+/// EVERY gate here is on PRESENCE, never on emptiness. Rust reads each of
+/// these through an `Option<&str>` accessor and either `.map()`s it or
+/// `.ok_or()`s it, so a present-but-empty flatbuffer string is `Some("")`: it
+/// satisfies `ok_or` (yielding `email_address: ""` rather than throwing) and
+/// survives `.map` (yielding `"role": ""` rather than a dropped key). Only a
+/// genuinely absent field is `None`. Gating on `.empty()` conflated the two
+/// and silently omitted keys the oracle keeps -- upstream finding #20.11.
+/// `poc_address_*` is the one exception, and deliberately so: see
+/// `point_of_contact_address_to_json` above, where non-emptiness IS Rust's
+/// own rule.
 nlohmann::json point_of_contact_to_json(const FileInfo& info) {
-    if (info.poc_contact_name.empty())
+    if (!info.poc_contact_name.has_value())
         return nullptr;
-    if (!info.has_poc_email) {
+    if (!info.poc_email.has_value()) {
         throw Error(ErrorCode::MissingRequiredField, "email_address");
     }
 
     nlohmann::json poc = nlohmann::json::object();
-    poc["contactName"] = info.poc_contact_name;
-    if (!info.poc_contact_type.empty())
-        poc["contactType"] = info.poc_contact_type;
-    if (!info.poc_role.empty())
-        poc["role"] = info.poc_role;
-    if (!info.poc_phone.empty())
-        poc["phone"] = info.poc_phone;
-    poc["emailAddress"] = info.poc_email;
-    if (!info.poc_website.empty())
-        poc["website"] = info.poc_website;
+    poc["contactName"] = *info.poc_contact_name;
+    if (info.poc_contact_type.has_value())
+        poc["contactType"] = *info.poc_contact_type;
+    if (info.poc_role.has_value())
+        poc["role"] = *info.poc_role;
+    if (info.poc_phone.has_value())
+        poc["phone"] = *info.poc_phone;
+    poc["emailAddress"] = *info.poc_email;
+    if (info.poc_website.has_value())
+        poc["website"] = *info.poc_website;
     if (auto addr = point_of_contact_address_to_json(info); !addr.is_null()) {
         poc["address"] = std::move(addr);
     }
@@ -616,15 +619,15 @@ nlohmann::json to_cityjson_metadata(const HeaderView& header) {
                                   info.crs.substr(0, info.crs.find(':')) + "/0/" +
                                   info.crs.substr(info.crs.find(':') + 1);
     }
-    if (!info.identifier.empty())
-        meta["identifier"] = info.identifier;
+    if (info.identifier.has_value())
+        meta["identifier"] = *info.identifier;
     if (auto poc = point_of_contact_to_json(info); !poc.is_null()) {
         meta["pointOfContact"] = std::move(poc);
     }
-    if (!info.reference_date.empty())
-        meta["referenceDate"] = info.reference_date;
-    if (!info.title.empty())
-        meta["title"] = info.title;
+    if (info.reference_date.has_value())
+        meta["referenceDate"] = *info.reference_date;
+    if (info.title.has_value())
+        meta["title"] = *info.title;
     cj["metadata"] = std::move(meta);
 
     // A CityJSONSeq header line carries no features of its own.
