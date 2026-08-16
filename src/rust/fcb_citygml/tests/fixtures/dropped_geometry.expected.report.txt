@@ -1,0 +1,5 @@
+# The 2D surface: valid GML, and no CityJSON to write it as. The polygon
+# goes, the rest of the MultiSurface stays.
+skip Polygon|srsDimension 2 is not supported; CityJSON holds 3D geometry alone
+# A lodX property CityJSON has no member for. Reported once per occurrence.
+skip lod2TerrainIntersection|no CityJSON counterpart for this property

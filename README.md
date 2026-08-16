@@ -84,7 +84,7 @@ FlatCityBuf delivers **10-20× faster** data retrieval compared to CityJSONTextS
 
 ```
 flatcitybuf/
-├── 🦀 src/rust/         # Rust reader + writer (fcb_core, cli, fcb_api)
+├── 🦀 src/rust/         # Rust reader + writer (fcb_core, cli, fcb_citygml, fcb_api)
 ├── ⚙️ src/cpp/          # Native C++ reader + writer
 ├── 🐍 src/py/           # Pure-Python reader (no compiled dependency)
 ├── 🌐 src/ts/           # Pure TypeScript reader (browser + Node.js)
@@ -191,6 +191,10 @@ fcb ser file1.city.jsonl file2.city.jsonl merged.fcb
 fcb ser 'data/*.city.jsonl' output.fcb
 fcb ser 'cities/**/*.city.json' all_cities.fcb
 
+# CityGML 2.0 input -- converted to CityJSON on the way in
+fcb ser city.gml city.fcb
+fcb ser 'tiles/*.gml' city.fcb
+
 # With spatial index and attribute index
 fcb ser data.city.jsonl data.fcb --attr-index attribute_name,attribute_name2
 
@@ -204,6 +208,29 @@ fcb inspect data.fcb --static
 # which reads only the header over range requests)
 fcb inspect data.fcb
 ```
+
+#### CityGML input
+
+`fcb ser` accepts CityGML files (`.gml`, `.xml`) alongside CityJSON and
+CityJSONSeq, and converts them to CityJSON on the way in — globs and multiple
+inputs work the same way, so a directory of tiles becomes one `.fcb`. Scope:
+
+- **CityGML 2.0**, and the 1.0 namespaces, which are accepted throughout.
+  **CityGML 3.0 is not supported.**
+- Geometry down to the boundary surfaces, including `ImplicitGeometry`, which
+  is flattened into real coordinates; semantic surfaces, attributes (generic
+  and thematic) and the appearance module (**materials and textures**) are all
+  carried over.
+- `srsName` is normalised to the CityJSON `metadata.referenceSystem` URL form,
+  swapping the axes when the source names them latitude-first. **There is no
+  reprojection** — coordinates stay in the file's own CRS.
+- **3D geometry only.** A surface whose `srsDimension` says two is skipped;
+  the rest of the document still converts.
+
+Valid CityGML that has no CityJSON representation is skipped rather than
+failing the conversion. Every warning is written to stderr in full, with a
+count of the skipped elements after it, so a conversion never loses anything
+without saying so.
 
 ### 🧪 Run Benchmarks
 
