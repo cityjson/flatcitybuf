@@ -18,7 +18,7 @@ use crate::{
 use cjseq::{
     Appearance as CjAppearance, BorderColor as CjBorderColor, CityJSON, CityJSONFeature,
     CityObject as CjCityObject, CityObjectType as CjCityObjectType, Geometry as CjGeometry,
-    GeometryType as CjGeometryType, PointOfContact as CjPointOfContact,
+    GeometryType as CjGeometryType, Index as _, PointOfContact as CjPointOfContact,
     ReferenceSystem as CjReferenceSystem, SemanticSurfaceType as CjSemanticSurfaceType,
     TextureFormat as CjTextureFormat, TextureType as CjTextureType, Transform as CjTransform,
     WrapMode as CjWrapMode,
@@ -57,7 +57,7 @@ pub(super) fn to_fcb_header<'a>(
     semantic_attr_schema: Option<&AttributeSchema>,
     attribute_indices_info: Option<&[AttributeIndexInfo]>,
 ) -> Result<flatbuffers::WIPOffset<Header<'a>>> {
-    let version = Some(fbb.create_string(&cj.version));
+    let version = Some(fbb.create_string(&json_string(&cj.version)));
     let transform = to_transform(&cj.transform);
     let features_count: u64 = header_options.feature_count;
     let columns = Some(to_columns(fbb, attr_schema));
@@ -86,24 +86,13 @@ pub(super) fn to_fcb_header<'a>(
     // itself: a map of extension name to `{url, version}`. Only that reference
     // is written; the schema document it points at is not fetched, so writing
     // a file never makes a network request.
-    let extensions = cj
-        .extensions
-        .as_ref()
-        .and_then(|e| e.as_object())
-        .map(|extensions| {
-            let extensions = extensions
-                .iter()
-                .map(|(name, ext)| {
-                    let url = ext.get("url").and_then(|v| v.as_str()).unwrap_or_default();
-                    let version = ext
-                        .get("version")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    to_extension(fbb, name, url, version)
-                })
-                .collect::<Vec<_>>();
-            fbb.create_vector(&extensions)
-        });
+    let extensions = cj.extensions.as_ref().map(|extensions| {
+        let extensions = extensions
+            .iter()
+            .map(|(name, ext)| to_extension(fbb, name, &ext.url, &ext.version))
+            .collect::<Vec<_>>();
+        fbb.create_vector(&extensions)
+    });
 
     // Use the geographical_extent from the HeaderWriterOptions if provided
     let geographical_extent_from_options = header_options
@@ -332,8 +321,14 @@ fn to_point_of_contact<'a>(
 ) -> FcbPointOfContact<'a> {
     let poc_contact_name = Some(fbb.create_string(&poc.contact_name));
 
-    let poc_contact_type = poc.contact_type.as_ref().map(|ct| fbb.create_string(ct));
-    let poc_role = poc.role.as_ref().map(|r| fbb.create_string(r));
+    let poc_contact_type = poc
+        .contact_type
+        .as_ref()
+        .map(|ct| fbb.create_string(&json_string(ct)));
+    let poc_role = poc
+        .role
+        .as_ref()
+        .map(|r| fbb.create_string(&json_string(r)));
     let poc_phone = poc.phone.as_ref().map(|p| fbb.create_string(p));
     let poc_email = Some(fbb.create_string(&poc.email_address));
     let poc_website = poc.website.as_ref().map(|w| fbb.create_string(w));
@@ -683,9 +678,6 @@ pub(super) fn to_city_object<'a>(
         .attributes
         .as_ref()
         .map(|attr| {
-            if !attr.is_object() {
-                return (None, None);
-            }
             let (attr_vec, own_schema) = to_fcb_attribute(fbb, attr, attr_schema);
             let columns = own_schema.map(|schema| to_columns(fbb, &schema));
             (Some(attr_vec), columns)
@@ -904,7 +896,9 @@ pub(crate) fn to_geometry<'a>(
     semantic_attr_schema: Option<&AttributeSchema>,
 ) -> flatbuffers::WIPOffset<Geometry<'a>> {
     let type_ = to_geom_type(&geometry.geometry_type());
-    let lod = geometry.lod().map(|lod| fbb.create_string(lod));
+    let lod = geometry
+        .lod()
+        .map(|lod| fbb.create_string(&lod.to_string()));
 
     let encoded = encode(geometry);
     let GMBoundaries {
@@ -930,7 +924,7 @@ pub(crate) fn to_geometry<'a>(
                 .iter()
                 .map(|s| {
                     let children = s.children.as_ref().map(|c| {
-                        let c = c.iter().map(|&i| i as u32).collect::<Vec<_>>();
+                        let c = c.iter().map(|i| i.get() as u32).collect::<Vec<_>>();
                         fbb.create_vector(&c)
                     });
 
@@ -942,9 +936,8 @@ pub(crate) fn to_geometry<'a>(
                     let attributes = if s.other.is_empty() {
                         None
                     } else {
-                        let other = Value::Object(s.other.clone().into_iter().collect());
                         semantic_attr_schema.as_ref().map(|schema| {
-                            fbb.create_vector(&encode_attributes_with_schema(&other, schema))
+                            fbb.create_vector(&encode_attributes_with_schema(&s.other, schema))
                         })
                     };
                     SemanticObject::create(
@@ -954,7 +947,7 @@ pub(crate) fn to_geometry<'a>(
                             extension_type,
                             attributes,
                             children,
-                            parent: s.parent.map(|p| p as u32),
+                            parent: s.parent.map(|p| p.get() as u32),
                         },
                     )
                 })
@@ -1094,8 +1087,11 @@ pub(super) fn to_geometry_instance<'a>(
         //TODO: don't use panic, instead, return Result type
     };
 
-    let template = *template as u32;
-    let indices = boundaries.iter().map(|&i| i as u32).collect::<Vec<_>>();
+    let template = template.get() as u32;
+    let indices = boundaries
+        .iter()
+        .map(|i| i.get() as u32)
+        .collect::<Vec<_>>();
     let boundaries = Some(fbb.create_vector(&indices));
     let transformation = Some(TransformationMatrix::new(
         m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13],
@@ -1111,27 +1107,24 @@ pub(super) fn to_geometry_instance<'a>(
     )
 }
 
-/// `geometry-templates.vertices-templates` is an untyped `Value` in CityJSON;
-/// anything that is not a 3-element array of numbers is not a vertex and is
-/// skipped rather than guessed at.
 pub(super) fn to_templates_vertices<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
-    vertices: &Value,
+    vertices: &[[f64; 3]],
 ) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, DoubleVertex>> {
     let vertices_vec = vertices
-        .as_array()
-        .map(|vs| {
-            vs.iter()
-                .filter_map(|v| {
-                    let v = v.as_array()?;
-                    let coords: Vec<f64> = v.iter().filter_map(|c| c.as_f64()).collect();
-                    let [x, y, z]: [f64; 3] = coords.try_into().ok()?;
-                    Some(DoubleVertex::new(x, y, z))
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+        .iter()
+        .map(|&[x, y, z]| DoubleVertex::new(x, y, z))
+        .collect::<Vec<_>>();
     fbb.create_vector(&vertices_vec)
+}
+
+/// The string a CityJSON enumeration member, such as `version` or
+/// `contactType`, is spelled as in JSON.
+fn json_string<T: serde::Serialize>(value: &T) -> String {
+    match serde_json::to_value(value) {
+        Ok(Value::String(s)) => s,
+        _ => unreachable!("a CityJSON enumeration serializes as a string"),
+    }
 }
 
 pub(crate) fn to_columns<'a>(
@@ -1160,14 +1153,14 @@ pub(crate) fn to_columns<'a>(
 
 pub(super) fn to_fcb_attribute<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
-    attr: &Value,
+    attr: &serde_json::Map<String, Value>,
     schema: &AttributeSchema,
 ) -> (
     flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>,
     Option<AttributeSchema>,
 ) {
     let mut is_own_schema = false;
-    for (key, _) in attr.as_object().unwrap().iter() {
+    for (key, _) in attr.iter() {
         if !schema.contains_key(key) {
             is_own_schema = true;
         }
@@ -1193,6 +1186,7 @@ mod tests {
     use cjseq::CityJSONFeature;
     use flatbuffers::FlatBufferBuilder;
     use pretty_assertions::assert_eq;
+    use std::str::FromStr;
 
     #[test]
     fn test_to_fcb_city_feature() -> Result<()> {
@@ -1274,7 +1268,7 @@ mod tests {
                     .as_ref()
                     .unwrap()
                     .iter()
-                    .find(|g| g.lod() == fb_geometry.lod())
+                    .find(|g| g.lod().map(|l| l.to_string()).as_deref() == fb_geometry.lod())
                     .unwrap();
                 assert_eq!(
                     cj_geometry.geometry_type(),

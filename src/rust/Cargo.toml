@@ -9,9 +9,10 @@ bytemuck = "1.15.0"
 async-trait = { version = "0.1.85", default-features = true }
 flatbuffers = "25.9.23"
 byteorder = "1.5.0"
-cjseq = { package = "cjseq2", version = "0.2.0-alpha.1" }
+cjseq = { git = "https://github.com/HideBa/cjseq", rev = "2b635a12196d1c5264f7125f22165fdac8f68e96" }
 tempfile = "3.14.0"
 serde_json = "1.0.133"
+indexmap = "2"
 serde = "1.0.200"
 anyhow = "1.0.95"
 fallible-streaming-iterator = "0.1.9"

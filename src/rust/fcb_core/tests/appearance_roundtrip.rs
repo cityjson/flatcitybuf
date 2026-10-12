@@ -29,7 +29,7 @@
 //! instead.
 
 use anyhow::Result;
-use cjseq::{CityJSONFeature, Geometry as CjGeometry, MaterialReference, TextureReference};
+use cjseq::{CityJSONFeature, Geometry as CjGeometry};
 use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     deserializer,
@@ -38,7 +38,6 @@ use fcb_core::{
 };
 use pretty_assertions::assert_eq;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::io::{BufReader, Cursor};
 
 /// Raw arrays of one FlatBuffers `MaterialMapping`, as emitted by the encoder.
@@ -62,12 +61,14 @@ struct TextureDump {
     vertices: Vec<u32>,
 }
 
-fn material_of(g: &CjGeometry) -> Option<&HashMap<String, MaterialReference>> {
-    g.common().and_then(|c| c.material.as_ref())
+/// A geometry's `material` member as JSON, `null` when it has none.
+fn material_of(g: &CjGeometry) -> Value {
+    serde_json::to_value(g).expect("a geometry serializes")["material"].clone()
 }
 
-fn texture_of(g: &CjGeometry) -> Option<&HashMap<String, TextureReference>> {
-    g.common().and_then(|c| c.texture.as_ref())
+/// A geometry's `texture` member as JSON, `null` when it has none.
+fn texture_of(g: &CjGeometry) -> Value {
+    serde_json::to_value(g).expect("a geometry serializes")["texture"].clone()
 }
 
 /// Encodes a single-geometry CityJSONSeq with the real writer, decodes it with
@@ -1244,7 +1245,7 @@ fn the_header_appearance_palette_roundtrips() -> Result<()> {
         .as_ref()
         .expect("the header declares geometry templates");
     assert!(
-        templates.templates[0].common().is_some(),
+        !material_of(&templates.templates[0]).is_null(),
         "the template that indexes the palette must still be emitted"
     );
     Ok(())

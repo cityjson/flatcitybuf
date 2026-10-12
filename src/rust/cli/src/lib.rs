@@ -58,4 +58,7 @@ pub enum CliError {
 
     #[error("FCB core error: {0}")]
     FcbCore(#[from] Error),
+
+    #[error("CityJSON error: {0}")]
+    Cjseq(#[from] cjseq::CjseqError),
 }

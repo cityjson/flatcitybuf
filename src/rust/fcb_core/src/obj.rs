@@ -9,7 +9,7 @@
 //! geometry's ring iterator comes from its variant, so the depth is never
 //! guessed at.
 
-use cjseq::{CityJSON, Geometry, Ring};
+use cjseq::{CityJSON, Geometry, Index, Lod, VertexIndex};
 use std::io::{Result as IoResult, Write};
 
 /// Converts a CityJSON object to OBJ format and returns it as a string.
@@ -56,25 +56,45 @@ pub fn to_obj<W: Write>(city_json: &CityJSON, writer: &mut W) -> IoResult<()> {
 
 /// Every ring of a geometry, in document order. The nesting depth comes from
 /// the variant, so no runtime inspection of the boundaries is needed.
-fn rings(geometry: &Geometry) -> Box<dyn Iterator<Item = &Ring> + '_> {
+fn rings(geometry: &Geometry) -> Box<dyn Iterator<Item = &[VertexIndex]> + '_> {
     match geometry {
-        Geometry::MultiPoint { boundaries, .. } | Geometry::GeometryInstance { boundaries, .. } => {
-            Box::new(std::iter::once(boundaries))
+        Geometry::MultiPoint { boundaries, .. } => Box::new(std::iter::once(boundaries.as_slice())),
+        Geometry::GeometryInstance { boundaries, .. } => {
+            Box::new(std::iter::once(boundaries.as_slice()))
         }
-        Geometry::MultiLineString { boundaries, .. } => Box::new(boundaries.iter()),
+        Geometry::MultiLineString { boundaries, .. } => {
+            Box::new(boundaries.iter().map(Vec::as_slice))
+        }
         Geometry::MultiSurface { boundaries, .. }
-        | Geometry::CompositeSurface { boundaries, .. } => Box::new(boundaries.iter().flatten()),
-        Geometry::Solid { boundaries, .. } => Box::new(boundaries.iter().flatten().flatten()),
+        | Geometry::CompositeSurface { boundaries, .. } => {
+            Box::new(boundaries.iter().flatten().map(Vec::as_slice))
+        }
+        Geometry::Solid { boundaries, .. } => {
+            Box::new(boundaries.iter().flatten().flatten().map(Vec::as_slice))
+        }
         Geometry::MultiSolid { boundaries, .. } | Geometry::CompositeSolid { boundaries, .. } => {
-            Box::new(boundaries.iter().flatten().flatten().flatten())
+            Box::new(
+                boundaries
+                    .iter()
+                    .flatten()
+                    .flatten()
+                    .flatten()
+                    .map(Vec::as_slice),
+            )
         }
     }
 }
 
-/// The geometries with the highest numeric lod, or all of them when no
-/// geometry has an lod that parses as a number.
+/// A lod as a number, so that `"2.2"` ranks above `"2"` and `"2"` ties with
+/// `"2.0"`.
+fn lod_value(lod: Lod) -> f64 {
+    f64::from(lod.level()) + lod.refinement().map_or(0.0, |r| f64::from(r) / 10.0)
+}
+
+/// The geometries with the highest lod, or all of them when none has one
+/// (only a GeometryInstance has none).
 fn find_highest_lod_geometry(geometries: &[Geometry]) -> Vec<&Geometry> {
-    let lod_of = |g: &Geometry| g.lod().and_then(|l| l.parse::<f64>().ok());
+    let lod_of = |g: &Geometry| g.lod().map(lod_value);
 
     let Some(max_lod) = geometries
         .iter()
@@ -93,14 +113,14 @@ fn find_highest_lod_geometry(geometries: &[Geometry]) -> Vec<&Geometry> {
 }
 
 /// Writes one ring as an OBJ face. OBJ indices are 1-based, CityJSON's 0-based.
-fn write_obj_face<W: Write>(indices: &[usize], writer: &mut W) -> IoResult<()> {
+fn write_obj_face<W: Write>(indices: &[VertexIndex], writer: &mut W) -> IoResult<()> {
     if indices.is_empty() {
         return Ok(());
     }
 
     write!(writer, "f")?;
     for idx in indices {
-        write!(writer, " {}", idx + 1)?;
+        write!(writer, " {}", idx.get() + 1)?;
     }
     writeln!(writer)?;
 

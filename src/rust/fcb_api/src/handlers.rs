@@ -3,9 +3,10 @@ use axum::{
     http::{header, HeaderMap, StatusCode},
     response::Json,
 };
+use cjseq::{CityJSON, CityJSONFeature};
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::constants::*;
 use crate::models::*;
@@ -20,6 +21,19 @@ pub struct BboxQuery {
     pub bbox_crs: Option<String>,
     pub filter: Option<String>,
     pub f: Option<String>,
+}
+
+/// Collects `features` into one CityJSON document under `header`, merging
+/// duplicate vertices and fitting the transform to the data. A feature that
+/// does not fit the document is a server error.
+pub(crate) fn collect_features(
+    header: CityJSON,
+    features: Vec<CityJSONFeature>,
+) -> Result<CityJSON, StatusCode> {
+    cjseq::cjseq_to_cj(header, features).map_err(|e| {
+        warn!("Failed to collect features into one CityJSON object: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 /// Determine output format from query parameter or Accept header

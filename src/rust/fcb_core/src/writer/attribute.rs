@@ -2,7 +2,7 @@ use crate::fb::ColumnType;
 use byteorder::{ByteOrder, LittleEndian};
 use chrono::{DateTime, Utc};
 use cjseq::CityJSONFeature;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use tracing::{debug, warn};
 
@@ -20,18 +20,15 @@ use tracing::{debug, warn};
 pub type AttributeSchema = BTreeMap<String, (u16, ColumnType)>;
 
 pub trait AttributeSchemaMethods {
-    fn add_attributes(&mut self, attrs: &Value);
+    /// Adds a column for each member of `attrs` the schema does not have yet,
+    /// typed from its value. A `null` member says nothing about the type and
+    /// adds no column.
+    fn add_attributes(&mut self, attrs: &Map<String, Value>);
 }
 
 impl AttributeSchemaMethods for AttributeSchema {
-    fn add_attributes(&mut self, attrs: &Value) {
-        if !attrs.is_object() {
-            self.insert("json".to_string(), (self.len() as u16, ColumnType::Json));
-            return;
-        }
-
-        let map = attrs.as_object().unwrap();
-        for (key, val) in map.iter() {
+    fn add_attributes(&mut self, attrs: &Map<String, Value>) {
+        for (key, val) in attrs.iter() {
             if !self.contains_key(key) && !val.is_null() {
                 if let Some(coltype) = guess_type(val) {
                     self.insert(key.clone(), (self.len() as u16, coltype));
@@ -95,8 +92,11 @@ pub(crate) fn attr_size(coltype: &ColumnType, colval: &Value) -> usize {
     }
 }
 
-pub(crate) fn encode_attributes_with_schema(attr: &Value, schema: &AttributeSchema) -> Vec<u8> {
-    if !attr.is_object() || attr.as_object().unwrap().is_empty() || attr.is_null() {
+pub(crate) fn encode_attributes_with_schema(
+    attr: &Map<String, Value>,
+    schema: &AttributeSchema,
+) -> Vec<u8> {
+    if attr.is_empty() {
         return Vec::new();
     }
 
@@ -105,23 +105,9 @@ pub(crate) fn encode_attributes_with_schema(attr: &Value, schema: &AttributeSche
     sorted_schema.sort_by_key(|(_, (index, _))| *index);
 
     for (name, (index, coltype)) in sorted_schema {
-        let (_, val) = {
-            let attr_obj = attr.as_object();
-            if let Some(attr_obj) = attr_obj {
-                let value = attr_obj.iter().find(|(k, _)| *k == name);
-                if let Some(value) = value {
-                    (value.0, value.1)
-                } else {
-                    continue;
-                }
-            } else {
-                return Vec::new();
-            }
-        };
-
-        if val.is_null() {
+        let Some(val) = attr.get(name).filter(|v| !v.is_null()) else {
             continue;
-        }
+        };
 
         let mut offset = out.len();
         let attr_size = attr_size(coltype, val);
@@ -229,9 +215,9 @@ pub fn cityfeature_to_index_entries(
     indexing_attr: &[String],
 ) -> Vec<AttributeIndexEntry> {
     let mut index_entries = Vec::new();
-    // `city_objects` is a `HashMap` in cjseq, so iterate it in a fixed (id)
-    // order -- the entry order reaches the B+tree payload lists for duplicate
-    // keys, and a random order there is a random output file.
+    // Iterate in id order -- the entry order reaches the B+tree payload lists
+    // for duplicate keys, so it is kept independent of the order the feature
+    // lists its City Objects in, as the C++ writer does.
     let mut object_ids: Vec<_> = cityfeature.city_objects.keys().collect();
     object_ids.sort_unstable();
     for object in object_ids
@@ -249,17 +235,11 @@ pub fn cityfeature_to_index_entries(
 
 // this attr should be a json object with attribute name as key and attribute value as value
 pub fn attribute_to_index_entries(
-    attr: &Value,
+    map: &serde_json::Map<String, Value>,
     schema: &AttributeSchema,
     indexing_attr: &[String],
 ) -> Vec<AttributeIndexEntry> {
-    if !attr.is_object() || attr.is_null() || attr.as_object().unwrap().is_empty() {
-        return Vec::new();
-    }
-
     let mut index_entries = Vec::new();
-
-    let map = attr.as_object().unwrap();
     for attr in indexing_attr {
         let val: &Value = match map.get(attr) {
             Some(val) => val,
@@ -391,7 +371,7 @@ mod tests {
 
         let mut attr_schema: AttributeSchema = AttributeSchema::new();
 
-        attr_schema.add_attributes(&json_data["attributes"]);
+        attr_schema.add_attributes(json_data["attributes"].as_object().unwrap());
 
         // Check if the schema contains the expected keys and types
         assert_eq!(attr_schema.get("int").unwrap().1, ColumnType::Long);
@@ -519,7 +499,7 @@ mod tests {
             // Create and encode with schema
             let mut fbb = FlatBufferBuilder::new();
             let mut common_schema = AttributeSchema::new();
-            common_schema.add_attributes(attr_schema);
+            common_schema.add_attributes(attr_schema.as_object().unwrap());
 
             let columns = to_columns(&mut fbb, &common_schema);
             let header = {
@@ -541,7 +521,8 @@ mod tests {
 
             let mut fbb = FlatBufferBuilder::new();
             let feature = {
-                let (attr_buf, _) = to_fcb_attribute(&mut fbb, attrs, &common_schema);
+                let (attr_buf, _) =
+                    to_fcb_attribute(&mut fbb, attrs.as_object().unwrap(), &common_schema);
                 let city_object = {
                     let id = fbb.create_string("test");
                     CityObject::create(

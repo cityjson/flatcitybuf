@@ -7,13 +7,11 @@
 //! and for the table of depths per geometry type.
 
 use cjseq::{
-    Geometry as CjGeometry, MaterialReference as CjMaterialReference,
-    MaterialValues as CjMaterialValues, Ring, Semantics as CjSemantics,
-    SemanticsSurface as CjSemanticsSurface, SemanticsValues as CjSemanticsValues, Shell, Surface,
-    TextureReference as CjTextureReference, TextureValues as CjTextureValues, TexturedShell,
-    TexturedSurface,
+    Geometry as CjGeometry, Index, MaterialIndex, MaterialReference as CjMaterialReference,
+    MultiSolidValues, PrimitiveValues, Ring, Semantics as CjSemantics,
+    SemanticsSurface as CjSemanticsSurface, Shell, SolidValues, Surface, SurfaceIndex,
+    TextureReference as CjTextureReference, TexturedRing, TexturedShell, TexturedSurface, Themes,
 };
-use std::collections::HashMap;
 
 /// The wire spelling of "no value here": a `null` index in CityJSON, and — in
 /// the `solids`/`shells` count arrays of a material mapping — a whole `null`
@@ -101,15 +99,45 @@ pub(crate) struct EncodedGeometry {
 /// `serializer::to_geometry_instance` instead, and yields empty arrays here.
 pub(crate) fn encode(geometry: &CjGeometry) -> EncodedGeometry {
     let boundaries = encode_boundaries(geometry);
-
-    let common = geometry.common();
-    let semantics = common
-        .and_then(|c| c.semantics.as_ref())
-        .map(|s| encode_semantics(s, &boundaries));
-    let textures = common.and_then(|c| c.texture.as_ref()).map(encode_texture);
-    let materials = common
-        .and_then(|c| c.material.as_ref())
-        .map(encode_material);
+    let (semantics, materials, textures) = match geometry {
+        CjGeometry::MultiPoint { semantics, .. }
+        | CjGeometry::MultiLineString { semantics, .. } => (
+            semantics.as_ref().map(|s| encode_semantics(s, &boundaries)),
+            None,
+            None,
+        ),
+        CjGeometry::MultiSurface {
+            semantics,
+            material,
+            texture,
+            ..
+        }
+        | CjGeometry::CompositeSurface {
+            semantics,
+            material,
+            texture,
+            ..
+        } => encode_appearance(semantics, material, texture, &boundaries),
+        CjGeometry::Solid {
+            semantics,
+            material,
+            texture,
+            ..
+        } => encode_appearance(semantics, material, texture, &boundaries),
+        CjGeometry::MultiSolid {
+            semantics,
+            material,
+            texture,
+            ..
+        }
+        | CjGeometry::CompositeSolid {
+            semantics,
+            material,
+            texture,
+            ..
+        } => encode_appearance(semantics, material, texture, &boundaries),
+        CjGeometry::GeometryInstance { .. } => (None, None, None),
+    };
 
     EncodedGeometry {
         boundaries,
@@ -119,13 +147,39 @@ pub(crate) fn encode(geometry: &CjGeometry) -> EncodedGeometry {
     }
 }
 
+type EncodedAppearance = (
+    Option<GMSemantics>,
+    Option<Vec<MaterialMapping>>,
+    Option<Vec<TextureMapping>>,
+);
+
+/// The semantics, material and texture of a surface or solid geometry, whose
+/// value shapes `S`, `M` and `T` are fixed by its variant.
+fn encode_appearance<S, M, T>(
+    semantics: &Option<CjSemantics<S>>,
+    material: &Option<Themes<CjMaterialReference<M>>>,
+    texture: &Option<Themes<CjTextureReference<T>>>,
+    boundaries: &GMBoundaries,
+) -> EncodedAppearance
+where
+    S: NestedValues<SurfaceIndex>,
+    M: NestedValues<MaterialIndex>,
+    T: NestedTextures,
+{
+    (
+        semantics.as_ref().map(|s| encode_semantics(s, boundaries)),
+        material.as_ref().map(encode_material),
+        texture.as_ref().map(encode_texture),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // boundaries
 // ---------------------------------------------------------------------------
 
 fn push_ring(ring: &Ring, b: &mut GMBoundaries) {
     b.strings.push(ring.len() as u32);
-    b.indices.extend(ring.iter().map(|&i| i as u32));
+    b.indices.extend(ring.iter().map(|i| i.get() as u32));
 }
 
 fn push_surface(surface: &Surface, b: &mut GMBoundaries) {
@@ -154,9 +208,7 @@ fn push_solid(solid: &[Shell], b: &mut GMBoundaries) {
 /// The outermost level is recorded as a single count one array up from where
 /// the type sits — a `MultiSurface` writes its surface count into `shells`, a
 /// `Solid` its shell count into `solids` — except for the 5-deep types, whose
-/// outermost count is simply `solids.len()`. This is the shape the format has
-/// always had; it is reproduced here without the depth inference that used to
-/// produce it.
+/// outermost count is simply `solids.len()`.
 pub(crate) fn encode_boundaries(geometry: &CjGeometry) -> GMBoundaries {
     let mut b = GMBoundaries::default();
     match geometry {
@@ -189,34 +241,143 @@ pub(crate) fn encode_boundaries(geometry: &CjGeometry) -> GMBoundaries {
 }
 
 // ---------------------------------------------------------------------------
+// semantics and material values
+// ---------------------------------------------------------------------------
+
+fn leaf<I: Index>(i: Option<I>) -> u32 {
+    i.map_or(NULL, |v| v.get() as u32)
+}
+
+/// The three shapes `semantics.values` and `material.values` come in —
+/// per surface, per shell, per solid — and how each one flattens. `I` is the
+/// kind of index at the leaves.
+pub(crate) trait NestedValues<I> {
+    /// The material layout: a count per solid and per shell, `NULL` for a
+    /// solid or shell that is `null`, and one leaf per surface.
+    fn flatten_counted(&self, solids: &mut Vec<u32>, shells: &mut Vec<u32>, leaves: &mut Vec<u32>);
+
+    /// The semantics layout: leaves only, regrouped on decode by the boundary
+    /// counts. A semantics mapping has no count arrays of its own, so a `null`
+    /// shell or solid cannot be stored as such; it is expanded to a run of
+    /// `NULL` leaves as long as the boundaries say, which means the same thing
+    /// (nothing in it is semantically tagged) but does not round-trip its
+    /// spelling.
+    fn flatten_by_boundaries(&self, boundaries: &GMBoundaries, leaves: &mut Vec<u32>);
+}
+
+impl<I: Index> NestedValues<I> for PrimitiveValues<I> {
+    fn flatten_counted(&self, _: &mut Vec<u32>, _: &mut Vec<u32>, leaves: &mut Vec<u32>) {
+        leaves.extend(self.iter().copied().map(leaf));
+    }
+
+    fn flatten_by_boundaries(&self, _: &GMBoundaries, leaves: &mut Vec<u32>) {
+        leaves.extend(self.iter().copied().map(leaf));
+    }
+}
+
+impl<I: Index> NestedValues<I> for SolidValues<I> {
+    fn flatten_counted(&self, solids: &mut Vec<u32>, shells: &mut Vec<u32>, leaves: &mut Vec<u32>) {
+        solids.push(self.len() as u32);
+        for shell in self {
+            push_counted_shell(shell.as_deref(), shells, leaves);
+        }
+    }
+
+    fn flatten_by_boundaries(&self, boundaries: &GMBoundaries, leaves: &mut Vec<u32>) {
+        let mut shell_cursor = 0;
+        for shell in self {
+            push_boundary_shell(shell.as_deref(), boundaries, &mut shell_cursor, leaves);
+        }
+    }
+}
+
+impl<I: Index> NestedValues<I> for MultiSolidValues<I> {
+    fn flatten_counted(&self, solids: &mut Vec<u32>, shells: &mut Vec<u32>, leaves: &mut Vec<u32>) {
+        for solid in self {
+            match solid {
+                Some(solid) => {
+                    solids.push(solid.len() as u32);
+                    for shell in solid {
+                        push_counted_shell(shell.as_deref(), shells, leaves);
+                    }
+                }
+                None => solids.push(NULL),
+            }
+        }
+    }
+
+    fn flatten_by_boundaries(&self, boundaries: &GMBoundaries, leaves: &mut Vec<u32>) {
+        let mut shell_cursor = 0;
+        for (i, solid) in self.iter().enumerate() {
+            match solid {
+                Some(solid) => {
+                    for shell in solid {
+                        push_boundary_shell(
+                            shell.as_deref(),
+                            boundaries,
+                            &mut shell_cursor,
+                            leaves,
+                        );
+                    }
+                }
+                None => {
+                    let shell_count = boundaries.solids.get(i).copied().unwrap_or(0);
+                    for _ in 0..shell_count {
+                        push_boundary_shell::<I>(None, boundaries, &mut shell_cursor, leaves);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn push_counted_shell<I: Index>(
+    shell: Option<&[Option<I>]>,
+    shells: &mut Vec<u32>,
+    leaves: &mut Vec<u32>,
+) {
+    match shell {
+        Some(indices) => {
+            shells.push(indices.len() as u32);
+            leaves.extend(indices.iter().copied().map(leaf));
+        }
+        None => shells.push(NULL),
+    }
+}
+
+fn push_boundary_shell<I: Index>(
+    shell: Option<&[Option<I>]>,
+    boundaries: &GMBoundaries,
+    shell_cursor: &mut usize,
+    leaves: &mut Vec<u32>,
+) {
+    let surface_count = boundaries.shells.get(*shell_cursor).copied().unwrap_or(0) as usize;
+    *shell_cursor += 1;
+    match shell {
+        Some(indices) => leaves.extend(indices.iter().copied().map(leaf)),
+        None => leaves.extend(std::iter::repeat_n(NULL, surface_count)),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // material
 // ---------------------------------------------------------------------------
 
-fn material_index(i: Option<usize>) -> u32 {
-    i.map_or(NULL, |v| v as u32)
-}
-
-/// Flattens one theme's `material.values` at the depth its variant declares.
+/// Flattens each theme's `material`: a `value`, or `values` at the depth its
+/// shape declares.
 ///
 /// A `null` shell or solid — legal at every level of `material.values` — is
 /// written as a `NULL` count in `shells`/`solids` rather than being dropped,
 /// so it decodes back as `null` and not as an empty array (finding #7).
-pub(crate) fn encode_material(
-    materials: &HashMap<String, CjMaterialReference>,
+pub(crate) fn encode_material<V: NestedValues<MaterialIndex>>(
+    materials: &Themes<CjMaterialReference<V>>,
 ) -> Vec<MaterialMapping> {
     let mut material_mappings = Vec::new();
-    // cjseq hands us a `HashMap`, so fix the theme order: the mappings go out
-    // in iteration order and a randomly seeded one is a different file per run.
-    let mut themes: Vec<&String> = materials.keys().collect();
-    themes.sort_unstable();
-    for (theme, material) in themes
-        .into_iter()
-        .filter_map(|t| materials.get(t).map(|m| (t, m)))
-    {
+    for (theme, material) in sorted_themes(materials) {
         if let Some(value) = material.value {
             material_mappings.push(MaterialMapping::Value(MaterialValue {
                 theme: theme.clone(),
-                value: value as u32,
+                value: value.get() as u32,
             }));
             continue;
         }
@@ -237,90 +398,99 @@ pub(crate) fn encode_material(
             theme: theme.clone(),
             ..Default::default()
         };
-
-        match values {
-            // MultiSurface, CompositeSurface: one index per surface.
-            CjMaterialValues::Surfaces(surfaces) => {
-                mv.vertices
-                    .extend(surfaces.iter().copied().map(material_index));
-            }
-            // Solid: one index per surface, per shell.
-            CjMaterialValues::Shells(shells) => {
-                mv.solids.push(shells.len() as u32);
-                for shell in shells {
-                    push_material_shell(shell.as_deref(), &mut mv);
-                }
-            }
-            // MultiSolid, CompositeSolid: ... per solid.
-            CjMaterialValues::Solids(solids) => {
-                for solid in solids {
-                    match solid {
-                        Some(shells) => {
-                            mv.solids.push(shells.len() as u32);
-                            for shell in shells {
-                                push_material_shell(shell.as_deref(), &mut mv);
-                            }
-                        }
-                        None => mv.solids.push(NULL),
-                    }
-                }
-            }
-        }
-
+        values.flatten_counted(&mut mv.solids, &mut mv.shells, &mut mv.vertices);
         material_mappings.push(MaterialMapping::Values(mv));
     }
     material_mappings
 }
 
-fn push_material_shell(shell: Option<&[Option<usize>]>, mv: &mut MaterialValues) {
-    match shell {
-        Some(indices) => {
-            mv.shells.push(indices.len() as u32);
-            mv.vertices
-                .extend(indices.iter().copied().map(material_index));
-        }
-        None => mv.shells.push(NULL),
-    }
+/// Themes in name order: the mappings are written in this order whatever
+/// order the document lists its themes in.
+fn sorted_themes<T>(themes: &Themes<T>) -> Vec<(&String, &T)> {
+    let mut sorted: Vec<(&String, &T)> = themes.iter().collect();
+    sorted.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    sorted
 }
 
 // ---------------------------------------------------------------------------
 // texture
 // ---------------------------------------------------------------------------
 
-pub(crate) fn encode_texture(
-    texture_map: &HashMap<String, CjTextureReference>,
-) -> Vec<TextureMapping> {
-    let mut texture_mappings = Vec::new();
+/// The three shapes `texture.values` comes in, nested exactly as deeply as
+/// the boundaries, and how each one flattens. This mirrors
+/// [`encode_boundaries`] level for level.
+pub(crate) trait NestedTextures {
+    fn flatten(&self, m: &mut TextureMapping);
+}
 
-    // Same fixed theme order as `encode_material`, and for the same reason.
-    let mut themes: Vec<&String> = texture_map.keys().collect();
-    themes.sort_unstable();
-    for (theme, texture) in themes
-        .into_iter()
-        .filter_map(|t| texture_map.get(t).map(|x| (t, x)))
-    {
-        let mut mapping = TextureMapping {
-            theme: theme.clone(),
-            ..Default::default()
-        };
-
-        // A theme may legally carry no `values` at all, which flattens to
-        // nothing but still records the theme.
-        if let Some(values) = texture.values.as_ref() {
-            mapping.has_values = true;
-            encode_texture_values(values, &mut mapping);
+impl NestedTextures for Vec<TexturedSurface> {
+    fn flatten(&self, m: &mut TextureMapping) {
+        for surface in self {
+            push_textured_surface(surface, m);
         }
-
-        texture_mappings.push(mapping);
+        m.shells.push(self.len() as u32);
     }
+}
 
-    texture_mappings
+impl NestedTextures for Vec<TexturedShell> {
+    fn flatten(&self, m: &mut TextureMapping) {
+        for shell in self {
+            push_textured_shell(shell, m);
+        }
+        m.solids.push(self.len() as u32);
+    }
+}
+
+impl NestedTextures for Vec<Vec<TexturedShell>> {
+    fn flatten(&self, m: &mut TextureMapping) {
+        for solid in self {
+            for shell in solid {
+                push_textured_shell(shell, m);
+            }
+            m.solids.push(solid.len() as u32);
+        }
+    }
+}
+
+pub(crate) fn encode_texture<V: NestedTextures>(
+    texture_map: &Themes<CjTextureReference<V>>,
+) -> Vec<TextureMapping> {
+    sorted_themes(texture_map)
+        .into_iter()
+        .map(|(theme, texture)| {
+            let mut mapping = TextureMapping {
+                theme: theme.clone(),
+                ..Default::default()
+            };
+            // A theme may legally carry no `values` at all, which flattens to
+            // nothing but still records the theme.
+            if let Some(values) = texture.values.as_ref() {
+                mapping.has_values = true;
+                values.flatten(&mut mapping);
+            }
+            mapping
+        })
+        .collect()
+}
+
+/// A ring is stored as it is spelled: `[null]`, or `[texture, uv, ...]`.
+fn push_textured_ring(ring: &TexturedRing, m: &mut TextureMapping) {
+    match ring {
+        TexturedRing::Untextured => {
+            m.strings.push(1);
+            m.vertices.push(NULL);
+        }
+        TexturedRing::Textured { texture, uvs } => {
+            m.strings.push(1 + uvs.len() as u32);
+            m.vertices.push(texture.get() as u32);
+            m.vertices.extend(uvs.iter().map(|uv| uv.get() as u32));
+        }
+    }
 }
 
 fn push_textured_surface(surface: &TexturedSurface, m: &mut TextureMapping) {
     for ring in surface {
-        m.strings.push(ring.len() as u32);
-        m.vertices.extend(ring.iter().copied().map(material_index));
+        push_textured_ring(ring, m);
     }
     m.surfaces.push(surface.len() as u32);
 }
@@ -332,111 +502,19 @@ fn push_textured_shell(shell: &TexturedShell, m: &mut TextureMapping) {
     m.shells.push(shell.len() as u32);
 }
 
-/// Flattens one theme's `texture.values` at the depth its variant declares.
-/// `texture.values` is nested exactly as deeply as the geometry's boundaries,
-/// so this mirrors [`encode_boundaries`] level for level.
-fn encode_texture_values(values: &CjTextureValues, m: &mut TextureMapping) {
-    match values {
-        CjTextureValues::Surface(surfaces) => {
-            for surface in surfaces {
-                push_textured_surface(surface, m);
-            }
-            m.shells.push(surfaces.len() as u32);
-        }
-        CjTextureValues::Shell(shells) => {
-            for shell in shells {
-                push_textured_shell(shell, m);
-            }
-            m.solids.push(shells.len() as u32);
-        }
-        CjTextureValues::Solid(solids) => {
-            for solid in solids {
-                for shell in solid {
-                    push_textured_shell(shell, m);
-                }
-                m.solids.push(solid.len() as u32);
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // semantics
 // ---------------------------------------------------------------------------
 
-fn semantics_index(i: Option<usize>) -> u32 {
-    i.map_or(NULL, |v| v as u32)
-}
-
-/// Flattens `semantics.values` into one entry per surface, in document order.
-///
-/// The depth comes from the `SemanticsValues` variant. Unlike a material
-/// mapping, a semantics mapping has no count arrays of its own — the decoder
-/// regroups the flat run using the *boundary* counts — so a `null` shell or
-/// solid cannot be stored as such. It is expanded to a run of `null` surface
-/// values of the right length instead, which says the same thing (nothing in
-/// here is semantically tagged) but does not round-trip its spelling.
-fn encode_semantics_values(
-    values: &CjSemanticsValues,
-    boundaries: &GMBoundaries,
-    flattened: &mut Vec<u32>,
-) {
-    match values {
-        CjSemanticsValues::Surfaces(surfaces) => {
-            flattened.extend(surfaces.iter().copied().map(semantics_index));
-        }
-        CjSemanticsValues::Shells(shells) => {
-            let mut shell_cursor = 0;
-            for shell in shells {
-                push_semantics_shell(shell.as_deref(), boundaries, &mut shell_cursor, flattened);
-            }
-        }
-        CjSemanticsValues::Solids(solids) => {
-            let mut shell_cursor = 0;
-            for (i, solid) in solids.iter().enumerate() {
-                let shell_count = boundaries.solids.get(i).copied().unwrap_or(0) as usize;
-                match solid {
-                    Some(shells) => {
-                        for shell in shells {
-                            push_semantics_shell(
-                                shell.as_deref(),
-                                boundaries,
-                                &mut shell_cursor,
-                                flattened,
-                            );
-                        }
-                    }
-                    None => {
-                        for _ in 0..shell_count {
-                            push_semantics_shell(None, boundaries, &mut shell_cursor, flattened);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn push_semantics_shell(
-    shell: Option<&[Option<usize>]>,
-    boundaries: &GMBoundaries,
-    shell_cursor: &mut usize,
-    flattened: &mut Vec<u32>,
-) {
-    let surface_count = boundaries.shells.get(*shell_cursor).copied().unwrap_or(0) as usize;
-    *shell_cursor += 1;
-    match shell {
-        Some(indices) => flattened.extend(indices.iter().copied().map(semantics_index)),
-        None => flattened.extend(std::iter::repeat_n(NULL, surface_count)),
-    }
-}
-
 /// Flattens a `semantics` member: its surfaces verbatim, its values one entry
 /// per surface — or no vector at all for `"values": null`.
-pub(crate) fn encode_semantics(semantics: &CjSemantics, boundaries: &GMBoundaries) -> GMSemantics {
+pub(crate) fn encode_semantics<V: NestedValues<SurfaceIndex>>(
+    semantics: &CjSemantics<V>,
+    boundaries: &GMBoundaries,
+) -> GMSemantics {
     let values = semantics.values.as_ref().map(|v| {
         let mut values = Vec::new();
-        encode_semantics_values(v, boundaries, &mut values);
+        v.flatten_by_boundaries(boundaries, &mut values);
         values
     });
 
@@ -452,6 +530,7 @@ mod tests {
     use anyhow::Result;
     use cjseq::SemanticSurfaceType;
     use pretty_assertions::assert_eq;
+    use serde::de::DeserializeOwned;
     use serde_json::json;
 
     fn theme_of(m: &MaterialMapping) -> &str {
@@ -464,6 +543,15 @@ mod tests {
 
     fn geom(v: serde_json::Value) -> CjGeometry {
         serde_json::from_value(v).expect("test geometry must parse")
+    }
+
+    /// A theme map of material or texture references, from its JSON.
+    fn themes<T: DeserializeOwned>(v: serde_json::Value) -> Themes<T> {
+        serde_json::from_value(v).expect("test themes must parse")
+    }
+
+    fn object(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        v.as_object().expect("an object").clone()
     }
 
     #[test]
@@ -579,34 +667,6 @@ mod tests {
         Ok(())
     }
 
-    /// A `MultiSurface` and a `CompositeSurface` with identical boundaries
-    /// flatten identically, and so do a `MultiSolid` and a `CompositeSolid`:
-    /// nothing about the encoding distinguishes the members of a depth pair.
-    /// The type is what tells them apart, and it is stored separately.
-    #[test]
-    fn types_of_equal_depth_flatten_identically() {
-        let surface_boundaries = json!([[[0, 1, 2]], [[3, 4, 5]]]);
-        let ms = encode(&geom(
-            json!({"type": "MultiSurface", "boundaries": surface_boundaries}),
-        ));
-        let cs = encode(&geom(
-            json!({"type": "CompositeSurface", "boundaries": surface_boundaries}),
-        ));
-        assert_eq!(ms.boundaries.shells, cs.boundaries.shells);
-        assert_eq!(ms.boundaries.surfaces, cs.boundaries.surfaces);
-        assert_eq!(ms.boundaries.indices, cs.boundaries.indices);
-
-        let solid_boundaries = json!([[[[[0, 1, 2]]]], [[[[3, 4, 5]]]]]);
-        let msol = encode(&geom(
-            json!({"type": "MultiSolid", "boundaries": solid_boundaries}),
-        ));
-        let csol = encode(&geom(
-            json!({"type": "CompositeSolid", "boundaries": solid_boundaries}),
-        ));
-        assert_eq!(msol.boundaries.solids, csol.boundaries.solids);
-        assert_eq!(msol.boundaries.shells, csol.boundaries.shells);
-    }
-
     #[test]
     fn test_encode_semantics() -> Result<()> {
         //MultiSurface
@@ -636,20 +696,20 @@ mod tests {
             CjSemanticsSurface {
                 thetype: SemanticSurfaceType::WallSurface,
                 parent: None,
-                children: Some(vec![2]),
-                other: HashMap::from([("slope".to_string(), json!(33.4))]),
+                children: Some(vec![SurfaceIndex(2)]),
+                other: object(json!({"slope": 33.4})),
             },
             CjSemanticsSurface {
                 thetype: SemanticSurfaceType::RoofSurface,
                 parent: None,
                 children: None,
-                other: HashMap::from([("slope".to_string(), json!(66.6))]),
+                other: object(json!({"slope": 66.6})),
             },
             CjSemanticsSurface {
                 thetype: SemanticSurfaceType::OuterCeilingSurface,
-                parent: Some(0),
+                parent: Some(SurfaceIndex(0)),
                 children: None,
-                other: HashMap::from([("colour".to_string(), json!("blue"))]),
+                other: object(json!({"colour": "blue"})),
             },
         ];
 
@@ -686,13 +746,13 @@ mod tests {
                 thetype: SemanticSurfaceType::RoofSurface,
                 parent: None,
                 children: None,
-                other: HashMap::new(),
+                other: serde_json::Map::new(),
             },
             CjSemanticsSurface {
                 thetype: SemanticSurfaceType::WallSurface,
                 parent: None,
                 children: None,
-                other: HashMap::new(),
+                other: serde_json::Map::new(),
             },
         ];
 
@@ -710,7 +770,7 @@ mod tests {
     #[test]
     fn a_null_semantics_shell_expands_to_one_null_per_surface() {
         let solid = geom(json!({
-            "type": "Solid",
+            "type": "Solid", "lod": "2",
             "boundaries": [
                 [[[0, 1, 2]], [[3, 4, 5]]],
                 [[[6, 7, 8]]]
@@ -727,14 +787,13 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_material() -> Result<()> {
-        // Test case 1: Single material value
-        let materials = HashMap::from([(
-            "theme1".to_string(),
-            serde_json::from_value::<CjMaterialReference>(json!({"value": 5}))?,
-        )]);
+    fn test_encode_material() {
+        type Surfaces = CjMaterialReference<PrimitiveValues<MaterialIndex>>;
+        type Shells = CjMaterialReference<SolidValues<MaterialIndex>>;
+        type Solids = CjMaterialReference<MultiSolidValues<MaterialIndex>>;
 
-        let encoded = encode_material(&materials);
+        // A `value` colours the whole geometry.
+        let encoded = encode_material(&themes::<Shells>(json!({"theme1": {"value": 5}})));
         assert_eq!(encoded.len(), 1);
         match &encoded[0] {
             MaterialMapping::Value(value) => {
@@ -744,17 +803,12 @@ mod tests {
             _ => panic!("Expected MaterialMapping::Value"),
         }
 
-        // Test case 2: MultiSurface material values
-        let materials = HashMap::from([(
-            "theme2".to_string(),
-            serde_json::from_value::<CjMaterialReference>(json!({"values": [0, 1, null, 2]}))?,
-        )]);
-
-        let encoded = encode_material(&materials);
-        assert_eq!(encoded.len(), 1);
+        // MultiSurface: one index per surface, no counts.
+        let encoded = encode_material(&themes::<Surfaces>(
+            json!({"theme2": {"values": [0, 1, null, 2]}}),
+        ));
         match &encoded[0] {
             MaterialMapping::Values(values) => {
-                assert_eq!(values.theme, "theme2");
                 assert_eq!(values.vertices, vec![0, 1, NULL, 2]);
                 assert!(values.shells.is_empty());
                 assert!(values.solids.is_empty());
@@ -762,102 +816,49 @@ mod tests {
             _ => panic!("Expected MaterialMapping::Values"),
         }
 
-        // Test case 3: Solid material values
-        let materials = HashMap::from([(
-            "theme3".to_string(),
-            serde_json::from_value::<CjMaterialReference>(
-                json!({"values": [[0, 1, null], [2, 3, 4]]}),
-            )?,
-        )]);
-
-        let encoded = encode_material(&materials);
-        assert_eq!(encoded.len(), 1);
+        // Solid: one solid of two shells of three surfaces.
+        let encoded = encode_material(&themes::<Shells>(
+            json!({"theme3": {"values": [[0, 1, null], [2, 3, 4]]}}),
+        ));
         match &encoded[0] {
             MaterialMapping::Values(values) => {
-                assert_eq!(values.theme, "theme3");
-                assert_eq!(values.solids, vec![2]); // 1 solid with 2 shells
-                assert_eq!(values.shells, vec![3, 3]); // Each shell has 3 surfaces
+                assert_eq!(values.solids, vec![2]);
+                assert_eq!(values.shells, vec![3, 3]);
                 assert_eq!(values.vertices, vec![0, 1, NULL, 2, 3, 4]);
             }
             _ => panic!("Expected MaterialMapping::Values"),
         }
 
-        // Test case 4: Multiple themes
-        let materials = HashMap::from([
-            (
-                "theme4".to_string(),
-                serde_json::from_value::<CjMaterialReference>(json!({"value": 7}))?,
-            ),
-            (
-                "theme5".to_string(),
-                serde_json::from_value::<CjMaterialReference>(json!({"values": [8, 9]}))?,
-            ),
-        ]);
-
-        let encoded = encode_material(&materials);
-        assert_eq!(encoded.len(), 2);
-
-        // Find and verify each mapping by theme name instead of relying on order
-        let theme4_mapping = encoded
-            .iter()
-            .find(|m| theme_of(m) == "theme4")
-            .expect("Should have theme4 mapping");
-
-        let theme5_mapping = encoded
-            .iter()
-            .find(|m| theme_of(m) == "theme5")
-            .expect("Should have theme5 mapping");
-
-        match theme4_mapping {
-            MaterialMapping::Value(value) => {
-                assert_eq!(value.theme, "theme4");
-                assert_eq!(value.value, 7);
-            }
-            _ => panic!("Expected MaterialMapping::Value for theme4"),
-        }
-
-        match theme5_mapping {
-            MaterialMapping::Values(values) => {
-                assert_eq!(values.theme, "theme5");
-                assert_eq!(values.vertices, vec![8, 9]);
-                assert!(values.shells.is_empty());
-                assert!(values.solids.is_empty());
-            }
-            _ => panic!("Expected MaterialMapping::Values for theme5"),
-        }
-
-        // Test case 5: CompositeSolid material values
-        let materials = HashMap::from([(
-            "theme6".to_string(),
-            serde_json::from_value::<CjMaterialReference>(json!({
-                "values": [[[0, 1, null], [2, null, null]], [[3, 4, null]]]
-            }))?,
-        )]);
-
-        let encoded = encode_material(&materials);
-        assert_eq!(encoded.len(), 1);
+        // CompositeSolid: two solids, of two shells and of one.
+        let encoded = encode_material(&themes::<Solids>(json!({"theme6": {
+            "values": [[[0, 1, null], [2, null, null]], [[3, 4, null]]]
+        }})));
         match &encoded[0] {
             MaterialMapping::Values(values) => {
-                assert_eq!(values.theme, "theme6");
-                assert_eq!(values.solids, vec![2, 1]); // Two solids: 2 shells, then 1
-                assert_eq!(values.shells, vec![3, 3, 3]); // Each shell has 3 surfaces
+                assert_eq!(values.solids, vec![2, 1]);
+                assert_eq!(values.shells, vec![3, 3, 3]);
                 assert_eq!(values.vertices, vec![0, 1, NULL, 2, NULL, NULL, 3, 4, NULL]);
             }
             _ => panic!("Expected MaterialMapping::Values"),
         }
 
-        Ok(())
+        // Themes are written in name order, whatever order the document gives.
+        let encoded = encode_material(&themes::<Surfaces>(json!({
+            "winter": {"value": 7},
+            "summer": {"values": [8, 9]}
+        })));
+        let names: Vec<&str> = encoded.iter().map(theme_of).collect();
+        assert_eq!(names, vec!["summer", "winter"]);
     }
 
     /// `material.values` is nullable at *every* level, not only at the leaf.
     /// A whole `null` shell or solid is recorded as a `NULL` count so that it
     /// decodes back as `null` rather than as an empty array.
     #[test]
-    fn a_null_material_shell_or_solid_is_recorded_as_a_null_count() -> Result<()> {
-        let materials = HashMap::from([(
-            "t".to_string(),
-            serde_json::from_value::<CjMaterialReference>(json!({"values": [[0, 1], null]}))?,
-        )]);
+    fn a_null_material_shell_or_solid_is_recorded_as_a_null_count() {
+        let materials = themes::<CjMaterialReference<SolidValues<MaterialIndex>>>(
+            json!({"t": {"values": [[0, 1], null]}}),
+        );
         match &encode_material(&materials)[0] {
             MaterialMapping::Values(v) => {
                 assert_eq!(v.solids, vec![2]);
@@ -867,10 +868,9 @@ mod tests {
             _ => panic!("expected Values"),
         }
 
-        let materials = HashMap::from([(
-            "t".to_string(),
-            serde_json::from_value::<CjMaterialReference>(json!({"values": [[[0, 1]], null]}))?,
-        )]);
+        let materials = themes::<CjMaterialReference<MultiSolidValues<MaterialIndex>>>(
+            json!({"t": {"values": [[[0, 1]], null]}}),
+        );
         match &encode_material(&materials)[0] {
             MaterialMapping::Values(v) => {
                 assert_eq!(v.solids, vec![1, NULL]);
@@ -879,100 +879,46 @@ mod tests {
             }
             _ => panic!("expected Values"),
         }
-        Ok(())
     }
 
+    /// Each ring is stored as spelled, `[texture, uv, ...]` or `[null]`, with
+    /// the counts mirroring the boundaries level for level.
     #[test]
-    fn test_encode_texture() -> Result<()> {
-        let theme = "test-theme".to_string();
-        let texture = |v: serde_json::Value| -> HashMap<String, CjTextureReference> {
-            HashMap::from([(
-                theme.clone(),
-                serde_json::from_value::<CjTextureReference>(json!({"values": v}))
-                    .expect("texture values must parse"),
-            )])
-        };
-
-        // MultiSurface-like texture values (the shallowest a texture can be)
-        let encoded = encode_texture(&texture(json!([
-            [[0, 10, 20, 30]],
-            [[1, 11, 21, null]],
-            [[2, 12, null, 32]]
-        ])));
-        assert_eq!(encoded.len(), 1);
-        assert_eq!(encoded[0].theme, theme);
+    fn test_encode_texture() {
+        // MultiSurface
+        let encoded = encode_texture(&themes::<CjTextureReference<Vec<TexturedSurface>>>(
+            json!({"t": {"values": [[[0, 10, 20, 30]], [[null]], [[2, 12, 22, 32]]]}}),
+        ));
         assert_eq!(
             encoded[0].vertices,
-            vec![0, 10, 20, 30, 1, 11, 21, NULL, 2, 12, NULL, 32]
+            vec![0, 10, 20, 30, NULL, 2, 12, 22, 32]
         );
-        assert_eq!(encoded[0].strings, vec![4, 4, 4]);
+        assert_eq!(encoded[0].strings, vec![4, 1, 4]);
         assert_eq!(encoded[0].surfaces, vec![1, 1, 1]);
         assert_eq!(encoded[0].shells, vec![3]);
         assert!(encoded[0].solids.is_empty());
 
-        // Solid-like texture values
-        let encoded = encode_texture(&texture(json!([
-            [[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]],
-            [[[3, 13, 23, 33]], [[4, 14, 24, null]]]
-        ])));
-        assert_eq!(encoded.len(), 1);
+        // Solid
+        let encoded = encode_texture(&themes::<CjTextureReference<Vec<TexturedShell>>>(
+            json!({"t": {"values": [[[[0, 10, 20, 30]], [[null]]], [[[3, 13, 23, 33]]]]}}),
+        ));
         assert_eq!(
             encoded[0].vertices,
-            vec![0, 10, 20, 30, 1, 11, 21, NULL, 2, 12, NULL, 32, 3, 13, 23, 33, 4, 14, 24, NULL]
+            vec![0, 10, 20, 30, NULL, 3, 13, 23, 33]
         );
-        assert_eq!(encoded[0].strings, vec![4, 4, 4, 4, 4]);
-        assert_eq!(encoded[0].surfaces, vec![1, 1, 1, 1, 1]);
-        assert_eq!(encoded[0].shells, vec![3, 2]);
+        assert_eq!(encoded[0].strings, vec![4, 1, 4]);
+        assert_eq!(encoded[0].surfaces, vec![1, 1, 1]);
+        assert_eq!(encoded[0].shells, vec![2, 1]);
         assert_eq!(encoded[0].solids, vec![2]);
 
-        // CompositeSolid-like texture values
-        let encoded = encode_texture(&texture(json!([
-            [
-                [[[0, 10, 20]], [[1, 11, null]]],
-                [[[2, 12, 22]], [[3, null, 23]]]
-            ],
-            [[[[4, 14, 24]], [[5, 15, 25]]]]
-        ])));
-        assert_eq!(encoded.len(), 1);
-        assert_eq!(
-            encoded[0].vertices,
-            vec![0, 10, 20, 1, 11, NULL, 2, 12, 22, 3, NULL, 23, 4, 14, 24, 5, 15, 25]
-        );
-        assert_eq!(encoded[0].strings, vec![3, 3, 3, 3, 3, 3]);
-        assert_eq!(encoded[0].surfaces, vec![1, 1, 1, 1, 1, 1]);
-        assert_eq!(encoded[0].shells, vec![2, 2, 2]);
+        // CompositeSolid
+        let encoded = encode_texture(&themes::<CjTextureReference<Vec<Vec<TexturedShell>>>>(
+            json!({"t": {"values": [[[[[0, 10, 20]]], [[[null]]]], [[[[4, 14, 24]]]]]}}),
+        ));
+        assert_eq!(encoded[0].vertices, vec![0, 10, 20, NULL, 4, 14, 24]);
+        assert_eq!(encoded[0].strings, vec![3, 1, 3]);
+        assert_eq!(encoded[0].surfaces, vec![1, 1, 1]);
+        assert_eq!(encoded[0].shells, vec![1, 1, 1]);
         assert_eq!(encoded[0].solids, vec![2, 1]);
-
-        // Multiple themes
-        let textures = HashMap::from([
-            (
-                "winter".to_string(),
-                serde_json::from_value::<CjTextureReference>(json!({"values": [[[0, 10, 20]]]}))?,
-            ),
-            (
-                "summer".to_string(),
-                serde_json::from_value::<CjTextureReference>(json!({"values": [[[1, 11, null]]]}))?,
-            ),
-        ]);
-
-        let encoded = encode_texture(&textures);
-        assert_eq!(encoded.len(), 2);
-
-        let winter_mapping = encoded
-            .iter()
-            .find(|m| m.theme == "winter")
-            .expect("Should have winter mapping");
-        let summer_mapping = encoded
-            .iter()
-            .find(|m| m.theme == "summer")
-            .expect("Should have summer mapping");
-
-        assert_eq!(winter_mapping.vertices, vec![0, 10, 20]);
-        assert_eq!(winter_mapping.strings, vec![3]);
-
-        assert_eq!(summer_mapping.vertices, vec![1, 11, NULL]);
-        assert_eq!(summer_mapping.strings, vec![3]);
-
-        Ok(())
     }
 }
