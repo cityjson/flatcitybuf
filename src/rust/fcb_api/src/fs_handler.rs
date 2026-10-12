@@ -348,7 +348,10 @@ pub async fn collection_items(
             let cjj = collect_features(cjj, features)?;
 
             // Convert to OBJ
-            let obj_str = fcb_core::obj::to_obj_string(&cjj);
+            let obj_str = fcb_core::obj::to_obj_string(&cjj).map_err(|e| {
+                error!("OBJ conversion error: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
             // Build Link header for pagination
             let link_header = build_link_header(

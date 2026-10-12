@@ -30,7 +30,7 @@ use serde_json::Value;
 
 use super::geom_encoder::{GMBoundaries, GMSemantics, MaterialMapping as GMMaterialMapping};
 use super::header_writer::HeaderWriterOptions;
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub(super) struct AttributeIndexInfo {
@@ -100,7 +100,11 @@ pub(super) fn to_fcb_header<'a>(
         .as_ref()
         .map(to_geographical_extent);
 
-    let appearance = cj.appearance.as_ref().map(|app| to_appearance(fbb, app));
+    let appearance = cj
+        .appearance
+        .as_ref()
+        .map(|app| to_appearance(fbb, app))
+        .transpose()?;
 
     let (templates, templates_vertices) = match &cj.geometry_templates {
         Some(gm) => {
@@ -110,7 +114,7 @@ pub(super) fn to_fcb_header<'a>(
                 .templates
                 .iter()
                 .map(|g| to_geometry(fbb, g, semantic_attr_schema))
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>>>()?;
             (Some(fbb.create_vector(&gm_vec)), Some(templates_vertices))
         }
         None => (None, None),
@@ -418,19 +422,18 @@ pub(super) fn to_fcb_city_feature<'a>(
     city_feature: &CityJSONFeature,
     attr_schema: &AttributeSchema,
     semantic_attr_schema: Option<&AttributeSchema>,
-) -> (flatbuffers::WIPOffset<CityFeature<'a>>, NodeItem) {
+) -> Result<(flatbuffers::WIPOffset<CityFeature<'a>>, NodeItem)> {
     let id = Some(fbb.create_string(id));
-    // cjseq stores `city_objects` in a `HashMap`, whose iteration order is
-    // randomly seeded per process. Emitting the objects in that order made the
-    // same input serialise to different bytes on every run; sort by id so the
-    // feature payload is reproducible.
+    // City Objects are written sorted by id, not in document order, so the
+    // bytes match the C++ writer's, which `test_writer_oracle.cpp` compares
+    // byte for byte.
     let mut object_ids: Vec<&String> = city_feature.city_objects.keys().collect();
     object_ids.sort_unstable();
     let city_objects: Vec<_> = object_ids
         .into_iter()
         .filter_map(|id| city_feature.city_objects.get(id).map(|co| (id, co)))
         .map(|(id, co)| to_city_object(fbb, id, co, attr_schema, semantic_attr_schema))
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let objects = Some(fbb.create_vector(&city_objects));
     let vertices = Some(
         fbb.create_vector(
@@ -452,7 +455,8 @@ pub(super) fn to_fcb_city_feature<'a>(
     let appearance = city_feature
         .appearance
         .as_ref()
-        .map(|app| to_appearance(fbb, app));
+        .map(|app| to_appearance(fbb, app))
+        .transpose()?;
     let min_x = city_feature
         .vertices
         .iter()
@@ -479,7 +483,7 @@ pub(super) fn to_fcb_city_feature<'a>(
         .unwrap_or(0) as f64;
 
     let bbox = NodeItem::bounds(min_x, min_y, max_x, max_y);
-    (
+    Ok((
         CityFeature::create(
             fbb,
             &CityFeatureArgs {
@@ -490,57 +494,56 @@ pub(super) fn to_fcb_city_feature<'a>(
             },
         ),
         bbox,
-    )
+    ))
 }
 
 /// The FlatCityBuf tag for a CityJSON `wrapMode`.
 ///
-/// Exhaustive by construction: there is no `_` arm, so a spelling added to
-/// `cjseq::WrapMode` -- which mirrors `appearance.schema.json`'s five --
-/// stops this crate from compiling until it is mapped here. This replaces a
-/// table lookup keyed on a *string*, whose fallback turned a mis-spelling into
-/// a valid-looking default: that is how a texture written
-/// `"wrapMode": "wrap"` came back as `"None"` and survived until the C++
-/// conformance corpus caught it.
-pub(crate) fn fb_wrap_mode(w: CjWrapMode) -> WrapMode {
-    match w {
+/// `cjseq::WrapMode` mirrors `appearance.schema.json`'s five spellings but is
+/// `#[non_exhaustive]`, so one it adds reaches the `_` arm and is refused,
+/// never defaulted. A default is what the table lookup keyed on a *string*
+/// that this replaces did: a texture written `"wrapMode": "wrap"` came back
+/// as `"None"` and survived until the C++ conformance corpus caught it.
+pub(crate) fn fb_wrap_mode(w: CjWrapMode) -> Result<WrapMode> {
+    Ok(match w {
         CjWrapMode::None => WrapMode::None,
         CjWrapMode::Wrap => WrapMode::Wrap,
         CjWrapMode::Mirror => WrapMode::Mirror,
         CjWrapMode::Clamp => WrapMode::Clamp,
         CjWrapMode::Border => WrapMode::Border,
-    }
+        _ => return Err(Error::unencodable("wrapMode", &w)),
+    })
 }
 
-/// The FlatCityBuf tag for a CityJSON `textureType`. Exhaustive, as above.
-pub(crate) fn fb_texture_type(t: CjTextureType) -> TextureType {
-    match t {
+/// The FlatCityBuf tag for a CityJSON `textureType`. Refuses, as above.
+pub(crate) fn fb_texture_type(t: CjTextureType) -> Result<TextureType> {
+    Ok(match t {
         CjTextureType::Unknown => TextureType::Unknown,
         CjTextureType::Specific => TextureType::Specific,
         CjTextureType::Typical => TextureType::Typical,
-    }
+        _ => return Err(Error::unencodable("textureType", &t)),
+    })
 }
 
-/// The FlatCityBuf tag for a CityJSON texture `type`. Exhaustive, as above.
+/// The FlatCityBuf tag for a CityJSON texture `type`. Refuses, as above.
 ///
 /// `type` is optional in `appearance.schema.json` (the `Texture` object has no
 /// `required` keyword at all) but mandatory in `header.fbs`, whose default is
 /// `PNG`. An absent `type` therefore comes back as `"PNG"`; that lossiness
 /// predates this change and is fixed only by changing the schema, which would
 /// break the C++ reader.
-pub(crate) fn fb_texture_format(f: Option<CjTextureFormat>) -> TextureFormat {
-    match f {
+pub(crate) fn fb_texture_format(f: Option<CjTextureFormat>) -> Result<TextureFormat> {
+    Ok(match f {
         Some(CjTextureFormat::PNG) | None => TextureFormat::PNG,
         Some(CjTextureFormat::JPG) => TextureFormat::JPG,
-    }
+        Some(other) => return Err(Error::unencodable("texture type", &other)),
+    })
 }
 
 pub(super) fn to_appearance<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     appearance: &CjAppearance,
-) -> flatbuffers::WIPOffset<Appearance<'a>> {
-    // Handle appearance if present
-
+) -> Result<flatbuffers::WIPOffset<Appearance<'a>>> {
     // `appearance.materials` and `appearance.textures` are typed by cjseq
     // straight from `appearance.schema.json`, so every member here is read off
     // a field rather than looked up by name in a `serde_json::Value`.
@@ -570,31 +573,34 @@ pub(super) fn to_appearance<'a>(
         fbb.create_vector(&material_offsets)
     });
 
-    let textures = appearance.textures.as_ref().map(|textures| {
-        let texture_offsets: Vec<_> = textures
-            .iter()
-            .map(|t| {
-                // `image` is optional in CityJSON but mandatory in the `.fbs`,
-                // so an absent one is written as the empty string.
-                let image = fbb.create_string(t.image.as_deref().unwrap_or_default());
-                let border_color = t.border_color.as_ref().map(|c| match c {
-                    CjBorderColor::Rgb(c) => fbb.create_vector(c),
-                    CjBorderColor::Rgba(c) => fbb.create_vector(c),
-                });
-                Texture::create(
-                    fbb,
-                    &TextureArgs {
-                        type_: fb_texture_format(t.thetype),
-                        image: Some(image),
-                        wrap_mode: t.wrap_mode.map(fb_wrap_mode),
-                        texture_type: t.texture_type.map(fb_texture_type),
-                        border_color,
-                    },
-                )
-            })
-            .collect();
-        fbb.create_vector(&texture_offsets)
-    });
+    let textures = match appearance.textures.as_ref() {
+        None => None,
+        Some(textures) => {
+            let texture_offsets = textures
+                .iter()
+                .map(|t| {
+                    // `image` is optional in CityJSON but mandatory in the `.fbs`,
+                    // so an absent one is written as the empty string.
+                    let image = fbb.create_string(t.image.as_deref().unwrap_or_default());
+                    let border_color = t.border_color.as_ref().map(|c| match c {
+                        CjBorderColor::Rgb(c) => fbb.create_vector(c),
+                        CjBorderColor::Rgba(c) => fbb.create_vector(c),
+                    });
+                    Ok(Texture::create(
+                        fbb,
+                        &TextureArgs {
+                            type_: fb_texture_format(t.thetype)?,
+                            image: Some(image),
+                            wrap_mode: t.wrap_mode.map(fb_wrap_mode).transpose()?,
+                            texture_type: t.texture_type.map(fb_texture_type).transpose()?,
+                            border_color,
+                        },
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Some(fbb.create_vector(&texture_offsets))
+        }
+    };
 
     let vertices_texture = appearance.vertices_texture.as_ref().map(|vertices| {
         fbb.create_vector(
@@ -614,7 +620,7 @@ pub(super) fn to_appearance<'a>(
         .as_ref()
         .map(|m| fbb.create_string(m));
 
-    Appearance::create(
+    Ok(Appearance::create(
         fbb,
         &AppearanceArgs {
             materials,
@@ -623,7 +629,7 @@ pub(super) fn to_appearance<'a>(
             default_theme_texture,
             default_theme_material,
         },
-    )
+    ))
 }
 
 /// Converts CityJSON object to FlatBuffers
@@ -640,10 +646,10 @@ pub(super) fn to_city_object<'a>(
     co: &CjCityObject,
     attr_schema: &AttributeSchema,
     semantic_attr_schema: Option<&AttributeSchema>,
-) -> flatbuffers::WIPOffset<CityObject<'a>> {
+) -> Result<flatbuffers::WIPOffset<CityObject<'a>>> {
     let id = Some(fbb.create_string(id));
 
-    let (type_, extension_type) = to_co_type(&co.thetype);
+    let (type_, extension_type) = to_co_type(&co.thetype)?;
     let extension_type = extension_type.as_ref().map(|et| fbb.create_string(et));
     let geographical_extent = co.geographical_extent.as_ref().map(to_geographical_extent);
     let geometry_without_instances = co.geometry.as_ref().map(|gs| {
@@ -656,13 +662,15 @@ pub(super) fn to_city_object<'a>(
             .filter(|g| g.geometry_type() == CjGeometryType::GeometryInstance)
             .collect::<Vec<_>>()
     });
-    let geometries = {
-        let geometries = geometry_without_instances.map(|gs| {
-            gs.iter()
+    let geometries = match geometry_without_instances {
+        None => None,
+        Some(gs) => {
+            let geometries = gs
+                .iter()
                 .map(|g| to_geometry(fbb, g, semantic_attr_schema))
-                .collect::<Vec<_>>()
-        });
-        geometries.map(|geometries| fbb.create_vector(&geometries))
+                .collect::<Result<Vec<_>>>()?;
+            Some(fbb.create_vector(&geometries))
+        }
     };
 
     let geometry_instances = {
@@ -713,7 +721,7 @@ pub(super) fn to_city_object<'a>(
         parents.map(|p| fbb.create_vector(&p))
     };
 
-    CityObject::create(
+    Ok(CityObject::create(
         fbb,
         &CityObjectArgs {
             id,
@@ -728,7 +736,7 @@ pub(super) fn to_city_object<'a>(
             children_roles,
             parents,
         },
-    )
+    ))
 }
 
 /// Converts a CityJSON City Object type to the FlatBuffers enum.
@@ -741,11 +749,11 @@ pub(super) fn to_city_object<'a>(
 /// `const` pattern against a `&CityObjectType` is `E0308`, and rustc's fix-it
 /// suggestion silently turns the arm into a catch-all binding.
 ///
-/// There is deliberately no `_` arm: listing every known const plus `Extension`
-/// *is* exhaustive, so a name added to `KnownCityObjectType` upstream fails to
-/// compile here rather than silently becoming a `GenericCityObject`.
-pub(super) fn to_co_type(co_type: &CjCityObjectType) -> (CityObjectType, Option<String>) {
-    match *co_type {
+/// `KnownCityObjectType` is `#[non_exhaustive]`, so the `_` arm is required. A
+/// name cjseq adds lands there and is refused, rather than silently becoming
+/// a `GenericCityObject`; the FlatCityBuf enum needs the name first.
+pub(super) fn to_co_type(co_type: &CjCityObjectType) -> Result<(CityObjectType, Option<String>)> {
+    Ok(match *co_type {
         CjCityObjectType::Bridge => (CityObjectType::Bridge, None),
         CjCityObjectType::BridgePart => (CityObjectType::BridgePart, None),
         CjCityObjectType::BridgeInstallation => (CityObjectType::BridgeInstallation, None),
@@ -790,7 +798,8 @@ pub(super) fn to_co_type(co_type: &CjCityObjectType) -> (CityObjectType, Option<
         CjCityObjectType::Extension(ref name) => {
             (CityObjectType::ExtensionObject, Some(name.clone()))
         }
-    }
+        _ => return Err(Error::unencodable("City Object type", co_type)),
+    })
 }
 
 /// Converts CityJSON geometry type to FlatBuffers enum
@@ -798,8 +807,8 @@ pub(super) fn to_co_type(co_type: &CjCityObjectType) -> (CityObjectType, Option<
 /// # Arguments
 ///
 /// * `geometry_type` - CityJSON geometry type
-pub(super) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
-    match geometry_type {
+pub(super) fn to_geom_type(geometry_type: &CjGeometryType) -> Result<GeometryType> {
+    Ok(match geometry_type {
         CjGeometryType::MultiPoint => GeometryType::MultiPoint,
         CjGeometryType::MultiLineString => GeometryType::MultiLineString,
         CjGeometryType::MultiSurface => GeometryType::MultiSurface,
@@ -808,7 +817,8 @@ pub(super) fn to_geom_type(geometry_type: &CjGeometryType) -> GeometryType {
         CjGeometryType::MultiSolid => GeometryType::MultiSolid,
         CjGeometryType::CompositeSolid => GeometryType::CompositeSolid,
         CjGeometryType::GeometryInstance => GeometryType::GeometryInstance,
-    }
+        _ => return Err(Error::unencodable("geometry type", geometry_type)),
+    })
 }
 
 /// A semantic surface type as FlatCityBuf stores it: the enum tag, plus the
@@ -832,12 +842,14 @@ impl FcbSemanticSurfaceType {
 ///
 /// As with [`to_co_type`], the match is on the value rather than the reference:
 /// the known names are associated `const`s, and a `const` pattern against a
-/// reference is `E0308`. Listing every one of them is what makes this
-/// exhaustive — adding a name to `KnownSemanticSurfaceType` upstream will fail
-/// to compile here rather than silently decay to `ExtraSemanticSurface`.
-impl From<&CjSemanticSurfaceType> for FcbSemanticSurfaceType {
-    fn from(ss_type: &CjSemanticSurfaceType) -> Self {
-        match *ss_type {
+/// reference is `E0308`. A name cjseq adds to the `#[non_exhaustive]`
+/// `KnownSemanticSurfaceType` reaches the `_` arm and is refused, rather than
+/// silently decaying to `ExtraSemanticSurface`.
+impl TryFrom<&CjSemanticSurfaceType> for FcbSemanticSurfaceType {
+    type Error = Error;
+
+    fn try_from(ss_type: &CjSemanticSurfaceType) -> Result<Self> {
+        Ok(match *ss_type {
             CjSemanticSurfaceType::RoofSurface => Self::known(SemanticSurfaceType::RoofSurface),
             CjSemanticSurfaceType::GroundSurface => Self::known(SemanticSurfaceType::GroundSurface),
             CjSemanticSurfaceType::WallSurface => Self::known(SemanticSurfaceType::WallSurface),
@@ -880,7 +892,8 @@ impl From<&CjSemanticSurfaceType> for FcbSemanticSurfaceType {
                 type_: SemanticSurfaceType::ExtraSemanticSurface,
                 extension_type: Some(name.clone()),
             },
-        }
+            _ => return Err(Error::unencodable("semantic surface type", ss_type)),
+        })
     }
 }
 
@@ -894,13 +907,13 @@ pub(crate) fn to_geometry<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     geometry: &CjGeometry,
     semantic_attr_schema: Option<&AttributeSchema>,
-) -> flatbuffers::WIPOffset<Geometry<'a>> {
-    let type_ = to_geom_type(&geometry.geometry_type());
+) -> Result<flatbuffers::WIPOffset<Geometry<'a>>> {
+    let type_ = to_geom_type(&geometry.geometry_type())?;
     let lod = geometry
         .lod()
         .map(|lod| fbb.create_string(&lod.to_string()));
 
-    let encoded = encode(geometry);
+    let encoded = encode(geometry)?;
     let GMBoundaries {
         solids,
         shells,
@@ -918,8 +931,9 @@ pub(crate) fn to_geometry<'a>(
     let strings = Some(fbb.create_vector(&strings));
     let boundary_indices = Some(fbb.create_vector(&indices));
 
-    let (semantics_objects, semantics_values) =
-        semantics.map_or((None, None), |(surface, values)| {
+    let (semantics_objects, semantics_values) = match semantics {
+        None => (None, None),
+        Some((surface, values)) => {
             let semantics_objects = surface
                 .iter()
                 .map(|s| {
@@ -931,7 +945,7 @@ pub(crate) fn to_geometry<'a>(
                     let FcbSemanticSurfaceType {
                         type_,
                         extension_type,
-                    } = FcbSemanticSurfaceType::from(&s.thetype);
+                    } = FcbSemanticSurfaceType::try_from(&s.thetype)?;
                     let extension_type = extension_type.map(|s| fbb.create_string(&s));
                     let attributes = if s.other.is_empty() {
                         None
@@ -940,7 +954,7 @@ pub(crate) fn to_geometry<'a>(
                             fbb.create_vector(&encode_attributes_with_schema(&s.other, schema))
                         })
                     };
-                    SemanticObject::create(
+                    Ok(SemanticObject::create(
                         fbb,
                         &SemanticObjectArgs {
                             type_,
@@ -949,9 +963,9 @@ pub(crate) fn to_geometry<'a>(
                             children,
                             parent: s.parent.map(|p| p.get() as u32),
                         },
-                    )
+                    ))
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>>>()?;
 
             (
                 Some(fbb.create_vector(&semantics_objects)),
@@ -960,7 +974,8 @@ pub(crate) fn to_geometry<'a>(
                 // an empty array.
                 values.map(|values| fbb.create_vector(&values)),
             )
-        });
+        }
+    };
 
     let material_mappings = encoded.materials.map(|m| {
         let mappings = m
@@ -1049,7 +1064,7 @@ pub(crate) fn to_geometry<'a>(
         fbb.create_vector(&mappings)
     });
 
-    Geometry::create(
+    Ok(Geometry::create(
         fbb,
         &GeometryArgs {
             type_,
@@ -1064,7 +1079,7 @@ pub(crate) fn to_geometry<'a>(
             material: material_mappings,
             texture: texture_mappings,
         },
-    )
+    ))
 }
 
 pub(super) fn to_geometry_instance<'a>(
@@ -1205,7 +1220,7 @@ mod tests {
         let mut fbb = FlatBufferBuilder::new();
 
         let (city_feature, _) =
-            to_fcb_city_feature(&mut fbb, "test_id", &cj_city_feature, &attr_schema, None);
+            to_fcb_city_feature(&mut fbb, "test_id", &cj_city_feature, &attr_schema, None)?;
 
         fbb.finish(city_feature, None);
         let buf = fbb.finished_data();

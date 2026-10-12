@@ -6,6 +6,7 @@
 //! non-empty. See `crate::reader::geom_decoder` for the matching decode side
 //! and for the table of depths per geometry type.
 
+use crate::error::{Error, Result};
 use cjseq::{
     Geometry as CjGeometry, Index, MaterialIndex, MaterialReference as CjMaterialReference,
     MultiSolidValues, PrimitiveValues, Ring, Semantics as CjSemantics,
@@ -97,8 +98,11 @@ pub(crate) struct EncodedGeometry {
 ///
 /// A [`CjGeometry::GeometryInstance`] carries none of these; it is encoded by
 /// `serializer::to_geometry_instance` instead, and yields empty arrays here.
-pub(crate) fn encode(geometry: &CjGeometry) -> EncodedGeometry {
-    let boundaries = encode_boundaries(geometry);
+///
+/// A geometry type cjseq adds after this was written has no encoding and is
+/// an [`Error::UnencodableVariant`].
+pub(crate) fn encode(geometry: &CjGeometry) -> Result<EncodedGeometry> {
+    let boundaries = encode_boundaries(geometry)?;
     let (semantics, materials, textures) = match geometry {
         CjGeometry::MultiPoint { semantics, .. }
         | CjGeometry::MultiLineString { semantics, .. } => (
@@ -137,14 +141,15 @@ pub(crate) fn encode(geometry: &CjGeometry) -> EncodedGeometry {
             ..
         } => encode_appearance(semantics, material, texture, &boundaries),
         CjGeometry::GeometryInstance { .. } => (None, None, None),
+        _ => return Err(Error::unencodable("geometry", &geometry.geometry_type())),
     };
 
-    EncodedGeometry {
+    Ok(EncodedGeometry {
         boundaries,
         semantics,
         materials,
         textures,
-    }
+    })
 }
 
 type EncodedAppearance = (
@@ -209,7 +214,7 @@ fn push_solid(solid: &[Shell], b: &mut GMBoundaries) {
 /// the type sits — a `MultiSurface` writes its surface count into `shells`, a
 /// `Solid` its shell count into `solids` — except for the 5-deep types, whose
 /// outermost count is simply `solids.len()`.
-pub(crate) fn encode_boundaries(geometry: &CjGeometry) -> GMBoundaries {
+pub(crate) fn encode_boundaries(geometry: &CjGeometry) -> Result<GMBoundaries> {
     let mut b = GMBoundaries::default();
     match geometry {
         CjGeometry::MultiPoint { boundaries, .. } => push_ring(boundaries, &mut b),
@@ -236,8 +241,9 @@ pub(crate) fn encode_boundaries(geometry: &CjGeometry) -> GMBoundaries {
         // Encoded by `to_geometry_instance`, which writes the single reference
         // vertex index directly.
         CjGeometry::GeometryInstance { .. } => {}
+        _ => return Err(Error::unencodable("geometry", &geometry.geometry_type())),
     }
-    b
+    Ok(b)
 }
 
 // ---------------------------------------------------------------------------
@@ -559,7 +565,7 @@ mod tests {
         // MultiPoint
         let encoded = encode(&geom(json!({
             "type": "MultiPoint", "lod": "1", "boundaries": [2, 44, 0, 7]
-        })));
+        })))?;
         assert_eq!(vec![2, 44, 0, 7], encoded.boundaries.indices);
         assert_eq!(vec![4], encoded.boundaries.strings);
         assert!(encoded.boundaries.surfaces.is_empty());
@@ -569,7 +575,7 @@ mod tests {
         // MultiLineString
         let encoded = encode(&geom(json!({
             "type": "MultiLineString", "lod": "1", "boundaries": [[2, 3, 5], [77, 55, 212]]
-        })));
+        })))?;
         assert_eq!(vec![2, 3, 5, 77, 55, 212], encoded.boundaries.indices);
         assert_eq!(vec![3, 3], encoded.boundaries.strings);
         assert_eq!(vec![2], encoded.boundaries.surfaces);
@@ -580,7 +586,7 @@ mod tests {
         let encoded = encode(&geom(json!({
             "type": "MultiSurface", "lod": "1",
             "boundaries": [[[0, 3, 2, 1]], [[4, 5, 6, 7]], [[0, 1, 5, 4]]]
-        })));
+        })))?;
         assert_eq!(
             vec![0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4],
             encoded.boundaries.indices
@@ -607,7 +613,7 @@ mod tests {
                     [[111, 246, 5]]
                 ]
             ]
-        })));
+        })))?;
         assert_eq!(
             vec![
                 0, 3, 2, 1, 22, 1, 2, 3, 4, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 240, 243, 124, 244,
@@ -645,7 +651,7 @@ mod tests {
                     [[111, 122, 226]]
                 ]]
             ]
-        })));
+        })))?;
         assert_eq!(
             vec![
                 0, 3, 2, 1, 22, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 240, 243, 124, 244, 246, 724,
@@ -689,7 +695,7 @@ mod tests {
               "values": [0, 0, null, 1, 2]
             }
         }));
-        let encoded = encode(&multi_surface);
+        let encoded = encode(&multi_surface)?;
         let encoded_semantics = encoded.semantics.expect("semantics must be encoded");
 
         let expected_semantics_surfaces = vec![
@@ -738,7 +744,7 @@ mod tests {
             "values": [[[0, 1, 1, null]], [[null, null, null]]]
           }
         }));
-        let encoded = encode(&composite_solid);
+        let encoded = encode(&composite_solid)?;
         let encoded_semantics = encoded.semantics.expect("semantics must be encoded");
 
         let expected_semantics_surfaces = vec![
@@ -780,7 +786,7 @@ mod tests {
                 "values": [[0, 0], null]
             }
         }));
-        let encoded = encode(&solid);
+        let encoded = encode(&solid).expect("a Solid encodes");
         let semantics = encoded.semantics.expect("semantics must be encoded");
         // Two surfaces in the first shell, one in the second.
         assert_eq!(semantics.values, Some(vec![0, 0, NULL]));

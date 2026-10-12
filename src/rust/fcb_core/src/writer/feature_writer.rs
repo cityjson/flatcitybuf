@@ -4,6 +4,7 @@ use crate::serializer::*;
 
 use super::attribute::{cityfeature_to_index_entries, AttributeIndexEntry, AttributeSchema};
 
+use crate::error::Result;
 use crate::packed_rtree::NodeItem;
 
 /// A writer that converts CityJSON features to FlatBuffers format
@@ -67,8 +68,9 @@ impl<'a> FeatureWriter<'a> {
     ///
     /// # Returns
     ///
-    /// A vector of bytes containing the serialized feature
-    pub fn finish_to_feature(&mut self) -> Vec<u8> {
+    /// A vector of bytes containing the serialized feature, or an error for a
+    /// cjseq value with no FlatCityBuf encoding.
+    pub fn finish_to_feature(&mut self) -> Result<Vec<u8>> {
         self.reset_bbox();
         self.reset_attribute_feature_offsets();
         self.extract_indexable_attributes();
@@ -78,12 +80,13 @@ impl<'a> FeatureWriter<'a> {
             self.city_feature,
             &self.attr_schema,
             self.semantic_attr_schema.as_ref(),
-        );
+        )
+        .inspect_err(|_| self.fbb.reset())?;
         self.bbox = bbox;
         self.fbb.finish_size_prefixed(cf_buf, None);
         let buf = self.fbb.finished_data().to_vec();
         self.fbb.reset();
-        buf
+        Ok(buf)
     }
 
     /// Updates the writer with a new feature to be serialized

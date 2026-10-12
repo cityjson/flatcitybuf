@@ -101,7 +101,7 @@ impl<'a> FcbWriter<'a> {
         let transform = &self.transform;
 
         if let Some(feat_writer) = &mut self.feat_writer {
-            let feat_buf = feat_writer.finish_to_feature();
+            let feat_buf = feat_writer.finish_to_feature()?;
 
             let mut attr_feature_offset = feat_writer.attribute_feature_offsets.clone();
 

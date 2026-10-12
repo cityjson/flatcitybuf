@@ -10,18 +10,23 @@
 //! guessed at.
 
 use cjseq::{CityJSON, Geometry, Index, Lod, VertexIndex};
-use std::io::{Result as IoResult, Write};
+use std::io::{Error as IoError, ErrorKind, Result as IoResult, Write};
 
 /// Converts a CityJSON object to OBJ format and returns it as a string.
-pub fn to_obj_string(city_json: &CityJSON) -> String {
+///
+/// Fails only on a geometry type this writer does not know; see [`to_obj`].
+pub fn to_obj_string(city_json: &CityJSON) -> IoResult<String> {
     let mut output = Vec::new();
-    // Writing into a `Vec<u8>` cannot fail, and the bytes are the ASCII we
-    // just wrote, so neither unwrap can fire.
-    to_obj(city_json, &mut output).expect("writing to a Vec cannot fail");
-    String::from_utf8(output).expect("OBJ output is ASCII")
+    to_obj(city_json, &mut output)?;
+    // The bytes are the ASCII just written.
+    Ok(String::from_utf8(output).expect("OBJ output is ASCII"))
 }
 
 /// Writes a CityJSON object as OBJ to `writer`.
+///
+/// cjseq's `Geometry` is `#[non_exhaustive]`: a geometry type it adds has no
+/// rings here yet, and is an [`ErrorKind::InvalidData`] error rather than a
+/// geometry silently left out.
 pub fn to_obj<W: Write>(city_json: &CityJSON, writer: &mut W) -> IoResult<()> {
     writeln!(writer, "# Converted from CityJSON to OBJ")?;
     writeln!(writer, "# by CJSeq converter")?;
@@ -44,7 +49,13 @@ pub fn to_obj<W: Write>(city_json: &CityJSON, writer: &mut W) -> IoResult<()> {
     for city_object in city_json.city_objects.values() {
         if let Some(geometries) = &city_object.geometry {
             for geometry in find_highest_lod_geometry(geometries) {
-                for ring in rings(geometry) {
+                let rings = rings(geometry).ok_or_else(|| {
+                    IoError::new(
+                        ErrorKind::InvalidData,
+                        format!("no OBJ faces for a {:?}", geometry.geometry_type()),
+                    )
+                })?;
+                for ring in rings {
                     write_obj_face(ring, writer)?;
                 }
             }
@@ -55,9 +66,10 @@ pub fn to_obj<W: Write>(city_json: &CityJSON, writer: &mut W) -> IoResult<()> {
 }
 
 /// Every ring of a geometry, in document order. The nesting depth comes from
-/// the variant, so no runtime inspection of the boundaries is needed.
-fn rings(geometry: &Geometry) -> Box<dyn Iterator<Item = &[VertexIndex]> + '_> {
-    match geometry {
+/// the variant, so no runtime inspection of the boundaries is needed. `None`
+/// for a geometry type cjseq adds after this was written.
+fn rings(geometry: &Geometry) -> Option<Box<dyn Iterator<Item = &[VertexIndex]> + '_>> {
+    Some(match geometry {
         Geometry::MultiPoint { boundaries, .. } => Box::new(std::iter::once(boundaries.as_slice())),
         Geometry::GeometryInstance { boundaries, .. } => {
             Box::new(std::iter::once(boundaries.as_slice()))
@@ -82,7 +94,8 @@ fn rings(geometry: &Geometry) -> Box<dyn Iterator<Item = &[VertexIndex]> + '_> {
                     .map(Vec::as_slice),
             )
         }
-    }
+        _ => return None,
+    })
 }
 
 /// A lod as a number, so that `"2.2"` ranks above `"2"` and `"2"` ties with
@@ -147,7 +160,8 @@ mod tests {
     fn vertices_are_written_in_real_world_coordinates() {
         let obj = to_obj_string(&city_json(
             json!({"type": "MultiSurface", "lod": "2", "boundaries": [[[0, 1, 2]]]}),
-        ));
+        ))
+        .expect("every geometry type has rings");
         assert!(obj.contains("v 1 2 3"), "{obj}");
         assert!(obj.contains("v 2 2 3"), "{obj}");
         assert!(obj.contains("v 2 3 3"), "{obj}");
@@ -175,7 +189,7 @@ mod tests {
                 "f 1 2 3",
             ),
         ] {
-            let obj = to_obj_string(&city_json(geometry));
+            let obj = to_obj_string(&city_json(geometry)).expect("every geometry type has rings");
             assert!(obj.contains(expected), "{obj}");
         }
     }
@@ -193,7 +207,7 @@ mod tests {
             "vertices": [[0, 0, 0], [1, 0, 0], [1, 1, 0]]
         });
         let cj: CityJSON = serde_json::from_value(doc).expect("document must parse");
-        let obj = to_obj_string(&cj);
+        let obj = to_obj_string(&cj).expect("every geometry type has rings");
         assert!(obj.contains("f 3 2 1"), "{obj}");
         assert!(!obj.contains("f 1 2 3"), "{obj}");
     }
