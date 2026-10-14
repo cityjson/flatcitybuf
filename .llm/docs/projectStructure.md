@@ -67,6 +67,18 @@ flatcitybuf/
 │   │   │   │   └── writer/        # FlatBuffers writing & serialization
 │   │   │   └── Cargo.toml
 │   │   │
+│   │   ├── 📁 fcb_citygml/         # CityGML 2.0 -> CityJSON(Seq) converter (crate)
+│   │   │   ├── src/
+│   │   │   │   ├── lib.rs         # Streaming parse entry point (parse_citygml)
+│   │   │   │   ├── citygml/       # Thematic module readers (building, relief, ...)
+│   │   │   │   ├── gml/           # GML geometry + ImplicitGeometry parsing
+│   │   │   │   ├── appearance.rs  # Materials and textures
+│   │   │   │   ├── convert.rs     # Intermediate model -> CityJSON, quantisation
+│   │   │   │   ├── crs.rs         # srsName normalisation and axis order
+│   │   │   │   └── model.rs       # Intermediate object/geometry model
+│   │   │   ├── tests/             # Hand-authored fixtures + citygml-tools cross-check
+│   │   │   └── Cargo.toml
+│   │   │
 │   │   ├── 📁 fcb_api/             # REST API server (axum)
 │   │   │   ├── src/
 │   │   │   │   └── main.rs        # API server entry point
@@ -120,7 +132,17 @@ The Rust workspace is organized as a multi-crate project with the following memb
 |-------|---------|-------------------|
 | **fcb_core** | Core library with read/write/indexing capabilities | Pure Rust |
 | **cli** | Command-line interface (`fcb` command) | - |
+| **fcb_citygml** | CityGML 2.0 (and 1.0 namespaces) to CityJSON(Seq) converter, used by `fcb ser` for `.gml`/`.xml` input | Pure Rust |
 | **fcb_api** | REST API server using axum | HTTP API |
+
+`fcb_citygml` is an input adapter, not part of the format: it converts CityGML
+into the `cjseq` CityJSON types the writer already consumes, so nothing
+downstream of `cli/src/reader.rs` knows CityGML exists and `docs/specification.md`
+is unaffected. It covers geometry (including `ImplicitGeometry`, flattened into
+real coordinates), semantic surfaces, generic and thematic attributes, and the
+appearance module (materials and textures); it normalises `srsName` to the
+CityJSON reference-system URL but does **not** reproject, and CityGML 3.0 is out
+of scope.
 
 The Python, C++ and TypeScript readers (`src/py/`, `src/cpp/`, `src/ts/`) are
 not Rust workspace members: each is a from-scratch, standalone reader with no

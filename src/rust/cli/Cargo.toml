@@ -20,6 +20,7 @@ path = "src/lib.rs"
 
 [dependencies]
 fcb_core = { workspace = true, features = ["http"] }
+fcb_citygml = { workspace = true }
 cjseq = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
@@ -28,6 +29,7 @@ serde_json = { workspace = true }
 bson = { workspace = true }
 serde_cbor = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 indicatif = { workspace = true }
 console = { workspace = true }
 glob = "0.3"

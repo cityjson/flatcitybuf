@@ -1,0 +1,3 @@
+# The wrapper itself has no CityJSON type; its components each become a city
+# object of their own, which is what the expected features show.
+skip ReliefFeature|<ReliefFeature> has no CityJSON counterpart; its <reliefComponent>s become city objects of their own and the wrapper's own properties are dropped

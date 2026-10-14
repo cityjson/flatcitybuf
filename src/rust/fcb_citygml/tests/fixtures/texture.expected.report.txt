@@ -1,0 +1,3 @@
+# A georeferenced texture states its parameterisation as a world file rather
+# than as texture coordinates, which CityJSON has no form for.
+skip GeoreferencedTexture|<GeoreferencedTexture> surface data is not converted; only <X3DMaterial> and <ParameterizedTexture> are

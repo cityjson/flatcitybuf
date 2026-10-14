@@ -39,7 +39,8 @@ struct Cli {
 enum Commands {
     /// Convert CityJSON to FCB
     Ser {
-        /// Input files (glob patterns supported, e.g., "cities/*/*.jsonl")
+        /// Input files: .json, .jsonl or CityGML .gml/.xml (glob patterns
+        /// supported, e.g., "cities/*/*.jsonl")
         #[arg(required = true, num_args = 1..)]
         input: Vec<String>,
 

@@ -1,7 +1,9 @@
 name: Publish Crate
 
-# Publishes fcb_core then fcb_cli to crates.io. fcb_api is a workspace member
-# but is not published (it is the axum server, deployed by deploy-api.yml).
+# Publishes fcb_core, then fcb_citygml, then fcb_cli to crates.io — dependency
+# order, because cli depends on both of the others. fcb_api is a workspace
+# member but is not published (it is the axum server, deployed by
+# deploy-api.yml).
 
 on:
   workflow_dispatch:
@@ -86,23 +88,34 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         working-directory: src/rust
         run: |
-          # fcb_core first: fcb_cli depends on it, and crates.io must have
-          # indexed the new version before the dependent can resolve it.
-          # --allow-dirty is required because the version bump above leaves
-          # the tree modified.
-          (cd fcb_core && cargo publish --allow-dirty)
-
+          # Dependencies first: cli depends on both fcb_core and fcb_citygml,
+          # and crates.io must have indexed the new version of each before the
+          # dependent can resolve it. --allow-dirty is required because the
+          # version bump above leaves the tree modified.
+          #
           # Poll the index instead of sleeping a fixed 30s, which was a guess
           # that either wasted time or was not long enough.
-          VERSION=$(grep "^version" fcb_core/Cargo.toml | head -1 | cut -d'"' -f2)
-          for i in $(seq 1 60); do
-            if curl -sSf "https://crates.io/api/v1/crates/fcb_core/${VERSION}" \
-                 -H "User-Agent: flatcitybuf-ci" > /dev/null 2>&1; then
-              echo "fcb_core ${VERSION} is indexed"
-              break
-            fi
-            echo "waiting for crates.io to index fcb_core ${VERSION} ($i/60)"
-            sleep 5
-          done
+          await_index() {
+            crate="$1"
+            version=$(grep "^version" "${2}/Cargo.toml" | head -1 | cut -d'"' -f2)
+            for i in $(seq 1 60); do
+              if curl -sSf "https://crates.io/api/v1/crates/${crate}/${version}" \
+                   -H "User-Agent: flatcitybuf-ci" > /dev/null 2>&1; then
+                echo "${crate} ${version} is indexed"
+                return 0
+              fi
+              echo "waiting for crates.io to index ${crate} ${version} ($i/60)"
+              sleep 5
+            done
+          }
+
+          (cd fcb_core && cargo publish --allow-dirty)
+          await_index fcb_core fcb_core
+
+          # fcb_citygml is the CityGML 2.0 reader `fcb ser` reads .gml through;
+          # cli names it as a path+version dependency, so it has to exist on
+          # crates.io before cli can be published at all.
+          (cd fcb_citygml && cargo publish --allow-dirty)
+          await_index fcb_citygml fcb_citygml
 
           (cd cli && cargo publish --allow-dirty)

@@ -1,0 +1,2 @@
+{"type":"CityJSON","version":"2.0","transform":{"scale":[0.001,0.001,0.001],"translate":[100.0,200.0,0.0]},"CityObjects":{},"vertices":[],"metadata":{"geographicalExtent":[100.0,200.0,0.0,102.0,201.0,2.0],"referenceSystem":"https://www.opengis.net/def/crs/EPSG/0/7415"}}
+{"type":"CityJSONFeature","id":"tin-1","CityObjects":{"tin-1":{"type":"TINRelief","attributes":{"name":"Terrain patch"},"geometry":[{"type":"CompositeSurface","lod":"1","boundaries":[[[0,1,2]],[[0,2,3]]]}]}},"vertices":[[0,0,0],[2000,0,0],[2000,1000,1000],[0,1000,2000]]}
