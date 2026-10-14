@@ -9,7 +9,7 @@ bytemuck = "1.15.0"
 async-trait = { version = "0.1.85", default-features = true }
 flatbuffers = "25.9.23"
 byteorder = "1.5.0"
-cjseq = { git = "https://github.com/HideBa/cjseq", rev = "0d92c4b51f4b32b9dc2aadf649b4b6caf8ad69f7", default-features = false }
+cjseq = { version = "=0.5.0-alpha.1", default-features = false }
 tempfile = "3.14.0"
 serde_json = "1.0.133"
 indexmap = "2"
