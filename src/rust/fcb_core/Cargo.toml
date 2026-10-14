@@ -35,6 +35,7 @@ byteorder = { workspace = true }
 cjseq = { workspace = true }
 tempfile = { workspace = true }
 serde_json = { workspace = true }
+indexmap = { workspace = true }
 anyhow = { workspace = true }
 fallible-streaming-iterator = { workspace = true }
 clap = { workspace = true }

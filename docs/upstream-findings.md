@@ -1781,3 +1781,39 @@ above is size, `inspect`, and a `deser` round-trip compared line by line.
 **What a consumer saw:** piping the writer's output (`ser … - | …`) on real
 heterogeneous data produced a file that no reader can open, with a clean exit
 status. No justfile recipe uses the `-` path, which is why it went unnoticed.
+
+## 37. The `geom_temp` fixture's geometry templates pointed past their materials palette — FIXED (fixture repaired)
+
+**Where:** `src/rust/fcb_core/tests/data/geom_temp.city.jsonl`, line 1, and
+the `conformance/geom_temp.{fcb,expected.jsonl}` pair built from it. The defect
+is upstream, in cjseq's `cat`, which wrote this header.
+
+The header holds two materials, but template 0 used material `1` and
+template 1 used material `2`. cjseq 0.5's `validate` rejects it:
+
+```
+$ cjseq validate geom_temp.city.jsonl
+header: in geometry template 1: Material index 2 is out of range (there are 2)
+```
+
+cjseq's `cat_metadata` (up to 0.4.x) renumbered the templates' material,
+texture and UV indices into a clone, sliced the palette to match, and then
+wrote the **original** templates beside the sliced palette. Materials were the
+only part that went wrong here: the templates' textures (`0`, `1`) and UVs
+(`0..=1014`) were already numbered in first-use order, so their renumbering
+was the identity. Every reader in this repo round-tripped the dangling indices
+faithfully, which is why no test noticed.
+
+**Fix:** the renumbering `cat` computed and dropped is applied by hand —
+template materials `1 → 0` and `2 → 1`, nothing else in the file touched — and
+the fixture now validates. `conformance/geom_temp.fcb` and
+`geom_temp.expected.jsonl` were regenerated with `scripts/gen_conformance.sh`;
+every other corpus file is unchanged. No test asserts on the material index
+values, so the Rust, C++, Python and TypeScript suites pass unchanged.
+
+`scripts/gen_conformance.sh` passes `-A` to every input under
+`conformance/inputs/`, but `btree_multilevel`, `header_metadata_full` and
+`rtree_multilevel` were built with other flags (`--attr-branching-factor 4`;
+no `-A`; no `-A`). Re-running the script rewrites those three `.fcb`s, and
+`test_writer_oracle.cpp` then compares against the wrong bytes. Restore them
+from git after a run.

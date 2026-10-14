@@ -17,7 +17,7 @@ use tracing::{error, info, warn};
 use crate::constants::*;
 use crate::crs::transform_bbox;
 use crate::filter_parser::{parse_filter, ParseError};
-use crate::handlers::{determine_format, BboxQuery};
+use crate::handlers::{collect_features, determine_format, BboxQuery};
 use crate::link::{build_link_header, build_link_json};
 use crate::models::*;
 use crate::AppState;
@@ -287,7 +287,7 @@ pub async fn collection_items(
         }
         "cityjson" => {
             // Generate CityJSON format by combining all features
-            let mut cjj = match deserializer::to_cj_metadata(&header) {
+            let cjj = match deserializer::to_cj_metadata(&header) {
                 Ok(meta) => meta,
                 Err(e) => {
                     error!(
@@ -299,14 +299,9 @@ pub async fn collection_items(
                 }
             };
 
-            // Add all features to the CityJSON object
-            for mut feature in features {
-                cjj.add_cjfeature(&mut feature);
-            }
-
-            // Remove duplicate vertices and update transform
-            cjj.remove_duplicate_vertices();
-            cjj.update_transform();
+            // Collect all features into one CityJSON object, which merges
+            // duplicate vertices and moves the transform to the data.
+            let cjj = collect_features(cjj, features)?;
 
             let json_str = serde_json::to_string(&cjj).unwrap_or_default();
 
@@ -336,7 +331,7 @@ pub async fn collection_items(
         }
         "obj" => {
             // Generate OBJ format
-            let mut cjj = match deserializer::to_cj_metadata(&header) {
+            let cjj = match deserializer::to_cj_metadata(&header) {
                 Ok(meta) => meta,
                 Err(e) => {
                     error!(
@@ -348,17 +343,15 @@ pub async fn collection_items(
                 }
             };
 
-            // Add all features to the CityJSON object
-            for mut feature in features {
-                cjj.add_cjfeature(&mut feature);
-            }
-
-            // Remove duplicate vertices and update transform
-            cjj.remove_duplicate_vertices();
-            cjj.update_transform();
+            // Collect all features into one CityJSON object, which merges
+            // duplicate vertices and moves the transform to the data.
+            let cjj = collect_features(cjj, features)?;
 
             // Convert to OBJ
-            let obj_str = fcb_core::obj::to_obj_string(&cjj);
+            let obj_str = fcb_core::obj::to_obj_string(&cjj).map_err(|e| {
+                error!("OBJ conversion error: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
             // Build Link header for pagination
             let link_header = build_link_header(

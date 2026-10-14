@@ -100,10 +100,7 @@ mod tests {
     use super::*;
 
     fn make_transform(scale: [f64; 3], translate: [f64; 3]) -> Transform {
-        Transform {
-            scale: scale.to_vec(),
-            translate: translate.to_vec(),
-        }
+        Transform { scale, translate }
     }
 
     #[test]
@@ -123,10 +120,10 @@ mod tests {
         let target = source.clone();
 
         let mut feature = CityJSONFeature::new();
-        feature.vertices = vec![vec![1000, 2000, 3000]];
+        feature.vertices = vec![[1000, 2000, 3000]];
 
         let converted = convert_feature_transform(feature.clone(), &source, &target);
-        assert_eq!(converted.vertices[0], vec![1000, 2000, 3000]);
+        assert_eq!(converted.vertices[0], [1000, 2000, 3000]);
     }
 
     #[test]
@@ -137,11 +134,11 @@ mod tests {
         let target = make_transform([0.002, 0.002, 0.002], [0.0, 0.0, 0.0]);
 
         let mut feature = CityJSONFeature::new();
-        feature.vertices = vec![vec![1000, 2000, 3000]];
+        feature.vertices = vec![[1000, 2000, 3000]];
 
         let converted = convert_feature_transform(feature, &source, &target);
         // 1000 * 0.001 = 1.0 -> 1.0 / 0.002 = 500
-        assert_eq!(converted.vertices[0], vec![500, 1000, 1500]);
+        assert_eq!(converted.vertices[0], [500, 1000, 1500]);
     }
 
     #[test]
@@ -150,11 +147,11 @@ mod tests {
         let target = make_transform([0.001, 0.001, 0.001], [0.0, 0.0, 0.0]);
 
         let mut feature = CityJSONFeature::new();
-        feature.vertices = vec![vec![0, 0, 0]]; // Real: (100, 200, 0)
+        feature.vertices = vec![[0, 0, 0]]; // Real: (100, 200, 0)
 
         let converted = convert_feature_transform(feature, &source, &target);
         // Real (100, 200, 0) with target translate (0, 0, 0) and scale 0.001
         // -> (100 / 0.001, 200 / 0.001, 0) = (100000, 200000, 0)
-        assert_eq!(converted.vertices[0], vec![100000, 200000, 0]);
+        assert_eq!(converted.vertices[0], [100000, 200000, 0]);
     }
 }
