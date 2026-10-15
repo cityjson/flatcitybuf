@@ -18,7 +18,7 @@ surface than the Rust and C++ implementations.** Concretely:
 |---|---|
 | Read | Yes — header, features, geometry, appearance, attributes, spatial and attribute queries |
 | Write | **No.** Only Rust (`src/rust/fcb_core`) and C++ (`src/cpp`) produce `.fcb` files |
-| Conformance | **14 / 14** corpus cases pass, compared whole-line against the Rust reader's own output ([`src/ts/test/conformance.test.ts:29-70`](../src/ts/test/conformance.test.ts)) |
+| Conformance | **15 / 15** corpus cases pass, compared whole-line against the Rust reader's own output ([`src/ts/test/conformance.test.ts:29-70`](../src/ts/test/conformance.test.ts)) |
 | Node suite | 16 files, 244 tests passing, 1 skipped (the opt-in live-3DBAG test) |
 | Browser suite | 3 tests in real headless Chromium ([`src/ts/test/browser/`](../src/ts/test/browser/)) |
 | npm | Published as `@cityjson/flatcitybuf`, currently `0.3.0` |

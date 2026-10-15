@@ -7,6 +7,7 @@ from flatcitybuf.attribute import decode_attributes
 from flatcitybuf.errors import ErrorCode, FcbError
 from flatcitybuf.errors import reraise_as_invalid_flatbuffer
 from flatcitybuf.feature import Feature, raw_city_feature, raw_city_object
+from flatcitybuf.feature import _columns_from_object
 from flatcitybuf.generated.geometry_generated import GeometryType
 from flatcitybuf.generated.header_generated import ColumnType
 from flatcitybuf.generated.header_generated import TextureFormat
@@ -102,6 +103,11 @@ _TEXTURE_TYPE_NAMES = {0: "unknown", 1: "specific", 2: "typical"}
 # _read_attribute_bytes reaches into CityObject.attributes: an O(n)
 # Python-level call per byte, and no numpy at module scope allowed.
 _SEMANTIC_ATTRIBUTES_VTABLE_OFFSET = 6
+
+# Address { attributes, columns, location } (feature.fbs) -- field 0
+# (attributes) sits at vtable slot (0 + 2) * 2 = 4. Read directly for
+# the same reason as the SemanticObject and CityObject attributes.
+_ADDRESS_ATTRIBUTES_VTABLE_OFFSET = 4
 
 
 def city_object_type_name(type_: int) -> str:
@@ -241,6 +247,52 @@ def _read_semantic_attribute_bytes(so: Any) -> bytes:
         )
     start = so._tab.Vector(o)
     return bytes(so._tab.Bytes[start : start + length])
+
+
+def _read_address_attribute_bytes(a: Any) -> bytes:
+    """Raw bytes of Address.attributes; the same pattern as
+    _read_semantic_attribute_bytes."""
+    o = a._tab.Offset(_ADDRESS_ATTRIBUTES_VTABLE_OFFSET)
+    if o == 0:
+        return b""
+    length = a._tab.VectorLen(o)
+    if length != a.AttributesLength():
+        raise FcbError(
+            ErrorCode.INVALID_FLATBUFFER,
+            "Address.attributes vtable slot mismatch: "
+            f"hand-counted offset {_ADDRESS_ATTRIBUTES_VTABLE_OFFSET} "
+            "disagrees with the generated accessor -- feature.fbs "
+            "field order may have changed",
+        )
+    start = a._tab.Vector(o)
+    return bytes(a._tab.Bytes[start : start + length])
+
+
+def _address_to_json(a: Any) -> Dict[str, Any]:
+    """One entry of a CityObject's CityJSON `address` array.
+
+    Its members are decoded from `attributes` against the address's OWN
+    `columns` -- never the header's -- and `location` is a MultiPoint
+    into the feature's vertices. Mirrors deserializer.rs's
+    to_cj_object_address: attributes without columns is an error, and
+    absent attributes mean no members.
+    """
+    out: Dict[str, Any] = {}
+    location = a.Location()
+    if location is not None:
+        out["location"] = _geometry_to_json(location, [])
+    if not a.AttributesIsNone():
+        if a.ColumnsIsNone():
+            raise FcbError(
+                ErrorCode.MISSING_REQUIRED_FIELD,
+                "Address has attributes but no columns",
+            )
+        blob = _read_address_attribute_bytes(a)
+        if blob:
+            out.update(
+                _decode_attributes_for_json(blob, _columns_from_object(a))
+            )
+    return out
 
 
 def _color_to_json(
@@ -955,6 +1007,16 @@ def _to_cityjson_feature_impl(
             co["parents"] = [
                 _decode_str(obj.Parents(j)) for j in range(obj.ParentsLength())
             ]
+
+        # Present (even empty) iff the object declares the vector: an
+        # absent field means no addresses, and the key is omitted.
+        if not obj.AddressIsNone():
+            addresses = []
+            for j in range(obj.AddressLength()):
+                a = obj.Address(j)
+                if a is not None:
+                    addresses.append(_address_to_json(a))
+            co["address"] = addresses
 
         objects[view.id] = co
     out["CityObjects"] = objects

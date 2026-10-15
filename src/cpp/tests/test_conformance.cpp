@@ -141,6 +141,13 @@ TEST_CASE("conformance: rtree_multilevel") { check_case("rtree_multilevel"); }
 // BOTH columns at once (one with no duplicates, one with a payload entry).
 TEST_CASE("conformance: btree_multilevel") { check_case("btree_multilevel"); }
 
+// City Object addresses (CityObject.address): one address with members and a
+// `location` MultiPoint, one with members of mixed types (a `null` member,
+// which is not written, and an array) and no `location`, and one with only a
+// `location`. Each address decodes against its OWN columns, never the
+// header's.
+TEST_CASE("conformance: object_address") { check_case("object_address"); }
+
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");
     CHECK(r.header().info().features_count == 1);

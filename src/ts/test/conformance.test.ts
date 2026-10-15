@@ -41,6 +41,7 @@ const CASES = [
   'multi_object_attrs',
   'no_count',
   'noise_extension',
+  'object_address',
   'single_feature',
   'small',
 ]

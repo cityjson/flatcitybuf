@@ -15,8 +15,10 @@
  *  survives a round trip through a file. Hence `put` below: this module never
  *  assigns `undefined` to a key. */
 import { ErrorCode, FcbError } from '../errors.js'
+import { decodeAttributes } from '../feature/attribute.js'
 import type { AttrValue } from '../feature/attribute.js'
 import type { CityObjectView, Feature } from '../feature/index.js'
+import type { Address as FbAddress } from '../generated/address.js'
 import { Appearance as FbAppearance } from '../generated/appearance.js'
 import { DoubleVertex } from '../generated/double-vertex.js'
 import { Extension } from '../generated/extension.js'
@@ -37,7 +39,8 @@ import {
   geometryTypeName, sharedMaterialValue,
 } from '../geometry/index.js'
 import type {
-  Appearance, CityJSON, CityJSONFeature, CityObject, Geometry, GeometryTemplates,
+  Appearance, CityJSON, CityJSONFeature, CityObject, CityObjectAddress, Geometry,
+  GeometryTemplates,
   IndexValues, JsonValue, MaterialObject, MaterialReference, Metadata, PointOfContact,
   Semantics, SemanticSurface, TextureObject, TextureReference,
 } from './types.js'
@@ -96,6 +99,17 @@ const HEADER_TEMPLATES_VERTICES_SLOT = 30
 const CITY_OBJECT_CHILDREN_SLOT = 20
 const CITY_OBJECT_CHILDREN_ROLES_SLOT = 22
 const CITY_OBJECT_PARENTS_SLOT = 24
+/** `CityObject.address` is field 11. Keyed off presence like the three
+ *  above: the Rust reader maps `co.address()`, so a present-but-empty vector
+ *  is `"address": []`. */
+const CITY_OBJECT_ADDRESS_SLOT = 26
+
+/** `Address.attributes` is field 0 and `columns` field 1 (src/fbs/
+ *  feature.fbs). Presence matters for both: attributes with no `columns` is
+ *  an error, never a fallback to `Header.columns` (docs/specification.md,
+ *  "city object addresses"). */
+const ADDRESS_ATTRIBUTES_SLOT = 4
+const ADDRESS_COLUMNS_SLOT = 6
 
 /** The largest magnitude a JS number represents exactly. */
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER)
@@ -433,6 +447,35 @@ function stringVector(
   return out
 }
 
+/** One entry of a City Object's `address` array -- ports
+ *  `to_cj_object_address` (deserializer.rs). Its members come from its
+ *  `attributes` blob decoded against ITS OWN `columns`; the header's columns
+ *  never apply to an address. `location` is a MultiPoint geometry decoded
+ *  like any other, with no semantic schema (Rust passes `None`). */
+function addressToJson(
+  a: FbAddress,
+  policy: Required<Int64Policy>['int64'],
+): CityObjectAddress {
+  const out: CityObjectAddress = {}
+  const location = a.location(new FbGeometry())
+  if (location !== null) out.location = geometryToJson(location, null, policy)
+
+  const hasAttributes = fieldPresent(a, ADDRESS_ATTRIBUTES_SLOT)
+  if (!hasAttributes) return out
+  if (!fieldPresent(a, ADDRESS_COLUMNS_SLOT)) {
+    throw new FcbError(ErrorCode.MissingRequiredField, 'columns')
+  }
+  const columns: ColumnInfo[] = []
+  for (let i = 0; i < a.columnsLength(); i++) {
+    const c = a.columns(i)
+    if (c === null) continue
+    columns.push({ index: c.index(), name: c.name() ?? '', type: c.type(), nullable: c.nullable() })
+  }
+  const blob = a.attributesArray() ?? new Uint8Array(0)
+  Object.assign(out, attrsToJson(decodeAttributes(blob, columns), policy))
+  return out
+}
+
 function cityObjectToJson(
   view: CityObjectView,
   headerHasColumns: boolean,
@@ -463,6 +506,15 @@ function cityObjectToJson(
   // cover an index still throws -- that one really is corruption.
   if (view.hasAttributes() && (headerHasColumns || view.hasColumns())) {
     out.attributes = attrsToJson(view.attributes(), policy)
+  }
+
+  if (fieldPresent(raw, CITY_OBJECT_ADDRESS_SLOT)) {
+    const address: CityObjectAddress[] = []
+    for (let i = 0; i < raw.addressLength(); i++) {
+      const a = raw.address(i)
+      if (a !== null) address.push(addressToJson(a, policy))
+    }
+    out.address = address
   }
 
   const geometry: Geometry[] = []
