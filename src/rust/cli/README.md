@@ -45,9 +45,9 @@ read-only command `inspect` takes a single positional argument.
 
 ### Commands
 
-#### `ser` - Serialize CityJSON to FCB
+#### `ser` - Serialize CityJSON or CityGML to FCB
 
-Convert CityJSON files to FlatCityBuf format with optional indexing.
+Convert CityJSON, CityJSONSeq or CityGML 2.0 / 3.0 files to FlatCityBuf format with optional indexing.
 
 ```bash
 fcb ser [OPTIONS] <INPUT>... <OUTPUT>
@@ -55,7 +55,7 @@ fcb ser [OPTIONS] <INPUT>... <OUTPUT>
 
 **Arguments:**
 
-- `<INPUT>...` - Input file(s) or glob patterns (supports multiple files; each path must end in `.json` or `.jsonl` -- `ser` does not read from stdin)
+- `<INPUT>...` - Input file(s) or glob patterns (supports multiple files; each path must end in `.json` or `.jsonl`, or all of them in `.gml` or `.xml` for CityGML -- `ser` does not read from stdin)
 - `<OUTPUT>` - Output file, always the last positional (use '-' for stdout)
 
 **Options:**
@@ -99,20 +99,43 @@ fcb ser large_dataset.city.jsonl filtered.fcb \
 
 # to stdout (input must still be a real file path)
 fcb ser input.city.jsonl - > output.fcb
+
+# CityGML 2.0 or 3.0; the version is read from the document
+fcb ser 53394519_bldg_6697_op.gml bldg.fcb
+fcb ser 'udx/bldg/*.gml' bldg.fcb
 ```
 
-#### `deser` - Deserialize FCB to CityJSON
+**CityGML input.** The CityGML is read by the
+[`citygml` crates](https://github.com/cityjson/cityparquet/tree/develop/lib/citygml-rs),
+the same reader `cityparquet` uses, so both tools give the same CityJSON for a
+document. Several files must share one CRS. The transform is chosen from their
+envelopes before any feature is read: its translate is the lower corner, and
+its scale follows the CRS's axis units (0.001 m for metres, 1e-9 for degrees,
+so EPSG:6697 keeps millimetre precision). Implicit-geometry templates are
+supported for a single document only. ADE schemas are read only from a relative
+`xsi:schemaLocation` next to the document; URLs are never fetched. Features
+are spooled to a temporary file while the attribute schemas are built, so
+memory holds one feature at a time rather than the dataset. `ser` prints the
+members it skipped and the ADE objects it read.
 
-Convert FlatCityBuf files back to CityJSON format.
+#### `deser` - Deserialize FCB to CityJSON or CityGML
+
+Convert FlatCityBuf files back to CityJSONSeq, or to CityGML when the output ends in `.gml` or `.xml`.
 
 ```bash
-fcb deser <INPUT> <OUTPUT>
+fcb deser [--citygml-version 2.0|3.0] <INPUT> <OUTPUT>
 ```
 
 **Arguments:**
 
 - `<INPUT>` - Input FCB file (use '-' for stdin)
 - `<OUTPUT>` - Output file (use '-' for stdout)
+
+**Options:**
+
+- `--citygml-version VERSION` - CityGML version written to a `.gml` / `.xml` output: `2.0` (default) or `3.0`
+
+Writing CityGML prints what the target version cannot hold, one line per kind with a count (for example a type CityGML 2.0 lacks, or a LoD 4 geometry written as CityGML 3.0). Features are written in the file's Hilbert order, not the source document's.
 
 **Examples:**
 
@@ -122,6 +145,9 @@ fcb deser input.fcb output.city.jsonl
 
 # from stdin to stdout
 cat input.fcb | fcb deser - - > output.city.jsonl
+
+# to CityGML 3.0
+fcb deser input.fcb output.gml --citygml-version 3.0
 ```
 
 #### `inspect` - Inspect an FCB file
@@ -210,6 +236,7 @@ fcb bson <INPUT> <OUTPUT>
 
 - **CityJSON** (`.city.json`) - Standard CityJSON files
 - **CityJSON Text Sequences** (`.city.jsonl`) - Line-delimited CityJSON features
+- **CityGML 2.0 / 3.0** (`.gml`, `.xml`) - read by `ser`
 - **FCB** (`.fcb`) - FlatCityBuf binary format
 
 > **Remote Input:** `inspect` also accepts an `http://` or `https://` URL and reads the header over HTTP range requests. The other commands (`ser`, `deser`, `cbor`, `bson`) take local paths only, plus `-` for stdin/stdout where documented.
@@ -220,6 +247,7 @@ fcb bson <INPUT> <OUTPUT>
 
 - **FCB** (`.fcb`) - FlatCityBuf binary format with optional indexing
 - **CityJSON Text Sequences** (`.city.jsonl`) - Line-delimited CityJSON features
+- **CityGML 2.0 / 3.0** (`.gml`, `.xml`) - written by `deser`
 - **CBOR** - Concise Binary Object Representation
 - **BSON** - Binary JSON
 

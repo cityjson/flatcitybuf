@@ -1817,3 +1817,51 @@ values, so the Rust, C++, Python and TypeScript suites pass unchanged.
 no `-A`; no `-A`). Re-running the script rewrites those three `.fcb`s, and
 `test_writer_oracle.cpp` then compares against the wrong bytes. Restore them
 from git after a run.
+
+## 38. City Object `address` was dropped on write, with no error — FIXED (branch `citygml-io`)
+
+**Where:** `src/fbs/feature.fbs` `CityObject` had no field for it, and
+`fcb_core`'s `to_city_object` never read `co.address`. Every port inherited
+the gap.
+
+A CityJSON 2.0 City Object may carry `address`, an array of objects whose
+`location` is a MultiPoint into the feature's vertices. `fcb ser` then `fcb
+deser` returned the object without it. CityGML is where it bites: the CityGML
+crates fill `address` from `bldg:address` (xAL), so every PLATEAU building
+address was lost.
+
+**Fix:** `CityObject.address:[Address]`, where `Address` holds every member
+but `location` as an attribute blob with its own `columns`, and `location` as a
+`Geometry`. Written and read by Rust and C++; read by Python and TypeScript.
+Corpus fixture: `object_address`. Null members are not written, as everywhere
+else in the format.
+
+## 39. Extension declarations kept only `url` and `version` — FIXED (branch `citygml-io`)
+
+**Where:** `src/fbs/extension.fbs` `Extension` held `name`, `url`, `version`
+and the schema strings only.
+
+A CityJSON `extensions` entry may hold further members. The CityGML crates put
+an ADE's `xmlns` and its constant XML attributes there, and the CityGML writer
+refuses an ADE prefix whose `xmlns` it cannot find. So a PLATEAU file with the
+`uro` ADE could be read into `.fcb` but not written back out as CityGML.
+
+**Fix:** `Extension.members`, the entry's other members as one JSON object
+string, absent when there are none. Written and read by Rust and C++; read by
+Python and TypeScript. A `members` that is not a JSON object is an
+`InvalidAttributeValue` error. Corpus fixture: `extension_members`; the C++
+writer's output for it is byte-identical to Rust's.
+
+## 40. A vertex outside the 32-bit range panicked the Rust writer and was truncated by the C++ writer — FIXED (branch `citygml-io`)
+
+**Where:** `fcb_core/src/writer/serializer.rs` converted each quantised
+coordinate with `i32::try_from(c).unwrap()`; `src/cpp/src/writer/feature_serializer.cpp`
+used `nlohmann::json::get<std::int32_t>()`, which casts.
+
+A `Vertex` is three `i32`. A CityJSON file whose transform is too fine for its
+extent quantises past `i32::MAX`; the Rust writer then panicked, and the C++
+writer wrapped the coordinate silently into a different position.
+
+**Fix:** both writers return an error (`Error::VertexOutOfRange` in Rust,
+`ErrorCode::VertexOutOfRange` in C++). Nothing that fits is affected; the
+corpus is byte-identical.

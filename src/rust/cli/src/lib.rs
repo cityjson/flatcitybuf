@@ -7,6 +7,9 @@
 //! fcb ser     city.jsonl city.fcb   # CityJSONSeq -> .fcb  (-A indexes every
 //!                                   # attribute, -g writes the extent)
 //! fcb deser   city.fcb   city.jsonl # .fcb -> CityJSONSeq
+//! fcb ser     city.gml   city.fcb   # CityGML 2.0 / 3.0 -> .fcb
+//! fcb deser   city.fcb   city.gml   # .fcb -> CityGML (--citygml-version
+//!                                   # 2.0 or 3.0, default 2.0)
 //! fcb inspect city.fcb              # terminal UI, or a static header report
 //!                                   # when stdout is not a TTY (--static
 //!                                   # forces it)
@@ -16,6 +19,8 @@
 //!
 //! Input and output are positional. `ser` takes any number of inputs before
 //! the output, so `fcb ser a.jsonl b.jsonl merged.fcb` merges as it converts.
+//! A `.gml` or `.xml` path selects CityGML, through the [`citygml`] module
+//! (the `citygml` feature, on by default).
 //!
 //! The modules below are `pub` so the integration tests can drive them
 //! directly; they are not a stable API. All the format work happens in
@@ -25,6 +30,8 @@
 //! readers are validated against, so its output is load-bearing for the whole
 //! repository.
 
+#[cfg(feature = "citygml")]
+pub mod citygml;
 pub mod inspect;
 pub mod merger;
 pub mod reader;
@@ -61,4 +68,7 @@ pub enum CliError {
 
     #[error("CityJSON error: {0}")]
     Cjseq(#[from] cjseq::CjseqError),
+
+    #[error("CityGML error: {0}")]
+    CityGml(String),
 }

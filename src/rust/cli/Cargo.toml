@@ -34,6 +34,22 @@ glob = "0.3"
 tokio = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+citygml-core = { workspace = true, optional = true }
+citygml2 = { workspace = true, optional = true }
+citygml3 = { workspace = true, optional = true }
+cityparquet-schema = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+
+[features]
+default = ["citygml"]
+# CityGML 2.0 and 3.0 in `fcb ser` and out of `fcb deser`.
+citygml = [
+  "dep:citygml-core",
+  "dep:citygml2",
+  "dep:citygml3",
+  "dep:cityparquet-schema",
+  "dep:tempfile",
+]
 
 [dev-dependencies]
 tempfile = { workspace = true }
