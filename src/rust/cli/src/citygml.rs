@@ -78,6 +78,8 @@ pub struct CityGmlInput {
 pub struct Spool {
     file: File,
     len: usize,
+    /// Subtracted from every spooled vertex as it is read back.
+    offset: [i64; 3],
 }
 
 impl Spool {
@@ -85,6 +87,7 @@ impl Spool {
         Ok(Self {
             file: tempfile::tempfile()?,
             len: 0,
+            offset: [0; 3],
         })
     }
 
@@ -103,9 +106,18 @@ impl Spool {
     ) -> Result<impl Iterator<Item = Result<CityJSONFeature, CliError>>, CliError> {
         let mut file = self.file.try_clone()?;
         file.seek(SeekFrom::Start(0))?;
-        Ok(BufReader::new(file).lines().map(|line| {
+        let offset = self.offset;
+        Ok(BufReader::new(file).lines().map(move |line| {
             let line = line?;
-            Ok(serde_json::from_str::<CityJSONFeature>(&line)?)
+            let mut feature = serde_json::from_str::<CityJSONFeature>(&line)?;
+            if offset != [0; 3] {
+                for v in &mut feature.vertices {
+                    for (c, o) in v.iter_mut().zip(offset) {
+                        *c -= o;
+                    }
+                }
+            }
+            Ok(feature)
         }))
     }
 }
@@ -162,7 +174,9 @@ fn objects(
 /// lower corner of the documents' envelopes together, and `scale` comes
 /// from the units of their CRS (a degree axis gets a nano-degree step, a
 /// metre axis a millimetre), the same rule cityparquet applies to the same
-/// documents. The documents must declare the same CRS. Several documents
+/// documents. When no document declares an envelope, `translate` is the
+/// smallest coordinate the features hold instead, so that they fit the 32-bit
+/// vertices of FlatCityBuf. The documents must declare the same CRS. Several documents
 /// with implicit geometries cannot be combined, because an instance names
 /// its template by its position in its own document.
 pub fn read(paths: &[PathBuf]) -> Result<CityGmlInput, CliError> {
@@ -230,6 +244,7 @@ pub fn read(paths: &[PathBuf]) -> Result<CityGmlInput, CliError> {
 
     let mut spool = Spool::new()?;
     let mut report = ReadReport::default();
+    let mut lowest = [i64::MAX; 3];
     {
         let mut out = BufWriter::new(&spool.file);
         for (path, version, document) in sources {
@@ -240,6 +255,11 @@ pub fn read(paths: &[PathBuf]) -> Result<CityGmlInput, CliError> {
             for feature in features.by_ref() {
                 let feature =
                     feature.map_err(|e| CliError::CityGml(format!("{}: {e}", path.display())))?;
+                for v in &feature.vertices {
+                    for (l, c) in lowest.iter_mut().zip(v) {
+                        *l = (*l).min(*c);
+                    }
+                }
                 serde_json::to_writer(&mut out, &feature)?;
                 out.write_all(b"\n")?;
                 spool.len += 1;
@@ -250,6 +270,15 @@ pub fn read(paths: &[PathBuf]) -> Result<CityGmlInput, CliError> {
             add_counts(&mut report.ade_geometries, reader.ade_geometries());
         }
         out.flush()?;
+    }
+    // Without an envelope the transform was built with no translate; the
+    // integers are shifted onto their own minimum, which loses nothing.
+    if envelope.is_none() && lowest[0] != i64::MAX {
+        spool.offset = lowest;
+        let t = &mut header.transform;
+        for ((translate, scale), l) in t.translate.iter_mut().zip(t.scale).zip(lowest) {
+            *translate += l as f64 * scale;
+        }
     }
     Ok(CityGmlInput {
         header,
@@ -392,7 +421,14 @@ pub fn write<R: Read, W: Write>(
     version: CityGmlVersion,
 ) -> Result<WriteReport, CliError> {
     let mut reader = FcbReader::open(input)?.select_all_seq()?;
-    let header = deserializer::to_cj_metadata(&reader.header())?;
+    let mut header = deserializer::to_cj_metadata(&reader.header())?;
+    // `to_cj_metadata` reads an absent extent as all zeros, which the
+    // writer would declare as the document's envelope.
+    if reader.header().geographical_extent().is_none() {
+        if let Some(metadata) = header.metadata.as_mut() {
+            metadata.geographical_extent = None;
+        }
+    }
     let options = citygml_core::convert::cjseq::WriterOptions::default();
     let report = match version {
         CityGmlVersion::V2_0 => {

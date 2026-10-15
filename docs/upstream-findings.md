@@ -1865,3 +1865,21 @@ writer wrapped the coordinate silently into a different position.
 **Fix:** both writers return an error (`Error::VertexOutOfRange` in Rust,
 `ErrorCode::VertexOutOfRange` in C++). Nothing that fits is affected; the
 corpus is byte-identical.
+
+## 41. Every reader invents a zero `geographicalExtent` for a header that has none — NOT FIXED (worked around in `fcb deser` to CityGML)
+
+**Where:** `fcb_core/src/reader/deserializer.rs` `to_cj_metadata` reads
+`header.geographical_extent()` with `.unwrap_or_default()`, so an absent
+extent becomes `[0, 0, 0, 0, 0, 0]`. The C++, Python and TypeScript readers
+copy this on purpose to match the oracle (`src/cpp/src/cityjson.cpp`,
+`src/py/flatcitybuf/cityjson.py`, `src/ts/src/cityjson/index.ts`), and 7 of
+the 20 `conformance/*.expected.jsonl` files carry it.
+
+It invents data: a CityGML document written from such a header declares the
+envelope `0 0 0` to `0 0 0`, and reading that document again quantises its
+coordinates from translate 0, past the 32-bit vertex range.
+
+**Workaround:** `fcb_cli::citygml::write` drops the extent when the file's
+header has none. **Fix, if wanted:** read an absent extent as absent in all
+four readers and regenerate the seven expected files; a reader change across
+the corpus, so left for a decision.

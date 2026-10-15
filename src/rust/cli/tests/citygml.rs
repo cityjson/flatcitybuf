@@ -5,7 +5,8 @@
 //! must give the same features back, whole, so FlatCityBuf loses nothing the
 //! crates read. The second leg writes the `.fcb` as CityGML and reads that
 //! back through `fcb ser`, which must give the same features again, unless
-//! the writer reports leaving something out.
+//! the writer reports leaving something out. An ADE document is read from
+//! where it lies, so the schema it names by a relative path is found.
 //!
 //! The committed fixtures are small real documents. `FCB_CITYGML_FIXTURES`
 //! names a directory of further `.gml` files (the PLATEAU set the CityGML
@@ -126,6 +127,38 @@ fn dereferenced(mut feature: Value) -> Value {
             }
         }
     }
+    feature
+}
+
+/// `feature` with every number and boolean under an `attributes` member
+/// written as its JSON text. The CityGML writer names an ADE's schema by its
+/// published URL, which the reader never fetches, so an ADE attribute typed
+/// from the schema next to the source document comes back as text.
+fn untyped_attributes(mut feature: Value) -> Value {
+    fn as_text(v: &mut Value) {
+        match v {
+            Value::Number(_) | Value::Bool(_) => *v = Value::String(v.to_string()),
+            Value::Array(items) => items.iter_mut().for_each(as_text),
+            Value::Object(members) => members.values_mut().for_each(as_text),
+            _ => {}
+        }
+    }
+    fn walk(v: &mut Value) {
+        match v {
+            Value::Array(items) => items.iter_mut().for_each(walk),
+            Value::Object(members) => {
+                for (k, m) in members.iter_mut() {
+                    if k == "attributes" {
+                        as_text(m);
+                    } else {
+                        walk(m);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(&mut feature);
     feature
 }
 
@@ -252,7 +285,9 @@ fn round_trip(gml: &Path, version: &str) {
     fcb(&[Path::new("deser"), &fcb_again, &seq_again]);
     let (_, again) = read_seq(&seq_again);
     let deref = |m: BTreeMap<String, Value>| -> BTreeMap<String, Value> {
-        m.into_iter().map(|(id, f)| (id, dereferenced(f))).collect()
+        m.into_iter()
+            .map(|(id, f)| (id, untyped_attributes(dereferenced(f))))
+            .collect()
     };
     assert_same_features(
         &format!("{} → fcb → CityGML {version} → fcb", gml.display()),
@@ -274,6 +309,14 @@ fn plateau_bridge_citygml3() {
 #[test]
 fn implicit_geometries() {
     round_trip(&fixtures().join("railway_trees_fragment.gml"), "2.0");
+}
+
+/// A document with no `gml:boundedBy` in metres: the transform cannot
+/// start from an envelope, and coordinates in the millions must still fit a
+/// 32-bit vertex.
+#[test]
+fn no_envelope() {
+    round_trip(&fixtures().join("melbourne_road_no_envelope.v3.gml"), "3.0");
 }
 
 /// Every `.gml` in `FCB_CITYGML_FIXTURES`, written back as the version it

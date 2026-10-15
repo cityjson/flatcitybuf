@@ -111,7 +111,9 @@ the same reader `cityparquet` uses, so both tools give the same CityJSON for a
 document. Several files must share one CRS. The transform is chosen from their
 envelopes before any feature is read: its translate is the lower corner, and
 its scale follows the CRS's axis units (0.001 m for metres, 1e-9 for degrees,
-so EPSG:6697 keeps millimetre precision). Implicit-geometry templates are
+so EPSG:6697 keeps millimetre precision). A document with no envelope gets the
+smallest coordinate its features hold as translate instead, so that its
+vertices fit FlatCityBuf's 32-bit integers. Implicit-geometry templates are
 supported for a single document only. ADE schemas are read only from a relative
 `xsi:schemaLocation` next to the document; URLs are never fetched. Features
 are spooled to a temporary file while the attribute schemas are built, so

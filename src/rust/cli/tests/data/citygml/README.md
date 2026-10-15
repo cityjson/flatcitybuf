@@ -9,4 +9,5 @@ provenance).
 | --- | --- |
 | `53394610_brid_6697_op.gml` | [PLATEAU](https://www.mlit.go.jp/plateau/) Chiyoda-ku 2025, `udx/brid/`, CityGML 2.0. MLIT, under the [PLATEAU site policy](https://www.mlit.go.jp/plateau/site-policy/), compatible with CC BY 4.0. |
 | `53394610_brid_6697_op.v3.gml` | The same file after `citygml-tools upgrade -l -s -r` (citygml-tools 2.5.0): CityGML 3.0. |
+| `melbourne_road_no_envelope.v3.gml` | `citygml3_individual_section_1carriageway.gml` from the OGC's [CityGML-3.0Encodings](https://github.com/opengeospatial/CityGML-3.0Encodings) (commit `910208e`, MIT licence): a Melbourne Open Data road section in EPSG:32755 with no `gml:boundedBy`. |
 | `railway_trees_fragment.gml` | `citygml-tools from-cityjson` (2.5.0) on cityjson.org's LoD 3 Railway (after the KIT/IAI Railway reference dataset, free for unrestricted use), cut to the CityObjectGroup, fifteen trees with `ImplicitGeometry`, and the CityModel-level appearance. |
