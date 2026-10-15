@@ -36,6 +36,7 @@ the `feature.fbs` schema (see `src/fbs/feature.fbs`) defines the structure of ci
 
 - **cityfeature**: the root object containing city objects and shared vertices
 - **cityobject**: individual 3d features with type, geometry, and attributes
+- **address**: one entry of a city object's CityJSON `address` array (see below)
 - **geometry**: complex structure for 3d geometries with boundaries and semantics
 - **semanticobject**: semantic classification of geometry parts
 
@@ -337,6 +338,16 @@ attributes must be decoded against the schema of the `CityObject` that owns them
 - this is the normal case, not an edge case: in `examples/data/delft.fcb`, **all 1115 objects that carry attributes declare their own columns**, and the header's 44 columns are never used for decoding.
 - objects within one feature differ: the `Building` parent carries no attributes while its `BuildingPart` child carries them all. code must walk all objects rather than assuming object 0.
 - getting this wrong does **not** fail loudly. attribute records are not self-delimiting — each value's width comes from its column's type — so a wrong schema desynchronises the remainder of the blob and yields plausible-looking garbage instead of an error. it surfaced as a nonsense column index (28777, which is ASCII `"ip"` from the middle of a string value) during the native C++ port.
+
+### city object addresses
+
+`CityObject.address` holds the CityJSON `address` array, one `Address` table per entry, in order. an address's members are free-form, so each `Address` carries its own schema:
+
+- `Address.columns` is the schema its `attributes` blob is encoded with. it is always set when `attributes` is; `Header.columns` is never used for an address.
+- `Address.attributes` holds every member but `location`, encoded exactly as object attributes are (see "null values": a `null` member is not written).
+- `Address.location` is the `location` member, a `MultiPoint` `Geometry` whose boundaries index the feature's `vertices`, like any other geometry of the feature.
+
+an absent `address` field means the object has no addresses. files written before the field existed read as having none.
 
 ### attribute access
 

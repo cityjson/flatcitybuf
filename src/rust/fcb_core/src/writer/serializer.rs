@@ -1,9 +1,9 @@
 use crate::attribute::{encode_attributes_with_schema, AttributeSchema, AttributeSchemaMethods};
 use crate::fb::{
-    Appearance, AppearanceArgs, CityFeature, CityFeatureArgs, CityObject, CityObjectArgs,
-    CityObjectType, Geometry, GeometryArgs, GeometryType, Material, MaterialArgs, SemanticObject,
-    SemanticObjectArgs, SemanticSurfaceType, Texture, TextureArgs, TextureType, Vec2, Vertex,
-    WrapMode,
+    Address, AddressArgs, Appearance, AppearanceArgs, CityFeature, CityFeatureArgs, CityObject,
+    CityObjectArgs, CityObjectType, Geometry, GeometryArgs, GeometryType, Material, MaterialArgs,
+    SemanticObject, SemanticObjectArgs, SemanticSurfaceType, Texture, TextureArgs, TextureType,
+    Vec2, Vertex, WrapMode,
 };
 use crate::fb::{Column, ColumnArgs};
 use crate::fb::{
@@ -17,11 +17,11 @@ use crate::{
 };
 use cjseq::{
     Appearance as CjAppearance, BorderColor as CjBorderColor, CityJSON, CityJSONFeature,
-    CityObject as CjCityObject, CityObjectType as CjCityObjectType, Geometry as CjGeometry,
-    GeometryType as CjGeometryType, Index as _, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, SemanticSurfaceType as CjSemanticSurfaceType,
-    TextureFormat as CjTextureFormat, TextureType as CjTextureType, Transform as CjTransform,
-    WrapMode as CjWrapMode,
+    CityObject as CjCityObject, CityObjectAddress as CjCityObjectAddress,
+    CityObjectType as CjCityObjectType, Geometry as CjGeometry, GeometryType as CjGeometryType,
+    Index as _, PointOfContact as CjPointOfContact, ReferenceSystem as CjReferenceSystem,
+    SemanticSurfaceType as CjSemanticSurfaceType, TextureFormat as CjTextureFormat,
+    TextureType as CjTextureType, Transform as CjTransform, WrapMode as CjWrapMode,
 };
 
 use crate::packed_rtree::NodeItem;
@@ -721,6 +721,17 @@ pub(super) fn to_city_object<'a>(
         parents.map(|p| fbb.create_vector(&p))
     };
 
+    let address = match &co.address {
+        None => None,
+        Some(addresses) => {
+            let addresses = addresses
+                .iter()
+                .map(|a| to_address(fbb, a))
+                .collect::<Result<Vec<_>>>()?;
+            Some(fbb.create_vector(&addresses))
+        }
+    };
+
     Ok(CityObject::create(
         fbb,
         &CityObjectArgs {
@@ -735,6 +746,40 @@ pub(super) fn to_city_object<'a>(
             children,
             children_roles,
             parents,
+            address,
+        },
+    ))
+}
+
+/// Converts one address of a City Object. Its members other than `location`
+/// are free-form, so they are encoded with a schema of their own, which the
+/// address carries.
+pub(super) fn to_address<'a>(
+    fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
+    address: &CjCityObjectAddress,
+) -> Result<flatbuffers::WIPOffset<Address<'a>>> {
+    let location = address
+        .location
+        .as_ref()
+        .map(|g| to_geometry(fbb, g, None))
+        .transpose()?;
+    let (attributes, columns) = if address.other.is_empty() {
+        (None, None)
+    } else {
+        let mut schema = AttributeSchema::new();
+        schema.add_attributes(&address.other);
+        let encoded = encode_attributes_with_schema(&address.other, &schema);
+        (
+            Some(fbb.create_vector(&encoded)),
+            Some(to_columns(fbb, &schema)),
+        )
+    };
+    Ok(Address::create(
+        fbb,
+        &AddressArgs {
+            attributes,
+            columns,
+            location,
         },
     ))
 }
