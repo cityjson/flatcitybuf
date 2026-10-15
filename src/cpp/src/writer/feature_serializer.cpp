@@ -5,6 +5,9 @@
 #    include <fcb/error.hpp>
 
 #    include <algorithm>
+#    include <cstdint>
+#    include <limits>
+#    include <string>
 
 namespace fcb {
 
@@ -387,6 +390,19 @@ to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb,
 
 namespace {
 
+/// A quantised vertex coordinate as a FlatCityBuf `Vertex` member, which is
+/// 32-bit. A coordinate outside that range is an error rather than a silent
+/// truncation, as `Error::VertexOutOfRange` is in the Rust writer.
+std::int32_t to_vertex_coordinate(const nlohmann::ordered_json& c) {
+    const auto v = c.get<std::int64_t>();
+    if (v < std::numeric_limits<std::int32_t>::min() ||
+        v > std::numeric_limits<std::int32_t>::max())
+        throw Error(ErrorCode::VertexOutOfRange,
+                    "vertex coordinate " + std::to_string(v) +
+                        " is outside the 32-bit range of a FlatCityBuf Vertex");
+    return static_cast<std::int32_t>(v);
+}
+
 /// Encodes `attr` against `schema`, or against a freshly-built schema of
 /// its own when `attr` carries a key `schema` does not know. Mirrors
 /// `to_fcb_attribute` (writer/serializer.rs:1151-1174).
@@ -609,8 +625,8 @@ to_fcb_city_feature(::flatbuffers::FlatBufferBuilder& fbb, const std::string& id
         for (const auto& v : *it) {
             const double x = v.at(0).get<double>();
             const double y = v.at(1).get<double>();
-            fb_vertices.emplace_back(v.at(0).get<std::int32_t>(), v.at(1).get<std::int32_t>(),
-                                     v.at(2).get<std::int32_t>());
+            fb_vertices.emplace_back(to_vertex_coordinate(v.at(0)), to_vertex_coordinate(v.at(1)),
+                                     to_vertex_coordinate(v.at(2)));
             if (first) {
                 min_x = max_x = x;
                 min_y = max_y = y;
