@@ -41,95 +41,6 @@ fn fcb(args: &[&Path]) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned() + &String::from_utf8_lossy(&output.stderr)
 }
 
-/// `feature` without an empty `geometry` array, which FlatCityBuf reads back
-/// absent.
-fn without_empty_geometry(mut feature: Value) -> Value {
-    if let Some(objects) = feature["CityObjects"].as_object_mut() {
-        for object in objects.values_mut() {
-            let o = object.as_object_mut().unwrap();
-            if o.get("geometry")
-                .and_then(Value::as_array)
-                .is_some_and(Vec::is_empty)
-            {
-                o.remove("geometry");
-            }
-        }
-    }
-    feature
-}
-
-/// `feature` with each geometry's material and texture indices replaced by
-/// the material, and the texture and UV coordinates, they index, and its
-/// appearance pools dropped: a CityGML document has no pools, so reading one
-/// back may number the same appearance differently.
-fn dereferenced(mut feature: Value) -> Value {
-    let appearance = feature
-        .as_object_mut()
-        .and_then(|f| f.remove("appearance"))
-        .unwrap_or(Value::Null);
-    let materials = appearance["materials"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let textures = appearance["textures"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let uvs = appearance["vertices-texture"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let at = |pool: &[Value], i: &Value| {
-        i.as_u64()
-            .and_then(|i| pool.get(i as usize).cloned())
-            .unwrap_or(Value::Null)
-    };
-    if let Some(objects) = feature["CityObjects"].as_object_mut() {
-        for object in objects.values_mut() {
-            let o = object.as_object_mut().unwrap();
-            for geometry in o
-                .get_mut("geometry")
-                .and_then(Value::as_array_mut)
-                .into_iter()
-                .flatten()
-            {
-                for theme in geometry
-                    .get_mut("material")
-                    .and_then(Value::as_object_mut)
-                    .into_iter()
-                    .flat_map(|m| m.values_mut())
-                {
-                    if let Some(v) = theme.get_mut("value") {
-                        *v = at(&materials, v);
-                    }
-                    if let Some(v) = theme.get_mut("values") {
-                        map_leaves(v, &mut |i| *i = at(&materials, i));
-                    }
-                }
-                for theme in geometry
-                    .get_mut("texture")
-                    .and_then(Value::as_object_mut)
-                    .into_iter()
-                    .flat_map(|t| t.values_mut())
-                {
-                    if let Some(v) = theme.get_mut("values") {
-                        map_rings(v, &mut |ring| {
-                            for (k, i) in ring.iter_mut().enumerate() {
-                                *i = if k == 0 {
-                                    at(&textures, i)
-                                } else {
-                                    at(&uvs, i)
-                                };
-                            }
-                        });
-                    }
-                }
-            }
-        }
-    }
-    feature
-}
-
 /// `feature` with every number and boolean under an `attributes` member
 /// written as its JSON text. The CityGML writer names an ADE's schema by its
 /// published URL, which the reader never fetches, so an ADE attribute typed
@@ -162,26 +73,6 @@ fn untyped_attributes(mut feature: Value) -> Value {
     feature
 }
 
-/// Apply `f` to every number or null in `v`'s nested arrays.
-fn map_leaves(v: &mut Value, f: &mut impl FnMut(&mut Value)) {
-    match v {
-        Value::Array(items) => items.iter_mut().for_each(|i| map_leaves(i, f)),
-        leaf => f(leaf),
-    }
-}
-
-/// Apply `f` to every innermost array of `v`: a texture ring, its texture
-/// index then its UV indices.
-fn map_rings(v: &mut Value, f: &mut impl FnMut(&mut Vec<Value>)) {
-    if let Value::Array(items) = v {
-        if items.first().is_some_and(|i| !i.is_array()) {
-            f(items);
-        } else {
-            items.iter_mut().for_each(|i| map_rings(i, f));
-        }
-    }
-}
-
 /// A CityJSONSeq file's header and its features by id.
 fn read_seq(path: &Path) -> (Value, BTreeMap<String, Value>) {
     let mut lines = BufReader::new(File::open(path).unwrap()).lines();
@@ -189,10 +80,7 @@ fn read_seq(path: &Path) -> (Value, BTreeMap<String, Value>) {
     let features = lines
         .map(|l| {
             let f: Value = serde_json::from_str(&l.unwrap()).unwrap();
-            (
-                f["id"].as_str().unwrap().to_string(),
-                without_empty_geometry(f),
-            )
+            (f["id"].as_str().unwrap().to_string(), f)
         })
         .collect();
     (header, features)
@@ -207,10 +95,7 @@ fn oracle(gml: &Path) -> (cjseq::CityJSON, BTreeMap<String, Value>) {
         .unwrap()
         .map(|f| {
             let f = serde_json::to_value(f.unwrap()).unwrap();
-            (
-                f["id"].as_str().unwrap().to_string(),
-                without_empty_geometry(f),
-            )
+            (f["id"].as_str().unwrap().to_string(), f)
         })
         .collect();
     (input.header, features)
@@ -259,6 +144,21 @@ fn round_trip(gml: &Path, version: &str) {
         "{}: transform",
         gml.display()
     );
+    // The transform cityparquet picks for the same document, unless the
+    // document has no envelope to pick it from.
+    let shared = citygml::header(gml).unwrap();
+    if shared
+        .metadata
+        .as_ref()
+        .is_some_and(|m| m.geographical_extent.is_some())
+    {
+        assert_eq!(
+            serde_json::to_value(&header.transform).unwrap(),
+            serde_json::to_value(&shared.transform).unwrap(),
+            "{}: transform differs from citygml::header's",
+            gml.display()
+        );
+    }
     assert!(!expected.is_empty(), "{}: no features", gml.display());
     assert_same_features(&format!("{} → fcb", gml.display()), &expected, &actual);
 
@@ -286,7 +186,7 @@ fn round_trip(gml: &Path, version: &str) {
     let (_, again) = read_seq(&seq_again);
     let deref = |m: BTreeMap<String, Value>| -> BTreeMap<String, Value> {
         m.into_iter()
-            .map(|(id, f)| (id, untyped_attributes(dereferenced(f))))
+            .map(|(id, f)| (id, untyped_attributes(f)))
             .collect()
     };
     assert_same_features(
@@ -333,8 +233,8 @@ fn fixtures_from_environment() {
         .collect();
     paths.sort();
     for path in paths {
-        let version = match citygml_core::sniff(&path) {
-            Some(citygml_core::Version::V3_0) => "3.0",
+        let version = match citygml::sniff(&path) {
+            Some(citygml::Version::V3_0) => "3.0",
             _ => "2.0",
         };
         eprintln!("{}", path.display());

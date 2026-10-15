@@ -1,8 +1,8 @@
 //! CityGML 2.0 and 3.0, in and out of `.fcb`.
 //!
-//! No XML is read or written here. The `citygml2` and `citygml3` crates turn
-//! a document into `cjseq` features and features back into a document; this
-//! module chooses the transform the features are quantised against, spools
+//! No XML is read or written here. The `citygml` crate turns a document of
+//! either version into a CityJSON header and `cjseq` features, and features
+//! back into a document; this module combines several documents' headers, spools
 //! them so that `fcb ser` can pass over them more than once, and feeds an
 //! `.fcb`'s features to a writer.
 //!
@@ -15,10 +15,8 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use citygml_core::reader::{scan_preamble, Document, ObjectStream};
-use citygml_core::Version;
-use cityparquet_schema::crs::{axis_scale, resolve_to_projjson, MM};
-use cjseq::{CityJSON, CityJSONFeature, Metadata, ReferenceSystem, Transform};
+use citygml::Version;
+use cjseq::{CityJSON, CityJSONFeature};
 use fcb_core::{deserializer, FcbReader};
 
 use crate::CliError;
@@ -123,19 +121,18 @@ impl Spool {
 }
 
 /// A CityGML document's error, as the CLI's.
-fn gml_error(e: citygml_core::Error) -> CliError {
+fn gml_error(e: citygml::Error) -> CliError {
     CliError::CityGml(e.to_string())
 }
 
 /// The version of the CityGML document at `path`, which a reader exists for.
-fn version_of(path: &Path) -> Result<CityGmlVersion, CliError> {
-    match citygml_core::sniff(path) {
-        Some(Version::V2_0) => Ok(CityGmlVersion::V2_0),
-        Some(Version::V3_0) => Ok(CityGmlVersion::V3_0),
+fn version_of(path: &Path) -> Result<Version, CliError> {
+    match citygml::sniff(path) {
         Some(Version::Other(v)) => Err(CliError::CityGml(format!(
             "{}: unsupported CityGML version {v} (only 2.0 and 3.0 are read)",
             path.display()
         ))),
+        Some(version) => Ok(version),
         None => Err(CliError::CityGml(format!(
             "{} is not a CityGML document",
             path.display()
@@ -143,104 +140,47 @@ fn version_of(path: &Path) -> Result<CityGmlVersion, CliError> {
     }
 }
 
-/// Read `path` once for what its objects need from elsewhere in it.
-fn read_document(path: &Path, version: CityGmlVersion) -> Result<Document, CliError> {
-    match version {
-        CityGmlVersion::V2_0 => citygml2::read_document(path),
-        CityGmlVersion::V3_0 => citygml3::read_document(path),
-    }
-    .map_err(gml_error)
-}
-
-/// The objects of `path` as a stream, with `document` already read.
-fn objects(
-    path: &Path,
-    version: CityGmlVersion,
-    document: Arc<Document>,
-) -> Result<Box<dyn ObjectStream + Send>, CliError> {
-    Ok(match version {
-        CityGmlVersion::V2_0 => {
-            Box::new(citygml2::FeatureReader::with_document(path, document).map_err(gml_error)?)
-        }
-        CityGmlVersion::V3_0 => {
-            Box::new(citygml3::FeatureReader::with_document(path, document).map_err(gml_error)?)
-        }
-    })
-}
-
 /// Read the CityGML documents at `paths` as one CityJSON dataset.
 ///
-/// Every feature is quantised against one transform: `translate` is the
-/// lower corner of the documents' envelopes together, and `scale` comes
-/// from the units of their CRS (a degree axis gets a nano-degree step, a
-/// metre axis a millimetre), the same rule cityparquet applies to the same
-/// documents. When no document declares an envelope, `translate` is the
-/// smallest coordinate the features hold instead, so that they fit the 32-bit
-/// vertices of FlatCityBuf. The documents must declare the same CRS. Several documents
-/// with implicit geometries cannot be combined, because an instance names
-/// its template by its position in its own document.
+/// One document's header is the one `citygml::header_with` builds for it,
+/// the same cityparquet takes: `translate` is the lower corner of its
+/// envelope and `scale` follows the units of its CRS (a nano-degree on a
+/// degree axis, a millimetre on a metre axis). Several documents must
+/// declare the same CRS, and share one transform from their envelopes
+/// together. When no document declares an envelope, `translate` is the
+/// smallest coordinate the features hold instead, so that they fit the
+/// 32-bit vertices of FlatCityBuf. Several documents with implicit
+/// geometries cannot be combined, because an instance names its template by
+/// its position in its own document.
 pub fn read(paths: &[PathBuf]) -> Result<CityGmlInput, CliError> {
     let mut sources = Vec::with_capacity(paths.len());
-    let mut srs: Option<(PathBuf, String)> = None;
-    let mut envelope: Option<[f64; 6]> = None;
+    let mut header: Option<CityJSON> = None;
+    let mut extensions = BTreeMap::new();
+    let mut with_templates = 0;
     for path in paths {
         let version = version_of(path)?;
-        let preamble = scan_preamble(BufReader::new(File::open(path)?)).map_err(gml_error)?;
-        if let Some(name) = preamble.srs_name {
-            match &srs {
-                Some((first, other)) if crs_code(other) != crs_code(&name) => {
-                    return Err(CliError::CityGml(format!(
-                        "{} declares the CRS {name}, but {} declares {other}; \
-                         documents in different CRSs cannot be combined",
-                        path.display(),
-                        first.display()
-                    )));
-                }
-                Some(_) => {}
-                None => srs = Some((path.clone(), name)),
-            }
+        let document = citygml::read_document(path, &version).map_err(gml_error)?;
+        let mut own = citygml::header_with(path, &document).map_err(gml_error)?;
+        if !document.templates().is_empty() {
+            with_templates += 1;
         }
-        if let Some(e) = preamble.envelope {
-            envelope = Some(match envelope {
-                None => e,
-                Some(u) => [
-                    u[0].min(e[0]),
-                    u[1].min(e[1]),
-                    u[2].min(e[2]),
-                    u[3].max(e[3]),
-                    u[4].max(e[4]),
-                    u[5].max(e[5]),
-                ],
-            });
-        }
-        let document = Arc::new(read_document(path, version)?);
-        sources.push((path.clone(), version, document));
+        extensions.extend(own.extensions.take().into_iter().flatten());
+        header = Some(match header {
+            None => own,
+            Some(combined) => combine(combined, own, &paths[0], path)?,
+        });
+        sources.push((path.clone(), version, Arc::new(document)));
     }
-
-    let srs_name = srs.map(|(_, name)| name);
-    let mut header = header(srs_name.as_deref(), envelope)?;
-
-    let with_templates = sources
-        .iter()
-        .filter(|(_, _, d)| !d.templates().is_empty())
-        .count();
     if with_templates > 0 && sources.len() > 1 {
         return Err(CityGmlError::TemplatesAcrossDocuments.into());
     }
-    let mut extensions = BTreeMap::new();
-    for (_, _, document) in &sources {
-        if let Some((templates, appearance)) =
-            citygml_core::convert::cjseq::geometry_templates(document.templates())
-                .map_err(gml_error)?
-        {
-            header.geometry_templates = Some(templates);
-            header.appearance = appearance;
-        }
-        extensions.extend(citygml_core::convert::cjseq::extensions(document.ade()));
-    }
+    let Some(mut header) = header else {
+        return Err(CliError::CityGml("no CityGML document given".into()));
+    };
     if !extensions.is_empty() {
         header.extensions = Some(extensions.into_iter().collect());
     }
+    let has_envelope = extent(&header).is_some();
 
     let mut spool = Spool::new()?;
     let mut report = ReadReport::default();
@@ -248,10 +188,9 @@ pub fn read(paths: &[PathBuf]) -> Result<CityGmlInput, CliError> {
     {
         let mut out = BufWriter::new(&spool.file);
         for (path, version, document) in sources {
-            let mut features = citygml_core::reader::Features::new(
-                objects(&path, version, document)?,
-                header.transform.clone(),
-            );
+            let mut features =
+                citygml::FeatureReader::with_document(&path, &version, &header.transform, document)
+                    .map_err(gml_error)?;
             for feature in features.by_ref() {
                 let feature =
                     feature.map_err(|e| CliError::CityGml(format!("{}: {e}", path.display())))?;
@@ -264,16 +203,16 @@ pub fn read(paths: &[PathBuf]) -> Result<CityGmlInput, CliError> {
                 out.write_all(b"\n")?;
                 spool.len += 1;
             }
-            let reader = features.reader();
-            add_counts(&mut report.skipped_members, reader.skipped_members());
-            add_counts(&mut report.ade_members, reader.ade_members());
-            add_counts(&mut report.ade_geometries, reader.ade_geometries());
+            let objects = features.objects();
+            add_counts(&mut report.skipped_members, objects.skipped_members());
+            add_counts(&mut report.ade_members, objects.ade_members());
+            add_counts(&mut report.ade_geometries, objects.ade_geometries());
         }
         out.flush()?;
     }
-    // Without an envelope the transform was built with no translate; the
-    // integers are shifted onto their own minimum, which loses nothing.
-    if envelope.is_none() && lowest[0] != i64::MAX {
+    // Without an envelope the transform has no translate; the integers are
+    // shifted onto their own minimum, which loses nothing.
+    if !has_envelope && lowest[0] != i64::MAX {
         spool.offset = lowest;
         let t = &mut header.transform;
         for ((translate, scale), l) in t.translate.iter_mut().zip(t.scale).zip(lowest) {
@@ -285,6 +224,67 @@ pub fn read(paths: &[PathBuf]) -> Result<CityGmlInput, CliError> {
         features: spool,
         report,
     })
+}
+
+/// A header's extent, when its document declares an envelope.
+fn extent(header: &CityJSON) -> Option<[f64; 6]> {
+    header.metadata.as_ref()?.geographical_extent
+}
+
+/// The header for the documents of `combined` and of `own` (the header of
+/// `path`) together: one CRS, and one transform from their envelopes.
+fn combine(
+    mut combined: CityJSON,
+    own: CityJSON,
+    first: &Path,
+    path: &Path,
+) -> Result<CityJSON, CliError> {
+    let crs = |h: &CityJSON| {
+        h.metadata
+            .as_ref()
+            .and_then(|m| m.reference_system.as_ref())
+            .and_then(|r| serde_json::to_string(r).ok())
+    };
+    if let (Some(a), Some(b)) = (crs(&combined), crs(&own)) {
+        if a != b {
+            return Err(CliError::CityGml(format!(
+                "{} declares the CRS {b}, but {} declares {a}; \
+                 documents in different CRSs cannot be combined",
+                path.display(),
+                first.display()
+            )));
+        }
+    }
+    if combined.transform.scale != own.transform.scale {
+        return Err(CliError::CityGml(format!(
+            "{} and {} are quantised at different steps; \
+             documents in different CRSs cannot be combined",
+            first.display(),
+            path.display()
+        )));
+    }
+    let union = match (extent(&combined), extent(&own)) {
+        (Some(u), Some(e)) => Some(std::array::from_fn(|i| {
+            if i < 3 {
+                u[i].min(e[i])
+            } else {
+                u[i].max(e[i])
+            }
+        })),
+        (u, e) => u.or(e),
+    };
+    if let Some(u) = union {
+        combined.transform.translate = [u[0], u[1], u[2]];
+    }
+    match (combined.metadata.as_mut(), own.metadata) {
+        (Some(m), _) => m.geographical_extent = union,
+        (None, Some(mut m)) => {
+            m.geographical_extent = union;
+            combined.metadata = Some(m);
+        }
+        (None, None) => {}
+    }
+    Ok(combined)
 }
 
 fn add_counts(into: &mut BTreeMap<String, usize>, from: &BTreeMap<String, usize>) {
@@ -307,99 +307,6 @@ impl From<CityGmlError> for CliError {
     fn from(e: CityGmlError) -> Self {
         CliError::CityGml(e.to_string())
     }
-}
-
-/// The CityJSON header for documents in `srs_name` within `envelope`: the
-/// transform, the extent and the reference system.
-fn header(srs_name: Option<&str>, envelope: Option<[f64; 6]>) -> Result<CityJSON, CliError> {
-    let translate = match &envelope {
-        Some(e) => [e[0], e[1], e[2]],
-        None => [0.0, 0.0, 0.0],
-    };
-    let crs = srs_name.map(resolve_crs).unwrap_or(Crs::Unresolved);
-    let key = match &crs {
-        Crs::Epsg(code) => Some(code.clone()),
-        Crs::Crs84 => Some("OGC:CRS84".to_string()),
-        Crs::Unresolved => None,
-    };
-    // A CRS the PROJJSON table does not know keeps the millimetre step.
-    let scale = match key.as_deref().and_then(|k| resolve_to_projjson(k).ok()) {
-        Some(projjson) => axis_scale(&projjson).map_err(|e| CliError::CityGml(e.to_string()))?,
-        None => [MM; 3],
-    };
-
-    let mut header = CityJSON::new();
-    header.transform = Transform { scale, translate };
-    let reference_system = match crs {
-        Crs::Epsg(code) => Some(ReferenceSystem::new(
-            None,
-            "EPSG".to_string(),
-            "0".to_string(),
-            code,
-        )),
-        Crs::Crs84 => Some(ReferenceSystem::new(
-            None,
-            "OGC".to_string(),
-            "1.3".to_string(),
-            "CRS84".to_string(),
-        )),
-        Crs::Unresolved => None,
-    };
-    if envelope.is_some() || reference_system.is_some() {
-        header.metadata = Some(Metadata {
-            geographical_extent: envelope,
-            identifier: None,
-            point_of_contact: None,
-            reference_date: None,
-            reference_system,
-            title: None,
-            other: serde_json::Map::new(),
-        });
-    }
-    Ok(header)
-}
-
-/// What an `srsName` names.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Crs {
-    Epsg(String),
-    /// `OGC:CRS84`, which has no EPSG code.
-    Crs84,
-    /// A name not understood: no CRS is advertised.
-    Unresolved,
-}
-
-/// The CRS code of `srs_name`, for comparing two documents' declarations.
-fn crs_code(srs_name: &str) -> Crs {
-    resolve_crs(srs_name)
-}
-
-/// Resolve an `srsName`, by the rules cityparquet's CityGML reader applies:
-/// the EPSG syntaxes, `CRS84`, and the German AdV URNs real CityGML 2.0
-/// data uses.
-fn resolve_crs(srs_name: &str) -> Crs {
-    let name = srs_name.trim();
-    if name.to_ascii_uppercase().contains("CRS84") {
-        return Crs::Crs84;
-    }
-    if let Some(rest) = name.strip_prefix("urn:adv:crs:") {
-        return match rest {
-            "ETRS89_UTM32*DE_DHHN92_NH" => Crs::Epsg("5555".to_string()),
-            "ETRS89_UTM33*DE_DHHN92_NH" => Crs::Epsg("5556".to_string()),
-            "ETRS89_UTM32" => Crs::Epsg("25832".to_string()),
-            "ETRS89_UTM33" => Crs::Epsg("25833".to_string()),
-            _ => Crs::Unresolved,
-        };
-    }
-    let tokens: Vec<&str> = name.split([':', '/']).filter(|t| !t.is_empty()).collect();
-    if !tokens.iter().any(|t| t.eq_ignore_ascii_case("EPSG")) {
-        return Crs::Unresolved;
-    }
-    tokens
-        .iter()
-        .rev()
-        .find(|t| t.len() >= 4 && t.chars().all(|c| c.is_ascii_digit()))
-        .map_or(Crs::Unresolved, |t| Crs::Epsg(t.to_string()))
 }
 
 /// What writing a CityGML document did.
@@ -429,33 +336,20 @@ pub fn write<R: Read, W: Write>(
             metadata.geographical_extent = None;
         }
     }
-    let options = citygml_core::convert::cjseq::WriterOptions::default();
-    let report = match version {
-        CityGmlVersion::V2_0 => {
-            let mut writer =
-                citygml2::writer::Writer::new(out, &header, options).map_err(gml_error)?;
-            while let Some(feature) = reader.next()? {
-                writer
-                    .write_feature(&feature.cur_cj_feature()?)
-                    .map_err(gml_error)?;
-            }
-            let (mut out, report) = writer.finish().map_err(gml_error)?;
-            out.flush()?;
-            report
-        }
-        CityGmlVersion::V3_0 => {
-            let mut writer =
-                citygml3::writer::Writer::new(out, &header, options).map_err(gml_error)?;
-            while let Some(feature) = reader.next()? {
-                writer
-                    .write_feature(&feature.cur_cj_feature()?)
-                    .map_err(gml_error)?;
-            }
-            let (mut out, report) = writer.finish().map_err(gml_error)?;
-            out.flush()?;
-            report
-        }
+    let version = match version {
+        CityGmlVersion::V2_0 => Version::V2_0,
+        CityGmlVersion::V3_0 => Version::V3_0,
     };
+    let mut writer =
+        citygml::Writer::new(&version, out, &header, citygml::WriterOptions::default())
+            .map_err(gml_error)?;
+    while let Some(feature) = reader.next()? {
+        writer
+            .write_feature(&feature.cur_cj_feature()?)
+            .map_err(gml_error)?;
+    }
+    let (mut out, report) = writer.finish().map_err(gml_error)?;
+    out.flush()?;
     Ok(WriteReport {
         features: report.features,
         objects: report.objects,
@@ -465,41 +359,4 @@ pub fn write<R: Read, W: Write>(
             .map(|(what, n)| (what.to_string(), n))
             .collect(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn srs_names_resolve_as_cityparquet_resolves_them() {
-        assert_eq!(
-            resolve_crs("http://www.opengis.net/def/crs/EPSG/0/6697"),
-            Crs::Epsg("6697".into())
-        );
-        assert_eq!(
-            resolve_crs("urn:ogc:def:crs:EPSG::28992"),
-            Crs::Epsg("28992".into())
-        );
-        assert_eq!(resolve_crs("EPSG:7415"), Crs::Epsg("7415".into()));
-        assert_eq!(
-            resolve_crs("urn:adv:crs:ETRS89_UTM32*DE_DHHN92_NH"),
-            Crs::Epsg("5555".into())
-        );
-        assert_eq!(resolve_crs("urn:ogc:def:crs:OGC:1.3:CRS84"), Crs::Crs84);
-        assert_eq!(resolve_crs("not-EPSG:1"), Crs::Unresolved);
-    }
-
-    #[test]
-    fn a_degree_crs_is_quantised_at_a_degree_step() {
-        // EPSG:6697 (JGD2011 + height), what PLATEAU declares: a millimetre
-        // step on a degree axis would quantise at about 100 m.
-        let header = header(
-            Some("http://www.opengis.net/def/crs/EPSG/0/6697"),
-            Some([139.0, 35.0, 0.0, 139.1, 35.1, 50.0]),
-        )
-        .unwrap();
-        assert_eq!(header.transform.scale, [1e-9, 1e-9, 1e-3]);
-        assert_eq!(header.transform.translate, [139.0, 35.0, 0.0]);
-    }
 }

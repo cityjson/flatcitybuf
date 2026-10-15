@@ -10,15 +10,11 @@ async-trait = { version = "0.1.85", default-features = true }
 flatbuffers = "25.9.23"
 byteorder = "1.5.0"
 cjseq = { version = "=0.5.0-alpha.1", default-features = false }
-# The CityGML crates, from the cityparquet repository until they are on
-# crates.io. They pin the same cjseq; a different one would build two
-# incompatible copies of its types.
-citygml-core = { git = "https://github.com/cityjson/cityparquet", rev = "fd259950b767f763799b88e59127dafcf95cab91" }
-citygml2 = { git = "https://github.com/cityjson/cityparquet", rev = "fd259950b767f763799b88e59127dafcf95cab91" }
-citygml3 = { git = "https://github.com/cityjson/cityparquet", rev = "fd259950b767f763799b88e59127dafcf95cab91" }
-# The CRS-unit table the CityGML header's quantisation step is read from,
-# shared with cityparquet so both tools quantise a document alike.
-cityparquet-schema = { git = "https://github.com/cityjson/cityparquet", rev = "fd259950b767f763799b88e59127dafcf95cab91" }
+# The CityGML reader and writer (the `citygml` facade over `citygml2` and
+# `citygml3`), from the cityparquet repository until they are on crates.io,
+# pinned to a commit. It pins the same cjseq; a different one would build
+# two incompatible copies of its types.
+citygml = { git = "https://github.com/cityjson/cityparquet", rev = "fdf8cda083724fcec2a9c37c3140d7089778679e" }
 tempfile = "3.14.0"
 serde_json = "1.0.133"
 indexmap = "2"
