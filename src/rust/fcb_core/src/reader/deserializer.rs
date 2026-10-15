@@ -42,17 +42,30 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
             .iter()
             .filter_map(|extension| {
                 extension.name().map(|name| {
-                    (
+                    let other = match extension.members() {
+                        Some(json) => match serde_json::from_str(json)? {
+                            Value::Object(map) => map,
+                            _ => {
+                                return Err(Error::InvalidAttributeValue {
+                                    msg: format!(
+                                        "extension {name}: `members` is not a JSON object"
+                                    ),
+                                })
+                            }
+                        },
+                        None => serde_json::Map::new(),
+                    };
+                    Ok((
                         name.to_string(),
                         CjExtension {
                             url: extension.url().unwrap_or_default().to_string(),
                             version: extension.version().unwrap_or_default().to_string(),
-                            other: serde_json::Map::new(),
+                            other,
                         },
-                    )
+                    ))
                 })
             })
-            .collect();
+            .collect::<Result<_, Error>>()?;
 
         if !extensions_map.is_empty() {
             cj.extensions = Some(extensions_map);

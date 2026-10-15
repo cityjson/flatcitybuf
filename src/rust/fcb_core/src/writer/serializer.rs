@@ -89,7 +89,7 @@ pub(super) fn to_fcb_header<'a>(
     let extensions = cj.extensions.as_ref().map(|extensions| {
         let extensions = extensions
             .iter()
-            .map(|(name, ext)| to_extension(fbb, name, &ext.url, &ext.version))
+            .map(|(name, ext)| to_extension(fbb, name, &ext.url, &ext.version, &ext.other))
             .collect::<Vec<_>>();
         fbb.create_vector(&extensions)
     });
@@ -379,8 +379,9 @@ fn to_point_of_contact<'a>(
 
 /// Writes one entry of the CityJSON `extensions` member into the header.
 ///
-/// Only the reference is written — the name, the URL of the extension schema
-/// and the version, which is all `extensions` contains. The schema document
+/// The reference is written — the name, the URL of the extension schema and
+/// the version — and any other member of the entry, such as the `xmlns` a
+/// CityGML ADE declares, as one JSON object in `members`. The schema document
 /// itself is not fetched: doing so made writing a file depend on the network
 /// (and on the extension host still being up), and nothing in this crate reads
 /// the embedded schema back.
@@ -389,10 +390,15 @@ pub fn to_extension<'a>(
     name: &str,
     url: &str,
     version: &str,
+    members: &serde_json::Map<String, Value>,
 ) -> flatbuffers::WIPOffset<Extension<'a>> {
     let name = fbb.create_string(name);
     let url = fbb.create_string(url);
     let version = fbb.create_string(version);
+    let members = (!members.is_empty()).then(|| {
+        let json = Value::Object(members.clone()).to_string();
+        fbb.create_string(&json)
+    });
 
     Extension::create(
         fbb,
@@ -400,6 +406,7 @@ pub fn to_extension<'a>(
             name: Some(name),
             url: Some(url),
             version: Some(version),
+            members,
             ..Default::default()
         },
     )
@@ -435,21 +442,19 @@ pub(super) fn to_fcb_city_feature<'a>(
         .map(|(id, co)| to_city_object(fbb, id, co, attr_schema, semantic_attr_schema))
         .collect::<Result<Vec<_>>>()?;
     let objects = Some(fbb.create_vector(&city_objects));
-    let vertices = Some(
-        fbb.create_vector(
-            &city_feature
-                .vertices
-                .iter()
-                .map(|v| {
-                    Vertex::new(
-                        v[0].try_into().unwrap(),
-                        v[1].try_into().unwrap(),
-                        v[2].try_into().unwrap(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        ),
-    );
+    let coordinate = |c: i64| i32::try_from(c).map_err(|_| Error::VertexOutOfRange(c));
+    let vertices = city_feature
+        .vertices
+        .iter()
+        .map(|v| {
+            Ok(Vertex::new(
+                coordinate(v[0])?,
+                coordinate(v[1])?,
+                coordinate(v[2])?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let vertices = Some(fbb.create_vector(&vertices));
 
     // Handle appearance if present
     let appearance = city_feature

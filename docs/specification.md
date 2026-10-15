@@ -53,7 +53,7 @@ the `geometry.fbs` schema (see `src/fbs/geometry.fbs`) defines geometry structur
 
 the `extension.fbs` schema (see `src/fbs/extension.fbs`) defines support for cityjson extensions:
 
-- **extension**: contains extension metadata and schema definitions
+- **extension**: contains extension metadata and schema definitions. `members` holds every member of the CityJSON `extensions` entry other than `url` and `version` (a CityGML ADE's `xmlns`, say) as one stringified JSON object, so the entry reads back whole
 - supports custom cityobject types and semantic surfaces
 - enables extensibility while maintaining core format efficiency
 

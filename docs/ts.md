@@ -216,7 +216,7 @@ startup budget — do not run this concurrently with a heavy build.
 inputs, the `.fcb` binaries, and `.expected.jsonl` files holding **the Rust
 reader's own output** for each case. The `.fcb` files are tracked, so a clean
 checkout runs the suite with no Rust toolchain. `test/conformance.test.ts`
-walks all 14 cases that have a matching `.expected.jsonl`, emits metadata plus
+walks all 15 cases that have a matching `.expected.jsonl`, emits metadata plus
 every feature through `toCityJSONMetadata`/`toCityJSONFeature`, and compares
 **whole lines** — comparing selected keys is exactly what once hid a missing
 per-feature `appearance` object through an entire port.

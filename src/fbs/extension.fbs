@@ -14,4 +14,5 @@ table Extension {
   extra_city_objects: string; // extra city objects of the extension. stringified JSON object.
   extra_root_properties: string; // extra root properties of the extension. stringified JSON object.
   extra_semantic_surfaces: string; // extra semantic surfaces of the extension. stringified JSON object.
+  members: string; // every member of the `extensions` entry other than url and version (e.g. a CityGML ADE's `xmlns`). stringified JSON object; absent when there are none.
 }

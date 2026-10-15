@@ -65,6 +65,12 @@ pub enum Error {
     #[error("No FlatCityBuf encoding for cjseq `{0}` {1}")]
     UnencodableVariant(&'static str, String),
 
+    /// A quantised vertex coordinate outside the 32-bit range a
+    /// FlatCityBuf `Vertex` holds: the transform's step is too fine, or its
+    /// origin too far, for the data's extent.
+    #[error("vertex coordinate {0} does not fit a FlatCityBuf vertex (32-bit); choose a coarser transform scale or a nearer translate")]
+    VertexOutOfRange(i64),
+
     // Index and query errors
     #[error("Failed to create index: {0}")]
     IndexCreationError(String),
