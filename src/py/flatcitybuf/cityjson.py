@@ -715,10 +715,30 @@ def _extensions_to_json(hdr: Any) -> Dict[str, Any]:
             continue
         url = ext.Url()
         version = ext.Version()
-        out[_decode_str(name)] = {
+        entry: Dict[str, Any] = {
             "url": _decode_str(url) if url is not None else "",
             "version": _decode_str(version) if version is not None else "",
         }
+        # Every other member of the entry (e.g. a CityGML ADE's xmlns),
+        # stored as one stringified JSON object; absent means none.
+        members = ext.Members()
+        if members is not None:
+            try:
+                parsed = json.loads(_decode_str(members))
+            except ValueError as exc:
+                raise FcbError(
+                    ErrorCode.INVALID_ATTRIBUTE_VALUE,
+                    f"extension {_decode_str(name)}: `members` is not "
+                    "valid JSON",
+                ) from exc
+            if not isinstance(parsed, dict):
+                raise FcbError(
+                    ErrorCode.INVALID_ATTRIBUTE_VALUE,
+                    f"extension {_decode_str(name)}: `members` is not "
+                    "a JSON object",
+                )
+            entry.update(parsed)
+        out[_decode_str(name)] = entry
     return out
 
 

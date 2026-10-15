@@ -690,3 +690,10 @@ TEST_CASE("oracle: write_fcb produces a byte-identical whole file for object_add
     // blob, then the columns), so a reordering changes the bytes.
     check_whole_file_byte_exact("object_address");
 }
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for extension_members") {
+    // An `extensions` entry's members other than url and version, written as
+    // one compact JSON object in the entry's own key order, exactly as
+    // serde_json's `to_string` does; a plain entry leaves `members` absent.
+    check_whole_file_byte_exact("extension_members");
+}

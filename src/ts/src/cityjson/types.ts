@@ -116,6 +116,14 @@ export interface CityObjectAddress {
   [member: string]: JsonValue | Geometry | undefined
 }
 
+/** One entry of the `extensions` object: `url`, `version`, and any other
+ *  members the declaration carried (a CityGML ADE's `xmlns`, say). */
+export interface ExtensionEntry {
+  url: string
+  version: string
+  [member: string]: JsonValue
+}
+
 export interface MaterialObject {
   name: string
   ambientIntensity?: number
@@ -161,9 +169,9 @@ export interface CityJSON {
    *  any feature's -- a template belongs to no feature. */
   appearance?: Appearance
   'geometry-templates'?: GeometryTemplates
-  /** `name -> { url, version }`, emitted only when at least one extension is
-   *  named. */
-  extensions?: Record<string, { url: string; version: string }>
+  /** `name -> { url, version, ...members }`, emitted only when at least one
+   *  extension is named. */
+  extensions?: Record<string, ExtensionEntry>
 }
 
 /** Every subsequent line. */

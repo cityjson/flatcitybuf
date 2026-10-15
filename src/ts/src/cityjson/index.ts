@@ -39,7 +39,8 @@ import {
   geometryTypeName, sharedMaterialValue,
 } from '../geometry/index.js'
 import type {
-  Appearance, CityJSON, CityJSONFeature, CityObject, CityObjectAddress, Geometry,
+  Appearance, CityJSON, CityJSONFeature, CityObject, CityObjectAddress, ExtensionEntry,
+  Geometry,
   GeometryTemplates,
   IndexValues, JsonValue, MaterialObject, MaterialReference, Metadata, PointOfContact,
   Semantics, SemanticSurface, TextureObject, TextureReference,
@@ -620,15 +621,42 @@ function referenceSystem(hdr: FbHeader): string | undefined {
   return `${CRS_BASE_URL}/${rs.authority() ?? ''}/${rs.version()}/${rs.code()}`
 }
 
-function extensions(hdr: FbHeader): Record<string, { url: string; version: string }> | undefined {
-  const out: Record<string, { url: string; version: string }> = {}
+function extensions(hdr: FbHeader): Record<string, ExtensionEntry> | undefined {
+  const out: Record<string, ExtensionEntry> = {}
   for (let i = 0; i < hdr.extensionsLength(); i++) {
     const e = hdr.extensions(i, new Extension())
     if (e === null) continue
     const name = e.name()
     // Keyed by name; an extension without one has nowhere to go.
     if (name === null) continue
-    out[name] = { url: e.url() ?? '', version: e.version() ?? '' }
+    const entry: ExtensionEntry = { url: e.url() ?? '', version: e.version() ?? '' }
+    // `members` is every other member of the entry (a CityGML ADE's `xmlns`,
+    // say), as one stringified JSON object; absent when there are none. Like
+    // the Rust reader (to_cj_metadata), anything but a JSON object is an
+    // error. The writer never stores `url`/`version` there; should a file do
+    // so anyway, the table's own fields win.
+    const members = e.members()
+    if (members !== null) {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(members)
+      } catch (err) {
+        throw new FcbError(
+          ErrorCode.InvalidAttributeValue,
+          `extension ${name}: \`members\` is not valid JSON: ${String(err)}`,
+        )
+      }
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new FcbError(
+          ErrorCode.InvalidAttributeValue,
+          `extension ${name}: \`members\` is not a JSON object`,
+        )
+      }
+      for (const [k, v] of Object.entries(parsed as Record<string, JsonValue>)) {
+        if (k !== 'url' && k !== 'version') entry[k] = v
+      }
+    }
+    out[name] = entry
   }
   return Object.keys(out).length > 0 ? out : undefined
 }

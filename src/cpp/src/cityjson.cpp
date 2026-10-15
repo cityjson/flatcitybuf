@@ -580,6 +580,23 @@ nlohmann::json extensions_to_json(const ::Header* hdr) {
         nlohmann::json entry = nlohmann::json::object();
         entry["url"] = (e->url() != nullptr) ? e->url()->str() : "";
         entry["version"] = (e->version() != nullptr) ? e->version()->str() : "";
+        // Every other member of the entry, as the writer stored it. Not
+        // valid JSON, or not an object, is an error, as in Rust.
+        if (e->members() != nullptr) {
+            nlohmann::json members;
+            try {
+                members = nlohmann::json::parse(e->members()->str());
+            } catch (const nlohmann::json::exception& ex) {
+                throw Error(ErrorCode::JsonError,
+                            "extension " + e->name()->str() + ": `members`: " + ex.what());
+            }
+            if (!members.is_object())
+                throw Error(ErrorCode::InvalidAttributeValue,
+                            "extension " + e->name()->str() + ": `members` is not a JSON object");
+            for (auto& [key, val] : members.items())
+                if (key != "url" && key != "version")
+                    entry[key] = std::move(val);
+        }
         out[e->name()->str()] = std::move(entry);
     }
     return out.empty() ? nlohmann::json(nullptr) : out;

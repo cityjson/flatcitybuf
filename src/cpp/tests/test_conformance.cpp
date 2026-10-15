@@ -148,6 +148,11 @@ TEST_CASE("conformance: btree_multilevel") { check_case("btree_multilevel"); }
 // header's.
 TEST_CASE("conformance: object_address") { check_case("object_address"); }
 
+// An `extensions` entry with members beyond url and version (a CityGML ADE's
+// `xmlns`, nested objects), restored from Extension.members, beside a plain
+// entry that carries none.
+TEST_CASE("conformance: extension_members") { check_case("extension_members"); }
+
 TEST_CASE("conformance: a single-feature file iterates exactly once") {
     FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/single_feature.fcb");
     CHECK(r.header().info().features_count == 1);
