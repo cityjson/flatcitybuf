@@ -37,7 +37,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Convert CityJSON to FCB
+    /// Convert CityJSON / CityJSONSeq to FCB, or CityGML 2.0 / 3.0 when the
+    /// inputs end in `.gml` or `.xml`
     Ser {
         /// Input files (glob patterns supported, e.g., "cities/*/*.jsonl")
         #[arg(required = true, num_args = 1..)]
@@ -80,13 +81,19 @@ enum Commands {
         ge: bool,
     },
 
-    /// Convert FCB to CityJSON
+    /// Convert FCB to CityJSONSeq, or to CityGML when the output ends in
+    /// `.gml` or `.xml`
     Deser {
         /// Input file (use '-' for stdin)
         input: String,
 
         /// Output file (use '-' for stdout)
         output: String,
+
+        /// CityGML version written to a `.gml`/`.xml` output: 2.0 or 3.0
+        #[cfg(feature = "citygml")]
+        #[arg(long, default_value = "2.0")]
+        citygml_version: String,
     },
 
     /// Convert CityJSON to CBOR
@@ -288,18 +295,24 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         term.write_line("").ok();
     }
 
-    // Read and merge input files
+    // Read and merge input files. CityGML is read one feature at a time and
+    // spooled to disk, CityJSON into memory.
+    #[cfg(feature = "citygml")]
+    let citygml = input_paths
+        .iter()
+        .any(|p| fcb_cli::citygml::is_citygml_path(p));
+    #[cfg(not(feature = "citygml"))]
+    let citygml = false;
     if !is_stdout {
         term.write_line(&format!(
-            "{} Reading CityJSON...",
-            style("▶").bold().green()
+            "{} Reading {}...",
+            style("▶").bold().green(),
+            if citygml { "CityGML" } else { "CityJSON" }
         ))
         .ok();
     }
 
-    let merge_result = fcb_cli::merger::merge_files(input_paths)?;
-    let cj = merge_result.metadata;
-    let features = merge_result.features;
+    let (cj, features) = read_features(input_paths, citygml, &term, is_stdout)?;
 
     if !is_stdout {
         term.write_line(&format!(
@@ -319,16 +332,24 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         .ok();
     }
 
-    let filtered_features = if let Some(bbox) = &bbox_parsed {
-        features
-            .into_iter()
-            .filter(|feature| feature_intersects_bbox(feature, bbox, &cj.transform))
-            .collect()
+    let transform = cj.transform.clone();
+    let keep = |feature: &CityJSONFeature| {
+        bbox_parsed
+            .as_ref()
+            .is_none_or(|bbox| feature_intersects_bbox(feature, bbox, &transform))
+    };
+    let kept_count = if bbox_parsed.is_some() {
+        let mut n = 0usize;
+        features.each(&keep, |_| {
+            n += 1;
+            Ok(true)
+        })?;
+        n
     } else {
-        features
+        features.len()
     };
 
-    if filtered_features.is_empty() {
+    if kept_count == 0 {
         if !is_stdout {
             term.write_line(&format!(
                 "  {} No features found within the specified bbox",
@@ -340,7 +361,7 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         term.write_line(&format!(
             "  {} {} features after filtering",
             style("✓").bold().green(),
-            style(filtered_features.len()).bold().yellow()
+            style(kept_count).bold().yellow()
         ))
         .ok();
     }
@@ -356,8 +377,12 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
 
     let attr_schema = {
         let mut schema = AttributeSchema::new();
-        // Limit to max 1000 features for schema building to have faster build time
-        for feature in filtered_features.iter().take(1000) {
+        // Limit to max 1000 features for schema building to have faster build
+        // time: an object whose attributes the schema misses carries its own
+        // columns.
+        let mut seen = 0usize;
+        features.each(&keep, |feature| {
+            seen += 1;
             // Sorted, because `add_attributes` assigns each new attribute the
             // next free column index -- so a `HashMap`'s random iteration order
             // would hand the same input different column numbers on every run.
@@ -371,7 +396,8 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
                     schema.add_attributes(attributes);
                 }
             }
-        }
+            Ok(seen < 1000)
+        })?;
         if schema.is_empty() {
             None
         } else {
@@ -398,7 +424,9 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
 
     let semantic_attr_schema = {
         let mut schema = AttributeSchema::new();
-        for feature in filtered_features.iter() {
+        // Every feature: a semantic surface has no columns of its own, so a
+        // member the schema misses would be lost.
+        features.each(&keep, |feature| {
             // Sorted for the same reason as the attribute schema above.
             let mut ids: Vec<&String> = feature.city_objects.keys().collect();
             ids.sort_unstable();
@@ -416,7 +444,8 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
                     }
                 }
             }
-        }
+            Ok(true)
+        })?;
         if schema.is_empty() {
             None
         } else {
@@ -459,7 +488,7 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
             ))
             .ok();
         }
-        let extent = calculate_geospatial_extent(&filtered_features, &cj.transform);
+        let extent = calculate_geospatial_extent(&features, &keep, &cj.transform)?;
         if !is_stdout {
             term.write_line(&format!(
                 "  {} Min: [{:.2}, {:.2}, {:.2}]",
@@ -485,7 +514,7 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         feature_count: if options.no_feature_count {
             0
         } else {
-            filtered_features.len() as u64
+            kept_count as u64
         },
         // The R-tree node size, NOT the attribute B+tree branching factor:
         // they are unrelated knobs and were previously driven by one flag.
@@ -550,7 +579,7 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
     let mut fcb = FcbWriter::new(cj, Some(header_options), attr_schema, semantic_attr_schema)?;
 
     let pb = if !is_stdout {
-        let pb = ProgressBar::new(filtered_features.len() as u64);
+        let pb = ProgressBar::new(kept_count as u64);
         pb.set_style(
             ProgressStyle::default_bar()
                 .template("  {bar:40.cyan/blue} {pos}/{len} features ({percent}%)")
@@ -562,12 +591,13 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         None
     };
 
-    for feature in filtered_features.iter() {
+    features.each(&keep, |feature| {
         fcb.add_feature(feature)?;
         if let Some(ref pb) = pb {
             pb.inc(1);
         }
-    }
+        Ok(true)
+    })?;
 
     if let Some(ref pb) = pb {
         pb.finish_and_clear();
@@ -598,6 +628,98 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
     }
 
     Ok(())
+}
+
+/// The features `ser` converts: CityJSON read into memory, or CityGML read
+/// one feature at a time and spooled to a temporary file.
+enum Features {
+    Memory(Vec<CityJSONFeature>),
+    #[cfg(feature = "citygml")]
+    Spooled(fcb_cli::citygml::Spool),
+}
+
+impl Features {
+    fn len(&self) -> usize {
+        match self {
+            Features::Memory(features) => features.len(),
+            #[cfg(feature = "citygml")]
+            Features::Spooled(spool) => spool.len(),
+        }
+    }
+
+    /// Call `f` with each feature `keep` admits, in order, until `f` returns
+    /// `false`.
+    fn each(
+        &self,
+        keep: &dyn Fn(&CityJSONFeature) -> bool,
+        mut f: impl FnMut(&CityJSONFeature) -> Result<bool, CliError>,
+    ) -> Result<(), CliError> {
+        match self {
+            Features::Memory(features) => {
+                for feature in features.iter().filter(|f| keep(f)) {
+                    if !f(feature)? {
+                        break;
+                    }
+                }
+            }
+            #[cfg(feature = "citygml")]
+            Features::Spooled(spool) => {
+                for feature in spool.iter()? {
+                    let feature = feature?;
+                    if keep(&feature) && !f(&feature)? {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Read the inputs of `ser`: CityGML documents when `citygml`, otherwise
+/// CityJSON / CityJSONSeq files merged onto the first one's transform.
+fn read_features(
+    input_paths: Vec<PathBuf>,
+    citygml: bool,
+    term: &Term,
+    is_stdout: bool,
+) -> Result<(CityJSON, Features), CliError> {
+    #[cfg(feature = "citygml")]
+    if citygml {
+        if let Some(other) = input_paths
+            .iter()
+            .find(|p| !fcb_cli::citygml::is_citygml_path(p))
+        {
+            return Err(CliError::UnsupportedFormat(
+                other.display().to_string(),
+                "CityGML and CityJSON inputs cannot be mixed".to_string(),
+            ));
+        }
+        let input = fcb_cli::citygml::read(&input_paths)?;
+        if !is_stdout {
+            let report = &input.report;
+            for (label, counts) in [
+                ("skipped (no reader for the class)", &report.skipped_members),
+                ("ADE objects read", &report.ade_members),
+                ("ADE geometry properties left out", &report.ade_geometries),
+            ] {
+                for (name, n) in counts {
+                    term.write_line(&format!(
+                        "  {} {label}: {} × {}",
+                        style("•").dim(),
+                        style(name).cyan(),
+                        n
+                    ))
+                    .ok();
+                }
+            }
+        }
+        return Ok((input.header, Features::Spooled(input.features)));
+    }
+    #[cfg(not(feature = "citygml"))]
+    let _ = (citygml, term, is_stdout);
+    let merged = fcb_cli::merger::merge_files(input_paths)?;
+    Ok((merged.metadata, Features::Memory(merged.features)))
 }
 
 /// Parse a bounding box string in format "minx,miny,maxx,maxy"
@@ -678,7 +800,11 @@ fn point_in_bbox_2d(point: &[f64; 3], bbox: &[f64; 4]) -> bool {
 }
 
 /// Calculate the geospatial extent from a list of features
-fn calculate_geospatial_extent(features: &[CityJSONFeature], transform: &CjTransform) -> [f64; 6] {
+fn calculate_geospatial_extent(
+    features: &Features,
+    keep: &dyn Fn(&CityJSONFeature) -> bool,
+    transform: &CjTransform,
+) -> Result<[f64; 6], CliError> {
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
     let mut min_z = f64::MAX;
@@ -686,7 +812,7 @@ fn calculate_geospatial_extent(features: &[CityJSONFeature], transform: &CjTrans
     let mut max_y = f64::MIN;
     let mut max_z = f64::MIN;
 
-    for feature in features {
+    features.each(keep, |feature| {
         let vertices = get_vertices_from_feature(feature, transform);
 
         for [x, y, z] in vertices {
@@ -697,14 +823,15 @@ fn calculate_geospatial_extent(features: &[CityJSONFeature], transform: &CjTrans
             max_y = max_y.max(y);
             max_z = max_z.max(z);
         }
-    }
+        Ok(true)
+    })?;
 
     // If no vertices were found, return a default extent
     if min_x == f64::MAX {
-        return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        return Ok([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     }
 
-    [min_x, min_y, min_z, max_x, max_y, max_z]
+    Ok([min_x, min_y, min_z, max_x, max_y, max_z])
 }
 
 fn deserialize(input: &str, output: &str) -> Result<(), Error> {
@@ -731,6 +858,27 @@ fn deserialize(input: &str, output: &str) -> Result<(), Error> {
 
     if output != "-" {
         eprintln!("Successfully decoded to CityJSON");
+    }
+    Ok(())
+}
+
+/// `fcb deser` to a CityGML document: the features one at a time, with what
+/// the version could not hold reported on stderr.
+#[cfg(feature = "citygml")]
+fn write_citygml(
+    input: &str,
+    output: &str,
+    version: fcb_cli::citygml::CityGmlVersion,
+) -> Result<(), CliError> {
+    let reader = BufReader::new(get_reader(input)?);
+    let writer = BufWriter::new(get_writer(output)?);
+    let report = fcb_cli::citygml::write(reader, writer, version)?;
+    eprintln!(
+        "Wrote {} features ({} top-level city objects) as CityGML",
+        report.features, report.objects
+    );
+    for (what, n) in &report.losses {
+        eprintln!("  left out: {what} × {n}");
     }
     Ok(())
 }
@@ -810,6 +958,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ge,
             },
         )?,
+        #[cfg(feature = "citygml")]
+        Commands::Deser {
+            input,
+            output,
+            citygml_version,
+        } => {
+            if fcb_cli::citygml::is_citygml_path(std::path::Path::new(&output)) {
+                let version = citygml_version
+                    .parse()
+                    .map_err(|e: String| CliError::CityGml(e))?;
+                write_citygml(&input, &output, version)?;
+            } else {
+                deserialize(&input, &output)?;
+            }
+        }
+        #[cfg(not(feature = "citygml"))]
         Commands::Deser { input, output } => deserialize(&input, &output)?,
         Commands::Cbor { input, output } => encode_cbor(&input, &output)?,
         Commands::Bson { input, output } => encode_bson(&input, &output)?,

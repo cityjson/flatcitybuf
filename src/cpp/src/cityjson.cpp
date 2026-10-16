@@ -456,6 +456,37 @@ nlohmann::json geometry_to_json(const ::Geometry* g,
     return out;
 }
 
+/// One address of a City Object: its members, decoded from `attributes`
+/// against the address's own `columns`, plus `location` when present. A
+/// `location` carries no semantics, so it decodes with no semantic schema.
+/// An attribute blob without columns cannot be decoded at all, and is an
+/// error, as in Rust.
+nlohmann::json address_to_json(const ::Address* a) {
+    nlohmann::json out = nlohmann::json::object();
+    if (a->attributes() != nullptr) {
+        if (a->columns() == nullptr)
+            throw Error(ErrorCode::MissingRequiredField, "columns");
+        std::vector<ColumnInfo> columns;
+        columns.reserve(a->columns()->size());
+        for (const auto* c : *a->columns()) {
+            if (c == nullptr)
+                continue;
+            ColumnInfo ci{};
+            ci.index = c->index();
+            ci.name = c->name() != nullptr ? c->name()->str() : std::string();
+            ci.type = static_cast<std::uint8_t>(c->type());
+            ci.nullable = c->nullable();
+            columns.push_back(std::move(ci));
+        }
+        const bytes_view blob(a->attributes()->data(), a->attributes()->size());
+        if (!blob.empty())
+            out = attributes_to_json(blob, columns);
+    }
+    if (a->location() != nullptr)
+        out["location"] = geometry_to_json(a->location(), {});
+    return out;
+}
+
 /// The `address` sub-object of `pointOfContact`, or null.
 ///
 /// Mirrors `to_cj_address` (deserializer.rs:195-216): each member is emitted
@@ -549,6 +580,23 @@ nlohmann::json extensions_to_json(const ::Header* hdr) {
         nlohmann::json entry = nlohmann::json::object();
         entry["url"] = (e->url() != nullptr) ? e->url()->str() : "";
         entry["version"] = (e->version() != nullptr) ? e->version()->str() : "";
+        // Every other member of the entry, as the writer stored it. Not
+        // valid JSON, or not an object, is an error, as in Rust.
+        if (e->members() != nullptr) {
+            nlohmann::json members;
+            try {
+                members = nlohmann::json::parse(e->members()->str());
+            } catch (const nlohmann::json::exception& ex) {
+                throw Error(ErrorCode::JsonError,
+                            "extension " + e->name()->str() + ": `members`: " + ex.what());
+            }
+            if (!members.is_object())
+                throw Error(ErrorCode::InvalidAttributeValue,
+                            "extension " + e->name()->str() + ": `members` is not a JSON object");
+            for (auto& [key, val] : members.items())
+                if (key != "url" && key != "version")
+                    entry[key] = std::move(val);
+        }
         out[e->name()->str()] = std::move(entry);
     }
     return out.empty() ? nlohmann::json(nullptr) : out;
@@ -754,6 +802,17 @@ nlohmann::json to_cityjson_feature(const Feature& feature, const HeaderView& hea
                     ps.push_back(p->str());
             }
             co["parents"] = std::move(ps);
+        }
+        // Addresses: each decodes against its OWN columns, never the
+        // header's, and an absent vector means no addresses. Mirrors
+        // `to_cj_object_address` (reader/deserializer.rs).
+        if (obj->address() != nullptr) {
+            auto addresses = nlohmann::json::array();
+            for (const auto* a : *obj->address()) {
+                if (a != nullptr)
+                    addresses.push_back(address_to_json(a));
+            }
+            co["address"] = std::move(addresses);
         }
 
         objects[feature.object_id(i)] = std::move(co);

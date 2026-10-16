@@ -682,3 +682,18 @@ TEST_CASE("oracle: write_fcb produces a byte-identical whole file for btree_mult
     // this milestone's own oracle test surfaced) all in one real file.
     check_whole_file_byte_exact("btree_multilevel");
 }
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for object_address") {
+    // City Object addresses: each Address carries its own columns, its
+    // members other than `location` as an attribute blob, and `location` as
+    // a MultiPoint Geometry -- built in Rust's order (location, then the
+    // blob, then the columns), so a reordering changes the bytes.
+    check_whole_file_byte_exact("object_address");
+}
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for extension_members") {
+    // An `extensions` entry's members other than url and version, written as
+    // one compact JSON object in the entry's own key order, exactly as
+    // serde_json's `to_string` does; a plain entry leaves `members` absent.
+    check_whole_file_byte_exact("extension_members");
+}

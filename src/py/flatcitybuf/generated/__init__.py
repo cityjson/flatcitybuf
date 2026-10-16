@@ -2,6 +2,7 @@
 """Re-exports of the flatc-generated FlatCityBuf FlatBuffers bindings."""
 from __future__ import annotations
 
+from .feature_generated import Address as Address
 from .header_generated import Appearance as Appearance
 from .header_generated import AttributeIndex as AttributeIndex
 from .feature_generated import CityFeature as CityFeature

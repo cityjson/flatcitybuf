@@ -76,11 +76,19 @@ to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::orde
 /// (writer/serializer.rs:233-250).
 ::GeographicalExtent to_geographical_extent(const std::array<double, 6>& extent);
 
+/// Builds one `Address` table from one entry of a CityJSON `address`
+/// array: `location` as a MultiPoint `Geometry`, and every other member as
+/// an attribute blob encoded with a schema of the address's own, which the
+/// table carries as `columns`. Throws `fcb::Error` if `address` is not a
+/// JSON object. Mirrors `to_address` (writer/serializer.rs).
+::flatbuffers::Offset<::Address> to_address(::flatbuffers::FlatBufferBuilder& fbb,
+                                            const nlohmann::ordered_json& address);
+
 /// Builds one `CityObject` table: type, geographical extent, geometry
 /// (split into non-instance and `GeometryInstance` entries), attributes
 /// (against `attr_schema`, or the object's own schema when its attribute
 /// keys are not all present in `attr_schema`), children/children-roles/
-/// parents. Mirrors `to_city_object` (writer/serializer.rs:632-730).
+/// parents, addresses. Mirrors `to_city_object` (writer/serializer.rs:632-730).
 ::flatbuffers::Offset<::CityObject> to_city_object(::flatbuffers::FlatBufferBuilder& fbb,
                                                    const std::string& id,
                                                    const nlohmann::ordered_json& co,

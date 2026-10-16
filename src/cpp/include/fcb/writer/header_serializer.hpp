@@ -74,12 +74,14 @@ std::optional<ParsedReferenceSystem> parse_reference_system(const std::string& u
 ::flatbuffers::Offset<::ReferenceSystem> to_reference_system(::flatbuffers::FlatBufferBuilder& fbb,
                                                              const ParsedReferenceSystem& ref_sys);
 
-/// Builds one `extensions` entry: only `name`/`url`/`version` are written
-/// (the schema document itself is never fetched or embedded). Mirrors
-/// `to_extension` (writer/serializer.rs:378-397).
+/// Builds one `extensions` entry: `name`, `url`, `version`, and `members`
+/// -- every other member of the entry, as one compact JSON object in its own
+/// key order, absent when `members` is empty. The schema document itself is
+/// never fetched or embedded. Mirrors `to_extension` (writer/serializer.rs).
 ::flatbuffers::Offset<::Extension> to_extension(::flatbuffers::FlatBufferBuilder& fbb,
                                                 const std::string& name, const std::string& url,
-                                                const std::string& version);
+                                                const std::string& version,
+                                                const nlohmann::ordered_json& members);
 
 /// Builds `Header.templates_vertices` from CityJSON's
 /// `geometry-templates.vertices-templates` (f64 precision, unlike a

@@ -97,15 +97,28 @@ TEST_CASE("to_reference_system builds the FlatBuffers table") {
     CHECK(rs->code_string() == nullptr);
 }
 
-TEST_CASE("to_extension builds name/url/version, leaving description empty") {
+TEST_CASE("to_extension builds name/url/version, leaving description and members empty") {
     flatbuffers::FlatBufferBuilder fbb;
-    auto off = to_extension(fbb, "Noise", "https://example.com/noise.ext.json", "1.0");
+    auto off = to_extension(fbb, "Noise", "https://example.com/noise.ext.json", "1.0",
+                            nlohmann::ordered_json::object());
     fbb.Finish(off);
     const auto* ext = flatbuffers::GetRoot<::Extension>(fbb.GetBufferPointer());
     CHECK(ext->name()->str() == "Noise");
     CHECK(ext->url()->str() == "https://example.com/noise.ext.json");
     CHECK(ext->version()->str() == "1.0");
     CHECK(ext->description() == nullptr);
+    CHECK(ext->members() == nullptr);
+}
+
+TEST_CASE("to_extension writes the other members as compact JSON in their own order") {
+    flatbuffers::FlatBufferBuilder fbb;
+    auto members =
+        nlohmann::ordered_json::parse(R"({"xmlns": "urn:x", "b": {"z": 1, "a": [true, null]}})");
+    auto off = to_extension(fbb, "ade", "https://example.com/ade.xsd", "1.0", members);
+    fbb.Finish(off);
+    const auto* ext = flatbuffers::GetRoot<::Extension>(fbb.GetBufferPointer());
+    REQUIRE(ext->members() != nullptr);
+    CHECK(ext->members()->str() == R"({"xmlns":"urn:x","b":{"z":1,"a":[true,null]}})");
 }
 
 TEST_CASE("to_templates_vertices keeps only entries that filter down to exactly 3 numbers") {

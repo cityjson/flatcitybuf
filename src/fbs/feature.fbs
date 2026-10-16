@@ -77,6 +77,15 @@ table CityObject {
   children:[string];
   children_roles:[string];  // for CityObjectGroup only
   parents:[string];
+  address:[Address];        // the City Object's addresses (CityJSON `address`), in order
+}
+
+// One address of a City Object. Its members are free-form, so each address
+// carries its own column schema, the way a CityObject's own `columns` does.
+table Address {
+  attributes:[ubyte];       // every member but `location`, encoded with `columns`
+  columns:[Column];         // the schema `attributes` is encoded with
+  location:Geometry;        // the `location` member: a MultiPoint into the feature's vertices
 }
 
 

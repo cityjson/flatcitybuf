@@ -11,9 +11,9 @@ use crate::{
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
     Address as CjAddress, Appearance as CjAppearance, BorderColor as CjBorderColor, CityJSON,
-    CityJSONFeature, CityObject as CjCityObject, CityObjectType as CjCityObjectType,
-    Color as CjColor, Extension as CjExtension, Geometry as CjGeometry,
-    GeometryTemplates as CjGeometryTemplates, Lod, MaterialIndex,
+    CityJSONFeature, CityObject as CjCityObject, CityObjectAddress as CjCityObjectAddress,
+    CityObjectType as CjCityObjectType, Color as CjColor, Extension as CjExtension,
+    Geometry as CjGeometry, GeometryTemplates as CjGeometryTemplates, Lod, MaterialIndex,
     MaterialObject as CjMaterialObject, MaterialReference as CjMaterialReference,
     Metadata as CjMetadata, PointOfContact as CjPointOfContact,
     ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, SurfaceIndex, TemplateIndex,
@@ -42,17 +42,30 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
             .iter()
             .filter_map(|extension| {
                 extension.name().map(|name| {
-                    (
+                    let other = match extension.members() {
+                        Some(json) => match serde_json::from_str(json)? {
+                            Value::Object(map) => map,
+                            _ => {
+                                return Err(Error::InvalidAttributeValue {
+                                    msg: format!(
+                                        "extension {name}: `members` is not a JSON object"
+                                    ),
+                                })
+                            }
+                        },
+                        None => serde_json::Map::new(),
+                    };
+                    Ok((
                         name.to_string(),
                         CjExtension {
                             url: extension.url().unwrap_or_default().to_string(),
                             version: extension.version().unwrap_or_default().to_string(),
-                            other: serde_json::Map::new(),
+                            other,
                         },
-                    )
+                    ))
                 })
             })
-            .collect();
+            .collect::<Result<_, Error>>()?;
 
         if !extensions_map.is_empty() {
             cj.extensions = Some(extensions_map);
@@ -606,6 +619,10 @@ pub fn to_cj_feature(
                 cjco.parents = co
                     .parents()
                     .map(|p| p.iter().map(|s| s.to_string()).collect());
+                cjco.address = co
+                    .address()
+                    .map(|a| a.iter().map(|a| to_cj_object_address(&a)).collect())
+                    .transpose()?;
                 Ok((co.id().to_string(), cjco)) // Return Result for map operation
             })
             .collect(); // Collect Results from map
@@ -622,6 +639,24 @@ pub fn to_cj_feature(
     cj.appearance = feature.appearance().map(to_cj_appearance).transpose()?;
 
     Ok(cj) // Return Result
+}
+
+/// Decode one address of a City Object: its members from `attributes` by
+/// its own `columns`, and its `location`.
+fn to_cj_object_address(address: &Address) -> Result<CjCityObjectAddress, Error> {
+    let other = match (address.columns(), address.attributes()) {
+        (Some(columns), Some(attributes)) => match decode_attributes(&columns, attributes) {
+            Value::Object(map) => map,
+            _ => serde_json::Map::new(),
+        },
+        (None, Some(_)) => return Err(Error::MissingRequiredField("columns".to_string())),
+        _ => serde_json::Map::new(),
+    };
+    let location = address
+        .location()
+        .map(|g| decode_geometry(g, None))
+        .transpose()?;
+    Ok(CjCityObjectAddress { location, other })
 }
 
 /// Decode one FlatBuffers `Appearance` table into its CityJSON form.

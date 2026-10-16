@@ -24,6 +24,9 @@ struct CityFeatureBuilder;
 struct CityObject;
 struct CityObjectBuilder;
 
+struct Address;
+struct AddressBuilder;
+
 enum class CityObjectType : uint8_t {
   Bridge = 0,
   BridgePart = 1,
@@ -298,7 +301,8 @@ struct CityObject FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_COLUMNS = 18,
     VT_CHILDREN = 20,
     VT_CHILDREN_ROLES = 22,
-    VT_PARENTS = 24
+    VT_PARENTS = 24,
+    VT_ADDRESS = 26
   };
   CityObjectType type() const {
     return static_cast<CityObjectType>(GetField<uint8_t>(VT_TYPE, 0));
@@ -345,6 +349,9 @@ struct CityObject FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *parents() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_PARENTS);
   }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<Address>> *address() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<Address>> *>(VT_ADDRESS);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint8_t>(verifier, VT_TYPE, 1) &&
@@ -373,6 +380,9 @@ struct CityObject FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyOffset(verifier, VT_PARENTS) &&
            verifier.VerifyVector(parents()) &&
            verifier.VerifyVectorOfStrings(parents()) &&
+           VerifyOffset(verifier, VT_ADDRESS) &&
+           verifier.VerifyVector(address()) &&
+           verifier.VerifyVectorOfTables(address()) &&
            verifier.EndTable();
   }
 };
@@ -414,6 +424,9 @@ struct CityObjectBuilder {
   void add_parents(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> parents) {
     fbb_.AddOffset(CityObject::VT_PARENTS, parents);
   }
+  void add_address(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<Address>>> address) {
+    fbb_.AddOffset(CityObject::VT_ADDRESS, address);
+  }
   explicit CityObjectBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -438,8 +451,10 @@ inline ::flatbuffers::Offset<CityObject> CreateCityObject(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<Column>>> columns = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> children = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> children_roles = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> parents = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> parents = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<Address>>> address = 0) {
   CityObjectBuilder builder_(_fbb);
+  builder_.add_address(address);
   builder_.add_parents(parents);
   builder_.add_children_roles(children_roles);
   builder_.add_children(children);
@@ -466,7 +481,8 @@ inline ::flatbuffers::Offset<CityObject> CreateCityObjectDirect(
     const std::vector<::flatbuffers::Offset<Column>> *columns = nullptr,
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *children = nullptr,
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *children_roles = nullptr,
-    const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *parents = nullptr) {
+    const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *parents = nullptr,
+    const std::vector<::flatbuffers::Offset<Address>> *address = nullptr) {
   auto extension_type__ = extension_type ? _fbb.CreateString(extension_type) : 0;
   auto id__ = id ? _fbb.CreateString(id) : 0;
   auto geometry__ = geometry ? _fbb.CreateVector<::flatbuffers::Offset<Geometry>>(*geometry) : 0;
@@ -476,6 +492,7 @@ inline ::flatbuffers::Offset<CityObject> CreateCityObjectDirect(
   auto children__ = children ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*children) : 0;
   auto children_roles__ = children_roles ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*children_roles) : 0;
   auto parents__ = parents ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*parents) : 0;
+  auto address__ = address ? _fbb.CreateVector<::flatbuffers::Offset<Address>>(*address) : 0;
   return CreateCityObject(
       _fbb,
       type,
@@ -488,7 +505,87 @@ inline ::flatbuffers::Offset<CityObject> CreateCityObjectDirect(
       columns__,
       children__,
       children_roles__,
-      parents__);
+      parents__,
+      address__);
+}
+
+struct Address FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef AddressBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_ATTRIBUTES = 4,
+    VT_COLUMNS = 6,
+    VT_LOCATION = 8
+  };
+  const ::flatbuffers::Vector<uint8_t> *attributes() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_ATTRIBUTES);
+  }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<Column>> *columns() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<Column>> *>(VT_COLUMNS);
+  }
+  const Geometry *location() const {
+    return GetPointer<const Geometry *>(VT_LOCATION);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_ATTRIBUTES) &&
+           verifier.VerifyVector(attributes()) &&
+           VerifyOffset(verifier, VT_COLUMNS) &&
+           verifier.VerifyVector(columns()) &&
+           verifier.VerifyVectorOfTables(columns()) &&
+           VerifyOffset(verifier, VT_LOCATION) &&
+           verifier.VerifyTable(location()) &&
+           verifier.EndTable();
+  }
+};
+
+struct AddressBuilder {
+  typedef Address Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_attributes(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> attributes) {
+    fbb_.AddOffset(Address::VT_ATTRIBUTES, attributes);
+  }
+  void add_columns(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<Column>>> columns) {
+    fbb_.AddOffset(Address::VT_COLUMNS, columns);
+  }
+  void add_location(::flatbuffers::Offset<Geometry> location) {
+    fbb_.AddOffset(Address::VT_LOCATION, location);
+  }
+  explicit AddressBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<Address> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<Address>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<Address> CreateAddress(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> attributes = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<Column>>> columns = 0,
+    ::flatbuffers::Offset<Geometry> location = 0) {
+  AddressBuilder builder_(_fbb);
+  builder_.add_location(location);
+  builder_.add_columns(columns);
+  builder_.add_attributes(attributes);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<Address> CreateAddressDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<uint8_t> *attributes = nullptr,
+    const std::vector<::flatbuffers::Offset<Column>> *columns = nullptr,
+    ::flatbuffers::Offset<Geometry> location = 0) {
+  auto attributes__ = attributes ? _fbb.CreateVector<uint8_t>(*attributes) : 0;
+  auto columns__ = columns ? _fbb.CreateVector<::flatbuffers::Offset<Column>>(*columns) : 0;
+  return CreateAddress(
+      _fbb,
+      attributes__,
+      columns__,
+      location);
 }
 
 inline const CityFeature *GetCityFeature(const void *buf) {
