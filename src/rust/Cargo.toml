@@ -12,9 +12,9 @@ byteorder = "1.5.0"
 cjseq = { version = "=0.5.0-alpha.1", default-features = false }
 # The CityGML reader and writer (the `citygml` facade over `citygml2` and
 # `citygml3`), from the cityparquet repository until they are on crates.io,
-# pinned to a commit. It pins the same cjseq; a different one would build
+# pinned to a commit on its develop branch. It pins the same cjseq; a different one would build
 # two incompatible copies of its types.
-citygml = { git = "https://github.com/cityjson/cityparquet", rev = "fdf8cda083724fcec2a9c37c3140d7089778679e" }
+citygml = { git = "https://github.com/cityjson/cityparquet", rev = "9cbd7540cb2dfd18dac71b2206f198a75965cfa6" }
 tempfile = "3.14.0"
 serde_json = "1.0.133"
 indexmap = "2"
