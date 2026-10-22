@@ -1,6 +1,6 @@
 {
   "name": "flatcitybuf",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Native C++ reader for the FlatCityBuf cloud-optimized CityJSON format",
   "homepage": "https://github.com/cityjson/flatcitybuf",
   "license": "MIT",

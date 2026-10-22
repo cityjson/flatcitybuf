@@ -35,6 +35,7 @@ impl<'a> Extension<'a> {
     pub const VT_EXTRA_CITY_OBJECTS: flatbuffers::VOffsetT = 16;
     pub const VT_EXTRA_ROOT_PROPERTIES: flatbuffers::VOffsetT = 18;
     pub const VT_EXTRA_SEMANTIC_SURFACES: flatbuffers::VOffsetT = 20;
+    pub const VT_MEMBERS: flatbuffers::VOffsetT = 22;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -46,6 +47,9 @@ impl<'a> Extension<'a> {
         args: &'args ExtensionArgs<'args>,
     ) -> flatbuffers::WIPOffset<Extension<'bldr>> {
         let mut builder = ExtensionBuilder::new(_fbb);
+        if let Some(x) = args.members {
+            builder.add_members(x);
+        }
         if let Some(x) = args.extra_semantic_surfaces {
             builder.add_extra_semantic_surfaces(x);
         }
@@ -170,6 +174,16 @@ impl<'a> Extension<'a> {
             )
         }
     }
+    #[inline]
+    pub fn members(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<&str>>(Extension::VT_MEMBERS, None)
+        }
+    }
 }
 
 impl flatbuffers::Verifiable for Extension<'_> {
@@ -213,6 +227,7 @@ impl flatbuffers::Verifiable for Extension<'_> {
                 Self::VT_EXTRA_SEMANTIC_SURFACES,
                 false,
             )?
+            .visit_field::<flatbuffers::ForwardsUOffset<&str>>("members", Self::VT_MEMBERS, false)?
             .finish();
         Ok(())
     }
@@ -227,6 +242,7 @@ pub struct ExtensionArgs<'a> {
     pub extra_city_objects: Option<flatbuffers::WIPOffset<&'a str>>,
     pub extra_root_properties: Option<flatbuffers::WIPOffset<&'a str>>,
     pub extra_semantic_surfaces: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub members: Option<flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for ExtensionArgs<'a> {
     #[inline]
@@ -241,6 +257,7 @@ impl<'a> Default for ExtensionArgs<'a> {
             extra_city_objects: None,
             extra_root_properties: None,
             extra_semantic_surfaces: None,
+            members: None,
         }
     }
 }
@@ -312,6 +329,11 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ExtensionBuilder<'a, 'b, A> {
         );
     }
     #[inline]
+    pub fn add_members(&mut self, members: flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Extension::VT_MEMBERS, members);
+    }
+    #[inline]
     pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> ExtensionBuilder<'a, 'b, A> {
         let start = _fbb.start_table();
         ExtensionBuilder {
@@ -338,6 +360,7 @@ impl core::fmt::Debug for Extension<'_> {
         ds.field("extra_city_objects", &self.extra_city_objects());
         ds.field("extra_root_properties", &self.extra_root_properties());
         ds.field("extra_semantic_surfaces", &self.extra_semantic_surfaces());
+        ds.field("members", &self.members());
         ds.finish()
     }
 }

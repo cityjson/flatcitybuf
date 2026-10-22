@@ -58,6 +58,19 @@ pub enum Error {
     #[error("Unknown FlatCityBuf `{0}` tag {1}")]
     UnknownEnumTag(&'static str, String),
 
+    /// The writer's mirror of [`Error::UnknownEnumTag`]: a cjseq value this
+    /// crate has no FlatCityBuf encoding for. cjseq's enums are
+    /// `#[non_exhaustive]`, so a variant it adds compiles here and arrives
+    /// at run time instead; it is refused rather than mapped to a default.
+    #[error("No FlatCityBuf encoding for cjseq `{0}` {1}")]
+    UnencodableVariant(&'static str, String),
+
+    /// A quantised vertex coordinate outside the 32-bit range a
+    /// FlatCityBuf `Vertex` holds: the transform's step is too fine, or its
+    /// origin too far, for the data's extent.
+    #[error("vertex coordinate {0} does not fit a FlatCityBuf vertex (32-bit); choose a coarser transform scale or a nearer translate")]
+    VertexOutOfRange(i64),
+
     // Index and query errors
     #[error("Failed to create index: {0}")]
     IndexCreationError(String),
@@ -91,6 +104,12 @@ pub enum Error {
 }
 
 impl Error {
+    /// An [`Error::UnencodableVariant`] for `value`, spelled as cjseq's
+    /// `Debug` spells it.
+    pub(crate) fn unencodable(what: &'static str, value: &impl std::fmt::Debug) -> Self {
+        Error::UnencodableVariant(what, format!("{value:?}"))
+    }
+
     /// Returns true if the error is related to IO operations
     pub fn is_io_error(&self) -> bool {
         matches!(self, Error::IoError(_))
@@ -108,7 +127,9 @@ impl Error {
     pub fn is_validation_error(&self) -> bool {
         matches!(
             self,
-            Error::UnsupportedColumnType(_) | Error::InvalidAttributeValue { .. }
+            Error::UnsupportedColumnType(_)
+                | Error::InvalidAttributeValue { .. }
+                | Error::UnencodableVariant(..)
         )
     }
 
