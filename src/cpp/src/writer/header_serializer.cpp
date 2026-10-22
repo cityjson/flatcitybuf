@@ -2,6 +2,7 @@
 #include <fcb/writer/header_serializer.hpp>
 
 #include <charconv>
+#include <optional>
 #include <string_view>
 
 namespace fcb {
@@ -137,11 +138,18 @@ std::optional<ParsedReferenceSystem> parse_reference_system(const std::string& u
 
 ::flatbuffers::Offset<::Extension> to_extension(::flatbuffers::FlatBufferBuilder& fbb,
                                                 const std::string& name, const std::string& url,
-                                                const std::string& version) {
+                                                const std::string& version,
+                                                const nlohmann::ordered_json& members) {
     auto name_off = fbb.CreateString(name);
     auto url_off = fbb.CreateString(url);
     auto version_off = fbb.CreateString(version);
-    return CreateExtension(fbb, name_off, 0, url_off, version_off);
+    // Compact, in the entry's own key order: what serde_json's `to_string`
+    // gives for Rust's insertion-ordered map. Absent when there are none.
+    std::optional<::flatbuffers::Offset<::flatbuffers::String>> members_off;
+    if (members.is_object() && !members.empty())
+        members_off = fbb.CreateString(members.dump());
+    return CreateExtension(fbb, name_off, 0, url_off, version_off, 0, 0, 0, 0, 0,
+                           members_off.value_or(0));
 }
 
 ::flatbuffers::Offset<::flatbuffers::Vector<const ::DoubleVertex*>>
@@ -231,9 +239,17 @@ to_fcb_header(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::ordered_jso
         extensions;
     if (auto it = cj.find("extensions"); it != cj.end() && it->is_object()) {
         std::vector<::flatbuffers::Offset<::Extension>> ext_offs;
-        for (const auto& [name, ext] : it->items())
+        for (const auto& [name, ext] : it->items()) {
+            // Every member other than url and version, in the entry's order.
+            nlohmann::ordered_json members = nlohmann::ordered_json::object();
+            if (ext.is_object()) {
+                for (const auto& [key, val] : ext.items())
+                    if (key != "url" && key != "version")
+                        members[key] = val;
+            }
             ext_offs.push_back(to_extension(fbb, name, as_str_or_empty(ext, "url"),
-                                            as_str_or_empty(ext, "version")));
+                                            as_str_or_empty(ext, "version"), members));
+        }
         extensions = fbb.CreateVector(ext_offs);
     }
 

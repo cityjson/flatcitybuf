@@ -34,6 +34,7 @@ const CASES = [
   'degenerate_extent',
   'duplicate_keys',
   'empty_appearance',
+  'extension_members',
   'geom_decoder_edges',
   'geom_temp',
   'inferable_types',
@@ -41,6 +42,7 @@ const CASES = [
   'multi_object_attrs',
   'no_count',
   'noise_extension',
+  'object_address',
   'single_feature',
   'small',
 ]
