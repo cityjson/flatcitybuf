@@ -42,6 +42,7 @@ pub fn build_link_json(
                     ("bbox-crs", &query.bbox_crs),
                     ("filter", &query.filter),
                     ("f", &query.f),
+                    ("crs", &query.crs),
                 ] {
                     if let Some(value) = value {
                         pairs.append_pair(key, value);

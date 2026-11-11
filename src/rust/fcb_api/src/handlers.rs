@@ -13,6 +13,7 @@ use crate::models::*;
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BboxQuery {
     pub limit: Option<u64>,
     pub offset: Option<u64>,
@@ -21,6 +22,7 @@ pub struct BboxQuery {
     pub bbox_crs: Option<String>,
     pub filter: Option<String>,
     pub f: Option<String>,
+    pub crs: Option<String>,
 }
 
 /// Collects `features` into one CityJSON document under `header`, merging
@@ -51,8 +53,64 @@ impl BboxQuery {
         }
         Ok((
             usize::try_from(limit.min(maximum as u64)).map_err(|_| StatusCode::BAD_REQUEST)?,
-            usize::try_from(self.offset.unwrap_or(0)).map_err(|_| StatusCode::BAD_REQUEST)?,
+            usize::try_from(self.offset.unwrap_or(DEFAULT_OFFSET))
+                .map_err(|_| StatusCode::BAD_REQUEST)?,
         ))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeatureQuery {
+    pub crs: Option<String>,
+}
+
+pub fn validate_output_crs(value: Option<&str>, state: &AppState) -> Result<(), StatusCode> {
+    if let Some(value) = value {
+        if crate::crs::SupportedCrs::parse(value)?.uri() != state.fcb_metadata.storage_crs {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+    Ok(())
+}
+impl BboxQuery {
+    pub fn spatial_query(&self, state: &AppState) -> Result<Option<Vec<f64>>, StatusCode> {
+        use crate::crs::{transform_bbox, SupportedCrs};
+        validate_output_crs(self.crs.as_deref(), state)?;
+        let target = SupportedCrs::parse(&state.fcb_metadata.storage_crs)?;
+        let source = self
+            .bbox_crs
+            .as_deref()
+            .map(SupportedCrs::parse)
+            .transpose()?
+            .unwrap_or(target);
+        let Some(value) = &self.bbox else {
+            return Ok(None);
+        };
+        let coordinates = value
+            .split(',')
+            .map(|v| v.trim().parse::<f64>().map_err(|_| StatusCode::BAD_REQUEST))
+            .collect::<Result<Vec<_>, _>>()?;
+        if ![4, 6].contains(&coordinates.len()) || coordinates.iter().any(|v| !v.is_finite()) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let dimensions = coordinates.len() / 2;
+        if (0..dimensions).any(|i| coordinates[i] > coordinates[i + dimensions]) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let mut bbox = vec![
+            coordinates[0],
+            coordinates[1],
+            coordinates[dimensions],
+            coordinates[dimensions + 1],
+        ];
+        if source == SupportedCrs::Wgs84 {
+            bbox.swap(0, 1);
+            bbox.swap(2, 3);
+        }
+        transform_bbox(&bbox, source.horizontal(), target.horizontal())
+            .map(Some)
+            .map_err(|_| StatusCode::BAD_REQUEST)
     }
 }
 
@@ -169,10 +227,9 @@ pub async fn collection_by_id(
 }
 
 pub fn storage_crs(state: &AppState) -> &str {
-    state.fcb_metadata.cityjson["metadata"]["referenceSystem"]
-        .as_str()
-        .unwrap_or("")
+    &state.fcb_metadata.storage_crs
 }
+
 fn collection_value(state: &AppState) -> serde_json::Value {
     let metadata = &state.fcb_metadata.cityjson;
     let mut cityjson =
@@ -195,10 +252,7 @@ fn collection_value(state: &AppState) -> serde_json::Value {
             {"href":LICENSE_RDF_URL,"rel":REL_LICENSE,"type":CONTENT_TYPE_RDF_XML,"title":LICENSE_TITLE}
         ]
     });
-    if let Some(e) = metadata["metadata"]["geographicalExtent"]
-        .as_array()
-        .filter(|e| e.len() == 6)
-    {
+    if let Some(e) = &state.fcb_metadata.extent {
         collection["extent"] = serde_json::json!({"spatial":{"bbox":[[e[0],e[1],e[3],e[4]]],"crs":storage_crs(state)}});
     }
     collection

@@ -35,6 +35,7 @@ pub struct AppState {
     pub fcb_metadata: FcbMetadata,
     pub is_local_file: bool,
     pub config: AppConfig,
+    http_client: reqwest::Client,
 }
 
 /// Check if the URL is a local file path or remote URL
@@ -94,7 +95,7 @@ pub async fn create_app() -> anyhow::Result<Router> {
 
 pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router> {
     anyhow::ensure!(
-        config.max_return_features > 0 && config.max_return_features <= i32::MAX as u32,
+        config.max_return_features > 0,
         "invalid MAX_RETURN_FEATURES"
     );
     anyhow::ensure!(
@@ -120,7 +121,17 @@ pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router>
     let is_local = is_local_file(&fcb_url);
 
     // Load FCB metadata
-    let fcb_metadata = load_fcb_metadata(&config).await?;
+    let mut fcb_metadata = load_fcb_metadata(&config).await?;
+    let crs = fcb_metadata.cityjson["metadata"]["referenceSystem"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("dataset has no storage CRS"))?;
+    let crs =
+        crs::SupportedCrs::parse(crs).map_err(|_| anyhow::anyhow!("unsupported storage CRS"))?;
+    anyhow::ensure!(
+        matches!(crs, crs::SupportedCrs::Rd | crs::SupportedCrs::RdNap),
+        "unsupported storage CRS"
+    );
+    fcb_metadata.storage_crs = crs.uri().into();
 
     let state = Arc::new(AppState {
         fcb_url: fcb_url.clone(),
@@ -128,6 +139,10 @@ pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router>
         base_url,
         fcb_metadata,
         is_local_file: is_local,
+        http_client: reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()?,
         config,
     });
 
@@ -158,7 +173,14 @@ pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router>
                 "/collections/:collection_id/items/:item_id",
                 get(fs_handler::collection_item_by_id),
             )
-            .layer(CorsLayer::permissive())
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                content_crs,
+            ))
+            .layer(CorsLayer::permissive().expose_headers([
+                axum::http::HeaderName::from_static("content-crs"),
+                axum::http::header::LINK,
+            ]))
             .layer(TraceLayer::new_for_http())
             .with_state(state)
     } else {
@@ -179,7 +201,14 @@ pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router>
                 "/collections/:collection_id/items/:item_id",
                 get(http_handler::collection_item_by_id),
             )
-            .layer(CorsLayer::permissive())
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                content_crs,
+            ))
+            .layer(CorsLayer::permissive().expose_headers([
+                axum::http::HeaderName::from_static("content-crs"),
+                axum::http::header::LINK,
+            ]))
             .layer(TraceLayer::new_for_http())
             .with_state(state)
     })
@@ -218,5 +247,35 @@ async fn readiness(
                 axum::Json(serde_json::json!({"status":"unavailable"})),
             )
         }
+    }
+}
+
+async fn content_crs(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let geometry = request.uri().path().starts_with("/collections/pand/items");
+    let mut response = next.run(request).await;
+    if geometry && response.status().is_success() {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("content-crs"),
+            format!("<{}>", state.fcb_metadata.storage_crs)
+                .parse()
+                .expect("static CRS URI"),
+        );
+    }
+    response
+}
+
+impl AppState {
+    pub(crate) async fn http_reader(
+        &self,
+    ) -> fcb_core::error::Result<fcb_core::HttpFcbReader<reqwest::Client>> {
+        let client = http_range_client::AsyncBufferedHttpRangeClient::with(
+            self.http_client.clone(),
+            &self.fcb_url,
+        );
+        fcb_core::HttpFcbReader::new(client).await
     }
 }

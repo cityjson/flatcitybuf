@@ -16,9 +16,8 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use crate::constants::*;
-use crate::crs::transform_bbox;
 use crate::filter_parser::{parse_filter, ParseError};
-use crate::handlers::{collect_features, determine_format, BboxQuery};
+use crate::handlers::{collect_features, determine_format, validate_output_crs, BboxQuery, FeatureQuery};
 use crate::link::{build_link_header, build_link_json};
 use crate::models::*;
 use crate::AppState;
@@ -26,9 +25,10 @@ use crate::AppState;
 pub async fn collection_items(
     Path(collection_id): Path<String>,
     headers: HeaderMap,
-    AxumQuery(mut query): AxumQuery<BboxQuery>,
+    query: Result<AxumQuery<BboxQuery>, axum::extract::rejection::QueryRejection>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, ApiError> {
+    let AxumQuery(mut query) = query.map_err(|_| StatusCode::BAD_REQUEST)?;
     info!(
         "Serving items for collection: {} with query: {:?}",
         collection_id, query
@@ -43,64 +43,7 @@ pub async fn collection_items(
     query.f = Some(format.clone());
     let (limit, offset) = query.pagination(state.max_return_features)?;
 
-    // Parse and transform bbox if provided
-    let bbox = if let Some(bbox_str) = &query.bbox {
-        let parts: Result<Vec<f64>, _> = bbox_str
-            .split(',')
-            .map(|s| s.trim().parse::<f64>())
-            .collect();
-
-        let parsed_bbox = match parts {
-            Ok(coords) => {
-                if coords.len() == 4 {
-                    Ok(coords)
-                } else if coords.len() == 6 {
-                    // Extract 2D bbox from 3D bbox (ignore z coordinates)
-                    Ok(vec![coords[0], coords[1], coords[3], coords[4]])
-                } else {
-                    Err(StatusCode::BAD_REQUEST)
-                }
-            }
-            Err(_) => {
-                warn!("Failed to parse bbox coordinates");
-                Err(StatusCode::BAD_REQUEST)
-            }
-        };
-
-        // Apply coordinate transformation if bbox-crs is provided
-        match parsed_bbox {
-            Ok(coords) => {
-                if let Some(bbox_crs) = &query.bbox_crs {
-                    // Transform from bbox_crs to Dutch CRS
-                    match transform_bbox(&coords, bbox_crs, DUTCH_CRS) {
-                        Ok(transformed) => {
-                            info!(
-                                "Transformed bbox from {} to {}: {:?} -> {:?}",
-                                bbox_crs, DUTCH_CRS, coords, transformed
-                            );
-                            Some(transformed)
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Failed to transform bbox from {} to {}: {}",
-                                bbox_crs, DUTCH_CRS, e
-                            );
-                            return Err(StatusCode::BAD_REQUEST.into());
-                        }
-                    }
-                } else {
-                    // No transformation needed, bbox is already in Dutch CRS
-                    Some(coords)
-                }
-            }
-            Err(e) => {
-                warn!("Failed to parse bbox: {:?}", e);
-                return Err(StatusCode::BAD_REQUEST.into());
-            }
-        }
-    } else {
-        None
-    };
+    let bbox = query.spatial_query(&state)?;
 
     // Parse filter if provided
     let filter_conditions = if let Some(filter_str) = &query.filter {
@@ -407,8 +350,10 @@ pub async fn collection_items(
 
 pub async fn collection_item_by_id(
     Path((collection_id, item_id)): Path<(String, String)>,
+    query: Result<AxumQuery<FeatureQuery>, axum::extract::rejection::QueryRejection>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<FeatureCityJson>, ApiError> {
+    let AxumQuery(query) = query.map_err(|_| StatusCode::BAD_REQUEST)?;
     info!(
         "Serving item: {} from collection: {}",
         item_id, collection_id
@@ -418,6 +363,7 @@ pub async fn collection_item_by_id(
         return Err(StatusCode::NOT_FOUND.into());
     }
 
+    validate_output_crs(query.crs.as_deref(), &state)?;
     // Open local file reader
     let file = match File::open(&state.fcb_url) {
         Ok(f) => f,
@@ -463,11 +409,20 @@ pub async fn collection_item_by_id(
                     state.base_url
                 ),
                 rel: "self".into(),
+                r#type: Some(CONTENT_TYPE_JSON.into()),
+                title: Some(TITLE_THIS_DOCUMENT.into()),
                 ..Default::default()
             },
             Link {
                 href: format!("{}/collections/{collection_id}", state.base_url),
                 rel: "collection".into(),
+                r#type: Some(CONTENT_TYPE_JSON.into()),
+                ..Default::default()
+            },
+            Link {
+                href: format!("{}/collections/{collection_id}/items", state.base_url),
+                rel: "parent".into(),
+                r#type: Some(CONTENT_TYPE_CITYJSON.into()),
                 ..Default::default()
             },
         ]),
@@ -476,7 +431,7 @@ pub async fn collection_item_by_id(
 
 fn fetch_features_by_bbox(
     reader: FcbReader<BufReader<File>>,
-    bbox: &Vec<f64>,
+    bbox: &[f64],
     limit: usize,
     offset: usize,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
@@ -485,8 +440,8 @@ fn fetch_features_by_bbox(
     let mut iter = reader
         .select_query(
             Query::BBox(minx, miny, maxx, maxy),
-            Some(limit as usize),
-            Some(offset as usize),
+            Some(limit),
+            Some(offset),
         )
         .map_err(|e| {
             error!("Failed to select query: {:?}", e);
@@ -510,7 +465,7 @@ fn fetch_features_by_bbox(
         }
     }
 
-    let features_count = iter.features_count().unwrap_or(count as usize);
+    let features_count = iter.features_count().unwrap_or(count);
 
     Ok((features, features_count))
 }
@@ -545,7 +500,7 @@ fn fetch_features_limited(
         }
     }
 
-    let features_count = iter.features_count().unwrap_or(count as usize);
+    let features_count = iter.features_count().unwrap_or(count);
 
     Ok((features, features_count))
 }
@@ -554,6 +509,9 @@ fn fetch_feature_by_id(
     reader: FcbReader<BufReader<File>>,
     feature_id: &str,
 ) -> Result<Option<CityJSONFeature>, anyhow::Error> {
+    if feature_id.len() > 50 {
+        return Ok(None);
+    }
     let query: Vec<(String, Operator, KeyType)> = vec![(
         "identificatie".to_string(),
         Operator::Eq,
@@ -620,7 +578,7 @@ fn fetch_features_with_filter(
                 }
             }
 
-            let features_count = iter.features_count().unwrap_or(count as usize);
+            let features_count = iter.features_count().unwrap_or(count);
             Ok((features, features_count))
         }
         // Only bbox

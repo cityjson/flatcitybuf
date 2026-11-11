@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use std::{
     io::{BufReader, Cursor},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU16, Ordering},
         Arc,
     },
 };
@@ -26,9 +26,12 @@ struct Dataset {
 }
 impl Dataset {
     fn new() -> Self {
+        Self::with_count(3)
+    }
+    fn with_count(count: usize) -> Self {
         let header = json!({"type":"CityJSON","version":"2.0","transform":{"scale":[0.01,0.02,0.03],"translate":[85000.25,446000.5,3.0]},"CityObjects":{},"vertices":[],"metadata":{"referenceSystem":"https://www.opengis.net/def/crs/EPSG/0/7415","title":"API fixture"}});
         let mut input = format!("{header}\n");
-        for i in 0..3 {
+        for i in 0..count {
             let id = format!("NL.IMBAG.Pand.{i:016}");
             let f = json!({"type":"CityJSONFeature","id":id,"CityObjects":{id.clone():{"type":"Building","attributes":{"identificatie":id,"height":i as f64 + 1.0},"geometry":[{"type":"MultiPoint","lod":"1","boundaries":[0]}]}},"vertices":[[i*10,i*10,0]]});
             input.push_str(&format!("{f}\n"));
@@ -48,13 +51,13 @@ impl Dataset {
             seq.cj,
             Some(HeaderWriterOptions {
                 write_index: true,
-                feature_count: 3,
+                feature_count: count as u64,
                 index_node_size: 16,
                 attribute_indices: Some(vec![
                     ("identificatie".into(), None),
                     ("height".into(), None),
                 ]),
-                geographical_extent: None,
+                geographical_extent: Some([85000.25, 446000.5, 3.0, 85000.45, 446000.9, 3.0]),
             }),
             Some(schema),
             None,
@@ -95,6 +98,8 @@ impl Dataset {
 struct Server {
     url: String,
     unavailable: Arc<AtomicBool>,
+    failure_status: Arc<AtomicU16>,
+    delay: Arc<AtomicBool>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Server {
@@ -102,6 +107,12 @@ impl Drop for Server {
         self.task.abort();
     }
 }
+type RangeState = (
+    Arc<Vec<u8>>,
+    Arc<AtomicBool>,
+    Arc<AtomicU16>,
+    Arc<AtomicBool>,
+);
 async fn serve(data: Vec<u8>) -> Server {
     use axum::{
         extract::State,
@@ -110,11 +121,16 @@ async fn serve(data: Vec<u8>) -> Server {
         routing::get,
     };
     async fn range(
-        State((data, down)): State<(Arc<Vec<u8>>, Arc<AtomicBool>)>,
+        State((data, down, status, delay)): State<RangeState>,
         headers: HeaderMap,
     ) -> axum::response::Response {
+        if delay.load(Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
         if down.load(Ordering::SeqCst) {
-            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            return StatusCode::from_u16(status.load(Ordering::SeqCst))
+                .unwrap()
+                .into_response();
         }
         let range = headers
             .get(header::RANGE)
@@ -143,9 +159,14 @@ async fn serve(data: Vec<u8>) -> Server {
             .into_response()
     }
     let unavailable = Arc::new(AtomicBool::new(false));
-    let app = Router::new()
-        .route("/data", get(range))
-        .with_state((Arc::new(data), unavailable.clone()));
+    let failure_status = Arc::new(AtomicU16::new(503));
+    let delay = Arc::new(AtomicBool::new(false));
+    let app = Router::new().route("/data", get(range)).with_state((
+        Arc::new(data),
+        unavailable.clone(),
+        failure_status.clone(),
+        delay.clone(),
+    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/data", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
@@ -154,6 +175,8 @@ async fn serve(data: Vec<u8>) -> Server {
     Server {
         url,
         unavailable,
+        failure_status,
+        delay,
         task,
     }
 }
@@ -183,12 +206,7 @@ async fn local_and_http_listing() {
         let (status, _, body) = request(&app, "/collections/pand/items?limit=2").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["numberReturned"], 2);
-        let got: Vec<_> = body["features"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .cloned()
-            .collect();
+        let got: Vec<_> = body["features"].as_array().unwrap().to_vec();
         assert_eq!(got, d.features[..2]);
         assert_eq!(
             request(&app, "/collections/absent").await.0,
@@ -258,7 +276,6 @@ async fn query_validation_and_empty_pages() {
 
 #[tokio::test]
 async fn missing_ids_and_storage_errors() {
-    let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
     let d = Dataset::new();
     let server = serve(std::fs::read(d.file.path()).unwrap()).await;
     for url in [d.file.path().to_str().unwrap().into(), server.url.clone()] {
@@ -310,12 +327,192 @@ async fn flask_metadata_and_provenance() {
         .await;
         assert_eq!(item["metadata"], d.metadata);
         assert_eq!(item["feature"], d.features[0]);
+        assert!(item["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["rel"] == "parent"));
         let (_, _, collection) = request(&app, "/collections/pand").await;
         assert_eq!(collection["cityjson"]["transform"], d.metadata["transform"]);
         assert_eq!(collection["version"]["collection"], "release-test");
+        assert_eq!(
+            collection["extent"]["spatial"]["bbox"],
+            json!([[85000.25, 446000.5, 85000.45, 446000.9]])
+        );
         assert_eq!(
             request(&app, "/collections").await.2["collections"][0],
             collection
         );
     }
+}
+
+#[tokio::test]
+async fn crs_validation_headers_and_axis_order() {
+    let d = Dataset::new();
+    let server = serve(std::fs::read(d.file.path()).unwrap()).await;
+    for url in [d.file.path().to_str().unwrap().into(), server.url.clone()] {
+        let app = create_app_with_config(d.config(url)).await.unwrap();
+        let item = format!(
+            "/collections/pand/items/{}",
+            d.features[0]["id"].as_str().unwrap()
+        );
+        for path in ["/collections/pand/items", item.as_str()] {
+            for alias in [
+                "EPSG:7415",
+                "http://www.opengis.net/def/crs/EPSG/0/7415",
+                "https://www.opengis.net/def/crs/EPSG/0/7415",
+            ] {
+                let (status, headers, _) =
+                    request(&app, &format!("{path}?crs={}", urlencoding::encode(alias))).await;
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(
+                    headers["content-crs"],
+                    "<http://www.opengis.net/def/crs/EPSG/0/7415>"
+                );
+            }
+            for crs in ["EPSG:4326", "EPSG:28992", "bogus"] {
+                assert_eq!(
+                    request(&app, &format!("{path}?crs={crs}")).await.0,
+                    StatusCode::BAD_REQUEST
+                );
+            }
+        }
+        for bbox in ["NaN,0,1,1", "0,0,inf,1", "1,0,0,1", "0,0,1", "0,0,5,1,1,4"] {
+            assert_eq!(
+                request(&app, &format!("/collections/pand/items?bbox={bbox}"))
+                    .await
+                    .0,
+                StatusCode::BAD_REQUEST
+            );
+        }
+        let a=request(&app,"/collections/pand/items?bbox=4.2,51.9,4.5,52.1&bbox-crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FOGC%2F1.3%2FCRS84").await;
+        let b=request(&app,"/collections/pand/items?bbox=51.9,4.2,52.1,4.5&bbox-crs=https%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F4326").await;
+        assert_eq!(a.0, StatusCode::OK);
+        assert_eq!(b.0, StatusCode::OK);
+        assert_eq!(a.2["features"], json!(d.features));
+        assert_eq!(a.2["features"], b.2["features"]);
+        for f in ["json", "cityjson", "cjseq", "obj"] {
+            let r = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/collections/pand/items?f={f}"))
+                        .header("origin", "http://viewer.test")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(r.status(), StatusCode::OK);
+            assert!(r.headers().contains_key("content-crs"));
+            assert!(r.headers()["access-control-expose-headers"]
+                .to_str()
+                .unwrap()
+                .contains("content-crs"));
+            let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            if f == "cjseq" {
+                let text = std::str::from_utf8(&bytes).unwrap();
+                let mut lines = text.lines();
+                assert_eq!(
+                    serde_json::from_str::<Value>(lines.next().unwrap()).unwrap(),
+                    d.metadata
+                );
+                assert_eq!(
+                    lines
+                        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+                        .collect::<Vec<_>>(),
+                    d.features
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn pagination_preserves_features_and_filter() {
+    let d = Dataset::new();
+    let server = serve(std::fs::read(d.file.path()).unwrap()).await;
+    for url in [d.file.path().to_str().unwrap().into(), server.url.clone()] {
+        let app = create_app_with_config(d.config(url)).await.unwrap();
+        for selection in ["", "&bbox=84000,445000,86000,447000", "&filter=height%3E0"] {
+            let mut all = vec![];
+            for offset in 0..3 {
+                let (status, _, body) = request(
+                    &app,
+                    &format!("/collections/pand/items?limit=1&offset={offset}{selection}"),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(body["numberMatched"], 3);
+                all.extend(body["features"].as_array().unwrap().iter().cloned());
+            }
+            assert_eq!(all, d.features);
+        }
+        let (_, _, body) = request(&app, "/collections/pand/items?filter=height%3E0&limit=1").await;
+        for link in body["links"].as_array().unwrap() {
+            let url = reqwest::Url::parse(link["href"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                url.query_pairs().find(|(k, _)| k == "filter").unwrap().1,
+                "height>0"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn startup_configuration_and_remote_probe_timeout() {
+    let d = Dataset::new();
+    for (cap, timeout) in [(0, 10), (100, 0)] {
+        let mut config = d.config(d.file.path().to_str().unwrap().into());
+        config.max_return_features = cap;
+        config.probe_timeout_seconds = timeout;
+        assert!(create_app_with_config(config).await.is_err());
+    }
+    let empty = Dataset::with_count(0);
+    let app = create_app_with_config(empty.config(empty.file.path().to_str().unwrap().into()))
+        .await
+        .unwrap();
+    let (status, _, body) = request(&app, "/collections/pand/items").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["features"], json!([]));
+    assert!(request(&app, "/collections/pand").await.2["version"]
+        .get("collection")
+        .is_none());
+    let server = serve(std::fs::read(d.file.path()).unwrap()).await;
+    let mut config = d.config(server.url.clone());
+    config.probe_timeout_seconds = 1;
+    let app = create_app_with_config(config.clone()).await.unwrap();
+    server.unavailable.store(true, Ordering::SeqCst);
+    for status in [404, 500] {
+        server.failure_status.store(status, Ordering::SeqCst);
+        assert_eq!(
+            request(&app, "/collections/pand/items").await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+    server.unavailable.store(false, Ordering::SeqCst);
+    server.delay.store(true, Ordering::SeqCst);
+    assert!(create_app_with_config(config).await.is_err());
+    assert_eq!(
+        request(&app, "/readyz").await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn missing_id_index_is_storage_failure_and_invalid_crs_fails_startup() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance");
+    let d = Dataset::new();
+    let config = d.config(root.join("noise_extension.fcb").to_str().unwrap().into());
+    assert!(create_app_with_config(config).await.is_err());
+    let empty = Dataset::with_count(0);
+    let app = create_app_with_config(empty.config(empty.file.path().to_str().unwrap().into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        request(&app, "/collections/pand/items/nonexistent").await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
 }

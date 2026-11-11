@@ -371,15 +371,8 @@ async fn batch_resolve_payloads<T: AsyncHttpRangeClient>(
             // Make sure we have enough data
             if relative_offset < payload_data.len() {
                 let mut buf = Cursor::new(&payload_data[relative_offset..]);
-                match PayloadEntry::deserialize(&mut buf) {
-                    Ok((entry, _)) => {
-                        fetched_payloads.insert(offset, entry);
-                    }
-                    Err(e) => {
-                        debug!("error deserializing payload at offset {}: {:?}", offset, e);
-                        // Continue with other offsets on error
-                    }
-                }
+                let (entry, _) = PayloadEntry::deserialize(&mut buf)?;
+                fetched_payloads.insert(offset, entry);
             }
         }
     }
