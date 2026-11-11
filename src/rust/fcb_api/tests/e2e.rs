@@ -339,11 +339,6 @@ async fn flask_metadata_and_provenance() {
         .await;
         assert_eq!(item["metadata"], d.metadata);
         assert_eq!(item["feature"], d.features[0]);
-        assert!(item["links"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|l| l["rel"] == "parent"));
         let (_, _, collection) = request(&app, "/collections/pand").await;
         assert_eq!(collection["cityjson"]["transform"], d.metadata["transform"]);
         assert_eq!(collection["version"]["collection"], "release-test");
@@ -530,7 +525,7 @@ async fn missing_id_index_is_storage_failure_and_invalid_crs_fails_startup() {
 }
 
 #[tokio::test]
-async fn individual_feature_links_match_flask() {
+async fn building_links_preserve_embedded_parts() {
     for hierarchy in [false, true] {
         let dataset = Dataset::with_hierarchy(1, hierarchy);
         let server = serve(std::fs::read(dataset.file.path()).unwrap()).await;
@@ -548,17 +543,17 @@ async fn individual_feature_links_match_flask() {
             )
             .await;
             assert_eq!(status, StatusCode::OK);
-            let mut expected_links = vec![
+            let expected_links = vec![
                 json!({"href":format!("http://api.test/v1/collections/pand/items/{id}?crs=EPSG%3A7415"),"rel":"self","type":"application/json","title":"Feature details"}),
                 json!({"href":"http://api.test/v1/collections/pand","rel":"collection","type":"application/json"}),
-                json!({"href":format!("http://api.test/v1/collections/pand/items/{id}"),"rel":"parent","type":"application/city+json"}),
             ];
             if hierarchy {
-                for child in dataset.features[0]["CityObjects"][id]["children"]
-                    .as_array()
-                    .unwrap()
-                {
-                    expected_links.push(json!({"href":format!("http://api.test/v1/collections/pand/items/{}",child.as_str().unwrap()),"rel":"child","type":"application/city+json"}));
+                let objects = &body["feature"]["CityObjects"];
+                let children = objects[id]["children"].as_array().unwrap();
+                assert_eq!(children.len(), 2);
+                for child in children {
+                    assert_eq!(objects[child.as_str().unwrap()]["parents"], json!([id]));
+                    assert_eq!(objects[child.as_str().unwrap()]["type"], "BuildingPart");
                 }
             }
             assert_eq!(

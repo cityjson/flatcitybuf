@@ -311,7 +311,6 @@ pub async fn collection_item_by_id(
         &state.base_url,
         &collection_id,
         &item_id,
-        &feature,
         query.crs.as_deref(),
     );
     let id = feature.id.clone();
