@@ -14,7 +14,9 @@ use tracing::{error, info, warn};
 
 use crate::constants::*;
 use crate::filter_parser::{parse_filter, ParseError};
-use crate::handlers::{collect_features, determine_format, validate_output_crs, BboxQuery, FeatureQuery};
+use crate::handlers::{
+    collect_features, determine_format, validate_output_crs, BboxQuery, FeatureQuery,
+};
 use crate::link::{build_feature_links, build_link_header, build_link_json};
 use crate::models::*;
 use crate::AppState;

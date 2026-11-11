@@ -21,7 +21,10 @@ IDs are escaped as individual URL path segments. `/conformance` matches Flask's
 CityJSON 2.0.1 declaration. The existing identificatie-based building lookup
 contract remains unchanged.
 
+The root response advertises only self, conformance, and collections; the
+unimplemented documentation endpoints are not linked.
+
 This work deliberately excludes local concurrency refactoring and the
-advertised documentation endpoints/schema, so it makes no new formal OGC
+planned documentation endpoints/schema, so it makes no new formal OGC
 conformance claim. See docs/upstream-findings.md for reader defects found by
 the API tests and their fixes.

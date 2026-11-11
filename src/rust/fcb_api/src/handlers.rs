@@ -160,20 +160,6 @@ pub async fn landing_page(
                 ..Default::default()
             },
             Link {
-                href: format!("{}/api", state.base_url),
-                rel: REL_SERVICE_DESC.to_string(),
-                r#type: Some(CONTENT_TYPE_OPENAPI.to_string()),
-                title: Some(TITLE_API_DEFINITION.to_string()),
-                ..Default::default()
-            },
-            Link {
-                href: format!("{}/api.html", state.base_url),
-                rel: REL_SERVICE_DOC.to_string(),
-                r#type: Some(CONTENT_TYPE_HTML.to_string()),
-                title: Some(TITLE_API_DOCUMENTATION.to_string()),
-                ..Default::default()
-            },
-            Link {
                 href: format!("{}/conformance", state.base_url),
                 rel: REL_CONFORMANCE.to_string(),
                 r#type: Some(CONTENT_TYPE_JSON.to_string()),

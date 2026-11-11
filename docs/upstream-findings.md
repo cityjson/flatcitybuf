@@ -1961,3 +1961,11 @@ storage, including a base-URL prefix. It checks that the parts and their parent
 relationships are present in the response. `conformance_matches_flask` checks
 the complete declaration on both backends. A link test covers reserved
 characters/Unicode, base-URL prefixes, and CRS query serialization.
+
+## API landing page advertised unimplemented documentation — FIXED
+
+`fcb_api/src/handlers.rs::landing_page` emitted service-desc and service-doc
+links to `/api` and `/api.html`, although those routes return 404. The root
+response now links only to itself, `/conformance`, and `/collections` until
+the documentation endpoints are implemented. Its stored response fixture is
+updated to match.
