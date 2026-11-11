@@ -11,18 +11,6 @@ pub const EXPECTED_LANDING_PAGE: &str = r#"{
       "type": "application/json"
     },
     {
-      "href": "https://api.3dbag.nl/api",
-      "rel": "service-desc",
-      "title": "the API definition",
-      "type": "application/vnd.oai.openapi+json;version=3.0"
-    },
-    {
-      "href": "https://api.3dbag.nl/api.html",
-      "rel": "service-doc",
-      "title": "the API documentation",
-      "type": "text/html"
-    },
-    {
       "href": "https://api.3dbag.nl/conformance",
       "rel": "conformance",
       "title": "Conformance classes implemented by this server",
@@ -40,7 +28,7 @@ pub const EXPECTED_LANDING_PAGE: &str = r#"{
 
 pub const EXPECTED_CONFORMANCE: &str = r#"{
   "conformsTo": [
-    "https://cityjson.org/specs/1.1.1/"
+    "https://cityjson.org/specs/2.0.1/"
   ]
 }"#;
 

@@ -47,6 +47,32 @@ fcb_core = { version = "0.7", default-features = false }
 
 ## Build and verify
 
+On NixOS or another system with Nix, enter the pinned Rust development shell
+from the repository root:
+
+```bash
+nix develop
+cd src/rust
+cargo build --release -p fcb_api
+```
+
+The root `flake.nix` and `flake.lock` provide Cargo, rustc, the C compiler and
+linker, rustfmt, Clippy, rust-analyzer, cargo-nextest, and just. This shell
+covers the Rust workspace; the other language implementations have their own
+prerequisites. `nix shell nixpkgs#cargo` alone does not provide a C linker and
+can fail with `linker cc not found`, including when compiling Rust build
+scripts or proc macros. The API uses Rustls and does not require OpenSSL.
+
+For a single command without entering an interactive shell, run from the root:
+
+```bash
+nix develop --command cargo build --manifest-path src/rust/Cargo.toml --release -p fcb_api
+```
+
+Commit both flake files so Nix can see them in a Git checkout and everyone uses
+the same tool versions. To try newly created, untracked flake files, use
+`nix develop path:.`. Update the pin explicitly with `nix flake update nixpkgs`.
+
 `just` is the task runner. Every language directory in this repo exposes the
 same five verbs; from `src/rust`:
 

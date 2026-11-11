@@ -10,7 +10,7 @@ pub const EPSG_28992: &str = "http://www.opengis.net/def/crs/EPSG/0/28992";
 pub const DEFAULT_BBOX: [f64; 4] = [10000.0, 306250.0, 287760.0, 623690.0];
 
 // Pagination defaults
-pub const DEFAULT_OFFSET: i32 = 1;
+pub const DEFAULT_OFFSET: u64 = 0;
 pub const DEFAULT_LIMIT: i32 = 10;
 pub const DEFAULT_MAX_LIMIT: i32 = 10000;
 
@@ -26,7 +26,6 @@ pub const PAND_COLLECTION_DESCRIPTION: &str =
 
 // Version information
 pub const API_VERSION: &str = "0.1";
-pub const COLLECTION_VERSION: &str = "v2023.10.08";
 
 // Content types
 pub const CONTENT_TYPE_JSON: &str = "application/json";
@@ -42,7 +41,7 @@ pub const LICENSE_RDF_URL: &str = "https://creativecommons.org/licenses/by/4.0/r
 pub const LICENSE_TITLE: &str = "CC BY 4.0";
 
 // Conformance
-pub const CITYJSON_SPEC: &str = "https://cityjson.org/specs/1.1.1/";
+pub const CITYJSON_SPEC: &str = "https://cityjson.org/specs/2.0.1/";
 
 // Link relations
 pub const REL_SELF: &str = "self";
@@ -69,14 +68,6 @@ pub const ITEM_TYPE_FEATURE: &str = "feature";
 
 // Feature collection type
 pub const FEATURE_COLLECTION_TYPE: &str = "FeatureCollection";
-
-// CityJSON Metadata
-pub const CITYJSON_VERSION: &str = "2.0";
-
-pub const CITYJSON_SCALE: [f64; 3] = [0.001, 0.001, 0.001];
-pub const CITYJSON_TRANSLATE: [f64; 3] = [171800.0, 472700.0, 0.0];
-
-pub const CITYJSON_EXTENSIONS: Vec<String> = vec![];
 
 // CRS, these are not used as part of API responses, but are used in the code.
 

@@ -222,6 +222,7 @@ impl<R: Read + Seek> FcbReader<R> {
             header.index_node_size(),
             query,
         )?;
+        let total_feat_count = list.len() as u64;
         let list: Vec<_> = list
             .into_iter()
             .skip(offset.unwrap_or(0))
@@ -241,7 +242,6 @@ impl<R: Read + Seek> FcbReader<R> {
             rtree_index: self.rtree_index_size(),
             attributes: self.attr_index_size(),
         };
-        let total_feat_count = list.len() as u64;
         Ok(FeatureIter::new(
             self.reader,
             self.verify,

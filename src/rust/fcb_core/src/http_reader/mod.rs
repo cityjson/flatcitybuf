@@ -310,10 +310,13 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             current_index_begin += attr_info.length() as usize;
         }
 
-        let result = http_multi_index
+        let mut result = http_multi_index
             .query(&mut self.client, &query.conditions)
             .await?;
 
+        // Match the local reader: page in physical feature order, not index-key order.
+        result.sort_by_key(|item| item.range.start());
+        result.dedup_by_key(|item| item.range.start());
         let total_count = result.len();
 
         // Apply pagination to attribute query results
