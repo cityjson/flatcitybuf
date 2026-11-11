@@ -356,7 +356,8 @@ async fn batch_resolve_payloads<T: AsyncHttpRangeClient>(
     for (start, end) in offset_ranges {
         // Calculate fetch size to include the complete payload entries
         // Add a margin to account for variable-sized payload entries
-        let fetch_size = (end - start) + DEFAULT_MIN_REQ_SIZE;
+        let fetch_size =
+            ((end - start) + DEFAULT_MIN_REQ_SIZE).min(feature_begin.saturating_sub(start));
 
         let payload_data = client.get_range(start, fetch_size).await?;
 
@@ -1381,7 +1382,14 @@ impl<K: Key> Stree<K> {
         debug!("prefetching payload with size: {} bytes", prefetch_size);
 
         // Prefetch a chunk of payload data
-        let payload_cache = prefetch_payload(client, payload_data_start, prefetch_size).await?;
+        // Payload bytes end where feature data starts. Speculative reads past
+        // that boundary can force a second range request beyond EOF on small files.
+        let prefetch_size = prefetch_size.min(feature_begin.saturating_sub(payload_data_start));
+        let payload_cache = if prefetch_size == 0 {
+            PayloadCache::new()
+        } else {
+            prefetch_payload(client, payload_data_start, prefetch_size).await?
+        };
 
         while let Some(node_range) = queue.pop_front() {
             debug!("next: {node_range:?}. {} items left in queue", queue.len());
@@ -1753,7 +1761,14 @@ impl<K: Key> Stree<K> {
         debug!("prefetching payload with size: {} bytes", prefetch_size);
 
         // Prefetch a chunk of payload data
-        let payload_cache = prefetch_payload(client, payload_data_start, prefetch_size).await?;
+        // Payload bytes end where feature data starts. Speculative reads past
+        // that boundary can force a second range request beyond EOF on small files.
+        let prefetch_size = prefetch_size.min(feature_begin.saturating_sub(payload_data_start));
+        let payload_cache = if prefetch_size == 0 {
+            PayloadCache::new()
+        } else {
+            prefetch_payload(client, payload_data_start, prefetch_size).await?
+        };
 
         debug!("http_stream_find_range - index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, lower: {lower:?}, upper: {upper:?}");
         let _ = level_bounds

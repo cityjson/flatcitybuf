@@ -1,3 +1,4 @@
+use crate::error::ApiError;
 use axum::{
     extract::{Path, Query as AxumQuery, State},
     http::{header, HeaderMap, StatusCode},
@@ -24,14 +25,14 @@ pub async fn collection_items(
     headers: HeaderMap,
     AxumQuery(mut query): AxumQuery<BboxQuery>,
     State(state): State<Arc<AppState>>,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, ApiError> {
     info!(
         "Serving items for collection: {} with query: {:?}",
         collection_id, query
     );
 
     if collection_id != PAND_COLLECTION_ID {
-        return Err(StatusCode::NOT_FOUND);
+        return Err(StatusCode::NOT_FOUND.into());
     }
 
     // Determine format from query parameter or Accept header
@@ -81,7 +82,7 @@ pub async fn collection_items(
                                 "Failed to transform bbox from {} to {}: {}",
                                 bbox_crs, DUTCH_CRS, e
                             );
-                            return Err(StatusCode::BAD_REQUEST);
+                            return Err(StatusCode::BAD_REQUEST.into());
                         }
                     }
                 } else {
@@ -91,7 +92,7 @@ pub async fn collection_items(
             }
             Err(e) => {
                 warn!("Failed to parse bbox: {:?}", e);
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(StatusCode::BAD_REQUEST.into());
             }
         }
     } else {
@@ -104,26 +105,36 @@ pub async fn collection_items(
             Ok(conditions) => Some(conditions),
             Err(ParseError::InvalidSyntax(msg)) => {
                 warn!("Invalid filter syntax: {}", msg);
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(StatusCode::BAD_REQUEST.into());
             }
             Err(ParseError::UnsupportedOperator(op)) => {
                 warn!("Unsupported operator in filter: {}", op);
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(StatusCode::BAD_REQUEST.into());
             }
             Err(ParseError::InvalidValue(val)) => {
                 warn!("Invalid value in filter: {}", val);
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(StatusCode::BAD_REQUEST.into());
             }
         }
     } else {
         None
     };
 
+    if let Some(conditions) = &filter_conditions {
+        if conditions.is_empty()
+            || conditions
+                .iter()
+                .any(|(name, _, _)| !state.fcb_metadata.is_column_indexed(name))
+        {
+            return Err(StatusCode::BAD_REQUEST.into());
+        }
+    }
+
     let http_reader = match HttpFcbReader::open(&state.fcb_url).await {
         Ok(reader) => reader,
         Err(e) => {
             warn!("Failed to open FCB reader: {:?}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
         }
     };
 
@@ -135,7 +146,7 @@ pub async fn collection_items(
         Ok(reader) => reader,
         Err(e) => {
             warn!("Failed to open FCB reader: {:?}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
         }
     };
 
@@ -153,16 +164,7 @@ pub async fn collection_items(
         Ok(features) => features,
         Err(e) => {
             warn!("Failed to fetch features: {:?}", e);
-            // Check if this is an attribute-related error that should return 400
-            let error_msg = e.to_string();
-            if error_msg.contains("AttributeIndexNotFound")
-                || error_msg.contains("NoColumnsInHeader")
-                || error_msg.contains("QueryExecutionError")
-                || error_msg.contains("Failed to execute streaming query")
-            {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
         }
     };
 
@@ -177,7 +179,7 @@ pub async fn collection_items(
                 Ok(meta) => meta,
                 Err(e) => {
                     warn!("Failed to generate CityJSON metadata: {:?}", e);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
                 }
             };
 
@@ -222,7 +224,7 @@ pub async fn collection_items(
                 Ok(meta) => meta,
                 Err(e) => {
                     warn!("Failed to generate CityJSON metadata: {:?}", e);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
                 }
             };
 
@@ -262,7 +264,7 @@ pub async fn collection_items(
                 Ok(meta) => meta,
                 Err(e) => {
                     warn!("Failed to generate CityJSON metadata: {:?}", e);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
                 }
             };
 
@@ -359,59 +361,49 @@ pub async fn collection_items(
 pub async fn collection_item_by_id(
     Path((collection_id, item_id)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
-) -> Result<Json<FeatureCityJson>, StatusCode> {
+) -> Result<Json<FeatureCityJson>, ApiError> {
     info!(
         "Serving item: {} from collection: {}",
         item_id, collection_id
     );
 
     if collection_id != PAND_COLLECTION_ID {
-        return Err(StatusCode::NOT_FOUND);
+        return Err(StatusCode::NOT_FOUND.into());
     }
 
     let http_reader = match HttpFcbReader::open(&state.fcb_url).await {
         Ok(reader) => reader,
         Err(e) => {
             warn!("Failed to open FCB reader: {:?}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
         }
     };
 
-    let feature = fetch_feature_by_id(http_reader, &item_id).await;
-
-    let feature = feature.map(|f| FeatureCityJson {
-        feature: f.map(|f| serde_json::to_value(f).unwrap_or_default()),
+    let feature = fetch_feature_by_id(http_reader, &item_id)
+        .await
+        .map_err(ApiError::storage)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(FeatureCityJson {
+        feature: Some(
+            serde_json::to_value(feature).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        ),
         id: Some(item_id.clone()),
         links: Some(vec![
             Link {
-                href: format!("/collections/{collection_id}/items/{item_id}"),
-                rel: "self".to_string(),
-                r#type: Some("application/json".to_string()),
-                title: Some("this document".to_string()),
+                href: format!(
+                    "{}/collections/{collection_id}/items/{item_id}",
+                    state.base_url
+                ),
+                rel: "self".into(),
                 ..Default::default()
             },
             Link {
-                href: format!("/collections/{collection_id}"),
-                rel: "collection".to_string(),
-                r#type: Some("application/json".to_string()),
-                ..Default::default()
-            },
-            Link {
-                href: format!("/collections/{collection_id}/items"),
-                rel: "parent".to_string(),
-                r#type: Some("application/city+json".to_string()),
+                href: format!("{}/collections/{collection_id}", state.base_url),
+                rel: "collection".into(),
                 ..Default::default()
             },
         ]),
-    });
-
-    match feature {
-        Ok(feature) => Ok(Json(feature)),
-        Err(e) => {
-            warn!("Failed to fetch feature by ID: {:?}", e);
-            Err(StatusCode::NOT_FOUND)
-        }
-    }
+    }))
 }
 
 async fn fetch_features_by_bbox<T: AsyncHttpRangeClient + Send + Sync>(

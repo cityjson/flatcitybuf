@@ -11,6 +11,7 @@
 
 pub mod constants;
 mod crs;
+mod error;
 mod filter_parser;
 mod fs_handler;
 mod handlers;

@@ -255,3 +255,34 @@ async fn query_validation_and_empty_pages() {
         assert_eq!(body["numberReturned"], 0);
     }
 }
+
+#[tokio::test]
+async fn missing_ids_and_storage_errors() {
+    let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
+    let d = Dataset::new();
+    let server = serve(std::fs::read(d.file.path()).unwrap()).await;
+    for url in [d.file.path().to_str().unwrap().into(), server.url.clone()] {
+        let app = create_app_with_config(d.config(url.clone())).await.unwrap();
+        let uri = format!(
+            "/collections/pand/items/{}",
+            d.features[0]["id"].as_str().unwrap()
+        );
+        assert_eq!(request(&app, &uri).await.0, StatusCode::OK);
+        let (status, _, body) = request(&app, "/collections/pand/items/absent").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["code"], "404");
+        if url.starts_with("http") {
+            server.unavailable.store(true, Ordering::SeqCst);
+        } else {
+            std::fs::rename(d.file.path(), d.file.path().with_extension("hidden")).unwrap();
+        }
+        for path in [&*uri, "/collections/pand/items"] {
+            assert_eq!(request(&app, path).await.0, StatusCode::SERVICE_UNAVAILABLE);
+        }
+        if url.starts_with("http") {
+            server.unavailable.store(false, Ordering::SeqCst);
+        } else {
+            std::fs::rename(d.file.path().with_extension("hidden"), d.file.path()).unwrap();
+        }
+    }
+}
