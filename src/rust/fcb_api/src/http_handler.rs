@@ -299,10 +299,8 @@ pub async fn collection_items(
             )
                 .into_response())
         }
-        "json" | _ => {
-            // Default JSON format (FeatureCollection)
-            // Generate pagination links using the shared link module
-            let collection_links = build_link_json(
+        _ => {
+            let links = build_link_json(
                 &state.base_url,
                 &collection_id,
                 &query,
@@ -311,49 +309,29 @@ pub async fn collection_items(
                 number_matched,
                 number_returned,
             );
-
-            let feature_collection = FeatureCollection {
+            let link_header = build_link_header(
+                &state.base_url,
+                &collection_id,
+                &query,
+                limit,
+                offset,
+                number_matched,
+                number_returned,
+            );
+            let response = FeatureCollection {
                 r#type: Type::FeatureCollection,
+                metadata: state.fcb_metadata.cityjson.clone(),
                 features: features
                     .into_iter()
-                    .map(|f| FeatureCityJson {
-                        feature: Some(serde_json::to_value(f.clone()).unwrap_or_default()),
-                        id: Some(f.id.clone()),
-                        links: Some(vec![
-                            Link {
-                                href: format!(
-                                    "{}/collections/{}/items/{}",
-                                    state.base_url.trim_end_matches('/'),
-                                    collection_id,
-                                    f.id
-                                ),
-                                rel: "self".to_string(),
-                                r#type: Some("application/city+json".to_string()),
-                                title: Some("this document".to_string()),
-                                ..Default::default()
-                            },
-                            Link {
-                                href: format!(
-                                    "{}/collections/{}",
-                                    state.base_url.trim_end_matches('/'),
-                                    collection_id
-                                ),
-                                rel: "collection".to_string(),
-                                r#type: Some("application/json".to_string()),
-                                title: Some("Collection".to_string()),
-                                ..Default::default()
-                            },
-                        ]),
-                        ..Default::default()
-                    })
-                    .collect(),
+                    .map(serde_json::to_value)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
                 number_matched: Some(number_matched as u64),
                 number_returned: Some(number_returned as u64),
                 time_stamp: Some(Utc::now().to_rfc3339()),
-                links: Some(collection_links),
+                links: Some(links),
             };
-
-            Ok(Json(feature_collection).into_response())
+            Ok(([(header::LINK, link_header)], Json(response)).into_response())
         }
     }
 }
@@ -384,6 +362,7 @@ pub async fn collection_item_by_id(
         .map_err(ApiError::storage)?
         .ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(FeatureCityJson {
+        metadata: state.fcb_metadata.cityjson.clone(),
         feature: Some(
             serde_json::to_value(feature).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
         ),

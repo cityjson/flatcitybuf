@@ -187,7 +187,7 @@ async fn local_and_http_listing() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|f| f["feature"].clone())
+            .cloned()
             .collect();
         assert_eq!(got, d.features[..2]);
         assert_eq!(
@@ -284,5 +284,38 @@ async fn missing_ids_and_storage_errors() {
         } else {
             std::fs::rename(d.file.path().with_extension("hidden"), d.file.path()).unwrap();
         }
+    }
+}
+
+#[tokio::test]
+async fn flask_metadata_and_provenance() {
+    let d = Dataset::new();
+    let server = serve(std::fs::read(d.file.path()).unwrap()).await;
+    for url in [d.file.path().to_str().unwrap().into(), server.url.clone()] {
+        let mut config = d.config(url);
+        config.collection_version = Some("release-test".into());
+        let app = create_app_with_config(config).await.unwrap();
+        let (_, _, body) = request(&app, "/collections/pand/items").await;
+        assert_eq!(body["metadata"], d.metadata);
+        assert_eq!(body["features"], json!(d.features));
+        let (_, _, empty) = request(&app, "/collections/pand/items?offset=999").await;
+        assert_eq!(empty["metadata"], d.metadata);
+        let (_, _, item) = request(
+            &app,
+            &format!(
+                "/collections/pand/items/{}",
+                d.features[0]["id"].as_str().unwrap()
+            ),
+        )
+        .await;
+        assert_eq!(item["metadata"], d.metadata);
+        assert_eq!(item["feature"], d.features[0]);
+        let (_, _, collection) = request(&app, "/collections/pand").await;
+        assert_eq!(collection["cityjson"]["transform"], d.metadata["transform"]);
+        assert_eq!(collection["version"]["collection"], "release-test");
+        assert_eq!(
+            request(&app, "/collections").await.2["collections"][0],
+            collection
+        );
     }
 }
