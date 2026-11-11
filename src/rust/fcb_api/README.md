@@ -18,6 +18,12 @@ complete CityJSON header document, including the transform needed to interpret
 integer vertices. Clients previously using `features[i].feature` must use
 `features[i]` instead. Collection metadata is read from the dataset header.
 
+Individual responses use Flask's hierarchy links: `parent` names the returned
+CityJSONFeature, and each child of its root CityObject has a `child` link.
+The `self` link retains the requested CRS parameter. `/conformance` declares
+`https://cityjson.org/specs/2.0.1/`, matching Flask; this does not establish
+formal OGC API Features certification.
+
 Offsets are zero-based. Negative offsets and nonpositive limits return 400;
 positive limits are capped at `MAX_RETURN_FEATURES` (default 100). Sending both
 `bbox` and `filter` returns 400 until their intersection is implemented.

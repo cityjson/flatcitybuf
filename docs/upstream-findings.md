@@ -1933,3 +1933,28 @@ now propagate decoding errors instead of silently dropping matches.
 
 API documentation endpoints/schema and local concurrency changes are outside
 this work. The server currently supports RD New storage (EPSG:7415/28992).
+
+## API replacement: hierarchy links and conformance declaration — FIXED
+
+**Where:** `fcb_api/src/fs_handler.rs::collection_item_by_id`, its HTTP
+counterpart, and `constants.rs::CITYJSON_SPEC`. The Flask reference is
+[views.py](https://github.com/3DBAG/3dbag-api/blob/master/app/views.py),
+`get_feature` (lines 225–255) and `conformance` (lines 84–91).
+
+**Reproduction:** GET an indexed feature with children. FCB returned no child
+links and pointed parent at the collection listing. GET `/conformance` returned
+CityJSON 1.1.1, while Flask declares 2.0.1.
+
+**Fix:** both storage paths use one link builder. Parent targets the returned
+CityJSONFeature ID, child links follow its root CityObject's children, and self
+retains the requested ID/CRS parameter. URL path segments are escaped. The
+response envelope's ID comes from the returned feature, matching Flask when
+an indexed lookup value differs from that ID. The declaration now names
+CityJSON 2.0.1; it does not claim formal OGC API Features certification.
+
+**Coverage:** `individual_feature_links_match_flask` compares whole responses
+for writer-generated features with/without children over local and HTTP
+storage, including a base-URL prefix. `conformance_matches_flask` checks the
+complete declaration on both backends. A link test covers aliases, reserved
+characters/Unicode, empty children, and a missing root object. ID lookup
+continues to use the dataset's existing `identificatie` index.

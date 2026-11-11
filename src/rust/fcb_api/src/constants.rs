@@ -41,7 +41,7 @@ pub const LICENSE_RDF_URL: &str = "https://creativecommons.org/licenses/by/4.0/r
 pub const LICENSE_TITLE: &str = "CC BY 4.0";
 
 // Conformance
-pub const CITYJSON_SPEC: &str = "https://cityjson.org/specs/1.1.1/";
+pub const CITYJSON_SPEC: &str = "https://cityjson.org/specs/2.0.1/";
 
 // Link relations
 pub const REL_SELF: &str = "self";

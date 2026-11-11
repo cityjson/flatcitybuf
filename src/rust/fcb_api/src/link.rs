@@ -1,5 +1,68 @@
 use crate::{handlers::BboxQuery, models::Link};
 
+/// Match Flask's feature navigation: parent names the returned CityJSONFeature,
+/// and children come from its root CityObject, rather than the collection listing.
+pub fn build_feature_links(
+    base_url: &str,
+    collection_id: &str,
+    requested_id: &str,
+    feature: &cjseq::CityJSONFeature,
+    crs: Option<&str>,
+) -> Vec<Link> {
+    use crate::constants::*;
+    let mut collection_url = reqwest::Url::parse(base_url).expect("validated base URL");
+    collection_url
+        .path_segments_mut()
+        .expect("HTTP base URL")
+        .pop_if_empty()
+        .extend(["collections", collection_id]);
+    let item_url = |id: &str| {
+        let mut url = collection_url.clone();
+        url.path_segments_mut()
+            .expect("HTTP base URL")
+            .extend(["items", id]);
+        url
+    };
+    let mut self_url = item_url(requested_id);
+    if let Some(crs) = crs {
+        self_url.query_pairs_mut().append_pair("crs", crs);
+    }
+    let mut links = vec![
+        Link {
+            href: self_url.into(),
+            rel: REL_SELF.into(),
+            r#type: Some(CONTENT_TYPE_JSON.into()),
+            title: Some("Feature details".into()),
+            ..Default::default()
+        },
+        Link {
+            href: collection_url.to_string(),
+            rel: REL_COLLECTION.into(),
+            r#type: Some(CONTENT_TYPE_JSON.into()),
+            ..Default::default()
+        },
+        Link {
+            href: item_url(&feature.id).into(),
+            rel: REL_PARENT.into(),
+            r#type: Some(CONTENT_TYPE_CITYJSON.into()),
+            ..Default::default()
+        },
+    ];
+    if let Some(children) = feature
+        .city_objects
+        .get(&feature.id)
+        .and_then(|root| root.children.as_ref())
+    {
+        links.extend(children.iter().map(|id| Link {
+            href: item_url(id).into(),
+            rel: REL_CHILD.into(),
+            r#type: Some(CONTENT_TYPE_CITYJSON.into()),
+            ..Default::default()
+        }));
+    }
+    links
+}
+
 pub fn build_link_json(
     base_url: &str,
     collection_id: &str,
@@ -84,6 +147,43 @@ pub fn build_link_header(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feature_links_encode_ids_and_use_returned_feature_as_parent() {
+        let child = "part /?#% café";
+        let mut feature: cjseq::CityJSONFeature = serde_json::from_value(serde_json::json!({
+            "type": "CityJSONFeature", "id": "root", "vertices": [],
+            "CityObjects": {"root": {"type": "Building", "children": [child]}}
+        }))
+        .unwrap();
+        let links = build_feature_links("https://api.test/v1/", "pand", "alias", &feature, None);
+        assert_eq!(
+            links[0].href,
+            "https://api.test/v1/collections/pand/items/alias"
+        );
+        assert_eq!(
+            links[2].href,
+            "https://api.test/v1/collections/pand/items/root"
+        );
+        let child_url = reqwest::Url::parse(&links[3].href).unwrap();
+        assert_eq!(child_url.query(), None);
+        assert_eq!(child_url.fragment(), None);
+        let segments: Vec<_> = child_url.path_segments().unwrap().collect();
+        assert_eq!(segments.len(), 5);
+        assert_eq!(urlencoding::decode(segments[4]).unwrap(), child);
+
+        feature.city_objects.get_mut("root").unwrap().children = Some(vec![]);
+        assert_eq!(
+            build_feature_links("https://api.test", "pand", "root", &feature, None).len(),
+            3
+        );
+        feature.city_objects.clear();
+        assert_eq!(
+            build_feature_links("https://api.test", "pand", "root", &feature, None).len(),
+            3
+        );
+    }
+
     #[test]
     fn encoded_links_and_boundaries() {
         let filter = "name = 'a & b+% café'";

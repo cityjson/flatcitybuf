@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 use crate::constants::*;
 use crate::filter_parser::{parse_filter, ParseError};
 use crate::handlers::{collect_features, determine_format, validate_output_crs, BboxQuery, FeatureQuery};
-use crate::link::{build_link_header, build_link_json};
+use crate::link::{build_feature_links, build_link_header, build_link_json};
 use crate::models::*;
 use crate::AppState;
 
@@ -307,36 +307,21 @@ pub async fn collection_item_by_id(
         .await
         .map_err(ApiError::storage)?
         .ok_or(StatusCode::NOT_FOUND)?;
+    let links = build_feature_links(
+        &state.base_url,
+        &collection_id,
+        &item_id,
+        &feature,
+        query.crs.as_deref(),
+    );
+    let id = feature.id.clone();
     Ok(Json(FeatureCityJson {
         metadata: state.fcb_metadata.cityjson.clone(),
         feature: Some(
             serde_json::to_value(feature).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
         ),
-        id: Some(item_id.clone()),
-        links: Some(vec![
-            Link {
-                href: format!(
-                    "{}/collections/{collection_id}/items/{item_id}",
-                    state.base_url
-                ),
-                rel: "self".into(),
-                r#type: Some(CONTENT_TYPE_JSON.into()),
-                title: Some(TITLE_THIS_DOCUMENT.into()),
-                ..Default::default()
-            },
-            Link {
-                href: format!("{}/collections/{collection_id}", state.base_url),
-                rel: "collection".into(),
-                r#type: Some(CONTENT_TYPE_JSON.into()),
-                ..Default::default()
-            },
-            Link {
-                href: format!("{}/collections/{collection_id}/items", state.base_url),
-                rel: "parent".into(),
-                r#type: Some(CONTENT_TYPE_CITYJSON.into()),
-                ..Default::default()
-            },
-        ]),
+        id: Some(id),
+        links: Some(links),
     }))
 }
 

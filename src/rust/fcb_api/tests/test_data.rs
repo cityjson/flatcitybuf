@@ -40,7 +40,7 @@ pub const EXPECTED_LANDING_PAGE: &str = r#"{
 
 pub const EXPECTED_CONFORMANCE: &str = r#"{
   "conformsTo": [
-    "https://cityjson.org/specs/1.1.1/"
+    "https://cityjson.org/specs/2.0.1/"
   ]
 }"#;
 

@@ -29,11 +29,21 @@ impl Dataset {
         Self::with_count(3)
     }
     fn with_count(count: usize) -> Self {
+        Self::with_hierarchy(count, false)
+    }
+    fn with_hierarchy(count: usize, hierarchy: bool) -> Self {
         let header = json!({"type":"CityJSON","version":"2.0","transform":{"scale":[0.01,0.02,0.03],"translate":[85000.25,446000.5,3.0]},"CityObjects":{},"vertices":[],"metadata":{"referenceSystem":"https://www.opengis.net/def/crs/EPSG/0/7415","title":"API fixture"}});
         let mut input = format!("{header}\n");
         for i in 0..count {
             let id = format!("NL.IMBAG.Pand.{i:016}");
-            let f = json!({"type":"CityJSONFeature","id":id,"CityObjects":{id.clone():{"type":"Building","attributes":{"identificatie":id,"height":i as f64 + 1.0},"geometry":[{"type":"MultiPoint","lod":"1","boundaries":[0]}]}},"vertices":[[i*10,i*10,0]]});
+            let mut f = json!({"type":"CityJSONFeature","id":id,"CityObjects":{id.clone():{"type":"Building","attributes":{"identificatie":id,"height":i as f64 + 1.0},"geometry":[{"type":"MultiPoint","lod":"1","boundaries":[0]}]}},"vertices":[[i*10,i*10,0]]});
+            if hierarchy {
+                let children = [format!("{id}-0"), format!("{id}-1")];
+                f["CityObjects"][&id]["children"] = json!(children);
+                for child in children {
+                    f["CityObjects"][&child] = json!({"type":"BuildingPart","parents":[id],"geometry":[{"type":"MultiPoint","lod":"1","boundaries":[0]}]});
+                }
+            }
             input.push_str(&format!("{f}\n"));
         }
         let CJType::Seq(seq) =
@@ -44,7 +54,9 @@ impl Dataset {
         let mut schema = AttributeSchema::new();
         for f in &seq.features {
             for co in f.city_objects.values() {
-                schema.add_attributes(co.attributes.as_ref().unwrap());
+                if let Some(attributes) = &co.attributes {
+                    schema.add_attributes(attributes);
+                }
             }
         }
         let mut writer = FcbWriter::new(
@@ -515,4 +527,62 @@ async fn missing_id_index_is_storage_failure_and_invalid_crs_fails_startup() {
         request(&app, "/collections/pand/items/nonexistent").await.0,
         StatusCode::SERVICE_UNAVAILABLE
     );
+}
+
+#[tokio::test]
+async fn individual_feature_links_match_flask() {
+    for hierarchy in [false, true] {
+        let dataset = Dataset::with_hierarchy(1, hierarchy);
+        let server = serve(std::fs::read(dataset.file.path()).unwrap()).await;
+        for url in [
+            dataset.file.path().to_str().unwrap().into(),
+            server.url.clone(),
+        ] {
+            let mut config = dataset.config(url);
+            config.base_url = "http://api.test/v1/".into();
+            let app = create_app_with_config(config).await.unwrap();
+            let id = dataset.features[0]["id"].as_str().unwrap();
+            let (status, _, body) = request(
+                &app,
+                &format!("/collections/pand/items/{id}?crs=EPSG%3A7415"),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            let mut expected_links = vec![
+                json!({"href":format!("http://api.test/v1/collections/pand/items/{id}?crs=EPSG%3A7415"),"rel":"self","type":"application/json","title":"Feature details"}),
+                json!({"href":"http://api.test/v1/collections/pand","rel":"collection","type":"application/json"}),
+                json!({"href":format!("http://api.test/v1/collections/pand/items/{id}"),"rel":"parent","type":"application/city+json"}),
+            ];
+            if hierarchy {
+                for child in dataset.features[0]["CityObjects"][id]["children"]
+                    .as_array()
+                    .unwrap()
+                {
+                    expected_links.push(json!({"href":format!("http://api.test/v1/collections/pand/items/{}",child.as_str().unwrap()),"rel":"child","type":"application/city+json"}));
+                }
+            }
+            assert_eq!(
+                body,
+                json!({"id":id,"metadata":dataset.metadata,"feature":dataset.features[0],"links":expected_links})
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn conformance_matches_flask() {
+    let dataset = Dataset::new();
+    let server = serve(std::fs::read(dataset.file.path()).unwrap()).await;
+    for url in [
+        dataset.file.path().to_str().unwrap().into(),
+        server.url.clone(),
+    ] {
+        let app = create_app_with_config(dataset.config(url)).await.unwrap();
+        let (status, _, body) = request(&app, "/conformance").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body,
+            json!({"conformsTo":["https://cityjson.org/specs/2.0.1/"]})
+        );
+    }
 }
