@@ -5,6 +5,7 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub struct FcbMetadata {
     /// Map from column name to column metadata
+    pub cityjson: serde_json::Value,
     pub columns: HashMap<String, ColumnMetadata>,
 }
 
@@ -28,7 +29,28 @@ impl FcbMetadata {
     pub fn new() -> Self {
         Self {
             columns: HashMap::new(),
+            cityjson: serde_json::Value::Null,
         }
+    }
+
+    pub fn from_header(header: fcb_core::Header<'_>) -> anyhow::Result<Self> {
+        let mut metadata = Self::new();
+        metadata.cityjson = serde_json::to_value(fcb_core::deserializer::to_cj_metadata(&header)?)?;
+        if let Some(columns) = header.columns() {
+            for column in columns.iter() {
+                metadata.columns.insert(
+                    column.name().to_string(),
+                    ColumnMetadata {
+                        index: column.index(),
+                        column_type: column.type_(),
+                        is_indexed: header.attribute_index().is_some_and(|indices| {
+                            indices.iter().any(|i| i.index() == column.index())
+                        }),
+                    },
+                );
+            }
+        }
+        Ok(metadata)
     }
 
     /// Get the column type for a given column name

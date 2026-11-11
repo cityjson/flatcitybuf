@@ -87,6 +87,8 @@ impl Dataset {
             fcb_url: url,
             base_url: "http://api.test".into(),
             max_return_features: 100,
+            probe_timeout_seconds: 10,
+            collection_version: None,
         }
     }
 }
@@ -177,7 +179,7 @@ async fn local_and_http_listing() {
     let d = Dataset::new();
     let server = serve(std::fs::read(d.file.path()).unwrap()).await;
     for url in [d.file.path().to_str().unwrap().into(), server.url.clone()] {
-        let app = create_app_with_config(d.config(url)).await;
+        let app = create_app_with_config(d.config(url)).await.unwrap();
         let (status, _, body) = request(&app, "/collections/pand/items?limit=2").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["numberReturned"], 2);
@@ -193,4 +195,35 @@ async fn local_and_http_listing() {
             StatusCode::NOT_FOUND
         );
     }
+}
+
+#[tokio::test]
+async fn startup_and_readiness() {
+    let d = Dataset::new();
+    let server = serve(std::fs::read(d.file.path()).unwrap()).await;
+    let app = create_app_with_config(d.config(server.url.clone()))
+        .await
+        .unwrap();
+    assert_eq!(request(&app, "/readyz").await.0, StatusCode::OK);
+    server.unavailable.store(true, Ordering::SeqCst);
+    assert_eq!(
+        request(&app, "/readyz").await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert!(create_app_with_config(d.config(server.url.clone()))
+        .await
+        .is_err());
+    server.unavailable.store(false, Ordering::SeqCst);
+    assert_eq!(request(&app, "/readyz").await.0, StatusCode::OK);
+    assert!(create_app_with_config(d.config("/no/such/dataset".into()))
+        .await
+        .is_err());
+    let app = create_app_with_config(d.config(d.file.path().to_str().unwrap().into()))
+        .await
+        .unwrap();
+    std::fs::write(d.file.path(), b"broken").unwrap();
+    assert_eq!(
+        request(&app, "/readyz").await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
 }
