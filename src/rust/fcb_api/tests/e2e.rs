@@ -1,777 +1,196 @@
-mod test_data;
-
 use axum::{
     body::Body,
     http::{Request, StatusCode},
+    Router,
 };
-use cjseq::CityJSONFeature;
-use openapi::models::FeatureCollection;
-use serde_json::Value;
-use test_data::{
-    EXPECTED_COLLECTIONS, EXPECTED_COLLECTION_PAND, EXPECTED_CONFORMANCE, EXPECTED_LANDING_PAGE,
+use fcb_api::{create_app_with_config, AppConfig};
+use fcb_core::{
+    attribute::{AttributeSchema, AttributeSchemaMethods},
+    header_writer::HeaderWriterOptions,
+    read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter,
 };
-use tower::util::ServiceExt;
+use serde_json::{json, Value};
+use std::{
+    io::{BufReader, Cursor},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+use tower::ServiceExt;
 
-async fn app() -> axum::Router {
-    std::env::set_var("BASE_URL", "https://api.3dbag.nl");
-    fcb_api::create_app().await
+struct Dataset {
+    file: tempfile::NamedTempFile,
+    metadata: Value,
+    features: Vec<Value>,
 }
-
-#[tokio::test]
-async fn test_landing_page() {
-    let app = app().await;
-
-    let response = app
-        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    let expected_json: Value = serde_json::from_str(EXPECTED_LANDING_PAGE).unwrap();
-    assert_eq!(json, expected_json);
-}
-
-#[tokio::test]
-async fn test_conformance() {
-    let app = app().await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/conformance")
-                .body(Body::empty())
-                .unwrap(),
+impl Dataset {
+    fn new() -> Self {
+        let header = json!({"type":"CityJSON","version":"2.0","transform":{"scale":[0.01,0.02,0.03],"translate":[85000.25,446000.5,3.0]},"CityObjects":{},"vertices":[],"metadata":{"referenceSystem":"https://www.opengis.net/def/crs/EPSG/0/7415","title":"API fixture"}});
+        let mut input = format!("{header}\n");
+        for i in 0..3 {
+            let id = format!("NL.IMBAG.Pand.{i:016}");
+            let f = json!({"type":"CityJSONFeature","id":id,"CityObjects":{id.clone():{"type":"Building","attributes":{"identificatie":id,"height":i as f64 + 1.0},"geometry":[{"type":"MultiPoint","lod":"1","boundaries":[0]}]}},"vertices":[[i*10,i*10,0]]});
+            input.push_str(&format!("{f}\n"));
+        }
+        let CJType::Seq(seq) =
+            read_cityjson_from_reader(BufReader::new(Cursor::new(input)), CJTypeKind::Seq).unwrap()
+        else {
+            panic!()
+        };
+        let mut schema = AttributeSchema::new();
+        for f in &seq.features {
+            for co in f.city_objects.values() {
+                schema.add_attributes(co.attributes.as_ref().unwrap());
+            }
+        }
+        let mut writer = FcbWriter::new(
+            seq.cj,
+            Some(HeaderWriterOptions {
+                write_index: true,
+                feature_count: 3,
+                index_node_size: 16,
+                attribute_indices: Some(vec![
+                    ("identificatie".into(), None),
+                    ("height".into(), None),
+                ]),
+                geographical_extent: None,
+            }),
+            Some(schema),
+            None,
         )
-        .await
         .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    let expected_json: Value = serde_json::from_str(EXPECTED_CONFORMANCE).unwrap();
-    assert_eq!(json, expected_json);
-}
-
-#[tokio::test]
-async fn test_collections() {
-    let app = app().await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/collections")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    let expected_json: Value = serde_json::from_str(EXPECTED_COLLECTIONS).unwrap();
-    assert_eq!(json, expected_json);
-}
-
-#[tokio::test]
-async fn test_collection_by_id() {
-    let app = app().await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/collections/pand")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    let expected_json: Value = serde_json::from_str(EXPECTED_COLLECTION_PAND).unwrap();
-    assert_eq!(json, expected_json);
-}
-
-#[tokio::test]
-async fn test_collection_not_found() {
-    let app = app().await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/collections/nonexistent")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn test_collection_items_with_limit() {
-    let app = app().await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/collections/pand/items?limit=2")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    assert_eq!(json["type"], "FeatureCollection");
-    assert!(json["features"].is_array());
-
-    let features = json["features"].as_array().unwrap();
-    assert!(features.len() <= 2);
-
-    // Check feature structure
-    if !features.is_empty() {
-        assert!(features[0]["id"].is_string());
-        assert!(features[0]["feature"].is_object());
-        assert!(features[0]["links"].is_array());
-    }
-}
-
-#[tokio::test]
-async fn test_collection_items_bbox_pagination_equivalence() {
-    let bbox = "68989.19384501831,444614.3991728433,70685.16687543111,446023.6031208569";
-
-    // Full page: offset=0, limit=3
-    let resp_all = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?bbox={bbox}&offset=0&limit=3"
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp_all.status(), StatusCode::OK);
-    let body_all = axum::body::to_bytes(resp_all.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_all: Value = serde_json::from_slice(&body_all).unwrap();
-    let features_all = json_all["features"].as_array().cloned().unwrap_or_default();
-
-    // Part 1: offset=0, limit=1
-    let resp_part1 = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?bbox={bbox}&offset=0&limit=1"
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp_part1.status(), StatusCode::OK);
-    let body_part1 = axum::body::to_bytes(resp_part1.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_part1: Value = serde_json::from_slice(&body_part1).unwrap();
-    let features_part1 = json_part1["features"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-
-    // Part 2: offset=1, limit=2
-    let resp_part2 = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?bbox={bbox}&offset=1&limit=2"
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp_part2.status(), StatusCode::OK);
-    let body_part2 = axum::body::to_bytes(resp_part2.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_part2: Value = serde_json::from_slice(&body_part2).unwrap();
-    let features_part2 = json_part2["features"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-
-    // Compare ordered ids
-    let ids_all: Vec<String> = features_all
-        .iter()
-        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
-        .collect();
-    let mut ids_parts: Vec<String> = features_part1
-        .iter()
-        .chain(features_part2.iter())
-        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
-        .collect();
-    ids_parts.truncate(ids_all.len());
-
-    assert_eq!(
-        ids_all, ids_parts,
-        "Bbox pagination parts should match full page results"
-    );
-}
-
-#[tokio::test]
-async fn test_collection_items_filter_pagination_equivalence() {
-    // Use a filter expected to return multiple results
-    let filter = "b3_h_dak_50p > 100";
-    let filter_enc = urlencoding::encode(filter);
-
-    // Full page: offset=0, limit=3
-    let resp_all = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?filter={filter_enc}&offset=0&limit=3"
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp_all.status(), StatusCode::OK);
-    let body_all = axum::body::to_bytes(resp_all.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_all: Value = serde_json::from_slice(&body_all).unwrap();
-    let features_all = json_all["features"].as_array().cloned().unwrap_or_default();
-
-    // Part 1: offset=0, limit=1
-    let resp_part1 = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?filter={filter_enc}&offset=0&limit=1"
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp_part1.status(), StatusCode::OK);
-    let body_part1 = axum::body::to_bytes(resp_part1.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_part1: Value = serde_json::from_slice(&body_part1).unwrap();
-    let features_part1 = json_part1["features"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-
-    // Part 2: offset=1, limit=2
-    let resp_part2 = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?filter={filter_enc}&offset=1&limit=2"
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp_part2.status(), StatusCode::OK);
-    let body_part2 = axum::body::to_bytes(resp_part2.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_part2: Value = serde_json::from_slice(&body_part2).unwrap();
-    let features_part2 = json_part2["features"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-
-    // Compare ordered ids
-    let ids_all: Vec<String> = features_all
-        .iter()
-        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
-        .collect();
-    let mut ids_parts: Vec<String> = features_part1
-        .iter()
-        .chain(features_part2.iter())
-        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
-        .collect();
-    ids_parts.truncate(ids_all.len());
-
-    assert_eq!(
-        ids_all, ids_parts,
-        "Filter pagination parts should match full page results"
-    );
-}
-
-#[tokio::test]
-async fn test_collection_items_pagination_equivalence() {
-    // Fetch first page (offset=0, limit=3)
-    let resp_all = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri("/collections/pand/items?offset=0&limit=3")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp_all.status(), StatusCode::OK);
-    let body_all = axum::body::to_bytes(resp_all.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_all: Value = serde_json::from_slice(&body_all).unwrap();
-    let features_all = json_all["features"].as_array().cloned().unwrap_or_default();
-
-    // Fetch parts: offset=0, limit=1
-    let resp_part1 = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri("/collections/pand/items?offset=0&limit=1")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp_part1.status(), StatusCode::OK);
-    let body_part1 = axum::body::to_bytes(resp_part1.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_part1: Value = serde_json::from_slice(&body_part1).unwrap();
-    let features_part1 = json_part1["features"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-
-    // Fetch parts: offset=1, limit=2
-    let resp_part2 = app()
-        .await
-        .oneshot(
-            Request::builder()
-                .uri("/collections/pand/items?offset=1&limit=2")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp_part2.status(), StatusCode::OK);
-    let body_part2 = axum::body::to_bytes(resp_part2.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json_part2: Value = serde_json::from_slice(&body_part2).unwrap();
-    let features_part2 = json_part2["features"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-
-    // Compare by concatenating ids
-    let ids_all: Vec<String> = features_all
-        .iter()
-        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
-        .collect();
-    let mut ids_parts: Vec<String> = features_part1
-        .iter()
-        .chain(features_part2.iter())
-        .filter_map(|f| f["id"].as_str().map(|s| s.to_string()))
-        .collect();
-
-    // Truncate concatenated parts to the length of the first page (in case the dataset has < 3 items)
-    ids_parts.truncate(ids_all.len());
-
-    assert_eq!(
-        ids_all, ids_parts,
-        "Pagination parts should match full page results"
-    );
-}
-
-#[tokio::test]
-async fn test_collection_items_with_bbox() {
-    let app = app().await;
-
-    let bbox = "68989.19384501831,444614.3991728433,70685.16687543111,446023.6031208569";
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/collections/pand/items?bbox={bbox}&limit=5"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    assert_eq!(json["type"], "FeatureCollection");
-
-    let features = json["features"].as_array().unwrap();
-    assert!(features.len() <= 5);
-}
-
-#[tokio::test]
-async fn test_invalid_bbox_format() {
-    let app = app().await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/collections/pand/items?bbox=invalid")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn test_bbox_with_wrong_number_of_coords() {
-    let app = app().await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/collections/pand/items?bbox=1,2,3")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn test_collection_item_by_id() {
-    let app = app().await;
-
-    let test_id = "NL.IMBAG.Pand.0851100000000564";
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/collections/pand/items/{test_id}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    if response.status() == StatusCode::OK {
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-
-        assert_eq!(json["id"], test_id);
-        assert!(json["feature"].is_object());
-        assert!(json["links"].is_array());
-    }
-}
-
-#[tokio::test]
-async fn test_filter_simple_equality() {
-    let app = app().await;
-
-    let test_id = "NL.IMBAG.Pand.0503100000012869";
-    let filter = format!("identificatie = '{test_id}'");
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?filter={}&limit=5",
-                    urlencoding::encode(&filter)
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    assert!(json["features"].is_array());
-    assert!(json["features"].as_array().unwrap().len() == 1);
-    assert!(
-        json["features"].as_array().unwrap()[0]["id"]
-            .as_str()
+        for f in &seq.features {
+            writer.add_feature(f).unwrap();
+        }
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writer.write(file.as_file_mut()).unwrap();
+        let mut reader = FcbReader::open(BufReader::new(std::fs::File::open(file.path()).unwrap()))
             .unwrap()
-            == test_id
-    );
-}
-
-#[tokio::test]
-async fn test_filter_numeric_comparison() {
-    let app = app().await;
-
-    let filter = "b3_h_dak_50p > 100";
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?filter={}&limit=10",
-                    urlencoding::encode(filter)
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    if response.status() == StatusCode::OK {
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
+            .select_all()
             .unwrap();
-        let json: FeatureCollection = serde_json::from_slice(&body).unwrap();
-        let features = json.features;
-        for feature in features {
-            let mut found = false;
-            let feature: CityJSONFeature =
-                serde_json::from_value(feature.feature.unwrap()).unwrap();
-            for co in feature.city_objects.values() {
-                if let Some(attrs) = co.attributes.as_ref() {
-                    if let Some(b3_h_dak_50p) = attrs.get("b3_h_dak_50p") {
-                        if b3_h_dak_50p.as_f64().unwrap() > 100.0 {
-                            found = true;
-                        }
-                    }
-                }
-            }
-            assert!(found);
+        let metadata =
+            serde_json::to_value(fcb_core::deserializer::to_cj_metadata(&reader.header()).unwrap())
+                .unwrap();
+        let mut features = vec![];
+        while let Some(f) = reader.next().unwrap() {
+            features.push(serde_json::to_value(f.cur_cj_feature().unwrap()).unwrap());
+        }
+        Self {
+            file,
+            metadata,
+            features,
+        }
+    }
+    fn config(&self, url: String) -> AppConfig {
+        AppConfig {
+            fcb_url: url,
+            base_url: "http://api.test".into(),
+            max_return_features: 100,
         }
     }
 }
-
-#[tokio::test]
-async fn test_filter_and_condition() {
-    let app = app().await;
-
-    let filter = "b3_h_dak_50p > 10 AND b3_bouwlagen >= 2";
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?filter={}&limit=3",
-                    urlencoding::encode(filter)
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    // Handle case where attributes might not be indexed in test dataset
-    assert!(
-        response.status() == StatusCode::OK,
-        "Expected 200 got: {}",
-        response.status()
-    );
-
-    if response.status() == StatusCode::OK {
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: FeatureCollection = serde_json::from_slice(&body).unwrap();
-        let features = json.features;
-
-        // Verify that all returned features match both conditions:
-        // b3_h_dak_50p > 10 AND b3_bouwlagen >= 2
-        for feature in features {
-            let mut height_condition_met = false;
-            let mut floors_condition_met = false;
-
-            let feature: CityJSONFeature =
-                serde_json::from_value(feature.feature.unwrap()).unwrap();
-            for co in feature.city_objects.values() {
-                if let Some(attrs) = co.attributes.as_ref() {
-                    // Check b3_h_dak_50p > 10
-                    if let Some(height) = attrs.get("b3_h_dak_50p") {
-                        if height.as_f64().unwrap() > 10.0 {
-                            height_condition_met = true;
-                        }
-                    }
-                    // Check b3_bouwlagen >= 2
-                    if let Some(floors) = attrs.get("b3_bouwlagen") {
-                        if floors.as_i64().unwrap() >= 2 {
-                            floors_condition_met = true;
-                        }
-                    }
-                }
-            }
-            // Both conditions must be met
-            assert!(height_condition_met, "Height condition not met for feature");
-            assert!(floors_condition_met, "Floors condition not met for feature");
-        }
+struct Server {
+    url: String,
+    unavailable: Arc<AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+}
+impl Drop for Server {
+    fn drop(&mut self) {
+        self.task.abort();
     }
 }
-
-#[tokio::test]
-async fn test_filter_boolean_value() {
-    let app = app().await;
-
-    let filter = "b3_is_glas_dak = true";
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?filter={}&limit=3",
-                    urlencoding::encode(filter)
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    // Handle case where attributes might not be indexed in test dataset
-    assert!(
-        response.status() == StatusCode::OK,
-        "Expected 200, got: {}",
-        response.status()
-    );
-
-    if response.status() == StatusCode::OK {
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: FeatureCollection = serde_json::from_slice(&body).unwrap();
-        let features = json.features;
-
-        // Verify that all returned features match boolean condition:
-        // b3_is_glas_dak = true
-        for feature in features {
-            let mut boolean_condition_met = false;
-
-            let feature: CityJSONFeature =
-                serde_json::from_value(feature.feature.unwrap()).unwrap();
-            for co in feature.city_objects.values() {
-                if let Some(attrs) = co.attributes.as_ref() {
-                    // Check b3_is_glas_dak = true
-                    if let Some(is_glass_roof) = attrs.get("b3_is_glas_dak") {
-                        if is_glass_roof.as_bool().unwrap_or(false) {
-                            boolean_condition_met = true;
-                        }
-                    }
-                }
-            }
-            assert!(
-                boolean_condition_met,
-                "Boolean condition not met for feature"
-            );
+async fn serve(data: Vec<u8>) -> Server {
+    use axum::{
+        extract::State,
+        http::{header, HeaderMap},
+        response::IntoResponse,
+        routing::get,
+    };
+    async fn range(
+        State((data, down)): State<(Arc<Vec<u8>>, Arc<AtomicBool>)>,
+        headers: HeaderMap,
+    ) -> axum::response::Response {
+        if down.load(Ordering::SeqCst) {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
         }
+        let range = headers
+            .get(header::RANGE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .strip_prefix("bytes=")
+            .unwrap();
+        let (a, b) = range.split_once('-').unwrap();
+        let a: usize = a.parse().unwrap();
+        if a >= data.len() {
+            return StatusCode::RANGE_NOT_SATISFIABLE.into_response();
+        }
+        let b = b
+            .parse::<usize>()
+            .unwrap_or(data.len() - 1)
+            .min(data.len() - 1);
+        (
+            StatusCode::PARTIAL_CONTENT,
+            [(
+                header::CONTENT_RANGE,
+                format!("bytes {a}-{b}/{}", data.len()),
+            )],
+            data[a..=b].to_vec(),
+        )
+            .into_response()
+    }
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let app = Router::new()
+        .route("/data", get(range))
+        .with_state((Arc::new(data), unavailable.clone()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/data", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    Server {
+        url,
+        unavailable,
+        task,
     }
 }
-
-#[tokio::test]
-async fn test_filter_invalid_syntax() {
-    let app = app().await;
-
-    let filter = "building_height >> 30";
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?filter={}",
-                    urlencoding::encode(filter)
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
+async fn request(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, Value) {
+    let r = app
+        .clone()
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
         .await
         .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let status = r.status();
+    let headers = r.headers().clone();
+    let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        headers,
+        serde_json::from_slice(&body).unwrap_or(Value::Null),
+    )
 }
-
 #[tokio::test]
-async fn test_filter_combined_with_bbox() {
-    let app = app().await;
-
-    let bbox = "68989.19384501831,444614.3991728433,70685.16687543111,446023.6031208569";
-    let filter = "b3_h_dak_50p > 5";
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/collections/pand/items?bbox={}&filter={}&limit=3",
-                    bbox,
-                    urlencoding::encode(filter)
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    // Handle case where attributes might not be indexed in test dataset
-    assert!(
-        response.status() == StatusCode::OK,
-        "Expected 200, got: {}",
-        response.status()
-    );
-
-    if response.status() == StatusCode::OK {
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-
-        assert_eq!(json["type"], "FeatureCollection");
-        assert!(json["features"].is_array());
-        let features = json["features"].as_array().unwrap();
-        assert!(features.len() <= 3);
+async fn local_and_http_listing() {
+    let d = Dataset::new();
+    let server = serve(std::fs::read(d.file.path()).unwrap()).await;
+    for url in [d.file.path().to_str().unwrap().into(), server.url.clone()] {
+        let app = create_app_with_config(d.config(url)).await;
+        let (status, _, body) = request(&app, "/collections/pand/items?limit=2").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["numberReturned"], 2);
+        let got: Vec<_> = body["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["feature"].clone())
+            .collect();
+        assert_eq!(got, d.features[..2]);
+        assert_eq!(
+            request(&app, "/collections/absent").await.0,
+            StatusCode::NOT_FOUND
+        );
     }
 }

@@ -51,16 +51,44 @@ fn is_local_file(url: &str) -> bool {
     true
 }
 
+#[derive(Clone, Debug)]
+pub struct AppConfig {
+    pub fcb_url: String,
+    pub base_url: String,
+    pub max_return_features: u32,
+}
+
+impl AppConfig {
+    pub fn from_env() -> Self {
+        let fcb_url = env::var("FCB_URL").unwrap_or_else(|_| {
+            "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb".to_string()
+        });
+
+        let base_url = env::var("BASE_URL").unwrap_or_else(|_| "https://api.3dbag.nl".to_string());
+
+        let max_return_features = env::var("MAX_RETURN_FEATURES")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<u32>()
+            .unwrap_or(100);
+
+        Self {
+            fcb_url,
+            base_url,
+            max_return_features,
+        }
+    }
+}
+
 pub async fn create_app() -> Router {
-    let fcb_url = env::var("FCB_URL")
-        .unwrap_or_else(|_| "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb".to_string());
+    create_app_with_config(AppConfig::from_env()).await
+}
 
-    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "https://api.3dbag.nl".to_string());
-
-    let max_return_features = env::var("MAX_RETURN_FEATURES")
-        .unwrap_or_else(|_| "100".to_string())
-        .parse::<u32>()
-        .unwrap_or(100);
+pub async fn create_app_with_config(config: AppConfig) -> Router {
+    let AppConfig {
+        fcb_url,
+        base_url,
+        max_return_features,
+    } = config;
 
     // Determine if the URL is local or remote
     let is_local = is_local_file(&fcb_url);
