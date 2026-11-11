@@ -125,6 +125,10 @@ bytes directly. Rust is the authoritative reference:
 - **Rust toolchain** (recent stable)
 - **Node.js** ≥ 22.12 (for the TypeScript reader in `src/ts`)
 
+For Rust development with Nix, run `nix develop` from the repository root.
+The pinned shell includes the Rust tools and C linker; see the
+[Rust development guide](docs/rust.md#build-and-verify).
+
 ### 📦 Installation
 
 #### Package Manager Installation (Recommended)

@@ -310,6 +310,10 @@ docker run -p 8080:8080 \
 
 #### Option 2: Cargo Binary
 
+On NixOS, run `nix develop` from the repository root first to load the Rust
+toolchain and C linker. See the [Rust development shell](../../../docs/rust.md#build-and-verify)
+for details.
+
 ```bash
 # Build from src/rust directory
 cd src/rust
