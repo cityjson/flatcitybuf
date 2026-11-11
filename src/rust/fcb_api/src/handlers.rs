@@ -14,8 +14,8 @@ use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct BboxQuery {
-    pub limit: Option<i32>,
-    pub offset: Option<i32>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
     pub bbox: Option<String>,
     #[serde(rename = "bbox-crs")]
     pub bbox_crs: Option<String>,
@@ -34,6 +34,26 @@ pub(crate) fn collect_features(
         warn!("Failed to collect features into one CityJSON object: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })
+}
+
+impl BboxQuery {
+    pub fn pagination(&self, maximum: u32) -> Result<(usize, usize), StatusCode> {
+        let limit = self.limit.unwrap_or(DEFAULT_LIMIT as u64);
+        if limit == 0 || (self.bbox.is_some() && self.filter.is_some()) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        if self
+            .f
+            .as_deref()
+            .is_some_and(|f| !["json", "cityjson", "cjseq", "obj"].contains(&f))
+        {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        Ok((
+            usize::try_from(limit.min(maximum as u64)).map_err(|_| StatusCode::BAD_REQUEST)?,
+            usize::try_from(self.offset.unwrap_or(0)).map_err(|_| StatusCode::BAD_REQUEST)?,
+        ))
+    }
 }
 
 /// Determine output format from query parameter or Accept header

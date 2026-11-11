@@ -100,7 +100,19 @@ pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router>
         config.probe_timeout_seconds > 0,
         "invalid DATASET_PROBE_TIMEOUT_SECONDS"
     );
-    let fcb_url = config.fcb_url.clone();
+    let base = reqwest::Url::parse(&config.base_url)?;
+    anyhow::ensure!(
+        matches!(base.scheme(), "http" | "https")
+            && base.host_str().is_some()
+            && base.query().is_none()
+            && base.fragment().is_none(),
+        "invalid BASE_URL"
+    );
+    let fcb_url = config
+        .fcb_url
+        .strip_prefix("file://")
+        .unwrap_or(&config.fcb_url)
+        .to_string();
     let base_url = config.base_url.trim().trim_end_matches('/').to_string();
     let max_return_features = config.max_return_features;
     // Determine if the URL is local or remote

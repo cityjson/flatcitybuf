@@ -25,7 +25,7 @@ use crate::AppState;
 pub async fn collection_items(
     Path(collection_id): Path<String>,
     headers: HeaderMap,
-    AxumQuery(query): AxumQuery<BboxQuery>,
+    AxumQuery(mut query): AxumQuery<BboxQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, StatusCode> {
     info!(
@@ -38,12 +38,9 @@ pub async fn collection_items(
     }
 
     // Determine format from query parameter or Accept header
-    let format = determine_format(&query.f, &headers);
-    let limit = query
-        .limit
-        .unwrap_or(DEFAULT_LIMIT)
-        .min(state.max_return_features as i32);
-    let offset = query.offset.unwrap_or(0).max(0);
+    let format = determine_format(&query.f, &headers).to_owned();
+    query.f = Some(format.clone());
+    let (limit, offset) = query.pagination(state.max_return_features)?;
 
     // Parse and transform bbox if provided
     let bbox = if let Some(bbox_str) = &query.bbox {
@@ -232,10 +229,10 @@ pub async fn collection_items(
     };
 
     // Handle different output formats
-    let number_matched = total_count as i32;
-    let number_returned = features.len() as i32;
+    let number_matched = total_count;
+    let number_returned = features.len();
 
-    match format {
+    match format.as_str() {
         "cjseq" => {
             // Generate CityJSONSeq format
             let metadata = match deserializer::to_cj_metadata(&header) {
@@ -422,8 +419,8 @@ pub async fn collection_items(
                         ..Default::default()
                     })
                     .collect(),
-                number_matched: Some(number_matched),
-                number_returned: Some(number_returned),
+                number_matched: Some(number_matched as u64),
+                number_returned: Some(number_returned as u64),
                 time_stamp: Some(Utc::now().to_rfc3339()),
                 links: Some(collection_links),
             };
@@ -522,8 +519,8 @@ pub async fn collection_item_by_id(
 fn fetch_features_by_bbox(
     reader: FcbReader<BufReader<File>>,
     bbox: &Vec<f64>,
-    limit: i32,
-    offset: i32,
+    limit: usize,
+    offset: usize,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     let (minx, miny, maxx, maxy) = (bbox[0], bbox[1], bbox[2], bbox[3]);
 
@@ -562,14 +559,14 @@ fn fetch_features_by_bbox(
 
 fn fetch_features_limited(
     reader: FcbReader<BufReader<File>>,
-    limit: u32,
-    offset: u32,
+    limit: usize,
+    offset: usize,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     // For full scan with pagination
     let mut iter = reader.select_all()?;
 
     // Skip offset
-    let mut skipped: u32 = 0;
+    let mut skipped: usize = 0;
     while skipped < offset {
         match iter.next()? {
             Some(_) => skipped += 1,
@@ -618,16 +615,11 @@ fn fetch_features_with_filter(
     reader: FcbReader<BufReader<File>>,
     bbox: Option<&Vec<f64>>,
     filter_conditions: Option<Vec<(String, Operator, KeyType)>>,
-    limit: i32,
-    offset: i32,
+    limit: usize,
+    offset: usize,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     match (bbox, filter_conditions) {
-        // Both bbox and filter
-        (Some(bbox), Some(_)) => {
-            // For now, we'll prioritize bbox over attribute filtering
-            // In a full implementation, we'd need to apply both filters
-            fetch_features_by_bbox(reader, bbox, limit, offset)
-        }
+        (Some(_), Some(_)) => unreachable!("combined queries rejected by validation"),
         // Only filter
         (None, Some(conditions)) => {
             info!("Fetching features with filter: {conditions:?}");
@@ -676,6 +668,6 @@ fn fetch_features_with_filter(
         // Only bbox
         (Some(bbox), None) => fetch_features_by_bbox(reader, bbox, limit, offset),
         // Neither bbox nor filter
-        (None, None) => fetch_features_limited(reader, limit as u32, offset as u32),
+        (None, None) => fetch_features_limited(reader, limit, offset),
     }
 }

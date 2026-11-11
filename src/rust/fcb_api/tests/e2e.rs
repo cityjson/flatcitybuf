@@ -227,3 +227,31 @@ async fn startup_and_readiness() {
         StatusCode::SERVICE_UNAVAILABLE
     );
 }
+
+#[tokio::test]
+async fn query_validation_and_empty_pages() {
+    let d = Dataset::new();
+    let server = serve(std::fs::read(d.file.path()).unwrap()).await;
+    for url in [d.file.path().to_str().unwrap().into(), server.url.clone()] {
+        let app = create_app_with_config(d.config(url)).await.unwrap();
+        for query in [
+            "offset=-1",
+            "limit=0",
+            "limit=-1",
+            "offset=18446744073709551616",
+            "limit=x",
+            "bbox=0,0,1,1&filter=height%3E1",
+        ] {
+            assert_eq!(
+                request(&app, &format!("/collections/pand/items?{query}"))
+                    .await
+                    .0,
+                StatusCode::BAD_REQUEST,
+                "{query}"
+            );
+        }
+        let (status, _, body) = request(&app, "/collections/pand/items?offset=99").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["numberReturned"], 0);
+    }
+}
