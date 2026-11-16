@@ -193,6 +193,9 @@ let options = HeaderWriterOptions {
     // branching factor.
     attribute_indices: Some(vec![("b3_h_dak_50p".to_string(), None)]),
     geographical_extent: None,
+    // Index every City Object's id, queried as the column `id` without
+    // being copied into the attributes. `None` writes no such index.
+    id_index: HeaderWriterOptions::default().id_index,
 };
 
 let mut fcb = FcbWriter::new(cj, Some(options), Some(schema), None)?;

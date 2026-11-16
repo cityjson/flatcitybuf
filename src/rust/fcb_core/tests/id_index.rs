@@ -25,7 +25,10 @@ fn write(features: &[CityJSONFeature], id_index: Option<u16>) -> Result<Vec<u8>>
     for feature in features {
         let mut ids: Vec<&String> = feature.city_objects.keys().collect();
         ids.sort_unstable();
-        for co in ids.into_iter().filter_map(|id| feature.city_objects.get(id)) {
+        for co in ids
+            .into_iter()
+            .filter_map(|id| feature.city_objects.get(id))
+        {
             if let Some(attributes) = &co.attributes {
                 schema.add_attributes(attributes);
             }

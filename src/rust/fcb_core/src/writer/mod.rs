@@ -1,5 +1,5 @@
-use crate::packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use crate::fb::ColumnType;
+use crate::packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use crate::MAGIC_BYTES;
 use attr_index::{build_attribute_index_for_attr, build_attribute_index_for_column};
 use attribute::AttributeSchema;
@@ -264,9 +264,12 @@ impl<'a> FcbWriter<'a> {
 
         // The id column has the highest column index, so its index comes
         // last: the section is ordered by column index.
-        if let (Some(id_column), Some(bf)) = (
+        // A file without features has no id to index, and a B+tree cannot be
+        // empty.
+        if let (Some(id_column), Some(bf), false) = (
             self.header_writer.id_column,
             self.header_writer.header_options.id_index,
+            self.feat_offsets.is_empty(),
         ) {
             let (buf, info) = build_attribute_index_for_column(
                 &id_column,

@@ -29,6 +29,9 @@ struct ColumnInfo {
     std::string name;
     std::uint8_t type;  // ::ColumnType, as its underlying ubyte
     bool nullable;
+    /// Set on the City Object id column: its value for an object is the
+    /// object's id, and no attribute blob carries it.
+    bool primary_key;
 };
 
 /// Where one column's B+tree index lives, and how it is shaped.

@@ -27,13 +27,13 @@ describe('headerModel', () => {
 
   it('excludes Json/Binary and unindexed columns from queryable', () => {
     const columns: ColumnInfo[] = [
-      { index: 0, name: 'str_col', type: ColumnType.String, nullable: true },
-      { index: 1, name: 'json_col', type: ColumnType.Json, nullable: true },
+      { index: 0, name: 'str_col', type: ColumnType.String, nullable: true, primaryKey: false },
+      { index: 1, name: 'json_col', type: ColumnType.Json, nullable: true, primaryKey: false },
       {
-        index: 2, name: 'bin_col', type: ColumnType.Binary, nullable: true,
+        index: 2, name: 'bin_col', type: ColumnType.Binary, nullable: true, primaryKey: false,
       },
       {
-        index: 3, name: 'int_col', type: ColumnType.Int, nullable: true,
+        index: 3, name: 'int_col', type: ColumnType.Int, nullable: true, primaryKey: false,
       },
     ]
     const info = {
@@ -69,7 +69,7 @@ describe('headerModel', () => {
 
 describe('coerceAttrValue', () => {
   const col = (type: ColumnType, name = 'c'): ColumnInfo => (
-    { index: 0, name, type, nullable: true }
+    { index: 0, name, type, nullable: true, primaryKey: false }
   )
 
   it('Bool', () => {
@@ -126,7 +126,7 @@ describe('coerceAttrValue', () => {
 
 describe('coerceAttrValue range validation', () => {
   const col = (type: ColumnType, name = 'c'): ColumnInfo => (
-    { index: 0, name, type, nullable: true }
+    { index: 0, name, type, nullable: true, primaryKey: false }
   )
 
   it('Byte accepts -128..127 and rejects one past each bound', () => {

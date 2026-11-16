@@ -6,11 +6,11 @@ use crate::fb::{
     Vec2, Vertex, WrapMode,
 };
 use crate::fb::{Column, ColumnArgs, ColumnType};
-use crate::ID_COLUMN_NAME;
 use crate::fb::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
 use crate::geom_encoder::encode;
+use crate::ID_COLUMN_NAME;
 use crate::{
     AttributeIndex, DoubleVertex, Extension, ExtensionArgs, GeometryInstance, GeometryInstanceArgs,
     MaterialMapping, MaterialMappingArgs, TextureFormat, TextureMapping, TextureMappingArgs,

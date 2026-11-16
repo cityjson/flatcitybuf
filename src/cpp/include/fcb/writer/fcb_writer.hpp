@@ -34,6 +34,14 @@ struct FcbWriterOptions {
     /// index is built for any column.
     std::vector<std::pair<std::string, std::optional<std::uint16_t>>> attribute_indices;
     std::optional<std::array<double, 6>> geographical_extent;
+    /// The branching factor of the index over City Object ids, or
+    /// `std::nullopt` to write none. The index holds the id of every City
+    /// Object, a feature's children included, and is queried as the column
+    /// `kIdColumnName`; the ids are not copied into the attributes. A
+    /// dataset whose attribute schema already has a column of that name
+    /// keeps it, and gets no id index. Mirrors
+    /// `HeaderWriterOptions::id_index`.
+    std::optional<std::uint16_t> id_index = kDefaultBranchingFactor;
 };
 
 /// Streaming writer for one `.fcb` file, mirroring Rust's own `FcbWriter`
@@ -121,6 +129,8 @@ class FcbWriter {
     AttributeSchema attr_schema_;
     std::optional<AttributeSchema> semantic_attr_schema_;
     std::vector<std::string> indexing_attr_;
+    /// The index of the City Object id column, when ids are indexed.
+    std::optional<std::uint16_t> id_column_;
 
     double scale_x_;
     double scale_y_;

@@ -174,7 +174,9 @@ export function postFilterCandidates(
     const want = operandBytes(cond)
     let matched = false
     for (const object of feature.cityObjects()) {
-      if (valueSatisfies(object.attributes()[cond.field], cond.operator, want)) {
+      // The id column's value is the object's id, not an attribute.
+      const value = column.primaryKey ? object.id : object.attributes()[cond.field]
+      if (valueSatisfies(value, cond.operator, want)) {
         matched = true
         break
       }

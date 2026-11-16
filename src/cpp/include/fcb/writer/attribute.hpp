@@ -9,6 +9,7 @@
 
 #    include <cstdint>
 #    include <map>
+#    include <optional>
 #    include <string>
 #    include <utility>
 #    include <vector>
@@ -63,9 +64,23 @@ std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::ordered_
                                                         const AttributeSchema& schema);
 
 /// Builds the `Column` vector for `Header.columns` or `CityObject.columns`,
-/// in ascending column-index order.
+/// in ascending column-index order. `id_column`, for `Header.columns` only,
+/// appends the City Object id column at that index: a String column named
+/// `kIdColumnName` with `primary_key` set, which no attribute blob carries.
 ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Column>>>
-to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema);
+to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema,
+           std::optional<std::uint16_t> id_column = std::nullopt);
+
+/// The name of the header column that stands for a City Object's id.
+/// Mirrors `ID_COLUMN_NAME` (const_vars.rs).
+inline constexpr const char* kIdColumnName = "id";
+
+/// The index of the City Object id column: the next free one when
+/// `id_index` asks for an id index and `schema` has no column of that name,
+/// which would otherwise keep it. Mirrors `HeaderWriter::new_with_options`
+/// (writer/header_writer.rs).
+std::optional<std::uint16_t> id_column_index(const std::optional<std::uint16_t>& id_index,
+                                             const AttributeSchema& schema);
 
 /// One indexable (column, value) pair pulled out of a feature for the
 /// static B+tree builder (M6). `value.kind()` always matches
@@ -74,6 +89,12 @@ struct AttributeIndexEntry {
     std::uint16_t index;
     KeyValue value;
 };
+
+/// One index entry per City Object of `city_feature`, keyed by the object's
+/// id, for the id column at `index`, in id order. Mirrors
+/// `cityfeature_to_id_index_entries` (writer/attribute.rs).
+std::vector<AttributeIndexEntry>
+cityfeature_to_id_index_entries(const nlohmann::ordered_json& city_feature, std::uint16_t index);
 
 /// Extracts index entries for `indexing_attr` from one CityJSON attributes
 /// object. Only Bool, Int, UInt, Long, ULong, Float, Double, String and

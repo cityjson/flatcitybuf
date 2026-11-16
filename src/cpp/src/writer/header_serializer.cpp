@@ -216,7 +216,7 @@ to_fcb_header(::flatbuffers::FlatBufferBuilder& fbb, const nlohmann::ordered_jso
     ::Transform transform = to_transform(cj.at("transform"));
     const std::uint64_t features_count = options.feature_count;
 
-    auto columns = to_columns(fbb, attr_schema);
+    auto columns = to_columns(fbb, attr_schema, id_column_index(options.id_index, attr_schema));
     std::optional<::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Column>>>>
         semantic_columns;
     if (semantic_attr_schema != nullptr)

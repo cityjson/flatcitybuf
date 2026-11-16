@@ -37,6 +37,7 @@ const CASES = [
   'extension_members',
   'geom_decoder_edges',
   'geom_temp',
+  'id_index',
   'inferable_types',
   'long_strings',
   'multi_object_attrs',

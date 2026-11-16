@@ -465,6 +465,14 @@ FeatureIterator FcbReader::select_attr(const AttrQuery& query, AttrQueryOptions 
             // them, each with its own column schema.
             bool matched = false;
             for (std::size_t i = 0; i < f.city_object_count() && !matched; ++i) {
+                // The id column's value is the object's id, not an attribute.
+                if (col->primary_key) {
+                    AttrValue id;
+                    id.type = AttrValue::Type::String;
+                    id.s = f.object_id(i);
+                    matched = value_satisfies(id, cond.op, cond.value, kind);
+                    continue;
+                }
                 auto blob = f.object_attributes(i);
                 if (blob.empty())
                     continue;

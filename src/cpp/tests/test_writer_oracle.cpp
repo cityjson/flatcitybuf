@@ -271,6 +271,7 @@ void check_header_byte_exact(const std::string& fixture, std::uint64_t feature_c
     AttributeSchema attr_schema = build_attr_schema(all_features);
 
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     options.feature_count = feature_count;
     options.index_node_size = index_node_size;
 
@@ -596,9 +597,14 @@ void check_whole_file_byte_exact(const std::string& fixture) {
     FcbWriterOptions options;
     options.write_index = r.header().info().index_node_size > 0;
     options.index_node_size = r.header().info().index_node_size;
-    for (const auto& ai : r.header().attr_indices())
-        options.attribute_indices.emplace_back(r.header().info().columns.at(ai.column_index).name,
-                                               ai.branching_factor);
+    options.id_index = std::nullopt;
+    for (const auto& ai : r.header().attr_indices()) {
+        const ColumnInfo& column = r.header().info().columns.at(ai.column_index);
+        if (column.primary_key)
+            options.id_index = ai.branching_factor;
+        else
+            options.attribute_indices.emplace_back(column.name, ai.branching_factor);
+    }
 
     std::vector<std::uint8_t> actual = write_fcb(cj, features, options, attr_schema, nullptr);
 
@@ -689,6 +695,12 @@ TEST_CASE("oracle: write_fcb produces a byte-identical whole file for object_add
     // a MultiPoint Geometry -- built in Rust's order (location, then the
     // blob, then the columns), so a reordering changes the bytes.
     check_whole_file_byte_exact("object_address");
+}
+
+TEST_CASE("oracle: write_fcb produces a byte-identical whole file for id_index") {
+    // The id column (primary_key set, after the attribute columns) and the
+    // index over every City Object id, which follows the attribute indices.
+    check_whole_file_byte_exact("id_index");
 }
 
 TEST_CASE("oracle: write_fcb produces a byte-identical whole file for extension_members") {

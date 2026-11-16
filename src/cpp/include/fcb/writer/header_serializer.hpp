@@ -6,6 +6,7 @@
 #    include <fcb/generated/header_generated.h>
 #    include <fcb/layout.hpp>
 #    include <fcb/writer/attribute.hpp>
+#    include <fcb/writer/btree_builder.hpp>
 #    include <fcb/writer/feature_serializer.hpp>
 
 #    include <nlohmann/json.hpp>
@@ -41,6 +42,11 @@ struct HeaderWriterOptions {
     /// means the default. Empty means Rust's `attribute_indices: None`.
     std::vector<std::pair<std::string, std::optional<std::uint16_t>>> attribute_indices;
     std::optional<std::array<double, 6>> geographical_extent;
+    /// The branching factor of the index over City Object ids, or
+    /// `std::nullopt` for none. When set, and the attribute schema has no
+    /// column named `kIdColumnName` of its own, the header declares the id
+    /// column. Mirrors `HeaderWriterOptions::id_index`.
+    std::optional<std::uint16_t> id_index = kDefaultBranchingFactor;
 };
 
 /// Builds the `Transform` struct (scale + translate) from CityJSON's

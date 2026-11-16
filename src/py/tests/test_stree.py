@@ -991,6 +991,28 @@ def test_select_attr_undoes_the_string_widening() -> None:
     assert _verified(path, "label", Operator.GE, LONG_A) == both
 
 
+def test_the_id_column_is_queried_by_city_object_id() -> None:
+    # The header's `id` column has no value in any attribute blob: a hit
+    # is checked against the object's own id. Three ids share their first
+    # 50 bytes, and so one key.
+    path = CORPUS / "id_index.fcb"
+    reader = FcbReader.open_file(path)
+    by_offset = {f.byte_offset: f.id for f in reader.select_all()}
+    k = "k" * 50
+
+    def select(object_id: str) -> list[str]:
+        return [
+            by_offset[off]
+            for off in _verified(path, "id", Operator.EQ, object_id)
+        ]
+
+    assert select("alpha-0") == ["alpha"]
+    assert select("beta") == ["beta"]
+    assert select(k) == [k]
+    assert select(k + "-two") == [k + "-one"]
+    assert select("missing") == []
+
+
 def test_select_attr_exact_index_only_is_the_raw_candidate_set() -> None:
     # Verification can only remove, never add (test_stree.cpp:216-240).
     path = CORPUS / "long_strings.fcb"

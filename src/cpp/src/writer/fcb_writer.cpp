@@ -37,6 +37,7 @@ FcbWriter::FcbWriter(nlohmann::ordered_json cj, FcbWriterOptions options,
       semantic_attr_schema_(std::move(semantic_attr_schema)) {
     for (const auto& [name, unused] : options_.attribute_indices)
         indexing_attr_.push_back(name);
+    id_column_ = id_column_index(options_.id_index, attr_schema_);
 
     const auto& transform = cj_.at("transform");
     scale_x_ = transform.at("scale").at(0).get<double>();
@@ -90,6 +91,11 @@ void FcbWriter::add_feature(const nlohmann::ordered_json& feature) {
             cityfeature_to_index_entries(feature, attr_schema_, indexing_attr_));
     } else {
         index_entries_by_feature_.emplace_back();
+    }
+    if (id_column_) {
+        auto ids = cityfeature_to_id_index_entries(feature, *id_column_);
+        auto& entries = index_entries_by_feature_.back();
+        entries.insert(entries.end(), ids.begin(), ids.end());
     }
 }
 
@@ -168,8 +174,12 @@ void FcbWriter::write(std::ostream& out) {
 
     std::vector<std::uint8_t> attr_index_bytes;
     std::vector<AttributeIndexInfo> attr_index_info;
-    if (!sorted_indices.empty()) {
-        std::vector<std::vector<BtreeEntry>> entries_by_column(attr_schema_.size());
+    if (!sorted_indices.empty() || id_column_) {
+        // One slot per column index; the id column's is the highest.
+        std::size_t column_slots = id_column_ ? *id_column_ + std::size_t{1} : 0;
+        for (const auto& [name, idx_type] : attr_schema_)
+            column_slots = std::max<std::size_t>(column_slots, idx_type.first + std::size_t{1});
+        std::vector<std::vector<BtreeEntry>> entries_by_column(column_slots);
         for (std::size_t temp_id = 0; temp_id < feat_offsets_.size(); ++temp_id) {
             const std::uint64_t feature_offset = final_offset_by_temp_id[temp_id];
             for (const auto& e : index_entries_by_feature_[temp_id])
@@ -194,12 +204,26 @@ void FcbWriter::write(std::ostream& out) {
                                    built.branching_factor, built.num_unique_items});
             attr_index_bytes.insert(attr_index_bytes.end(), built.bytes.begin(), built.bytes.end());
         }
+
+        // The id column has the highest column index, so its index comes
+        // last. A file without features has no id to index.
+        if (id_column_ && !entries_by_column.at(*id_column_).empty()) {
+            const KeyKind kind =
+                key_kind_for_column(static_cast<std::uint8_t>(::ColumnType::String));
+            BuiltBtreeIndex built =
+                build_static_btree(entries_by_column.at(*id_column_), kind, *options_.id_index);
+            attr_index_info.push_back(
+                AttributeIndexInfo{*id_column_, static_cast<std::uint32_t>(built.bytes.size()),
+                                   built.branching_factor, built.num_unique_items});
+            attr_index_bytes.insert(attr_index_bytes.end(), built.bytes.begin(), built.bytes.end());
+        }
     }
 
     HeaderWriterOptions header_options;
     header_options.feature_count = feat_offsets_.size();
     header_options.index_node_size = effective_node_size;
     header_options.geographical_extent = options_.geographical_extent;
+    header_options.id_index = options_.id_index;
 
     flatbuffers::FlatBufferBuilder header_fbb;
     auto header_off = to_fcb_header(header_fbb, cj_, header_options, attr_schema_,

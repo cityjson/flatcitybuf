@@ -3,7 +3,7 @@ import { ColumnType } from '../src/generated/column-type.js'
 import { decodeAttributes } from '../src/feature/attribute.js'
 
 const col = (index: number, name: string, type: ColumnType) =>
-  ({ index, name, type, nullable: true })
+  ({ index, name, type, nullable: true, primaryKey: false })
 
 /** Attribute records are `u16 column_index` then the value, back to back. */
 const rec = (index: number, body: number[]) => {
