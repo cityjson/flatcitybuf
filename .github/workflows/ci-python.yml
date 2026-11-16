@@ -23,11 +23,17 @@ jobs:
   # Pure-Python package at src/py: no compiled dependency, no Rust toolchain.
   check:
     name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.12"]
+        # setup-python has no Python 3.9 build for Ubuntu 26.04, which is
+        # what ubuntu-latest resolves to, so the 3.9 job stays on 24.04.
+        include:
+          - python-version: "3.9"
+            os: ubuntu-24.04
+          - python-version: "3.12"
+            os: ubuntu-latest
     defaults:
       run:
         working-directory: src/py
