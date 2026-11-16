@@ -233,6 +233,23 @@ pub fn cityfeature_to_index_entries(
     index_entries
 }
 
+/// One index entry per City Object of `cityfeature`, keyed by the object's
+/// id, for the id column at `index`. In id order, for the reason given in
+/// [`cityfeature_to_index_entries`].
+pub(super) fn cityfeature_to_id_index_entries(
+    cityfeature: &CityJSONFeature,
+    index: u16,
+) -> impl Iterator<Item = AttributeIndexEntry> + '_ {
+    let mut object_ids: Vec<_> = cityfeature.city_objects.keys().collect();
+    object_ids.sort_unstable();
+    object_ids
+        .into_iter()
+        .map(move |id| AttributeIndexEntry::String {
+            index,
+            val: id.clone(),
+        })
+}
+
 // this attr should be a json object with attribute name as key and attribute value as value
 pub fn attribute_to_index_entries(
     map: &serde_json::Map<String, Value>,
