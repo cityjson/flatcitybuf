@@ -143,6 +143,32 @@ async fn read_http_payload_data<T: AsyncHttpRangeClient>(
     Ok(payload_entry)
 }
 
+/// The payload entry at `offset`, whatever its length: its count first, then
+/// exactly the bytes that count asks for. The payload section ends at
+/// `feature_begin`, and an entry claiming more than that is not one.
+#[cfg(feature = "http")]
+async fn read_http_payload_entry<T: AsyncHttpRangeClient>(
+    client: &mut AsyncBufferedHttpRangeClient<T>,
+    offset: usize,
+    feature_begin: usize,
+) -> Result<PayloadEntry> {
+    const COUNT_SIZE: usize = size_of::<u32>();
+    let out_of_bounds =
+        || Error::InvalidFormat(format!("payload entry at {offset} runs past the index"));
+    if offset + COUNT_SIZE > feature_begin {
+        return Err(out_of_bounds());
+    }
+    let count = client.get_range(offset, COUNT_SIZE).await?;
+    let count = u32::from_le_bytes(count.try_into().map_err(|_| out_of_bounds())?) as usize;
+    let length = COUNT_SIZE + count * size_of::<u64>();
+    if offset + length > feature_begin {
+        return Err(out_of_bounds());
+    }
+    let data = client.get_range(offset, length).await?;
+    let (entry, _) = PayloadEntry::deserialize(&mut Cursor::new(data))?;
+    Ok(entry)
+}
+
 /// Cache for prefetched payload data to reduce HTTP requests
 #[derive(Debug, Default)]
 pub struct PayloadCache {
@@ -361,19 +387,26 @@ async fn batch_resolve_payloads<T: AsyncHttpRangeClient>(
 
         let payload_data = client.get_range(start, fetch_size).await?;
 
-        // Process each requested offset within this range
+        // Process each requested offset within this range. An entry is as
+        // long as its key has features, so one may run past what was fetched.
+        let mut cut_off = Vec::new();
         for &offset in payload_offsets_to_fetch
             .iter()
             .filter(|&&o| o >= start && o <= end)
         {
-            let relative_offset = offset - start;
-
-            // Make sure we have enough data
-            if relative_offset < payload_data.len() {
-                let mut buf = Cursor::new(&payload_data[relative_offset..]);
-                let (entry, _) = PayloadEntry::deserialize(&mut buf)?;
-                fetched_payloads.insert(offset, entry);
+            let entry = payload_data
+                .get(offset - start..)
+                .and_then(|data| PayloadEntry::deserialize(&mut Cursor::new(data)).ok());
+            match entry {
+                Some((entry, _)) => {
+                    fetched_payloads.insert(offset, entry);
+                }
+                None => cut_off.push(offset),
             }
+        }
+        for offset in cut_off {
+            let entry = read_http_payload_entry(client, offset, feature_begin).await?;
+            fetched_payloads.insert(offset, entry);
         }
     }
 

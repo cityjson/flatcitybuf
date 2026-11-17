@@ -187,6 +187,45 @@ impl<T: AsyncHttpRangeClient + Send + Sync> HttpFcbReader<T> {
             count: count as usize,
         })
     }
+    /// A page of [`HttpFcbReader::select_all`]: `limit` features from the
+    /// `offset`-th one on, in file order, found through the leaves of the
+    /// R-tree without fetching the features before the page.
+    /// `features_count()` on the returned iterator is the number of features
+    /// in the file. A file without an R-tree is [`Error::NoIndex`].
+    pub async fn select_all_paged(
+        mut self,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<AsyncFeatureIter<T>> {
+        let header = self.fbs.header();
+        if header.index_node_size() == 0 || header.features_count() == 0 {
+            return Err(Error::NoIndex);
+        }
+        let count = header.features_count() as usize;
+        let index_node_size = header.index_node_size();
+        let header_len = self.header_len();
+        let attr_index_size = self.attr_index_size() as usize;
+        let start = offset.unwrap_or(0);
+        let page_list = PackedRTree::http_leaf_items(
+            &mut self.client,
+            header_len,
+            attr_index_size,
+            count,
+            index_node_size,
+            start..start.saturating_add(limit.unwrap_or(usize::MAX)),
+        )
+        .await?;
+        // The same threshold as a bbox query: neighbouring features of a page
+        // are fetched in one request.
+        let feature_batches = FeatureBatch::make_batches(page_list, 256 * 1024).await?;
+        Ok(AsyncFeatureIter {
+            client: self.client,
+            fbs: self.fbs,
+            selection: FeatureSelection::SelectBbox(SelectBbox { feature_batches }),
+            count,
+        })
+    }
+
     /// Select features within a bounding box.
     pub async fn select_query(mut self, query: Query) -> Result<AsyncFeatureIter<T>> {
         self.select_query_paged(query, None, None).await
@@ -1002,3 +1041,131 @@ mod index_node_size_tests {
 //         Ok(())
 //     }
 // }
+
+#[cfg(test)]
+mod paging_tests {
+    //! Paging and attribute queries over HTTP, against the local reader as
+    //! the oracle. In the crate for the same reason as the tests above.
+
+    use super::*;
+    use crate::attribute::{AttributeSchema, AttributeSchemaMethods};
+    use crate::header_writer::HeaderWriterOptions;
+    use crate::http_reader::mock_http_range_client::MockHttpRangeClient;
+    use crate::{
+        read_cityjson_from_reader, CJType, CJTypeKind, FcbReader, FcbWriter, Float, KeyType,
+        Operator,
+    };
+    use std::io::{BufReader, Cursor};
+    use std::path::PathBuf;
+
+    async fn ids(iter: &mut AsyncFeatureIter<MockHttpRangeClient>) -> Result<Vec<String>> {
+        let mut ids = Vec::new();
+        while let Some(feature) = iter.next().await? {
+            ids.push(feature.cj_feature()?.id);
+        }
+        Ok(ids)
+    }
+
+    /// `count` features, the first `shared` of which have `height` 1.
+    fn dataset(count: usize, shared: usize) -> tempfile::NamedTempFile {
+        let mut input = String::from(
+            r#"{"type":"CityJSON","version":"2.0","transform":{"scale":[1.0,1.0,1.0],"translate":[0.0,0.0,0.0]},"CityObjects":{},"vertices":[]}"#,
+        );
+        input.push('\n');
+        for i in 0..count {
+            let height = if i < shared { 1.0 } else { i as f64 + 2.0 };
+            input.push_str(&format!(
+                r#"{{"type":"CityJSONFeature","id":"f{i}","CityObjects":{{"f{i}":{{"type":"Building","attributes":{{"height":{height:?}}},"geometry":[{{"type":"MultiPoint","lod":"1","boundaries":[0]}}]}}}},"vertices":[[{i},{i},0]]}}"#
+            ));
+            input.push('\n');
+        }
+        let CJType::Seq(seq) =
+            read_cityjson_from_reader(BufReader::new(Cursor::new(input)), CJTypeKind::Seq).unwrap()
+        else {
+            panic!("a CityJSONSeq input")
+        };
+        let mut schema = AttributeSchema::new();
+        for co in seq.features.iter().flat_map(|f| f.city_objects.values()) {
+            schema.add_attributes(co.attributes.as_ref().unwrap());
+        }
+        let mut writer = FcbWriter::new(
+            seq.cj,
+            Some(HeaderWriterOptions {
+                feature_count: count as u64,
+                attribute_indices: Some(vec![("height".into(), None)]),
+                ..Default::default()
+            }),
+            Some(schema),
+            None,
+        )
+        .unwrap();
+        for feature in &seq.features {
+            writer.add_feature(feature).unwrap();
+        }
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writer.write(file.as_file_mut()).unwrap();
+        file
+    }
+
+    /// A key shared by more features than fit the speculative payload fetch
+    /// (32 KiB, 4,095 offsets) still yields every one of them.
+    #[tokio::test]
+    async fn a_key_shared_by_many_features_is_read_whole() -> Result<()> {
+        let file = dataset(6000, 5000);
+        let path = file.path().to_str().unwrap();
+        for (operator, expected) in [
+            (Operator::Eq, 5000),
+            (Operator::Le, 5000),
+            (Operator::Gt, 1000),
+            (Operator::Ge, 6000),
+        ] {
+            let query = vec![("height".to_string(), operator, KeyType::Float64(Float(1.0)))];
+            let mut local = FcbReader::open(BufReader::new(std::fs::File::open(path)?))?
+                .select_attr_query(query.clone())?;
+            let mut local_ids = Vec::new();
+            while let Some(feature) = local.next()? {
+                local_ids.push(feature.cur_cj_feature()?.id);
+            }
+            assert_eq!(local_ids.len(), expected);
+
+            let (reader, _stats) = HttpFcbReader::mock_from_file(path).await?;
+            let mut iter = reader.select_attr_query(&query).await?;
+            assert_eq!(iter.features_count(), Some(expected));
+            assert_eq!(ids(&mut iter).await?, local_ids);
+        }
+        Ok(())
+    }
+
+    /// Pages of a full scan, found through the R-tree leaves, are the slices
+    /// of `select_all`, and reading a page far into the file does not read the
+    /// features before it.
+    #[tokio::test]
+    async fn full_scan_pages_are_slices_of_select_all() -> Result<()> {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../conformance/appearance_depths_node8.fcb");
+        let small = fixture.to_str().unwrap();
+        let file = dataset(6000, 0);
+        for (path, limit) in [(small, 5), (file.path().to_str().unwrap(), 2500)] {
+            let (reader, _stats) = HttpFcbReader::mock_from_file(path).await?;
+            let expected = ids(&mut reader.select_all().await?).await?;
+            let mut paged = Vec::new();
+            for offset in (0..expected.len() + limit).step_by(limit) {
+                let (reader, _stats) = HttpFcbReader::mock_from_file(path).await?;
+                let mut iter = reader.select_all_paged(Some(limit), Some(offset)).await?;
+                assert_eq!(iter.features_count(), Some(expected.len()));
+                paged.extend(ids(&mut iter).await?);
+            }
+            assert_eq!(paged, expected);
+        }
+
+        let path = file.path().to_str().unwrap();
+        let (reader, _stats) = HttpFcbReader::mock_from_file(path).await?;
+        let expected = ids(&mut reader.select_all().await?).await?;
+        let (reader, stats) = HttpFcbReader::mock_from_file(path).await?;
+        let mut iter = reader.select_all_paged(Some(1), Some(5999)).await?;
+        assert_eq!(ids(&mut iter).await?, expected[5999..]);
+        let file_size = std::fs::metadata(path)?.len();
+        assert!(stats.read().unwrap().bytes_requested < file_size / 10);
+        Ok(())
+    }
+}

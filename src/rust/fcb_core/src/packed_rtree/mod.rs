@@ -670,6 +670,42 @@ impl PackedRTree {
     }
 
     /// Search the R-Tree using a specific query type with streaming
+    /// The leaf items `leaves` of the tree at the current position of `data`,
+    /// which must be the start of the index; `data` is left at its end.
+    ///
+    /// Leaves are stored in feature order, so leaf `i` holds the byte offset of
+    /// feature `i`: this finds a page of features without reading the features
+    /// before it. A range reaching past the last leaf is cut to it.
+    pub fn stream_leaf_items<R: Read + Seek>(
+        data: &mut R,
+        num_items: usize,
+        node_size: u16,
+        leaves: Range<usize>,
+    ) -> Result<Vec<SearchResultItem>, Error> {
+        let level_bounds = PackedRTree::generate_level_bounds(num_items, node_size);
+        let Range {
+            start: leaf_nodes_offset,
+            end: num_nodes,
+        } = level_bounds
+            .first()
+            .expect("RTree has at least one level when node_size >= 2 and num_items > 0");
+        let index_base = data.stream_position()?;
+        let end = min(leaves.end, num_items);
+        let start = min(leaves.start, end);
+        let results = read_node_items(data, index_base, leaf_nodes_offset + start, end - start)?
+            .iter()
+            .enumerate()
+            .map(|(i, node_item)| SearchResultItem {
+                offset: node_item.offset as usize,
+                index: start + i,
+            })
+            .collect();
+        data.seek(SeekFrom::Start(
+            index_base + (num_nodes * size_of::<NodeItem>()) as u64,
+        ))?;
+        Ok(results)
+    }
+
     pub fn stream_search<R: Read + Seek>(
         data: &mut R,
         num_items: usize,
@@ -907,6 +943,50 @@ impl PackedRTree {
 
     pub fn extent(&self) -> NodeItem {
         self.extent.clone()
+    }
+
+    /// The HTTP counterpart of [`PackedRTree::stream_leaf_items`]: the byte
+    /// ranges of the features `leaves`, from one request for their leaf nodes.
+    #[cfg(feature = "http")]
+    pub async fn http_leaf_items<T: AsyncHttpRangeClient>(
+        client: &mut AsyncBufferedHttpRangeClient<T>,
+        index_begin: usize,
+        attr_index_size: usize,
+        num_items: usize,
+        branching_factor: u16,
+        leaves: Range<usize>,
+    ) -> Result<Vec<HttpSearchResultItem>, Error> {
+        let end = min(leaves.end, num_items);
+        let start = min(leaves.start, end);
+        if start == end {
+            return Ok(vec![]);
+        }
+        let level_bounds = PackedRTree::generate_level_bounds(num_items, branching_factor);
+        let leaf_nodes_offset = level_bounds
+            .first()
+            .expect("RTree has at least one level when node_size >= 2 and num_items > 0")
+            .start;
+        let feature_begin =
+            index_begin + attr_index_size + PackedRTree::index_size(num_items, branching_factor);
+        // One leaf more than asked for, where there is one: the start of the
+        // next feature is the end of the last one of the page.
+        let fetch_end = min(end + 1, num_items);
+        let node_items = read_http_node_items(
+            client,
+            index_begin,
+            &(leaf_nodes_offset + start..leaf_nodes_offset + fetch_end),
+        )
+        .await?;
+        Ok((0..end - start)
+            .map(|i| {
+                let begin = feature_begin + node_items[i].offset as usize;
+                let range = match node_items.get(i + 1) {
+                    Some(next) => HttpRange::Range(begin..feature_begin + next.offset as usize),
+                    None => HttpRange::RangeFrom(begin..),
+                };
+                HttpSearchResultItem { range }
+            })
+            .collect())
     }
 
     #[cfg(feature = "http")]
