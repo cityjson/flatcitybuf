@@ -476,6 +476,7 @@ nlohmann::json address_to_json(const ::Address* a) {
             ci.name = c->name() != nullptr ? c->name()->str() : std::string();
             ci.type = static_cast<std::uint8_t>(c->type());
             ci.nullable = c->nullable();
+            ci.primary_key = c->primary_key();
             columns.push_back(std::move(ci));
         }
         const bytes_view blob(a->attributes()->data(), a->attributes()->size());

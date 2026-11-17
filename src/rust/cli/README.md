@@ -62,8 +62,9 @@ fcb ser [OPTIONS] <INPUT>... <OUTPUT>
 
 - `-a, --attr-index ATTRIBUTES` - Comma-separated list of attributes to create index for
 - `-A, --index-all-attributes` - Index all attributes found in the dataset
+- `--no-id-index` - Write no index over city object ids. By default the id of every city object is indexed and can be queried as the column `id`; the ids are not copied into the attributes. A dataset with an attribute named `id` of its own keeps that column and gets no id index
 - `-s, --no-spatial-index` - Disable the spatial index (it is written by default)
-- `--attr-branching-factor FACTOR` - Branching factor for attribute index (default: 16 with `--attr-index`, 256 with `--index-all-attributes`)
+- `--attr-branching-factor FACTOR` - Branching factor for attribute index (default: 16 with `--attr-index`, 256 with `--index-all-attributes` and for the city object id index)
 - `--index-node-size SIZE` - Node size of the spatial R-tree index (default: 16)
 - `--no-feature-count` - Write a `features_count` of 0, meaning "unknown", which forces readers to scan to EOF (conformance fixtures only)
 - `-b, --bbox BBOX` - Bounding box filter in format "minx,miny,maxx,maxy"

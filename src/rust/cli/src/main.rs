@@ -14,7 +14,7 @@ use fcb_core::{
     attribute::{AttributeSchema, AttributeSchemaMethods},
     deserializer,
     header_writer::HeaderWriterOptions,
-    FcbReader, FcbWriter,
+    FcbReader, FcbWriter, ID_COLUMN_NAME,
 };
 use glob::glob;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -23,6 +23,10 @@ use std::{
     io::{self, BufReader, BufWriter, Read, Write},
     path::PathBuf,
 };
+/// The branching factor of the city object id index when
+/// `--attr-branching-factor` is not given: the one `-A` uses.
+const ID_INDEX_BRANCHING_FACTOR: u16 = 256;
+
 #[derive(Parser)]
 #[command(
     name = "fcb",
@@ -54,6 +58,12 @@ enum Commands {
         /// If index all attributes
         #[arg(short = 'A', long, action = ArgAction::SetTrue)]
         index_all_attributes: bool,
+
+        /// Write no index over city object ids. By default every city
+        /// object's id is indexed and can be queried as the column `id`,
+        /// without being copied into the attributes
+        #[arg(long, action = ArgAction::SetTrue)]
+        no_id_index: bool,
 
         /// Disable spatial index (spatial index is enabled by default)
         #[arg(short = 's', long, action = ArgAction::SetTrue)]
@@ -142,6 +152,7 @@ fn get_writer(output: &str) -> Result<Box<dyn Write>, Error> {
 struct SerializeOptions {
     attr_index: Option<String>,
     index_all_attributes: bool,
+    no_id_index: bool,
     no_spatial_index: bool,
     attr_branching_factor: Option<u16>,
     index_node_size: Option<u16>,
@@ -479,6 +490,24 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
             })
         };
 
+    // The id index, unless it is turned off or the dataset has an attribute
+    // named `id` of its own, which keeps the column name.
+    let own_id_attribute = attr_schema
+        .as_ref()
+        .is_some_and(|schema| schema.contains_key(ID_COLUMN_NAME));
+    let id_index = (!options.no_id_index && !own_id_attribute).then_some(
+        options
+            .attr_branching_factor
+            .unwrap_or(ID_INDEX_BRANCHING_FACTOR),
+    );
+    if own_id_attribute && !options.no_id_index && !is_stdout {
+        term.write_line(&format!(
+            "  {} The dataset has an attribute named `{ID_COLUMN_NAME}`, so city object ids are not indexed; index that attribute with -a {ID_COLUMN_NAME}",
+            style("⚠").bold().yellow()
+        ))
+        .ok();
+    }
+
     // Calculate geospatial extent if requested
     let geo_extent = if options.ge {
         if !is_stdout {
@@ -521,6 +550,7 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         index_node_size: options.index_node_size.unwrap_or(16),
         attribute_indices: attr_index_vec.clone(),
         geographical_extent: geo_extent,
+        id_index,
     };
 
     // Show index information
@@ -536,6 +566,15 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
                 "  {} Spatial R-tree index (node size: {})",
                 style("✓").bold().green(),
                 style(header_options.index_node_size).yellow()
+            ))
+            .ok();
+        }
+
+        if let Some(bf) = id_index {
+            term.write_line(&format!(
+                "  {} City object id B+Tree index (branching factor: {})",
+                style("✓").bold().green(),
+                style(bf).yellow()
             ))
             .ok();
         }
@@ -938,6 +977,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             output,
             attr_index,
             index_all_attributes,
+            no_id_index,
             no_spatial_index,
             attr_branching_factor,
             index_node_size,
@@ -950,6 +990,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             SerializeOptions {
                 attr_index,
                 index_all_attributes,
+                no_id_index,
                 no_spatial_index,
                 attr_branching_factor,
                 index_node_size,

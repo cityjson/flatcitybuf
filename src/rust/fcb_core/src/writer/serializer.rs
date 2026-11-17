@@ -5,11 +5,12 @@ use crate::fb::{
     SemanticObject, SemanticObjectArgs, SemanticSurfaceType, Texture, TextureArgs, TextureType,
     Vec2, Vertex, WrapMode,
 };
-use crate::fb::{Column, ColumnArgs};
+use crate::fb::{Column, ColumnArgs, ColumnType};
 use crate::fb::{
     GeographicalExtent, Header, HeaderArgs, ReferenceSystem, ReferenceSystemArgs, Transform, Vector,
 };
 use crate::geom_encoder::encode;
+use crate::ID_COLUMN_NAME;
 use crate::{
     AttributeIndex, DoubleVertex, Extension, ExtensionArgs, GeometryInstance, GeometryInstanceArgs,
     MaterialMapping, MaterialMappingArgs, TextureFormat, TextureMapping, TextureMappingArgs,
@@ -54,13 +55,14 @@ pub(super) fn to_fcb_header<'a>(
     cj: &CityJSON,
     header_options: HeaderWriterOptions,
     attr_schema: &AttributeSchema,
+    id_column: Option<u16>,
     semantic_attr_schema: Option<&AttributeSchema>,
     attribute_indices_info: Option<&[AttributeIndexInfo]>,
 ) -> Result<flatbuffers::WIPOffset<Header<'a>>> {
     let version = Some(fbb.create_string(&json_string(&cj.version)));
     let transform = to_transform(&cj.transform);
     let features_count: u64 = header_options.feature_count;
-    let columns = Some(to_columns(fbb, attr_schema));
+    let columns = Some(to_header_columns(fbb, attr_schema, id_column));
     let semantic_columns = semantic_attr_schema.map(|schema| to_columns(fbb, schema));
     let index_node_size = header_options.index_node_size;
     let attribute_index = {
@@ -1196,9 +1198,21 @@ pub(crate) fn to_columns<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     attr_schema: &AttributeSchema,
 ) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>> {
+    to_header_columns(fbb, attr_schema, None)
+}
+
+/// The header's columns: the attribute schema, followed by the City Object
+/// id column when the file gets an id index. That column is the one with
+/// `primary_key` set, which is how a reader knows its value is
+/// `CityObject.id` and not in any attribute blob.
+fn to_header_columns<'a>(
+    fbb: &mut FlatBufferBuilder<'a>,
+    attr_schema: &AttributeSchema,
+    id_column: Option<u16>,
+) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>> {
     let mut sorted_schema: Vec<_> = attr_schema.iter().collect();
     sorted_schema.sort_by_key(|(_, (index, _))| *index);
-    let columns_vec = sorted_schema
+    let mut columns_vec = sorted_schema
         .iter()
         .map(|(name, (index, column_type))| {
             let name = fbb.create_string(name);
@@ -1213,6 +1227,20 @@ pub(crate) fn to_columns<'a>(
             )
         })
         .collect::<Vec<_>>();
+    if let Some(index) = id_column {
+        let name = fbb.create_string(ID_COLUMN_NAME);
+        columns_vec.push(Column::create(
+            fbb,
+            &ColumnArgs {
+                name: Some(name),
+                index,
+                type_: ColumnType::String,
+                nullable: false,
+                primary_key: true,
+                ..Default::default()
+            },
+        ));
+    }
     fbb.create_vector(&columns_vec)
 }
 
@@ -1429,8 +1457,10 @@ mod tests {
                     index_node_size: 16,
                     attribute_indices: None,
                     geographical_extent: None,
+                    id_index: None,
                 },
                 &AttributeSchema::new(),
+                None,
                 None,
                 None,
             )?;

@@ -63,6 +63,7 @@ fn roundtrip(fixture: &str) -> Result<RoundTrip> {
             index_node_size: 16,
             attribute_indices: None,
             geographical_extent: None,
+            id_index: None,
         }),
         Some(attr_schema),
         Some(semantic_attr_schema),

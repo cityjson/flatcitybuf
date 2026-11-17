@@ -2,7 +2,10 @@ use cjseq::CityJSONFeature;
 
 use crate::serializer::*;
 
-use super::attribute::{cityfeature_to_index_entries, AttributeIndexEntry, AttributeSchema};
+use super::attribute::{
+    cityfeature_to_id_index_entries, cityfeature_to_index_entries, AttributeIndexEntry,
+    AttributeSchema,
+};
 
 use crate::error::Result;
 use crate::packed_rtree::NodeItem;
@@ -21,6 +24,8 @@ pub struct FeatureWriter {
     pub(super) bbox: NodeItem,
 
     attr_indices: Option<Vec<String>>,
+    /// The index of the City Object id column, when ids are indexed.
+    id_column: Option<u16>,
 
     pub(super) attribute_feature_offsets: AttributeFeatureOffset,
 }
@@ -39,6 +44,7 @@ impl FeatureWriter {
         attr_schema: AttributeSchema,
         semantic_attr_schema: Option<AttributeSchema>,
         attr_indices: Option<Vec<String>>,
+        id_column: Option<u16>,
     ) -> FeatureWriter {
         FeatureWriter {
             fbb: flatbuffers::FlatBufferBuilder::new(),
@@ -46,6 +52,7 @@ impl FeatureWriter {
             semantic_attr_schema,
             bbox: NodeItem::create(0),
             attr_indices,
+            id_column,
             attribute_feature_offsets: AttributeFeatureOffset {
                 offset: 0,
                 size: 0,
@@ -87,6 +94,11 @@ impl FeatureWriter {
             let index_entries =
                 cityfeature_to_index_entries(feature, &self.attr_schema, attr_indices);
             self.attribute_feature_offsets.index_entries = index_entries;
+        }
+        if let Some(index) = self.id_column {
+            self.attribute_feature_offsets
+                .index_entries
+                .extend(cityfeature_to_id_index_entries(feature, index));
         }
     }
 

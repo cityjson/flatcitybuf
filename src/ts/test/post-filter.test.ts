@@ -129,6 +129,19 @@ describe('string post-filtering', () => {
     expect(sorted(candB)).toEqual(sorted(LONG3))
   })
 
+  it('checks a hit on the id column against the City Object id', async () => {
+    // The header's `id` column has no value in any attribute blob. Three ids
+    // share their first 50 bytes, and so one key.
+    const r = await FcbReader.fromBytes(corpus('id_index.fcb'))
+    const select = async (id: string) =>
+      ids(await r.select({ where: [{ field: 'id', operator: 'Eq', value: id }] }))
+    expect(await select('alpha-0')).toEqual(['alpha'])
+    expect(await select('beta')).toEqual(['beta'])
+    expect(await select(K50)).toEqual([K50])
+    expect(await select(`${K50}-two`)).toEqual([`${K50}-one`])
+    expect(await select('missing')).toEqual([])
+  })
+
   it('post-filters SHORT queries too, and is not gated on query length', async () => {
     // A one-byte pivot. Its 50-byte key is 'a' followed by 49 zero bytes, and
     // the index's Gt/Lt bounds are NON-STRICT for string kinds (so the

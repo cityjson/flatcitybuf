@@ -148,6 +148,11 @@ TEST_CASE("conformance: btree_multilevel") { check_case("btree_multilevel"); }
 // header's.
 TEST_CASE("conformance: object_address") { check_case("object_address"); }
 
+// The index over City Object ids: the header's `id` column, which is the one
+// with `primary_key` set, has no value in any attribute blob, so no object
+// decodes with an `id` attribute.
+TEST_CASE("conformance: id_index") { check_case("id_index"); }
+
 // An `extensions` entry with members beyond url and version (a CityGML ADE's
 // `xmlns`, nested objects), restored from Extension.members, beside a plain
 // entry that carries none.

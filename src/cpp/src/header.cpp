@@ -69,6 +69,7 @@ void collect_columns(const flatbuffers::Vector<flatbuffers::Offset<::Column>>* c
         ci.name = c->name() != nullptr ? c->name()->str() : std::string();
         ci.type = static_cast<std::uint8_t>(c->type());
         ci.nullable = c->nullable();
+        ci.primary_key = c->primary_key();
         out.push_back(std::move(ci));
     }
 }

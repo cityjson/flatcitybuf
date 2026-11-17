@@ -470,7 +470,7 @@ function addressToJson(
   for (let i = 0; i < a.columnsLength(); i++) {
     const c = a.columns(i)
     if (c === null) continue
-    columns.push({ index: c.index(), name: c.name() ?? '', type: c.type(), nullable: c.nullable() })
+    columns.push({ index: c.index(), name: c.name() ?? '', type: c.type(), nullable: c.nullable(), primaryKey: c.primaryKey() })
   }
   const blob = a.attributesArray() ?? new Uint8Array(0)
   Object.assign(out, attrsToJson(decodeAttributes(blob, columns), policy))

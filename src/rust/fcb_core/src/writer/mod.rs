@@ -1,6 +1,7 @@
+use crate::fb::ColumnType;
 use crate::packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use crate::MAGIC_BYTES;
-use attr_index::build_attribute_index_for_attr;
+use attr_index::{build_attribute_index_for_attr, build_attribute_index_for_column};
 use attribute::AttributeSchema;
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use feature_writer::{AttributeFeatureOffset, FeatureWriter};
@@ -162,6 +163,7 @@ impl<'a> FcbWriter<'a> {
                     .attribute_indices
                     .as_ref()
                     .map(|a| a.iter().map(|(name, _)| name.clone()).collect()),
+                self.header_writer.id_column,
             ));
         }
 
@@ -258,6 +260,25 @@ impl<'a> FcbWriter<'a> {
                     attr_index_buf.extend(&buf);
                 }
             }
+        }
+
+        // The id column has the highest column index, so its index comes
+        // last: the section is ordered by column index.
+        // A file without features has no id to index, and a B+tree cannot be
+        // empty.
+        if let (Some(id_column), Some(bf), false) = (
+            self.header_writer.id_column,
+            self.header_writer.header_options.id_index,
+            self.feat_offsets.is_empty(),
+        ) {
+            let (buf, info) = build_attribute_index_for_column(
+                &id_column,
+                &ColumnType::String,
+                &self.attribute_index_entries,
+                bf,
+            )?;
+            attr_index_info.push(info);
+            attr_index_buf.extend(&buf);
         }
 
         // write header with attribute indices metadata

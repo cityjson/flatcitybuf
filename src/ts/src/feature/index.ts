@@ -117,7 +117,7 @@ export class CityObjectView {
     for (let i = 0; i < this.raw.columnsLength(); i++) {
       const c = this.raw.columns(i)
       if (c === null) continue
-      out.push({ index: c.index(), name: c.name() ?? '', type: c.type(), nullable: c.nullable() })
+      out.push({ index: c.index(), name: c.name() ?? '', type: c.type(), nullable: c.nullable(), primaryKey: c.primaryKey() })
     }
     return out
   }

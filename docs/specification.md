@@ -230,6 +230,20 @@ two major optimizations improve remote access efficiency:
 
 `StringKey20` is defined but **never produced by the writer**.
 
+### the city object id column
+
+a file may index the id of every city object, a feature's children included, so that an object is found by its id without the dataset carrying an `id` attribute. the rust and c++ writers do this by default.
+
+| part | value | citation |
+|---|---|---|
+| column | one `Header.columns` entry with `primary_key = true`: name `id`, type `String`, `nullable = false`, placed after the attribute columns at the next free `Column.index` | `writer/serializer.rs` `to_header_columns` |
+| values | the column has **no value in any attribute blob**. its value for a city object is `CityObject.id`, so a decoder never emits it as an attribute | `writer/header_writer.rs` `id_column` |
+| index | an ordinary `String` index (`FixedStringKey<50>`) with one entry per city object, keyed by the object's id and pointing at the feature that holds it. it is the last blob of the attribute index section, because its column index is the highest | `writer/mod.rs` `FcbWriter::write` |
+| post-filter | a reader that verifies string hits against the untruncated value (c++, python, typescript) compares against each object's id for this column, not against a decoded attribute | `src/cpp/src/reader.cpp` `select_attr` |
+| a dataset's own `id` attribute | when the attribute schema already has a column named `id`, the writer keeps it as an ordinary column and writes no id column and no id index | `writer/header_writer.rs` `new_with_options` |
+
+a file holds at most one column with `primary_key = true`. a reader that does not know the flag reads the file correctly; a string post-filter in such a reader finds no `id` attribute and returns no match for a query on the column.
+
 ### query algorithm
 
 the b+tree index supports the following operators, each lowered to one or two tree traversals (`static_btree/query/stream.rs:161-191`):

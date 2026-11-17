@@ -277,6 +277,7 @@ TEST_CASE("to_fcb_header builds a minimal header with no metadata") {
         "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     options.feature_count = 3;
     options.index_node_size = 16;
     AttributeSchema empty_schema;
@@ -316,6 +317,7 @@ TEST_CASE("to_fcb_header carries metadata: reference system, extent, identifier,
         }
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -340,6 +342,7 @@ TEST_CASE("to_fcb_header prefers HeaderWriterOptions.geographical_extent over me
         "metadata": {"geographicalExtent": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     options.geographical_extent = std::array<double, 6>{9.0, 9.0, 9.0, 10.0, 10.0, 10.0};
     AttributeSchema empty_schema;
 
@@ -355,6 +358,7 @@ TEST_CASE("to_fcb_header uses HeaderWriterOptions.geographical_extent when metad
         "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     options.geographical_extent = std::array<double, 6>{1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
     AttributeSchema empty_schema;
 
@@ -372,6 +376,7 @@ TEST_CASE("to_fcb_header writes an empty (but present) extensions vector for {}"
         "extensions": {}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -386,6 +391,7 @@ TEST_CASE("to_fcb_header wires semantic_columns from the semantic attribute sche
         "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
     AttributeSchema semantic_schema;
     semantic_schema["parent"] = {0, ::ColumnType::String};
@@ -406,6 +412,7 @@ TEST_CASE("to_fcb_header wires the appearance table from the CityJSON appearance
         }
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -425,6 +432,7 @@ TEST_CASE("to_fcb_header writes extensions from the CityJSON extensions member")
         }
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -442,6 +450,7 @@ TEST_CASE("to_fcb_header writes attribute_index entries when provided") {
         "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
     std::vector<AttributeIndexInfo> indices{{0, 100, 32, 7}};
 

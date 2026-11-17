@@ -146,6 +146,7 @@ mod serialization_tests {
             index_node_size: 16,
             attribute_indices: None,
             geographical_extent: None,
+            id_index: None,
         };
 
         let mut fcb = FcbWriter::new(
@@ -202,6 +203,7 @@ mod serialization_tests {
             index_node_size: 16,
             attribute_indices: None,
             geographical_extent: None,
+            id_index: None,
         };
 
         let mut fcb = FcbWriter::new(

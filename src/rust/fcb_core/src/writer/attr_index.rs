@@ -59,7 +59,17 @@ pub(super) fn build_attribute_index_for_attr(
 ) -> Result<(Vec<u8>, AttributeIndexInfo)> {
     // Look up attribute info from schema; if not found, return None
     let (schema_index, coltype) = schema.get(attr_name).ok_or(Error::AttributeIndexNotFound)?;
+    build_attribute_index_for_column(schema_index, coltype, attribute_entries, branching_factor)
+}
 
+/// Builds the index of the column at `schema_index`, from the entries that
+/// name it.
+pub(super) fn build_attribute_index_for_column(
+    schema_index: &u16,
+    coltype: &ColumnType,
+    attribute_entries: &BTreeMap<usize, AttributeFeatureOffset>,
+    branching_factor: u16,
+) -> Result<(Vec<u8>, AttributeIndexInfo)> {
     match *coltype {
         ColumnType::Bool => build_index_generic::<bool, _>(
             *schema_index,

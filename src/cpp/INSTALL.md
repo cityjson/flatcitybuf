@@ -171,7 +171,9 @@ w.write(out);
 
 Both indices are the writer's own: `options.write_index` / `index_node_size`
 control the packed Hilbert R-tree, `options.attribute_indices` names the
-columns that get a static B+tree. `add_feature` spools each encoded feature
+columns that get a static B+tree. `options.id_index`, set by default, indexes
+the id of every City Object under the column `id` without copying it into the
+attributes; `std::nullopt` writes no such index. `add_feature` spools each encoded feature
 to a temp file and `write(std::ostream&)` streams the result out in chunks,
 so peak memory does not grow with the number of features — the
 `std::vector`-returning `write()` overload is a convenience for small files
