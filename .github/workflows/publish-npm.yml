@@ -29,6 +29,13 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # npm trusted publishing: the registry accepts this workflow's GitHub
+    # identity (OIDC) for @cityjson/flatcitybuf, so no npm token is stored.
+    # The package's settings on npmjs.com name this repository and this
+    # workflow file as its trusted publisher; renaming the file breaks it.
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: src/ts
@@ -93,9 +100,15 @@ jobs:
           done
 
       - name: Publish to NPM
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: |
+          # Trusted publishing needs npm 11.5.1 or later. An older npm would
+          # look for a token and fail with a 404 that hides the cause.
+          NPM_VERSION="$(npm --version)"
+          if [ "$(printf '%s\n' 11.5.1 "$NPM_VERSION" | sort -V | head -1)" != "11.5.1" ]; then
+            echo "npm $NPM_VERSION is too old for trusted publishing (needs 11.5.1 or later)"
+            exit 1
+          fi
+          npm publish --access public
 
       - name: Commit the version bump
         run: |
