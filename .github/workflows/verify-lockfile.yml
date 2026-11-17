@@ -1,0 +1,47 @@
+# Checks .github/workflows/actions.lock against the workflows.
+#
+# The lockfile records the commit behind every action the workflows use,
+# including the actions those actions call, and the runner executes that
+# commit whatever the tag points at later. A workflow whose entry is missing
+# or stale does not start at all, and that failure is not listed among a pull
+# request's checks, so this job is where it shows.
+#
+# After adding a workflow or changing any `uses:` line, regenerate the
+# lockfile and commit it with the workflow:
+#
+#   gh extension install github/gh-actions-lock
+#   gh actions-lock
+#
+# Docs: https://docs.github.com/en/actions/concepts/security/workflow-dependency-lockfiles
+
+name: Verify actions lockfile
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify actions.lock
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install gh actions-lock
+        run: gh extension install github/gh-actions-lock --pin v0.4.1
+
+      - name: Verify the lockfile
+        run: gh actions-lock --verify
