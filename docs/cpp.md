@@ -79,6 +79,11 @@ queries the static B+tree; all three return a `FeatureIterator`
 over HTTP is the same code against a different transport — build with
 `FCB_WITH_CURL=ON` and see [INSTALL.md](../src/cpp/INSTALL.md).
 
+A file whose writer indexed the City Object ids has a string column named `id`
+(`ColumnInfo::primary_key` is set on it): `select_attr` on `id` finds an object
+by its id through that index. `FcbWriter` writes it unless `id_index` in its
+header options is `std::nullopt`.
+
 Field access is `nlohmann::json`, not a bespoke API, and vertices stay quantized
 integers — the runnable programs in
 [`src/cpp/examples/README.md`](../src/cpp/examples/README.md) walk through
