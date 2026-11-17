@@ -222,26 +222,19 @@ impl<'a> FcbWriter<'a> {
             tree.stream_write(&mut rtree_buf)?;
         }
 
-        self.tmpout.rewind()?;
-        let unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
-        let mut unsorted_feature_reader = BufReader::new(unsorted_feature_output);
-
-        let mut sorted_feature_buf = Vec::with_capacity(2048);
-
+        // Each feature's offset in the feature section, which is written in
+        // the R-tree's (Hilbert) order. The attribute indices point at these
+        // offsets, so they are known before any feature is copied.
+        let mut sorted_offset = 0;
         for node in &self.feat_nodes {
             let feat = &self.feat_offsets[node.offset as usize];
-            unsorted_feature_reader.seek(SeekFrom::Start(feat.offset as u64))?;
-
             if let Some(attr_index_entry) =
                 self.attribute_index_entries.get_mut(&feat.temp_feature_id)
             {
-                attr_index_entry.offset = sorted_feature_buf.len();
+                attr_index_entry.offset = sorted_offset;
                 attr_index_entry.size = feat.size;
             }
-
-            let cur_len = sorted_feature_buf.len();
-            sorted_feature_buf.resize(cur_len + feat.size, 0);
-            unsorted_feature_reader.read_exact(&mut sorted_feature_buf[cur_len..])?;
+            sorted_offset += feat.size;
         }
 
         // build attribute index buffers in sorted order
@@ -289,7 +282,23 @@ impl<'a> FcbWriter<'a> {
         // write spatial index (if any), attribute index bytes, then feature data
         out.write_all(&rtree_buf)?;
         out.write_all(&attr_index_buf)?;
-        out.write_all(&sorted_feature_buf)?;
+        drop(attr_index_buf);
+        drop(self.attribute_index_entries);
+
+        // Copy the features from the temporary file in sorted order, one at
+        // a time: the feature section is as large as the file, and is never
+        // held in memory.
+        self.tmpout.rewind()?;
+        let unsorted_feature_output = self.tmpout.into_inner().map_err(|e| e.into_error())?;
+        let mut unsorted_feature_reader = BufReader::new(unsorted_feature_output);
+        let mut feature_buf = Vec::new();
+        for node in &self.feat_nodes {
+            let feat = &self.feat_offsets[node.offset as usize];
+            unsorted_feature_reader.seek(SeekFrom::Start(feat.offset as u64))?;
+            feature_buf.resize(feat.size, 0);
+            unsorted_feature_reader.read_exact(&mut feature_buf)?;
+            out.write_all(&feature_buf)?;
+        }
 
         Ok(())
     }

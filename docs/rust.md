@@ -185,6 +185,13 @@ while features.next().await?.is_some() {
 
 `FcbWriter` takes the CityJSON metadata object plus a stream of
 `CityJSONFeature`s and assembles header, indices and feature data on `write`.
+`add_feature` borrows each feature only while it encodes it, into a temporary
+file; `write` copies the features from there into the output in spatial order,
+one at a time, so neither call needs the dataset in memory. The header's
+`feature_count` and the attribute schema are needed up front, so a caller
+streaming a large input reads it twice: once for those, once to add the
+features (`fcb ser` does this). The example below reads the whole file for
+brevity.
 
 ```rust
 use fcb_core::{
