@@ -1,7 +1,7 @@
 name: Publish Crate
 
-# Publishes fcb_core then fcb_cli to crates.io. fcb_api is a workspace member
-# but is not published (it is the axum server, deployed by deploy-api.yml).
+# Publishes fcb_core, then fcb_cli and fcb_api, to crates.io at one shared
+# version. fcb_api is the axum server; deploy-api.yml deploys it separately.
 
 on:
   workflow_dispatch:
@@ -86,8 +86,9 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         working-directory: src/rust
         run: |
-          # fcb_core first: fcb_cli depends on it, and crates.io must have
-          # indexed the new version before the dependent can resolve it.
+          # fcb_core first: fcb_cli and fcb_api depend on it, and crates.io
+          # must have indexed the new version before a dependent can resolve
+          # it. Neither dependent depends on the other.
           # --allow-dirty is required because the version bump above leaves
           # the tree modified.
           (cd fcb_core && cargo publish --allow-dirty)
@@ -106,3 +107,4 @@ jobs:
           done
 
           (cd cli && cargo publish --allow-dirty)
+          (cd fcb_api && cargo publish --allow-dirty)

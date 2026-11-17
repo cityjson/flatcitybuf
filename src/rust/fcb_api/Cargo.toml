@@ -2,6 +2,22 @@
 name = "fcb_api"
 version = "0.9.0"
 edition = "2021"
+authors = ["Hidemichi Baba <baba.papa1120.ba@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/cityjson/flatcitybuf"
+description = "An OGC API - Features server over a FlatCityBuf dataset, read from a local file or over HTTP range requests."
+readme = "README.md"
+keywords = ["cityjson", "flatcitybuf", "ogc-api", "geospatial", "3d"]
+categories = ["web-programming::http-server", "science::geo"]
+# The 3DBAG OpenAPI document and the scripts that regenerate
+# src/openapi/models from it are development inputs, not part of the crate.
+exclude = [
+  "schema/",
+  "fetch_schema.sh",
+  "generate_models.sh",
+  "openapitools.json",
+  "Makefile",
+]
 
 [lib]
 name = "fcb_api"
@@ -29,7 +45,6 @@ bytes = { workspace = true }
 http-range-client = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 ordered-float = { workspace = true }
-openapi = { path = "src/openapi" }
 cjseq = { workspace = true }
 thiserror = { workspace = true }
 proj4rs = { workspace = true }
