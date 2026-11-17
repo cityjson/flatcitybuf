@@ -11,6 +11,7 @@
 
 pub mod constants;
 mod crs;
+mod error;
 mod filter_parser;
 mod fs_handler;
 mod handlers;
@@ -33,6 +34,8 @@ pub struct AppState {
     pub base_url: String,
     pub fcb_metadata: FcbMetadata,
     pub is_local_file: bool,
+    pub config: AppConfig,
+    http_client: reqwest::Client,
 }
 
 /// Check if the URL is a local file path or remote URL
@@ -51,22 +54,84 @@ fn is_local_file(url: &str) -> bool {
     true
 }
 
-pub async fn create_app() -> Router {
-    let fcb_url = env::var("FCB_URL")
-        .unwrap_or_else(|_| "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb".to_string());
+#[derive(Clone, Debug)]
+pub struct AppConfig {
+    pub fcb_url: String,
+    pub base_url: String,
+    pub max_return_features: u32,
+    pub probe_timeout_seconds: u64,
+    pub collection_version: Option<String>,
+}
 
-    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "https://api.3dbag.nl".to_string());
+impl AppConfig {
+    pub fn from_env() -> anyhow::Result<Self> {
+        let fcb_url = env::var("FCB_URL").unwrap_or_else(|_| {
+            "https://flatcitybuf.open3d.city/data/3dbag_all_index.fcb".to_string()
+        });
 
-    let max_return_features = env::var("MAX_RETURN_FEATURES")
-        .unwrap_or_else(|_| "100".to_string())
-        .parse::<u32>()
-        .unwrap_or(100);
+        let base_url = env::var("BASE_URL").unwrap_or_else(|_| "https://api.3dbag.nl".to_string());
 
+        let max_return_features = env::var("MAX_RETURN_FEATURES")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<u32>()?;
+
+        Ok(Self {
+            fcb_url,
+            base_url,
+            max_return_features,
+            probe_timeout_seconds: env::var("DATASET_PROBE_TIMEOUT_SECONDS")
+                .unwrap_or_else(|_| "10".into())
+                .parse()?,
+            collection_version: env::var("COLLECTION_VERSION")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+        })
+    }
+}
+
+pub async fn create_app() -> anyhow::Result<Router> {
+    create_app_with_config(AppConfig::from_env()?).await
+}
+
+pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router> {
+    anyhow::ensure!(
+        config.max_return_features > 0,
+        "invalid MAX_RETURN_FEATURES"
+    );
+    anyhow::ensure!(
+        config.probe_timeout_seconds > 0,
+        "invalid DATASET_PROBE_TIMEOUT_SECONDS"
+    );
+    let base = reqwest::Url::parse(&config.base_url)?;
+    anyhow::ensure!(
+        matches!(base.scheme(), "http" | "https")
+            && base.host_str().is_some()
+            && base.query().is_none()
+            && base.fragment().is_none(),
+        "invalid BASE_URL"
+    );
+    let fcb_url = config
+        .fcb_url
+        .strip_prefix("file://")
+        .unwrap_or(&config.fcb_url)
+        .to_string();
+    let base_url = config.base_url.trim().trim_end_matches('/').to_string();
+    let max_return_features = config.max_return_features;
     // Determine if the URL is local or remote
     let is_local = is_local_file(&fcb_url);
 
     // Load FCB metadata
-    let fcb_metadata = load_fcb_metadata(&fcb_url, is_local).await;
+    let mut fcb_metadata = load_fcb_metadata(&config).await?;
+    let crs = fcb_metadata.cityjson["metadata"]["referenceSystem"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("dataset has no storage CRS"))?;
+    let crs =
+        crs::SupportedCrs::parse(crs).map_err(|_| anyhow::anyhow!("unsupported storage CRS"))?;
+    anyhow::ensure!(
+        matches!(crs, crs::SupportedCrs::Rd | crs::SupportedCrs::RdNap),
+        "unsupported storage CRS"
+    );
+    fcb_metadata.storage_crs = crs.uri().into();
 
     let state = Arc::new(AppState {
         fcb_url: fcb_url.clone(),
@@ -74,6 +139,11 @@ pub async fn create_app() -> Router {
         base_url,
         fcb_metadata,
         is_local_file: is_local,
+        http_client: reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()?,
+        config,
     });
 
     tracing::info!("FCB URL: {}", state.fcb_url);
@@ -85,9 +155,10 @@ pub async fn create_app() -> Router {
     );
 
     // Route to appropriate handlers based on URL type
-    if is_local {
+    Ok(if is_local {
         Router::new()
             .route("/", get(handlers::landing_page))
+            .route("/readyz", get(readiness))
             .route("/conformance", get(handlers::conformance))
             .route("/collections", get(handlers::collections))
             .route(
@@ -102,12 +173,20 @@ pub async fn create_app() -> Router {
                 "/collections/:collection_id/items/:item_id",
                 get(fs_handler::collection_item_by_id),
             )
-            .layer(CorsLayer::permissive())
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                content_crs,
+            ))
+            .layer(CorsLayer::permissive().expose_headers([
+                axum::http::HeaderName::from_static("content-crs"),
+                axum::http::header::LINK,
+            ]))
             .layer(TraceLayer::new_for_http())
             .with_state(state)
     } else {
         Router::new()
             .route("/", get(handlers::landing_page))
+            .route("/readyz", get(readiness))
             .route("/conformance", get(handlers::conformance))
             .route("/collections", get(handlers::collections))
             .route(
@@ -122,105 +201,81 @@ pub async fn create_app() -> Router {
                 "/collections/:collection_id/items/:item_id",
                 get(http_handler::collection_item_by_id),
             )
-            .layer(CorsLayer::permissive())
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                content_crs,
+            ))
+            .layer(CorsLayer::permissive().expose_headers([
+                axum::http::HeaderName::from_static("content-crs"),
+                axum::http::header::LINK,
+            ]))
             .layer(TraceLayer::new_for_http())
             .with_state(state)
+    })
+}
+
+async fn load_fcb_metadata(config: &AppConfig) -> anyhow::Result<FcbMetadata> {
+    use fcb_core::{FcbReader, HttpFcbReader};
+    if is_local_file(&config.fcb_url) {
+        let path = config
+            .fcb_url
+            .strip_prefix("file://")
+            .unwrap_or(&config.fcb_url);
+        let reader = FcbReader::open(std::io::BufReader::new(std::fs::File::open(path)?))?;
+        FcbMetadata::from_header(reader.header())
+    } else {
+        let reader = tokio::time::timeout(
+            std::time::Duration::from_secs(config.probe_timeout_seconds),
+            HttpFcbReader::open(&config.fcb_url),
+        )
+        .await??;
+        FcbMetadata::from_header(reader.header())
+    }
+}
+async fn readiness(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> (axum::http::StatusCode, axum::Json<serde_json::Value>) {
+    match load_fcb_metadata(&state.config).await {
+        Ok(_) => (
+            axum::http::StatusCode::OK,
+            axum::Json(serde_json::json!({"status":"ready"})),
+        ),
+        Err(e) => {
+            tracing::warn!(error = %e, "dataset readiness failed");
+            (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({"status":"unavailable"})),
+            )
+        }
     }
 }
 
-async fn load_fcb_metadata(fcb_url: &str, is_local: bool) -> FcbMetadata {
-    use fcb_core::{FcbReader, HttpFcbReader};
-    use metadata::ColumnMetadata;
-    use std::fs::File;
-    use std::io::BufReader;
-
-    let mut metadata = FcbMetadata::new();
-
-    if is_local {
-        // Load metadata from local file
-        match File::open(fcb_url) {
-            Ok(file) => {
-                let buf_reader = BufReader::new(file);
-                match FcbReader::open(buf_reader) {
-                    Ok(reader) => {
-                        let header = reader.header();
-
-                        // Get columns information
-                        if let Some(columns) = header.columns() {
-                            // Get attribute index information
-                            let attr_indices = header.attribute_index();
-                            let indexed_columns: std::collections::HashSet<u16> =
-                                if let Some(indices) = attr_indices {
-                                    indices.iter().map(|idx| idx.index()).collect()
-                                } else {
-                                    std::collections::HashSet::new()
-                                };
-
-                            // Build the metadata map
-                            for column in columns.iter() {
-                                let col_meta = ColumnMetadata {
-                                    index: column.index(),
-                                    column_type: column.type_(),
-                                    is_indexed: indexed_columns.contains(&column.index()),
-                                };
-                                metadata.columns.insert(column.name().to_string(), col_meta);
-                            }
-                        }
-
-                        tracing::info!(
-                            "Successfully loaded FCB metadata from local file: {}",
-                            fcb_url
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to open local FCB reader from {}: {}", fcb_url, e);
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::error!("Failed to open local FCB file {}: {}", fcb_url, e);
-            }
-        }
-    } else {
-        // Load metadata from HTTP URL
-        match HttpFcbReader::open(fcb_url).await {
-            Ok(http_reader) => {
-                // Get the header information
-                let header = http_reader.header();
-
-                // Get columns information
-                if let Some(columns) = header.columns() {
-                    // Get attribute index information
-                    let attr_indices = header.attribute_index();
-                    let indexed_columns: std::collections::HashSet<u16> =
-                        if let Some(indices) = attr_indices {
-                            indices.iter().map(|idx| idx.index()).collect()
-                        } else {
-                            std::collections::HashSet::new()
-                        };
-
-                    // Build the metadata map
-                    for column in columns.iter() {
-                        let col_meta = ColumnMetadata {
-                            index: column.index(),
-                            column_type: column.type_(),
-                            is_indexed: indexed_columns.contains(&column.index()),
-                        };
-                        metadata.columns.insert(column.name().to_string(), col_meta);
-                    }
-                }
-
-                tracing::info!(
-                    "Successfully loaded FCB metadata from HTTP URL: {}",
-                    fcb_url
-                );
-            }
-            Err(e) => {
-                tracing::error!("Failed to load FCB metadata from {}: {}", fcb_url, e);
-                // Continue with empty metadata - filters will fail gracefully
-            }
-        }
+async fn content_crs(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let geometry = request.uri().path().starts_with("/collections/pand/items");
+    let mut response = next.run(request).await;
+    if geometry && response.status().is_success() {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("content-crs"),
+            format!("<{}>", state.fcb_metadata.storage_crs)
+                .parse()
+                .expect("static CRS URI"),
+        );
     }
+    response
+}
 
-    metadata
+impl AppState {
+    pub(crate) async fn http_reader(
+        &self,
+    ) -> fcb_core::error::Result<fcb_core::HttpFcbReader<reqwest::Client>> {
+        let client = http_range_client::AsyncBufferedHttpRangeClient::with(
+            self.http_client.clone(),
+            &self.fcb_url,
+        );
+        fcb_core::HttpFcbReader::new(client).await
+    }
 }

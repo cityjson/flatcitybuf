@@ -33,7 +33,10 @@ deck.gl. No server component; reading is pure TypeScript, with export to
 CityJSON/OBJ using a lazy-loaded WASM helper. Source in
 [`examples/web`](examples/web). Supersedes the earlier WASM-based prototype.
 
-https://github.com/user-attachments/assets/3ae6a0f8-7e31-42da-8f59-0396f037c716
+
+https://github.com/user-attachments/assets/0f2df60a-4270-4b1a-9890-7ca37875801a
+
+
 
 ## Example FlatCityBuf File
 
@@ -121,6 +124,10 @@ bytes directly. Rust is the authoritative reference:
 
 - **Rust toolchain** (recent stable)
 - **Node.js** ≥ 22.12 (for the TypeScript reader in `src/ts`)
+
+For Rust development with Nix, run `nix develop` from the repository root.
+The pinned shell includes the Rust tools and C linker; see the
+[Rust development guide](docs/rust.md#build-and-verify).
 
 ### 📦 Installation
 

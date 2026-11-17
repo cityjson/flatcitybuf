@@ -264,3 +264,42 @@ mod tests {
         );
     }
 }
+
+/// CRS identity and axis order are kept separate from projection-library codes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SupportedCrs {
+    RdNap,
+    Rd,
+    Wgs84,
+    Crs84,
+}
+impl SupportedCrs {
+    pub fn parse(value: &str) -> Result<Self, axum::http::StatusCode> {
+        let value = value.to_ascii_lowercase();
+        let value = value
+            .strip_prefix("https://")
+            .or_else(|| value.strip_prefix("http://"))
+            .unwrap_or(&value);
+        match value {
+            "epsg:7415" | "www.opengis.net/def/crs/epsg/0/7415" => Ok(Self::RdNap),
+            "epsg:28992" | "www.opengis.net/def/crs/epsg/0/28992" => Ok(Self::Rd),
+            "epsg:4326" | "www.opengis.net/def/crs/epsg/0/4326" => Ok(Self::Wgs84),
+            "crs84" | "ogc:crs84" | "www.opengis.net/def/crs/ogc/1.3/crs84" => Ok(Self::Crs84),
+            _ => Err(axum::http::StatusCode::BAD_REQUEST),
+        }
+    }
+    pub fn uri(self) -> &'static str {
+        match self {
+            Self::RdNap => crate::constants::STORAGE_CRS,
+            Self::Rd => crate::constants::EPSG_28992,
+            Self::Wgs84 => "http://www.opengis.net/def/crs/EPSG/0/4326",
+            Self::Crs84 => crate::constants::CRS84,
+        }
+    }
+    pub fn horizontal(self) -> &'static str {
+        match self {
+            Self::RdNap | Self::Rd => "EPSG:28992",
+            Self::Wgs84 | Self::Crs84 => "EPSG:4326",
+        }
+    }
+}

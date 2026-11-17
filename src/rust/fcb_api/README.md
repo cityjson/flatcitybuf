@@ -9,6 +9,46 @@ A cloud-optimized API for serving 3D city models from FlatCityBuf files, designe
 
 ---
 
+## Response and configuration changes
+
+The default JSON response follows the Flask API: listings contain raw
+CityJSONFeatures in `features` and a top-level `metadata` document; individual
+responses contain `id`, `metadata`, `feature`, and `links`. `metadata` is the
+complete CityJSON header document, including the transform needed to interpret
+integer vertices. Clients previously using `features[i].feature` must use
+`features[i]` instead. Collection metadata is read from the dataset header.
+
+Each `pand` item includes its building parts as embedded CityObjects. Individual
+responses expose only `self` and `collection` links: building parts are not
+separate API resources. Their `children`/`parents` relationships remain inside
+the CityJSONFeature. The `self` link retains the requested CRS parameter.
+`/conformance` declares
+`https://cityjson.org/specs/2.0.1/`, matching Flask; this does not establish
+formal OGC API Features certification.
+
+Offsets are zero-based. Negative offsets and nonpositive limits return 400;
+positive limits are capped at `MAX_RETURN_FEATURES` (default 100). Sending both
+`bbox` and `filter` returns 400 until their intersection is implemented.
+
+Storage must identify EPSG:7415 or EPSG:28992 in its header. Geometry responses
+remain in that storage CRS and include `Content-Crs`. `crs` accepts only the
+storage CRS, including its HTTP/HTTPS OGC URI and `EPSG:` shorthand. Unsupported
+output CRS requests return 400. Bbox inputs additionally accept EPSG:4326 and
+CRS84. **EPSG:4326 uses latitude/longitude axis order**; use CRS84 for
+longitude/latitude. Six-coordinate bboxes filter horizontally only.
+
+Startup fails if dataset metadata cannot be loaded. `GET /readyz` opens the
+dataset again and returns 200 when accessible, otherwise 503. Remote startup
+and readiness reads use `DATASET_PROBE_TIMEOUT_SECONDS` (positive, default 10).
+Other remote reads have a 5-second connection timeout and 30-second request
+timeout. Local reads remain synchronous. Treat datasets as immutable while
+serving; restart after replacing them. Missing features return 404, while
+storage failures return 503.
+
+Set optional `COLLECTION_VERSION` to advertise a release in
+`version.collection`; it is omitted when unset. Header provenance remains in
+the CityJSON metadata and is not substituted with a hard-coded release.
+
 ## Overview
 
 The FlatCityBuf API provides an OGC API-compatible interface for querying and retrieving 3D city models stored in the FlatCityBuf format. Built with Rust and Axum, it reads a single `.fcb` file over HTTP range requests through `fcb_core`, so the file itself can be a multi-gigabyte object in cloud storage and a query still costs only a handful of requests.
@@ -84,8 +124,8 @@ Query features within a geographic bounding box using the `bbox` parameter.
 # Default CRS (EPSG:7415)
 GET /collections/pand/items?bbox=84000,445000,85000,446000
 
-# WGS 84 (EPSG:4326) - lon/lat order
-GET /collections/pand/items?bbox=4.367394,51.995031,4.398037,52.023820&bbox-crs=EPSG:4326
+# WGS 84 (EPSG:4326) - lat/lon order
+GET /collections/pand/items?bbox=51.995031,4.367394,52.023820,4.398037&bbox-crs=EPSG:4326
 
 # RD New (EPSG:28992)
 GET /collections/pand/items?bbox=84000,445000,85000,446000&bbox-crs=EPSG:28992
@@ -188,57 +228,24 @@ OGC API-compatible response format with individual CityJSON features.
 ```json
 {
   "type": "FeatureCollection",
+  "metadata": {
+    "type": "CityJSON",
+    "version": "2.0",
+    "transform": {"scale": [0.001, 0.001, 0.001], "translate": [0, 0, 0]},
+    "CityObjects": {},
+    "vertices": []
+  },
   "features": [
-    {
-      "feature": { /* CityJSONFeature object */ },
-      "id": "NL.IMBAG.Pand.1926100000492192",
-      "links": [
-        {
-          "href": "https://api.example.com/collections/pand/items/NL.IMBAG.Pand.1926100000492192",
-          "rel": "self",
-          "type": "application/city+json",
-          "title": "this document"
-        },
-        {
-          "href": "https://api.example.com/collections/pand",
-          "rel": "collection",
-          "type": "application/json",
-          "title": "Collection"
-        }
-      ]
-    }
+    {"type": "CityJSONFeature", "id": "example", "CityObjects": {}, "vertices": []}
   ],
-  "links": [
-    {
-      "href": "https://api.example.com/collections/pand/items?limit=10&offset=0",
-      "rel": "self",
-      "type": "application/json",
-      "title": "this document"
-    },
-    {
-      "href": "https://api.example.com/collections/pand/items?limit=10&offset=0",
-      "rel": "first",
-      "type": "application/json",
-      "title": "First page"
-    },
-    {
-      "href": "https://api.example.com/collections/pand/items?limit=10&offset=10",
-      "rel": "next",
-      "type": "application/json",
-      "title": "Next page"
-    },
-    {
-      "href": "https://api.example.com/collections/pand/items?limit=10&offset=9270",
-      "rel": "last",
-      "type": "application/json",
-      "title": "Last page"
-    }
-  ],
-  "timeStamp": "2025-10-13T13:14:04.409093129+00:00",
-  "numberMatched": 9271,
-  "numberReturned": 10
+  "links": [],
+  "numberMatched": 1,
+  "numberReturned": 1
 }
 ```
+
+The metadata values above are illustrative; actual values come from the FCB
+header. Results also include a response timestamp and encoded pagination links.
 
 **Link Headers:**
 The API also includes RFC 8288 compliant `Link` headers for pagination:
@@ -276,7 +283,9 @@ GET /collections/pand/items?f=obj
 | `BASE_URL` | API base URL for generating links | `https://api.3dbag.nl` | Yes |
 | `MAX_RETURN_FEATURES` | Maximum features per request | `100` | No |
 | `HOST` | Server bind address | `127.0.0.1` (binary) / `0.0.0.0` (Docker) | No |
-| `PORT` | Server port | `8080` | No |
+| `PORT` | Server port | `3000` | No |
+| `COLLECTION_VERSION` | Optional dataset release | omitted | No |
+| `DATASET_PROBE_TIMEOUT_SECONDS` | Remote startup/readiness timeout | `10` | No |
 
 ---
 
@@ -309,6 +318,10 @@ docker run -p 8080:8080 \
 ```
 
 #### Option 2: Cargo Binary
+
+On NixOS, run `nix develop` from the repository root first to load the Rust
+toolchain and C linker. See the [Rust development shell](../../../docs/rust.md#build-and-verify)
+for details.
 
 ```bash
 # Build from src/rust directory
@@ -398,7 +411,7 @@ While attribute filtering is supported, performance varies by query type:
 GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items?bbox=84000,445000,85000,446000&limit=10
 
 # Bounding box with WGS 84 coordinates
-GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items?bbox=4.367394,51.995031,4.398037,52.023820&bbox-crs=EPSG:4326
+GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items?bbox=51.995031,4.367394,52.023820,4.398037&bbox-crs=EPSG:4326
 
 # Attribute filter: building height
 GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items?filter=b3_h_dak_50p>30&limit=10
@@ -406,7 +419,7 @@ GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/i
 # Specific feature by ID
 GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items/NL.IMBAG.Pand.0153100000209948
 
-# Combined spatial and attribute query
+# Combined spatial and attribute query (currently returns 400)
 GET https://flatcitybuf-api-264879243442.europe-west4.run.app/collections/pand/items?bbox=84000,445000,85000,446000&filter=b3_bouwlagen>2
 
 # Request CityJSON format
