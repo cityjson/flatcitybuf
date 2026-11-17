@@ -61,8 +61,9 @@ fix: sync
 # numpy is a genuine optional extra: every code path has a working pure-Python
 # fallback, and BOTH states must be verified — otherwise whichever one happens to
 # be installed is the only one ever exercised. This mirrors CI's two passes.
-# Expect `251 passed, 5 skipped, 1 deselected` here (numpy-parity tests
-# importorskip), against `255 passed` with numpy present.
+# Expect `272 passed, 5 skipped, 1 deselected` here (numpy-parity tests
+# importorskip), against `276 passed, 1 skipped, 1 deselected` with numpy
+# present.
 
 # Re-run mypy + pytest with numpy uninstalled, then restore it
 test-no-numpy:

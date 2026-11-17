@@ -640,6 +640,7 @@ impl<'a> CityObject<'a> {
     pub const VT_CHILDREN: flatbuffers::VOffsetT = 20;
     pub const VT_CHILDREN_ROLES: flatbuffers::VOffsetT = 22;
     pub const VT_PARENTS: flatbuffers::VOffsetT = 24;
+    pub const VT_ADDRESS: flatbuffers::VOffsetT = 26;
 
     #[inline]
     pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -651,6 +652,9 @@ impl<'a> CityObject<'a> {
         args: &'args CityObjectArgs<'args>,
     ) -> flatbuffers::WIPOffset<CityObject<'bldr>> {
         let mut builder = CityObjectBuilder::new(_fbb);
+        if let Some(x) = args.address {
+            builder.add_address(x);
+        }
         if let Some(x) = args.parents {
             builder.add_parents(x);
         }
@@ -828,6 +832,19 @@ impl<'a> CityObject<'a> {
             >>(CityObject::VT_PARENTS, None)
         }
     }
+    #[inline]
+    pub fn address(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Address<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Address>>,
+            >>(CityObject::VT_ADDRESS, None)
+        }
+    }
 }
 
 impl flatbuffers::Verifiable for CityObject<'_> {
@@ -873,6 +890,9 @@ impl flatbuffers::Verifiable for CityObject<'_> {
             .visit_field::<flatbuffers::ForwardsUOffset<
                 flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<&'_ str>>,
             >>("parents", Self::VT_PARENTS, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Address>>,
+            >>("address", Self::VT_ADDRESS, false)?
             .finish();
         Ok(())
     }
@@ -903,6 +923,9 @@ pub struct CityObjectArgs<'a> {
     pub parents: Option<
         flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>,
     >,
+    pub address: Option<
+        flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Address<'a>>>>,
+    >,
 }
 impl<'a> Default for CityObjectArgs<'a> {
     #[inline]
@@ -919,6 +942,7 @@ impl<'a> Default for CityObjectArgs<'a> {
             children: None,
             children_roles: None,
             parents: None,
+            address: None,
         }
     }
 }
@@ -1025,6 +1049,16 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> CityObjectBuilder<'a, 'b, A> {
             .push_slot_always::<flatbuffers::WIPOffset<_>>(CityObject::VT_PARENTS, parents);
     }
     #[inline]
+    pub fn add_address(
+        &mut self,
+        address: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Address<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(CityObject::VT_ADDRESS, address);
+    }
+    #[inline]
     pub fn new(
         _fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
     ) -> CityObjectBuilder<'a, 'b, A> {
@@ -1056,6 +1090,184 @@ impl core::fmt::Debug for CityObject<'_> {
         ds.field("children", &self.children());
         ds.field("children_roles", &self.children_roles());
         ds.field("parents", &self.parents());
+        ds.field("address", &self.address());
+        ds.finish()
+    }
+}
+pub enum AddressOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct Address<'a> {
+    pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for Address<'a> {
+    type Inner = Address<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { flatbuffers::Table::new(buf, loc) },
+        }
+    }
+}
+
+impl<'a> Address<'a> {
+    pub const VT_ATTRIBUTES: flatbuffers::VOffsetT = 4;
+    pub const VT_COLUMNS: flatbuffers::VOffsetT = 6;
+    pub const VT_LOCATION: flatbuffers::VOffsetT = 8;
+
+    #[inline]
+    pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+        Address { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+        _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args AddressArgs<'args>,
+    ) -> flatbuffers::WIPOffset<Address<'bldr>> {
+        let mut builder = AddressBuilder::new(_fbb);
+        if let Some(x) = args.location {
+            builder.add_location(x);
+        }
+        if let Some(x) = args.columns {
+            builder.add_columns(x);
+        }
+        if let Some(x) = args.attributes {
+            builder.add_attributes(x);
+        }
+        builder.finish()
+    }
+
+    #[inline]
+    pub fn attributes(&self) -> Option<flatbuffers::Vector<'a, u8>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u8>>>(
+                    Address::VT_ATTRIBUTES,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn columns(
+        &self,
+    ) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column>>,
+            >>(Address::VT_COLUMNS, None)
+        }
+    }
+    #[inline]
+    pub fn location(&self) -> Option<Geometry<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<flatbuffers::ForwardsUOffset<Geometry>>(Address::VT_LOCATION, None)
+        }
+    }
+}
+
+impl flatbuffers::Verifiable for Address<'_> {
+    #[inline]
+    fn run_verifier(
+        v: &mut flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+        use self::flatbuffers::Verifiable;
+        v.visit_table(pos)?
+            .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(
+                "attributes",
+                Self::VT_ATTRIBUTES,
+                false,
+            )?
+            .visit_field::<flatbuffers::ForwardsUOffset<
+                flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column>>,
+            >>("columns", Self::VT_COLUMNS, false)?
+            .visit_field::<flatbuffers::ForwardsUOffset<Geometry>>(
+                "location",
+                Self::VT_LOCATION,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
+}
+pub struct AddressArgs<'a> {
+    pub attributes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
+    pub columns: Option<
+        flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>>,
+    >,
+    pub location: Option<flatbuffers::WIPOffset<Geometry<'a>>>,
+}
+impl<'a> Default for AddressArgs<'a> {
+    #[inline]
+    fn default() -> Self {
+        AddressArgs {
+            attributes: None,
+            columns: None,
+            location: None,
+        }
+    }
+}
+
+pub struct AddressBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+    fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> AddressBuilder<'a, 'b, A> {
+    #[inline]
+    pub fn add_attributes(
+        &mut self,
+        attributes: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u8>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Address::VT_ATTRIBUTES, attributes);
+    }
+    #[inline]
+    pub fn add_columns(
+        &mut self,
+        columns: flatbuffers::WIPOffset<
+            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Column<'b>>>,
+        >,
+    ) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<_>>(Address::VT_COLUMNS, columns);
+    }
+    #[inline]
+    pub fn add_location(&mut self, location: flatbuffers::WIPOffset<Geometry<'b>>) {
+        self.fbb_
+            .push_slot_always::<flatbuffers::WIPOffset<Geometry>>(Address::VT_LOCATION, location);
+    }
+    #[inline]
+    pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> AddressBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        AddressBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> flatbuffers::WIPOffset<Address<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        flatbuffers::WIPOffset::new(o.value())
+    }
+}
+
+impl core::fmt::Debug for Address<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut ds = f.debug_struct("Address");
+        ds.field("attributes", &self.attributes());
+        ds.field("columns", &self.columns());
+        ds.field("location", &self.location());
         ds.finish()
     }
 }

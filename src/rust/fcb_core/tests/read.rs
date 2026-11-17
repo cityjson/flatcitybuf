@@ -44,6 +44,7 @@ fn read_bbox() -> Result<()> {
             index_node_size: 16,
             attribute_indices: Some(attr_indices),
             geographical_extent: None,
+            id_index: None,
         }),
         Some(attr_schema),
         None,
@@ -151,6 +152,7 @@ fn read_bbox_nonseekable() -> anyhow::Result<()> {
             index_node_size: 16,
             attribute_indices: Some(attr_indices),
             geographical_extent: None,
+            id_index: None,
         }),
         Some(attr_schema),
         None,
@@ -272,5 +274,41 @@ fn read_bbox_honours_header_index_node_size() -> Result<()> {
     );
     hit_ids.sort();
     assert_eq!(hit_ids, expected_ids);
+    Ok(())
+}
+
+/// A page of a bbox query or of a full scan is a slice of the unpaged
+/// result, and `features_count()` stays the number of matches, not the size
+/// of the page.
+#[test]
+fn pages_are_slices_and_count_every_match() -> Result<()> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../conformance/appearance_depths_node8.fcb");
+    let open = || -> Result<FcbReader<BufReader<File>>> {
+        Ok(FcbReader::open(BufReader::new(File::open(&path)?))?)
+    };
+    let mut all_iter = open()?.select_all()?;
+    let mut expected = Vec::new();
+    while let Some(feature) = all_iter.next()? {
+        expected.push(feature.cur_cj_feature()?.id);
+    }
+    assert_eq!(expected.len(), 12);
+    let everything = Query::BBox(f64::MIN, f64::MIN, f64::MAX, f64::MAX);
+
+    for bbox in [false, true] {
+        let mut paged = Vec::new();
+        for offset in [0, 5, 10, 15] {
+            let mut iter = if bbox {
+                open()?.select_query(everything, Some(5), Some(offset))?
+            } else {
+                open()?.select_all_paged(Some(5), Some(offset))?
+            };
+            assert_eq!(iter.features_count(), Some(12));
+            while let Some(feature) = iter.next()? {
+                paged.push(feature.cur_cj_feature()?.id);
+            }
+        }
+        assert_eq!(paged, expected);
+    }
     Ok(())
 }

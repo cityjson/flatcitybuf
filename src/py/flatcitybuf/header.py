@@ -56,6 +56,9 @@ class ColumnInfo:
     name: str
     type: int  # header_generated.ColumnType, as its raw ubyte
     nullable: bool
+    # Set on the City Object id column: its value for an object is the
+    # object's id, and no attribute blob carries it.
+    primary_key: bool = False
 
 
 @dataclass(frozen=True)
@@ -165,6 +168,7 @@ def _column_info_from(col: Any, position: int) -> ColumnInfo:
         name=_decode_str(name_bytes),
         type=col.Type(),
         nullable=col.Nullable(),
+        primary_key=col.PrimaryKey(),
     )
 
 

@@ -363,7 +363,8 @@ std::vector<std::uint8_t> encode_attributes_with_schema(const nlohmann::ordered_
 }
 
 ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Column>>>
-to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema) {
+to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema,
+           std::optional<std::uint16_t> id_column) {
     std::vector<std::pair<std::string, std::pair<std::uint16_t, ::ColumnType>>> sorted(
         schema.begin(), schema.end());
     std::sort(sorted.begin(), sorted.end(),
@@ -375,7 +376,41 @@ to_columns(::flatbuffers::FlatBufferBuilder& fbb, const AttributeSchema& schema)
         auto name_off = fbb.CreateString(name);
         columns.push_back(CreateColumn(fbb, idx_type.first, name_off, idx_type.second));
     }
+    if (id_column) {
+        auto name_off = fbb.CreateString(kIdColumnName);
+        columns.push_back(CreateColumn(fbb, *id_column, name_off, ::ColumnType::String, 0, 0, -1,
+                                       -1,
+                                       /*nullable=*/false, /*unique=*/false,
+                                       /*primary_key=*/true));
+    }
     return fbb.CreateVector(columns);
+}
+
+std::optional<std::uint16_t> id_column_index(const std::optional<std::uint16_t>& id_index,
+                                             const AttributeSchema& schema) {
+    if (!id_index || schema.find(kIdColumnName) != schema.end())
+        return std::nullopt;
+    std::uint16_t next = 0;
+    for (const auto& [name, idx_type] : schema)
+        next = std::max<std::uint16_t>(next, static_cast<std::uint16_t>(idx_type.first + 1));
+    return next;
+}
+
+std::vector<AttributeIndexEntry>
+cityfeature_to_id_index_entries(const nlohmann::ordered_json& city_feature, std::uint16_t index) {
+    std::vector<AttributeIndexEntry> out;
+    auto co_it = city_feature.find("CityObjects");
+    if (co_it == city_feature.end() || !co_it->is_object())
+        return out;
+    std::vector<std::string> object_ids;
+    object_ids.reserve(co_it->size());
+    for (const auto& [id, unused] : co_it->items())
+        object_ids.push_back(id);
+    std::sort(object_ids.begin(), object_ids.end());
+    const KeyKind kind = key_kind_for_column(static_cast<std::uint8_t>(::ColumnType::String));
+    for (const auto& id : object_ids)
+        out.push_back(AttributeIndexEntry{index, KeyValue::from_string(kind, id)});
+    return out;
 }
 
 std::vector<AttributeIndexEntry>

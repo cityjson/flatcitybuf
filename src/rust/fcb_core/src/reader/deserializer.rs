@@ -1,25 +1,27 @@
-use std::{collections::HashMap, mem::size_of};
+use std::mem::size_of;
 
 use crate::{
     error::Error,
     fb::*,
     geom_decoder::{
         decode_materials, decode_points, decode_rings, decode_semantics, decode_shells,
-        decode_solids, decode_surfaces, decode_textures,
+        decode_solids, decode_surfaces, decode_textures, UnflattenTextures, UnflattenValues,
     },
 };
 use byteorder::{ByteOrder, LittleEndian};
 use cjseq::{
     Address as CjAddress, Appearance as CjAppearance, BorderColor as CjBorderColor, CityJSON,
-    CityJSONFeature, CityObject as CjCityObject, CityObjectType as CjCityObjectType,
-    Color as CjColor, Geometry as CjGeometry, GeometryCommon as CjGeometryCommon,
-    GeometryTemplates as CjGeometryTemplates, MaterialObject as CjMaterialObject,
+    CityJSONFeature, CityObject as CjCityObject, CityObjectAddress as CjCityObjectAddress,
+    CityObjectType as CjCityObjectType, Color as CjColor, Extension as CjExtension,
+    Geometry as CjGeometry, GeometryTemplates as CjGeometryTemplates, Lod, MaterialIndex,
+    MaterialObject as CjMaterialObject, MaterialReference as CjMaterialReference,
     Metadata as CjMetadata, PointOfContact as CjPointOfContact,
-    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics,
+    ReferenceSystem as CjReferenceSystem, Semantics as CjSemantics, SurfaceIndex, TemplateIndex,
     TextureFormat as CjTextureFormat, TextureObject as CjTextureObject,
-    TextureType as CjTextureType, Transform as CjTransform, WrapMode as CjWrapMode,
+    TextureReference as CjTextureReference, TextureType as CjTextureType, Themes,
+    Transform as CjTransform, VertexIndex, WrapMode as CjWrapMode,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::meta::{Column as MetaColumn, ColumnType as MetaColumnType, Meta};
 
@@ -29,28 +31,44 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
     if let Some(transform) = header.transform() {
         let (scale, translate) = (transform.scale(), transform.translate());
         cj.transform = CjTransform {
-            scale: vec![scale.x(), scale.y(), scale.z()],
-            translate: vec![translate.x(), translate.y(), translate.z()],
+            scale: [scale.x(), scale.y(), scale.z()],
+            translate: [translate.x(), translate.y(), translate.z()],
         };
     }
 
     // Extract extensions if present
     if let Some(extensions_vec) = header.extensions() {
-        let mut extensions_map = serde_json::Map::new();
-        for extension in extensions_vec.iter() {
-            if let Some(name) = extension.name() {
-                extensions_map.insert(
-                    name.to_string(),
-                    json!({
-                        "url": extension.url().unwrap_or_default(),
-                        "version": extension.version().unwrap_or_default(),
-                    }),
-                );
-            }
-        }
+        let extensions_map: indexmap::IndexMap<String, CjExtension> = extensions_vec
+            .iter()
+            .filter_map(|extension| {
+                extension.name().map(|name| {
+                    let other = match extension.members() {
+                        Some(json) => match serde_json::from_str(json)? {
+                            Value::Object(map) => map,
+                            _ => {
+                                return Err(Error::InvalidAttributeValue {
+                                    msg: format!(
+                                        "extension {name}: `members` is not a JSON object"
+                                    ),
+                                })
+                            }
+                        },
+                        None => serde_json::Map::new(),
+                    };
+                    Ok((
+                        name.to_string(),
+                        CjExtension {
+                            url: extension.url().unwrap_or_default().to_string(),
+                            version: extension.version().unwrap_or_default().to_string(),
+                            other,
+                        },
+                    ))
+                })
+            })
+            .collect::<Result<_, Error>>()?;
 
         if !extensions_map.is_empty() {
-            cj.extensions = Some(Value::Object(extensions_map));
+            cj.extensions = Some(extensions_map);
         }
     }
 
@@ -62,7 +80,7 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
             rs.code().to_string(),
         )
     });
-    cj.version = header.version().to_string();
+    cj.version = from_json_string(header.version())?;
 
     let geographical_extent = header
         .geographical_extent()
@@ -90,7 +108,7 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
         reference_date: header.reference_date().map(|r| r.to_string()),
         reference_system,
         title: header.title().map(|t| t.to_string()),
-        other: HashMap::new(),
+        other: serde_json::Map::new(),
     });
 
     // The header's own appearance palette. The geometry templates decoded
@@ -108,12 +126,7 @@ pub fn to_cj_metadata(header: &Header) -> Result<CityJSON, Error> {
             .map(|g| decode_geometry(g, semantic_attr_schema)) // Use local decode_geometry
             .collect::<Result<Vec<_>, _>>()?;
 
-        let vertices_templates = Value::Array(
-            fb_vertices
-                .iter()
-                .map(|v| json!([v.x(), v.y(), v.z()]))
-                .collect(),
-        );
+        let vertices_templates = fb_vertices.iter().map(|v| [v.x(), v.y(), v.z()]).collect();
 
         cj.geometry_templates = Some(CjGeometryTemplates {
             templates,
@@ -175,14 +188,24 @@ pub(crate) fn to_meta(header: Header) -> Result<Meta, Error> {
     })
 }
 
+/// A CityJSON enumeration member, such as `version` or `contactType`, from
+/// the string the header stores it as. A string the schema does not permit is
+/// an error rather than a default.
+fn from_json_string<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, Error> {
+    Ok(serde_json::from_value(Value::String(s.to_string()))?)
+}
+
 pub(crate) fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact, Error> {
     Ok(CjPointOfContact {
         contact_name: header
             .poc_contact_name()
             .ok_or(Error::MissingRequiredField("contact_name".to_string()))?
             .to_string(),
-        contact_type: header.poc_contact_type().map(|ct| ct.to_string()),
-        role: header.poc_role().map(|r| r.to_string()),
+        contact_type: header
+            .poc_contact_type()
+            .map(from_json_string)
+            .transpose()?,
+        role: header.poc_role().map(from_json_string).transpose()?,
         phone: header.poc_phone().map(|p| p.to_string()),
         email_address: header
             .poc_email()
@@ -191,7 +214,7 @@ pub(crate) fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact
         website: header.poc_website().map(|w| w.to_string()),
         organization: None,
         address: to_cj_address(header),
-        other: HashMap::new(),
+        other: serde_json::Map::new(),
     })
 }
 
@@ -199,7 +222,7 @@ pub(crate) fn to_cj_point_of_contact(header: &Header) -> Result<CjPointOfContact
 /// Members the writer had nothing to write are simply absent, which is what
 /// the schema wants — it names no required member at all.
 pub(crate) fn to_cj_address(header: &Header) -> Option<CjAddress> {
-    let mut members: HashMap<String, Value> = HashMap::new();
+    let mut members = serde_json::Map::new();
     let mut insert = |key: &str, value: Option<&str>| {
         if let Some(value) = value.filter(|v| !v.is_empty()) {
             members.insert(key.to_string(), Value::String(value.to_string()));
@@ -523,7 +546,7 @@ pub fn to_cj_feature(
     cj.id = feature.id().to_string();
 
     if let Some(objects) = feature.objects() {
-        let city_objects_result: Result<HashMap<String, CjCityObject>, Error> = objects
+        let city_objects_result: Result<indexmap::IndexMap<String, CjCityObject>, Error> = objects
             .iter()
             .map(|co| {
                 let geographical_extent = co.geographical_extent().map(|extent| {
@@ -567,7 +590,13 @@ pub fn to_cj_feature(
                     None
                 } else {
                     co.attributes().map(|a| {
-                        decode_attributes(&co.columns().unwrap_or(root_attr_schema.unwrap()), a)
+                        match decode_attributes(
+                            &co.columns().unwrap_or(root_attr_schema.unwrap()),
+                            a,
+                        ) {
+                            Value::Object(map) => map,
+                            _ => serde_json::Map::new(),
+                        }
                     })
                 };
 
@@ -590,6 +619,10 @@ pub fn to_cj_feature(
                 cjco.parents = co
                     .parents()
                     .map(|p| p.iter().map(|s| s.to_string()).collect());
+                cjco.address = co
+                    .address()
+                    .map(|a| a.iter().map(|a| to_cj_object_address(&a)).collect())
+                    .transpose()?;
                 Ok((co.id().to_string(), cjco)) // Return Result for map operation
             })
             .collect(); // Collect Results from map
@@ -606,6 +639,24 @@ pub fn to_cj_feature(
     cj.appearance = feature.appearance().map(to_cj_appearance).transpose()?;
 
     Ok(cj) // Return Result
+}
+
+/// Decode one address of a City Object: its members from `attributes` by
+/// its own `columns`, and its `location`.
+fn to_cj_object_address(address: &Address) -> Result<CjCityObjectAddress, Error> {
+    let other = match (address.columns(), address.attributes()) {
+        (Some(columns), Some(attributes)) => match decode_attributes(&columns, attributes) {
+            Value::Object(map) => map,
+            _ => serde_json::Map::new(),
+        },
+        (None, Some(_)) => return Err(Error::MissingRequiredField("columns".to_string())),
+        _ => serde_json::Map::new(),
+    };
+    let location = address
+        .location()
+        .map(|g| decode_geometry(g, None))
+        .transpose()?;
+    Ok(CjCityObjectAddress { location, other })
 }
 
 /// Decode one FlatBuffers `Appearance` table into its CityJSON form.
@@ -703,111 +754,139 @@ pub(crate) fn decode_geometry(
     g: Geometry,
     semantic_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
 ) -> Result<CjGeometry, Error> {
-    let solids = g
-        .solids()
-        .map(|v| v.iter().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let shells = g
-        .shells()
-        .map(|v| v.iter().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let surfaces = g
-        .surfaces()
-        .map(|v| v.iter().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let strings = g
-        .strings()
-        .map(|v| v.iter().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let indices = g
-        .boundaries()
-        .map(|v| v.iter().collect::<Vec<_>>())
-        .unwrap_or_default();
+    let collect = |v: Option<flatbuffers::Vector<'_, u32>>| {
+        v.map(|v| v.iter().collect::<Vec<_>>()).unwrap_or_default()
+    };
+    let solids = collect(g.solids());
+    let shells = collect(g.shells());
+    let surfaces = collect(g.surfaces());
+    let strings = collect(g.strings());
+    let indices = collect(g.boundaries());
     let geometry_type = g.type_();
 
-    // The surfaces decide whether there is a `semantics` member at all; the
-    // values vector being absent is `"values": null`, which is a member with a
-    // null value rather than no member.
-    let semantics: Option<CjSemantics> = g.semantics_objects().map(|semantics_objects| {
-        let semantics_objects = semantics_objects.iter().collect::<Vec<_>>();
-        let semantics_values = g.semantics().map(|v| v.iter().collect::<Vec<_>>());
-        decode_semantics(
-            &solids,
-            &shells,
-            geometry_type,
-            semantics_objects,
-            semantics_values,
-            semantic_attr_schema,
-        )
-    });
+    // The schema requires a lod on every geometry but a GeometryInstance,
+    // which never reaches here.
+    let lod: Lod = g
+        .lod()
+        .ok_or_else(|| Error::MissingRequiredField("geometry lod".to_string()))?
+        .parse()?;
 
-    // Decode material mappings if present
-    let material = if let Some(material_mappings) = g.material() {
-        decode_materials(geometry_type, &material_mappings.iter().collect::<Vec<_>>())
-    } else {
-        None
+    let parts = GeometryParts {
+        solids: &solids,
+        shells: &shells,
+        semantics_objects: g.semantics_objects().map(|o| o.iter().collect::<Vec<_>>()),
+        semantics_values: g.semantics().map(|v| v.iter().collect::<Vec<_>>()),
+        semantic_attr_schema,
+        materials: g
+            .material()
+            .map(|m| m.iter().collect::<Vec<_>>())
+            .unwrap_or_default(),
+        textures: g
+            .texture()
+            .map(|t| t.iter().collect::<Vec<_>>())
+            .unwrap_or_default(),
     };
 
-    // Decode texture mappings if present
-    let texture = if let Some(texture_mappings) = g.texture() {
-        decode_textures(geometry_type, &texture_mappings.iter().collect::<Vec<_>>())
-    } else {
-        None
-    };
-
-    let common = CjGeometryCommon {
-        semantics,
-        material,
-        texture,
-    };
-    let lod = g.lod().map(|v| v.to_string());
-
-    // The geometry type selects the depth of `boundaries`; nothing looks at
-    // which of the count arrays happen to be populated.
+    // The geometry type selects the depth of `boundaries`, and the variant
+    // selects the shape of the semantics, material and texture values; nothing
+    // looks at which of the count arrays happen to be populated. A MultiPoint
+    // or MultiLineString has no `material` or `texture` member in the schema,
+    // so any stored for one is not read.
     Ok(match geometry_type {
         GeometryType::MultiPoint => CjGeometry::MultiPoint {
             lod,
             boundaries: decode_points(&indices),
-            common,
+            semantics: parts.semantics(),
         },
         GeometryType::MultiLineString => CjGeometry::MultiLineString {
             lod,
             boundaries: decode_rings(&strings, &indices),
-            common,
+            semantics: parts.semantics(),
         },
         GeometryType::MultiSurface => CjGeometry::MultiSurface {
             lod,
             boundaries: decode_surfaces(&surfaces, &strings, &indices),
-            common,
+            semantics: parts.semantics(),
+            material: parts.material(),
+            texture: parts.texture()?,
         },
         GeometryType::CompositeSurface => CjGeometry::CompositeSurface {
             lod,
             boundaries: decode_surfaces(&surfaces, &strings, &indices),
-            common,
+            semantics: parts.semantics(),
+            material: parts.material(),
+            texture: parts.texture()?,
         },
         GeometryType::MultiSolid => CjGeometry::MultiSolid {
             lod,
             boundaries: decode_solids(&solids, &shells, &surfaces, &strings, &indices),
-            common,
+            semantics: parts.semantics(),
+            material: parts.material(),
+            texture: parts.texture()?,
         },
         GeometryType::CompositeSolid => CjGeometry::CompositeSolid {
             lod,
             boundaries: decode_solids(&solids, &shells, &surfaces, &strings, &indices),
-            common,
+            semantics: parts.semantics(),
+            material: parts.material(),
+            texture: parts.texture()?,
         },
         GeometryType::Solid => CjGeometry::Solid {
             lod,
             boundaries: decode_shells(&shells, &surfaces, &strings, &indices),
-            common,
+            semantics: parts.semantics(),
+            material: parts.material(),
+            texture: parts.texture()?,
         },
         // UNKNOWN-TAG POLICY. A `GeometryInstance` never reaches here -- it is
         // dispatched to `decode_geometry_instance` -- so anything left is a
         // tag outside the eight CityJSON names, and there is no `+`-prefixed
         // spelling the schema would accept for it (§ 3). Decoding it as a
-        // Solid, which this used to do, silently reads the boundaries at the
-        // wrong depth. See `GeometryType::to_cj` for the full argument.
+        // Solid would read the boundaries at the wrong depth. See
+        // `GeometryType::to_cj` for the full argument.
         other => return Err(Error::UnknownEnumTag("GeometryType", format!("{other:?}"))),
     })
+}
+
+/// The stored semantics, material and texture of one geometry, decoded into
+/// whichever value shape the variant being built asks for.
+struct GeometryParts<'a, 'b> {
+    solids: &'a [u32],
+    shells: &'a [u32],
+    semantics_objects: Option<Vec<SemanticObject<'b>>>,
+    semantics_values: Option<Vec<u32>>,
+    semantic_attr_schema: Option<flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<Column<'b>>>>,
+    materials: Vec<MaterialMapping<'b>>,
+    textures: Vec<TextureMapping<'b>>,
+}
+
+impl GeometryParts<'_, '_> {
+    /// The surfaces decide whether there is a `semantics` member at all; the
+    /// values vector being absent is `"values": null`, which is a member with
+    /// a null value rather than no member.
+    fn semantics<V: UnflattenValues<SurfaceIndex>>(&self) -> Option<CjSemantics<V>> {
+        self.semantics_objects.as_ref().map(|objects| {
+            decode_semantics(
+                self.solids,
+                self.shells,
+                objects,
+                self.semantics_values.as_deref(),
+                self.semantic_attr_schema,
+            )
+        })
+    }
+
+    fn material<V: UnflattenValues<MaterialIndex>>(
+        &self,
+    ) -> Option<Themes<CjMaterialReference<V>>> {
+        decode_materials(&self.materials)
+    }
+
+    fn texture<V: UnflattenTextures>(
+        &self,
+    ) -> Result<Option<Themes<CjTextureReference<V>>>, Error> {
+        decode_textures(&self.textures)
+    }
 }
 
 /// Decodes a FlatBuffers GeometryInstance into a CityJSON Geometry struct.
@@ -830,7 +909,7 @@ pub(crate) fn decode_geometry_instance(instance: &GeometryInstance) -> Result<Cj
                     msg: format!("geometryinstance boundaries should contain exactly one vertex index, found {}", fb_boundaries.len())
                 });
             }
-            vec![fb_boundaries.get(0) as usize]
+            [VertexIndex(fb_boundaries.get(0) as usize)]
         }
         None => {
             return Err(Error::MissingRequiredField(
@@ -868,15 +947,15 @@ pub(crate) fn decode_geometry_instance(instance: &GeometryInstance) -> Result<Cj
     // fields for them.
     Ok(CjGeometry::GeometryInstance {
         boundaries,
-        template: template_index as usize,
+        template: TemplateIndex(template_index as usize),
         transformation_matrix: transformation_matrix_array,
     })
 }
 
-pub(crate) fn to_cj_vertices(vertices: Vec<&Vertex>) -> Vec<Vec<i64>> {
+pub(crate) fn to_cj_vertices(vertices: Vec<&Vertex>) -> Vec<[i64; 3]> {
     vertices
         .iter()
-        .map(|v| vec![v.x() as i64, v.y() as i64, v.z() as i64])
+        .map(|v| [v.x() as i64, v.y() as i64, v.z() as i64])
         .collect()
 }
 
@@ -930,8 +1009,8 @@ mod tests {
         else {
             panic!("expected a GeometryInstance");
         };
-        assert_eq!(template, 5);
-        assert_eq!(boundaries, vec![42]);
+        assert_eq!(template, TemplateIndex(5));
+        assert_eq!(boundaries, [VertexIndex(42)]);
         assert_eq!(matrix[0], 1.0); // First element
         assert_eq!(matrix[12], 10.0); // Translation X
         assert_eq!(matrix[13], 10.0); // Translation Y
@@ -1146,7 +1225,10 @@ mod tests {
         let columns = city_object.columns().unwrap();
         let decoded = decode_attributes(&columns, city_object.attributes().unwrap());
 
-        assert_eq!(decoded, json!({"b": 200, "ub": 200, "bin": [1, 255]}));
+        assert_eq!(
+            decoded,
+            serde_json::json!({"b": 200, "ub": 200, "bin": [1, 255]})
+        );
 
         Ok(())
     }

@@ -5,6 +5,9 @@
 #    include <fcb/error.hpp>
 
 #    include <algorithm>
+#    include <cstdint>
+#    include <limits>
+#    include <string>
 
 namespace fcb {
 
@@ -387,6 +390,19 @@ to_geometry_instance(::flatbuffers::FlatBufferBuilder& fbb,
 
 namespace {
 
+/// A quantised vertex coordinate as a FlatCityBuf `Vertex` member, which is
+/// 32-bit. A coordinate outside that range is an error rather than a silent
+/// truncation, as `Error::VertexOutOfRange` is in the Rust writer.
+std::int32_t to_vertex_coordinate(const nlohmann::ordered_json& c) {
+    const auto v = c.get<std::int64_t>();
+    if (v < std::numeric_limits<std::int32_t>::min() ||
+        v > std::numeric_limits<std::int32_t>::max())
+        throw Error(ErrorCode::VertexOutOfRange,
+                    "vertex coordinate " + std::to_string(v) +
+                        " is outside the 32-bit range of a FlatCityBuf Vertex");
+    return static_cast<std::int32_t>(v);
+}
+
 /// Encodes `attr` against `schema`, or against a freshly-built schema of
 /// its own when `attr` carries a key `schema` does not know. Mirrors
 /// `to_fcb_attribute` (writer/serializer.rs:1151-1174).
@@ -415,6 +431,37 @@ FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb,
 }
 
 }  // namespace
+
+::flatbuffers::Offset<::Address> to_address(::flatbuffers::FlatBufferBuilder& fbb,
+                                            const nlohmann::ordered_json& address) {
+    if (!address.is_object())
+        throw Error(ErrorCode::JsonError, "a City Object address must be a JSON object");
+
+    // Rust's order: `location`, then the attribute blob, then its columns.
+    std::optional<::flatbuffers::Offset<::Geometry>> location_off;
+    nlohmann::ordered_json other = nlohmann::ordered_json::object();
+    for (const auto& [key, val] : address.items()) {
+        if (key == "location")
+            location_off = to_geometry(fbb, val, nullptr);
+        else
+            other[key] = val;
+    }
+
+    // Keyed on the members being present at all, before any `null` is
+    // dropped: `{"unit": null}` still writes an (empty) blob and columns.
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<std::uint8_t>>> attributes_off;
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Column>>>>
+        columns_off;
+    if (!other.empty()) {
+        AttributeSchema schema;
+        add_attributes(schema, other);
+        auto encoded = encode_attributes_with_schema(other, schema);
+        attributes_off = fbb.CreateVector(encoded);
+        columns_off = to_columns(fbb, schema);
+    }
+    return CreateAddress(fbb, attributes_off.value_or(0), columns_off.value_or(0),
+                         location_off.value_or(0));
+}
 
 ::flatbuffers::Offset<::CityObject> to_city_object(::flatbuffers::FlatBufferBuilder& fbb,
                                                    const std::string& id,
@@ -526,11 +573,21 @@ FcbAttribute to_fcb_attribute(::flatbuffers::FlatBufferBuilder& fbb,
         parents_off = fbb.CreateVector(p);
     }
 
-    return CreateCityObject(fbb, type_, extension_type_off.value_or(0), id_off,
-                            extent ? &*extent : nullptr, geometry_off.value_or(0),
-                            geometry_instances_off.value_or(0), attributes_off.value_or(0),
-                            columns_off.value_or(0), children_off.value_or(0),
-                            children_roles_off.value_or(0), parents_off.value_or(0));
+    // Built after `parents`, as in Rust, so the bytes match.
+    std::optional<::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::Address>>>>
+        address_off;
+    if (auto it = co.find("address"); it != co.end() && it->is_array()) {
+        std::vector<::flatbuffers::Offset<::Address>> a;
+        for (const auto& entry : *it)
+            a.push_back(to_address(fbb, entry));
+        address_off = fbb.CreateVector(a);
+    }
+
+    return CreateCityObject(
+        fbb, type_, extension_type_off.value_or(0), id_off, extent ? &*extent : nullptr,
+        geometry_off.value_or(0), geometry_instances_off.value_or(0), attributes_off.value_or(0),
+        columns_off.value_or(0), children_off.value_or(0), children_roles_off.value_or(0),
+        parents_off.value_or(0), address_off.value_or(0));
 }
 
 std::pair<::flatbuffers::Offset<::CityFeature>, NodeItem>
@@ -568,8 +625,8 @@ to_fcb_city_feature(::flatbuffers::FlatBufferBuilder& fbb, const std::string& id
         for (const auto& v : *it) {
             const double x = v.at(0).get<double>();
             const double y = v.at(1).get<double>();
-            fb_vertices.emplace_back(v.at(0).get<std::int32_t>(), v.at(1).get<std::int32_t>(),
-                                     v.at(2).get<std::int32_t>());
+            fb_vertices.emplace_back(to_vertex_coordinate(v.at(0)), to_vertex_coordinate(v.at(1)),
+                                     to_vertex_coordinate(v.at(2)));
             if (first) {
                 min_x = max_x = x;
                 min_y = max_y = y;

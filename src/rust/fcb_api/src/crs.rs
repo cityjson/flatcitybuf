@@ -106,19 +106,6 @@ pub fn transform_bbox(bbox: &[f64], from_epsg: &str, to_epsg: &str) -> Result<Ve
     let from_is_geographic =
         from_proj_string.contains("+proj=longlat") || from_proj_string.contains("+proj=latlong");
 
-    // Convert to radians if source is geographic (degrees to radians)
-    let mut left_lower = if from_is_geographic {
-        (minx.to_radians(), miny.to_radians())
-    } else {
-        (minx, miny)
-    };
-
-    let mut right_upper = if from_is_geographic {
-        (maxx.to_radians(), maxy.to_radians())
-    } else {
-        (maxx, maxy)
-    };
-
     // Helper for transformation errors
     let create_transform_error = |e| CrsError::TransformationFailed {
         from: from_epsg.to_string(),
@@ -126,33 +113,39 @@ pub fn transform_bbox(bbox: &[f64], from_epsg: &str, to_epsg: &str) -> Result<Ve
         source: e,
     };
 
-    // Transform the lower-left corner (minx, miny)
-    proj4rs::transform::transform(&from_proj, &to_proj, &mut left_lower)
-        .map_err(create_transform_error)?;
-
-    // Transform the upper-right corner (maxx, maxy)
-    proj4rs::transform::transform(&from_proj, &to_proj, &mut right_upper)
-        .map_err(create_transform_error)?;
-
     // Check if destination CRS is geographic and convert back to degrees if needed
     // NOTE: maybe this is not the best way to check if the CRS is geographic.
     let to_is_geographic =
         to_proj_string.contains("+proj=longlat") || to_proj_string.contains("+proj=latlong");
 
-    if to_is_geographic {
-        left_lower.0 = left_lower.0.to_degrees();
-        left_lower.1 = left_lower.1.to_degrees();
-        right_upper.0 = right_upper.0.to_degrees();
-        right_upper.1 = right_upper.1.to_degrees();
+    // A box is not a box in another CRS: its edges turn. All four corners are
+    // transformed, and the result is the box around them, so that nothing
+    // inside the requested box falls outside the transformed one.
+    let mut result = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for (x, y) in [(minx, miny), (minx, maxy), (maxx, miny), (maxx, maxy)] {
+        // Proj works on radians for a geographic CRS.
+        let mut corner = if from_is_geographic {
+            (x.to_radians(), y.to_radians())
+        } else {
+            (x, y)
+        };
+        proj4rs::transform::transform(&from_proj, &to_proj, &mut corner)
+            .map_err(create_transform_error)?;
+        if to_is_geographic {
+            corner = (corner.0.to_degrees(), corner.1.to_degrees());
+        }
+        result[0] = result[0].min(corner.0);
+        result[1] = result[1].min(corner.1);
+        result[2] = result[2].max(corner.0);
+        result[3] = result[3].max(corner.1);
     }
 
-    // Ensure min/max are in correct order after transformation
-    let final_minx = left_lower.0.min(right_upper.0);
-    let final_maxx = left_lower.0.max(right_upper.0);
-    let final_miny = left_lower.1.min(right_upper.1);
-    let final_maxy = left_lower.1.max(right_upper.1);
-
-    Ok(vec![final_minx, final_miny, final_maxx, final_maxy])
+    Ok(result.to_vec())
 }
 
 #[cfg(test)]
@@ -222,45 +215,76 @@ mod tests {
         assert!(result[1] < result[3]); // miny < maxy
     }
 
+    /// RD is turned against WGS84, so the corners of a WGS84 box do not share
+    /// their RD x or y: the box around the two diagonal corners alone leaves
+    /// the other two outside.
+    #[test]
+    fn test_transformed_box_holds_all_four_corners() {
+        let rd = transform_bbox(&[6.0, 53.0, 6.5, 53.2], WGS84_CRS, DUTCH_CRS).unwrap();
+        for (lon, lat) in [(6.0, 53.0), (6.0, 53.2), (6.5, 53.0), (6.5, 53.2)] {
+            let p = transform_bbox(&[lon, lat, lon, lat], WGS84_CRS, DUTCH_CRS).unwrap();
+            assert!(rd[0] <= p[0] && p[0] <= rd[2], "x of ({lon}, {lat})");
+            assert!(rd[1] <= p[1] && p[1] <= rd[3], "y of ({lon}, {lat})");
+        }
+    }
+
     #[test]
     fn test_round_trip_transformation() {
         // Original WGS84 bbox - Amsterdam Central Station area
         let original_bbox = vec![4.895, 52.375, 4.905, 52.385];
 
-        // Transform to Dutch RD
         let dutch_bbox = transform_bbox(&original_bbox, WGS84_CRS, DUTCH_CRS)
             .expect("Failed to transform WGS84 to Dutch RD");
-
-        // Transform back to WGS84
         let round_trip_bbox = transform_bbox(&dutch_bbox, DUTCH_CRS, WGS84_CRS)
             .expect("Failed to transform Dutch RD back to WGS84");
 
-        // Compare with original - should be very close (within reasonable floating point precision)
-        const EPSILON: f64 = 1e-6; // Tolerance for floating point comparison
+        // Each transformation returns the box around a turned box, so the
+        // round trip holds the original and is only slightly larger.
+        const EPSILON: f64 = 1e-9;
+        const GROWTH: f64 = 1e-3;
+        for i in 0..2 {
+            let (min, max) = (round_trip_bbox[i], round_trip_bbox[i + 2]);
+            assert!(min <= original_bbox[i] + EPSILON && original_bbox[i] - min < GROWTH);
+            assert!(max >= original_bbox[i + 2] - EPSILON && max - original_bbox[i + 2] < GROWTH);
+        }
+    }
+}
 
-        assert!(
-            (original_bbox[0] - round_trip_bbox[0]).abs() < EPSILON,
-            "minx mismatch: original={}, round_trip={}",
-            original_bbox[0],
-            round_trip_bbox[0]
-        );
-        assert!(
-            (original_bbox[1] - round_trip_bbox[1]).abs() < EPSILON,
-            "miny mismatch: original={}, round_trip={}",
-            original_bbox[1],
-            round_trip_bbox[1]
-        );
-        assert!(
-            (original_bbox[2] - round_trip_bbox[2]).abs() < EPSILON,
-            "maxx mismatch: original={}, round_trip={}",
-            original_bbox[2],
-            round_trip_bbox[2]
-        );
-        assert!(
-            (original_bbox[3] - round_trip_bbox[3]).abs() < EPSILON,
-            "maxy mismatch: original={}, round_trip={}",
-            original_bbox[3],
-            round_trip_bbox[3]
-        );
+/// CRS identity and axis order are kept separate from projection-library codes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SupportedCrs {
+    RdNap,
+    Rd,
+    Wgs84,
+    Crs84,
+}
+impl SupportedCrs {
+    pub fn parse(value: &str) -> Result<Self, axum::http::StatusCode> {
+        let value = value.to_ascii_lowercase();
+        let value = value
+            .strip_prefix("https://")
+            .or_else(|| value.strip_prefix("http://"))
+            .unwrap_or(&value);
+        match value {
+            "epsg:7415" | "www.opengis.net/def/crs/epsg/0/7415" => Ok(Self::RdNap),
+            "epsg:28992" | "www.opengis.net/def/crs/epsg/0/28992" => Ok(Self::Rd),
+            "epsg:4326" | "www.opengis.net/def/crs/epsg/0/4326" => Ok(Self::Wgs84),
+            "crs84" | "ogc:crs84" | "www.opengis.net/def/crs/ogc/1.3/crs84" => Ok(Self::Crs84),
+            _ => Err(axum::http::StatusCode::BAD_REQUEST),
+        }
+    }
+    pub fn uri(self) -> &'static str {
+        match self {
+            Self::RdNap => crate::constants::STORAGE_CRS,
+            Self::Rd => crate::constants::EPSG_28992,
+            Self::Wgs84 => "http://www.opengis.net/def/crs/EPSG/0/4326",
+            Self::Crs84 => crate::constants::CRS84,
+        }
+    }
+    pub fn horizontal(self) -> &'static str {
+        match self {
+            Self::RdNap | Self::Rd => "EPSG:28992",
+            Self::Wgs84 | Self::Crs84 => "EPSG:4326",
+        }
     }
 }

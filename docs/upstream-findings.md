@@ -1781,3 +1781,211 @@ above is size, `inspect`, and a `deser` round-trip compared line by line.
 **What a consumer saw:** piping the writer's output (`ser … - | …`) on real
 heterogeneous data produced a file that no reader can open, with a clean exit
 status. No justfile recipe uses the `-` path, which is why it went unnoticed.
+
+## 37. The `geom_temp` fixture's geometry templates pointed past their materials palette — FIXED (fixture repaired)
+
+**Where:** `src/rust/fcb_core/tests/data/geom_temp.city.jsonl`, line 1, and
+the `conformance/geom_temp.{fcb,expected.jsonl}` pair built from it. The defect
+is upstream, in cjseq's `cat`, which wrote this header.
+
+The header holds two materials, but template 0 used material `1` and
+template 1 used material `2`. cjseq 0.5's `validate` rejects it:
+
+```
+$ cjseq validate geom_temp.city.jsonl
+header: in geometry template 1: Material index 2 is out of range (there are 2)
+```
+
+cjseq's `cat_metadata` (up to 0.4.x) renumbered the templates' material,
+texture and UV indices into a clone, sliced the palette to match, and then
+wrote the **original** templates beside the sliced palette. Materials were the
+only part that went wrong here: the templates' textures (`0`, `1`) and UVs
+(`0..=1014`) were already numbered in first-use order, so their renumbering
+was the identity. Every reader in this repo round-tripped the dangling indices
+faithfully, which is why no test noticed.
+
+**Fix:** the renumbering `cat` computed and dropped is applied by hand —
+template materials `1 → 0` and `2 → 1`, nothing else in the file touched — and
+the fixture now validates. `conformance/geom_temp.fcb` and
+`geom_temp.expected.jsonl` were regenerated with `scripts/gen_conformance.sh`;
+every other corpus file is unchanged. No test asserts on the material index
+values, so the Rust, C++, Python and TypeScript suites pass unchanged.
+
+`scripts/gen_conformance.sh` passes `-A` to every input under
+`conformance/inputs/`, but `btree_multilevel`, `header_metadata_full` and
+`rtree_multilevel` were built with other flags (`--attr-branching-factor 4`;
+no `-A`; no `-A`). Re-running the script rewrites those three `.fcb`s, and
+`test_writer_oracle.cpp` then compares against the wrong bytes. Restore them
+from git after a run.
+
+## 38. City Object `address` was dropped on write, with no error — FIXED (branch `citygml-io`)
+
+**Where:** `src/fbs/feature.fbs` `CityObject` had no field for it, and
+`fcb_core`'s `to_city_object` never read `co.address`. Every port inherited
+the gap.
+
+A CityJSON 2.0 City Object may carry `address`, an array of objects whose
+`location` is a MultiPoint into the feature's vertices. `fcb ser` then `fcb
+deser` returned the object without it. CityGML is where it bites: the CityGML
+crates fill `address` from `bldg:address` (xAL), so every PLATEAU building
+address was lost.
+
+**Fix:** `CityObject.address:[Address]`, where `Address` holds every member
+but `location` as an attribute blob with its own `columns`, and `location` as a
+`Geometry`. Written and read by Rust and C++; read by Python and TypeScript.
+Corpus fixture: `object_address`. Null members are not written, as everywhere
+else in the format.
+
+## 39. Extension declarations kept only `url` and `version` — FIXED (branch `citygml-io`)
+
+**Where:** `src/fbs/extension.fbs` `Extension` held `name`, `url`, `version`
+and the schema strings only.
+
+A CityJSON `extensions` entry may hold further members. The CityGML crates put
+an ADE's `xmlns` and its constant XML attributes there, and the CityGML writer
+refuses an ADE prefix whose `xmlns` it cannot find. So a PLATEAU file with the
+`uro` ADE could be read into `.fcb` but not written back out as CityGML.
+
+**Fix:** `Extension.members`, the entry's other members as one JSON object
+string, absent when there are none. Written and read by Rust and C++; read by
+Python and TypeScript. A `members` that is not a JSON object is an
+`InvalidAttributeValue` error. Corpus fixture: `extension_members`; the C++
+writer's output for it is byte-identical to Rust's.
+
+## 40. A vertex outside the 32-bit range panicked the Rust writer and was truncated by the C++ writer — FIXED (branch `citygml-io`)
+
+**Where:** `fcb_core/src/writer/serializer.rs` converted each quantised
+coordinate with `i32::try_from(c).unwrap()`; `src/cpp/src/writer/feature_serializer.cpp`
+used `nlohmann::json::get<std::int32_t>()`, which casts.
+
+A `Vertex` is three `i32`. A CityJSON file whose transform is too fine for its
+extent quantises past `i32::MAX`; the Rust writer then panicked, and the C++
+writer wrapped the coordinate silently into a different position.
+
+**Fix:** both writers return an error (`Error::VertexOutOfRange` in Rust,
+`ErrorCode::VertexOutOfRange` in C++). Nothing that fits is affected; the
+corpus is byte-identical.
+
+## 41. Every reader invents a zero `geographicalExtent` for a header that has none — NOT FIXED (worked around in `fcb deser` to CityGML)
+
+**Where:** `fcb_core/src/reader/deserializer.rs` `to_cj_metadata` reads
+`header.geographical_extent()` with `.unwrap_or_default()`, so an absent
+extent becomes `[0, 0, 0, 0, 0, 0]`. The C++, Python and TypeScript readers
+copy this on purpose to match the oracle (`src/cpp/src/cityjson.cpp`,
+`src/py/flatcitybuf/cityjson.py`, `src/ts/src/cityjson/index.ts`), and 7 of
+the 20 `conformance/*.expected.jsonl` files carry it.
+
+It invents data: a CityGML document written from such a header declares the
+envelope `0 0 0` to `0 0 0`, and reading that document again quantises its
+coordinates from translate 0, past the 32-bit vertex range.
+
+**Workaround:** `fcb_cli::citygml::write` drops the extent when the file's
+header has none. **Fix, if wanted:** read an absent extent as absent in all
+four readers and regenerate the seven expected files; a reader change across
+the corpus, so left for a decision.
+
+## API hardening: small-file HTTP attribute queries — FIXED
+
+`fcb_core/src/static_btree/stree.rs`, `http_stream_find_exact` and
+`http_stream_find_range`, prefetched an estimated payload size without bounding
+it to the attribute section. On a small Rust-written indexed file, a real HTTP
+range server returns a short response at EOF; the buffered client then requests
+bytes past EOF and receives 416. Local lookup succeeds but HTTP lookup fails.
+The API `missing_ids_and_storage_errors` regression reproduces this using the
+same writer-generated bytes over local and loopback HTTP storage. Payload
+prefetches and batched fallback fetches now stop at `feature_begin`.
+
+## API hardening: pagination consistency and service metadata — FIXED
+
+**Reader defects:** `reader/mod.rs::select_query` calculated total matches after
+applying limit/offset, causing `numberMatched` to equal the page size. It now
+captures the total before slicing. `http_reader/mod.rs::select_attr_query_paged`
+paged index-key-ordered matches, whereas local `reader/attr_query.rs` sorted
+physical offsets. HTTP now sorts/deduplicates offsets before pagination. The
+`pagination_preserves_features_and_filter` API test compares whole features
+across local/HTTP full-scan, bbox, and attribute pages. Truncated HTTP payloads
+now propagate decoding errors instead of silently dropping matches.
+
+**API defects and reproductions:**
+
+- `handlers.rs` returned fixed version/transform/extensions, extent and release;
+  `lib.rs` swallowed dataset loading errors. Responses now use Rust-converted
+  header metadata, optional `COLLECTION_VERSION`, fail-fast construction, and
+  `/readyz`. `flask_metadata_and_provenance`, `startup_and_readiness`, and
+  `startup_configuration_and_remote_probe_timeout` cover these cases.
+- `fs_handler.rs` and `http_handler.rs` accepted invalid pagination and silently
+  ignored attributes with a bbox. Shared validation now returns 400;
+  `query_validation_and_empty_pages` reproduces the former invalid inputs.
+- Those handlers returned 200 for an absent feature and 404 for lookup errors.
+  `missing_ids_and_storage_errors` now requires 404 for absence and 503 for
+  unavailable storage. Typed error responses replace message substring checks.
+- Default JSON omitted CityJSON metadata and wrapped listing features using a
+  stale schema. Runtime DTOs now match Flask: top-level metadata/raw listing
+  features and id/metadata/feature/links for individual responses. Complete
+  corpus metadata and writer-generated feature comparisons cover this change.
+- `link.rs` interpolated unescaped filters into URLs. Shared query serialization
+  now preserves query values and effective formats; encoded reserved characters
+  and Unicode round-trip in `encoded_links_and_boundaries`.
+- `crs.rs` could not parse the advertised OGC CRS URIs and handlers ignored
+  output CRS. Explicit normalization/axis handling now validates supported
+  inputs, rejects output reprojection, and reports actual CRS in Content-Crs.
+  `crs_validation_headers_and_axis_order` checks both storage paths and formats.
+
+API documentation endpoints/schema and local concurrency changes are outside
+this work. The server currently supports RD New storage (EPSG:7415/28992).
+
+## API replacement: building resource links and conformance declaration — FIXED
+
+**Where:** `fcb_api/src/fs_handler.rs::collection_item_by_id`, its HTTP
+counterpart, `link.rs::build_feature_links`, and `constants.rs::CITYJSON_SPEC`.
+The Flask reference is [views.py](https://github.com/3DBAG/3dbag-api/blob/master/app/views.py),
+`get_feature` (lines 225–255) and `conformance` (lines 84–91).
+
+**Reproduction:** individual item responses advertised parent/child navigation
+although a pand item already includes all building parts. Parent pointed at
+first the listing, then the same feature; copied Flask child links advertised
+building-part endpoints that the API does not serve. `/conformance` declared
+CityJSON 1.1.1 rather than Flask's 2.0.1.
+
+**Fix:** both storage paths use a shared link builder advertising only self and
+collection. Building-part hierarchy remains in CityObjects.children/parents;
+parts are not independent HTTP resources. Self retains the requested ID/CRS,
+with IDs escaped as URL path segments. The response ID comes from the returned
+feature. The declaration names CityJSON 2.0.1, without claiming formal OGC API
+Features certification. This intentionally differs from Flask's hierarchy links
+and retains the existing identificatie-based building lookup contract.
+
+**Coverage:** `building_links_preserve_embedded_parts` compares whole responses
+for writer-generated buildings with/without embedded parts over local and HTTP
+storage, including a base-URL prefix. It checks that the parts and their parent
+relationships are present in the response. `conformance_matches_flask` checks
+the complete declaration on both backends. A link test covers reserved
+characters/Unicode, base-URL prefixes, and CRS query serialization.
+
+## API landing page advertised unimplemented documentation — FIXED
+
+`fcb_api/src/handlers.rs::landing_page` emitted service-desc and service-doc
+links to `/api` and `/api.html`, although those routes return 404. The root
+response now links only to itself, `/conformance`, and `/collections` until
+the documentation endpoints are implemented. Its stored response fixture is
+updated to match.
+
+## 42. Rust HTTP reader: an attribute key shared by more than 4,095 features could not be read — FIXED
+
+**Where:** `fcb_core/src/static_btree/stree.rs` `batch_resolve_payloads`. A
+payload entry is a `u32` count followed by that many `u64` feature offsets, so
+its length is the number of features sharing the key. The function fetched
+each group of entries with a fixed margin of `DEFAULT_MIN_REQ_SIZE` (32 KiB)
+past the last entry's start, and decoded from that buffer: an entry of more
+than 4,095 offsets was cut off. The decode error was swallowed, so the key
+matched nothing; since the API hardening above it is an error. The local
+reader, and the C++, Python and TypeScript HTTP readers, read the count first
+and then the body, and were not affected.
+
+**Reproduction:** `http_reader::paging_tests::a_key_shared_by_many_features_is_read_whole`
+writes 6,000 features of which 5,000 share one `height`, and compares
+`Eq`/`Le`/`Gt`/`Ge` over the mock HTTP client with the local reader.
+
+**Fix:** an entry that does not decode from the speculative fetch is read
+again by `read_http_payload_entry`: its count, then exactly its bytes, bounded
+by the start of the feature section.

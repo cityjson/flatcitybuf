@@ -59,6 +59,7 @@ mod tests {
                 index_node_size: 16,
                 attribute_indices: Some(attr_indices),
                 geographical_extent: None,
+                id_index: None,
             }),
             Some(attr_schema),
             None,
@@ -162,6 +163,7 @@ mod tests {
                 index_node_size: 16,
                 attribute_indices: Some(attr_indices),
                 geographical_extent: None,
+                id_index: None,
             }),
             Some(attr_schema),
             None,
@@ -254,10 +256,7 @@ mod tests {
         const LONG_COLUMN: &str = "elevation_offset";
         for (i, feature) in original_cj_seq.features.iter_mut().enumerate() {
             for co in feature.city_objects.values_mut() {
-                let Some(attrs) = co.attributes.as_mut() else {
-                    continue;
-                };
-                let Some(map) = attrs.as_object_mut() else {
+                let Some(map) = co.attributes.as_mut() else {
                     continue;
                 };
                 if map.is_empty() {
@@ -293,6 +292,7 @@ mod tests {
                 index_node_size: 16,
                 attribute_indices: Some(attr_indices),
                 geographical_extent: None,
+                id_index: None,
             }),
             Some(attr_schema),
             None,
@@ -418,6 +418,7 @@ mod tests {
                 index_node_size: 16,
                 attribute_indices: Some(attr_indices),
                 geographical_extent: None,
+                id_index: None,
             }),
             Some(attr_schema),
             None,

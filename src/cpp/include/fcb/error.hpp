@@ -22,6 +22,7 @@ enum class ErrorCode {
     IoError,
     HttpError,
     JsonError,
+    VertexOutOfRange,
 };
 
 /// Every failure the library reports is one of these. Derives from

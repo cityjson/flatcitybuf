@@ -406,6 +406,19 @@ TEST_CASE("to_fcb_city_feature: an empty vertex array yields a zeroed bbox, not 
     CHECK(bbox.max_y == doctest::Approx(0.0));
 }
 
+TEST_CASE("to_fcb_city_feature: a vertex outside the int32 range is an error, not truncated") {
+    auto feature = nlohmann::ordered_json::parse(R"({"type": "CityJSONFeature", "id": "f3",
+        "CityObjects": {}, "vertices": [[0, 0, 0], [4294967296, 0, 0]]})");
+    AttributeSchema schema;
+    flatbuffers::FlatBufferBuilder fbb;
+    try {
+        (void)to_fcb_city_feature(fbb, "f3", feature, schema, nullptr);
+        FAIL("expected an error");
+    } catch (const fcb::Error& e) {
+        CHECK(e.code() == fcb::ErrorCode::VertexOutOfRange);
+    }
+}
+
 TEST_CASE("to_fcb_city_feature: a feature-level appearance is built when present") {
     auto feature = nlohmann::ordered_json::parse(R"({
         "type": "CityJSONFeature", "id": "f3", "CityObjects": {}, "vertices": [],

@@ -97,15 +97,28 @@ TEST_CASE("to_reference_system builds the FlatBuffers table") {
     CHECK(rs->code_string() == nullptr);
 }
 
-TEST_CASE("to_extension builds name/url/version, leaving description empty") {
+TEST_CASE("to_extension builds name/url/version, leaving description and members empty") {
     flatbuffers::FlatBufferBuilder fbb;
-    auto off = to_extension(fbb, "Noise", "https://example.com/noise.ext.json", "1.0");
+    auto off = to_extension(fbb, "Noise", "https://example.com/noise.ext.json", "1.0",
+                            nlohmann::ordered_json::object());
     fbb.Finish(off);
     const auto* ext = flatbuffers::GetRoot<::Extension>(fbb.GetBufferPointer());
     CHECK(ext->name()->str() == "Noise");
     CHECK(ext->url()->str() == "https://example.com/noise.ext.json");
     CHECK(ext->version()->str() == "1.0");
     CHECK(ext->description() == nullptr);
+    CHECK(ext->members() == nullptr);
+}
+
+TEST_CASE("to_extension writes the other members as compact JSON in their own order") {
+    flatbuffers::FlatBufferBuilder fbb;
+    auto members =
+        nlohmann::ordered_json::parse(R"({"xmlns": "urn:x", "b": {"z": 1, "a": [true, null]}})");
+    auto off = to_extension(fbb, "ade", "https://example.com/ade.xsd", "1.0", members);
+    fbb.Finish(off);
+    const auto* ext = flatbuffers::GetRoot<::Extension>(fbb.GetBufferPointer());
+    REQUIRE(ext->members() != nullptr);
+    CHECK(ext->members()->str() == R"({"xmlns":"urn:x","b":{"z":1,"a":[true,null]}})");
 }
 
 TEST_CASE("to_templates_vertices keeps only entries that filter down to exactly 3 numbers") {
@@ -264,6 +277,7 @@ TEST_CASE("to_fcb_header builds a minimal header with no metadata") {
         "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     options.feature_count = 3;
     options.index_node_size = 16;
     AttributeSchema empty_schema;
@@ -303,6 +317,7 @@ TEST_CASE("to_fcb_header carries metadata: reference system, extent, identifier,
         }
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -327,6 +342,7 @@ TEST_CASE("to_fcb_header prefers HeaderWriterOptions.geographical_extent over me
         "metadata": {"geographicalExtent": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     options.geographical_extent = std::array<double, 6>{9.0, 9.0, 9.0, 10.0, 10.0, 10.0};
     AttributeSchema empty_schema;
 
@@ -342,6 +358,7 @@ TEST_CASE("to_fcb_header uses HeaderWriterOptions.geographical_extent when metad
         "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     options.geographical_extent = std::array<double, 6>{1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
     AttributeSchema empty_schema;
 
@@ -359,6 +376,7 @@ TEST_CASE("to_fcb_header writes an empty (but present) extensions vector for {}"
         "extensions": {}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -373,6 +391,7 @@ TEST_CASE("to_fcb_header wires semantic_columns from the semantic attribute sche
         "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
     AttributeSchema semantic_schema;
     semantic_schema["parent"] = {0, ::ColumnType::String};
@@ -393,6 +412,7 @@ TEST_CASE("to_fcb_header wires the appearance table from the CityJSON appearance
         }
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -412,6 +432,7 @@ TEST_CASE("to_fcb_header writes extensions from the CityJSON extensions member")
         }
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -429,6 +450,7 @@ TEST_CASE("to_fcb_header writes attribute_index entries when provided") {
         "transform": {"scale": [1.0, 1.0, 1.0], "translate": [0.0, 0.0, 0.0]}
     })");
     HeaderWriterOptions options;
+    options.id_index = std::nullopt;
     AttributeSchema empty_schema;
     std::vector<AttributeIndexInfo> indices{{0, 100, 32, 7}};
 

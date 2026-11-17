@@ -15,7 +15,7 @@
 #---------------------------------------------------------------------------
 DOXYFILE_ENCODING      = UTF-8
 PROJECT_NAME           = "FlatCityBuf C++ reader"
-PROJECT_NUMBER         = 0.8.0
+PROJECT_NUMBER         = 0.9.0
 PROJECT_BRIEF          = "Native C++17 reader for FlatCityBuf, the cloud-optimized CityJSON format"
 PROJECT_LOGO           =
 PROJECT_ICON           =

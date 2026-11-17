@@ -252,7 +252,7 @@ function intAttribute(columnIndex: number, value: number): Uint8Array {
 }
 
 const SEMANTIC_COLUMNS: ColumnInfo[] = [
-  { index: 0, name: 'slope', type: ColumnType.Int, nullable: true },
+  { index: 0, name: 'slope', type: ColumnType.Int, nullable: true, primaryKey: false },
 ]
 
 describe('decodeSemantics', () => {

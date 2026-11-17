@@ -89,6 +89,7 @@ TEST_CASE("write_fcb with write_index=false writes index_node_size 0, no R-tree 
         add_attributes(schema, f.at("CityObjects").begin().value().at("attributes"));
 
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     options.write_index = false;
     options.index_node_size = 16;  // must be ignored/zeroed since write_index is false
 
@@ -117,6 +118,7 @@ TEST_CASE("write_fcb with no requested attribute indices writes none") {
     add_attributes(schema, features[0].at("CityObjects").begin().value().at("attributes"));
 
     FcbWriterOptions options;  // attribute_indices left empty
+    options.id_index = std::nullopt;
 
     std::vector<std::uint8_t> bytes = write_fcb(cj, features, options, schema, nullptr);
     const std::string tmp = "test_writer_fcb_no_attr_index.fcb";
@@ -134,6 +136,7 @@ TEST_CASE("write_fcb silently skips a requested attribute index for a column abs
     add_attributes(schema, features[0].at("CityObjects").begin().value().at("attributes"));
 
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     options.attribute_indices.emplace_back("does_not_exist", std::nullopt);
     options.attribute_indices.emplace_back("n",
                                            std::nullopt);  // a real column, alongside the bogus one
@@ -161,6 +164,7 @@ TEST_CASE("write_fcb silently skips a requested attribute index for a column wit
     add_attributes(schema, features[0].at("CityObjects").begin().value().at("attributes"));
 
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     options.attribute_indices.emplace_back("blob", std::nullopt);
 
     std::vector<std::uint8_t> bytes = write_fcb(cj, features, options, schema, nullptr);
@@ -181,6 +185,7 @@ TEST_CASE("write_fcb requests a non-default branching factor and it round-trips 
         add_attributes(schema, f.at("CityObjects").begin().value().at("attributes"));
 
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     options.attribute_indices.emplace_back("n", static_cast<std::uint16_t>(4));
 
     std::vector<std::uint8_t> bytes = write_fcb(cj, features, options, schema, nullptr);
@@ -201,6 +206,7 @@ TEST_CASE("write_fcb handles an empty feature list") {
     AttributeSchema schema;
 
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     options.write_index = true;
     options.index_node_size = 16;
 
@@ -241,10 +247,12 @@ TEST_CASE("write_fcb normalizes attribute_indices request order to schema column
     REQUIRE(schema.at("b").first == 1);
 
     FcbWriterOptions forward;
+    forward.id_index = std::nullopt;
     forward.attribute_indices.emplace_back("a", std::nullopt);
     forward.attribute_indices.emplace_back("b", std::nullopt);
 
     FcbWriterOptions reversed;
+    reversed.id_index = std::nullopt;
     reversed.attribute_indices.emplace_back("b", std::nullopt);
     reversed.attribute_indices.emplace_back("a", std::nullopt);
 
@@ -270,6 +278,7 @@ TEST_CASE("FcbWriter used directly (not through the test wrapper) round-trips a 
     add_attributes(schema, f.at("CityObjects").begin().value().at("attributes"));
 
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     FcbWriter w(cj, options, schema, std::nullopt);
     w.add_feature(f);
     std::vector<std::uint8_t> bytes = w.write();
@@ -288,6 +297,7 @@ TEST_CASE("FcbWriter throws if add_feature is called after write()") {
     ordered_json cj = make_metadata();
     AttributeSchema schema;
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     FcbWriter w(cj, options, schema, std::nullopt);
     w.add_feature(make_feature("f1", ordered_json::object()));
     (void)w.write();
@@ -298,6 +308,7 @@ TEST_CASE("FcbWriter throws if write() is called more than once") {
     ordered_json cj = make_metadata();
     AttributeSchema schema;
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     FcbWriter w(cj, options, schema, std::nullopt);
     w.add_feature(make_feature("f1", ordered_json::object()));
     (void)w.write();
@@ -321,6 +332,7 @@ TEST_CASE("FcbWriter streams many features through the temp file without holding
         add_attributes(schema, f.at("CityObjects").begin().value().at("attributes"));
 
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     options.attribute_indices.emplace_back("n", std::nullopt);
     FcbWriter w(cj, options, schema, std::nullopt);
     for (const auto& f : features)
@@ -357,6 +369,7 @@ TEST_CASE("FcbWriter::write(ostream&) produces byte-identical output to write(),
         add_attributes(schema, f.at("CityObjects").begin().value().at("attributes"));
 
     FcbWriterOptions options;
+    options.id_index = std::nullopt;
     options.attribute_indices.emplace_back("n", std::nullopt);
 
     FcbWriter w1(cj, options, schema, std::nullopt);

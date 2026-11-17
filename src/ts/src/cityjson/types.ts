@@ -100,11 +100,28 @@ export interface CityObject {
   type: string
   geographicalExtent?: [number, number, number, number, number, number]
   attributes?: Record<string, JsonValue>
+  /** The object's addresses, in order. Absent when the object has none. */
+  address?: CityObjectAddress[]
   geometry?: Geometry[]
   children?: string[]
   /** CityObjectGroup only; an unspecified role is `null`, not absent. */
   childrenRoles?: (string | null)[]
   parents?: string[]
+}
+
+/** One entry of a City Object's `address` array: free-form members, plus
+ *  `location`, a MultiPoint into the feature's vertices, when present. */
+export interface CityObjectAddress {
+  location?: Geometry
+  [member: string]: JsonValue | Geometry | undefined
+}
+
+/** One entry of the `extensions` object: `url`, `version`, and any other
+ *  members the declaration carried (a CityGML ADE's `xmlns`, say). */
+export interface ExtensionEntry {
+  url: string
+  version: string
+  [member: string]: JsonValue
 }
 
 export interface MaterialObject {
@@ -152,9 +169,9 @@ export interface CityJSON {
    *  any feature's -- a template belongs to no feature. */
   appearance?: Appearance
   'geometry-templates'?: GeometryTemplates
-  /** `name -> { url, version }`, emitted only when at least one extension is
-   *  named. */
-  extensions?: Record<string, { url: string; version: string }>
+  /** `name -> { url, version, ...members }`, emitted only when at least one
+   *  extension is named. */
+  extensions?: Record<string, ExtensionEntry>
 }
 
 /** Every subsequent line. */

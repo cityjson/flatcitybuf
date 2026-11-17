@@ -87,8 +87,15 @@ class Extension(object):
             return self._tab.String(o + self._tab.Pos)
         return None
 
+    # Extension
+    def Members(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(22))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
 def ExtensionStart(builder):
-    builder.StartObject(9)
+    builder.StartObject(10)
 
 def ExtensionAddName(builder, name):
     builder.PrependUOffsetTRelativeSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(name), 0)
@@ -116,6 +123,9 @@ def ExtensionAddExtraRootProperties(builder, extraRootProperties):
 
 def ExtensionAddExtraSemanticSurfaces(builder, extraSemanticSurfaces):
     builder.PrependUOffsetTRelativeSlot(8, flatbuffers.number_types.UOffsetTFlags.py_type(extraSemanticSurfaces), 0)
+
+def ExtensionAddMembers(builder, members):
+    builder.PrependUOffsetTRelativeSlot(9, flatbuffers.number_types.UOffsetTFlags.py_type(members), 0)
 
 def ExtensionEnd(builder):
     return builder.EndObject()

@@ -1,6 +1,7 @@
+use crate::fb::ColumnType;
 use crate::packed_rtree::{calc_extent, hilbert_sort, NodeItem, PackedRTree};
 use crate::MAGIC_BYTES;
-use attr_index::build_attribute_index_for_attr;
+use attr_index::{build_attribute_index_for_attr, build_attribute_index_for_column};
 use attribute::AttributeSchema;
 use cjseq::{CityJSON, CityJSONFeature, Transform as CjTransform};
 use feature_writer::{AttributeFeatureOffset, FeatureWriter};
@@ -29,7 +30,7 @@ pub struct FcbWriter<'a> {
     /// Writer for the FCB header section
     header_writer: HeaderWriter<'a>,
     /// Optional writer for features
-    feat_writer: Option<FeatureWriter<'a>>,
+    feat_writer: Option<FeatureWriter>,
 
     transform: CjTransform,
     /// Offset of the feature in the feature data section
@@ -92,16 +93,16 @@ impl<'a> FcbWriter<'a> {
         })
     }
 
-    /// Writes the current feature to the temporary buffer
+    /// Writes `feature` to the temporary buffer
     ///
     /// # Returns
     ///
     /// A Result indicating success or failure of the write operation
-    fn write_feature(&mut self) -> Result<()> {
+    fn write_feature(&mut self, feature: &CityJSONFeature) -> Result<()> {
         let transform = &self.transform;
 
         if let Some(feat_writer) = &mut self.feat_writer {
-            let feat_buf = feat_writer.finish_to_feature();
+            let feat_buf = feat_writer.finish_to_feature(feature)?;
 
             let mut attr_feature_offset = feat_writer.attribute_feature_offsets.clone();
 
@@ -152,10 +153,9 @@ impl<'a> FcbWriter<'a> {
     /// # Returns
     ///
     /// A Result indicating success or failure of the operation
-    pub fn add_feature(&mut self, feature: &'a CityJSONFeature) -> Result<()> {
+    pub fn add_feature(&mut self, feature: &CityJSONFeature) -> Result<()> {
         if self.feat_writer.is_none() {
             self.feat_writer = Some(FeatureWriter::new(
-                feature,
                 self.attr_schema.clone(),
                 self.semantic_attr_schema.clone(),
                 self.header_writer
@@ -163,13 +163,11 @@ impl<'a> FcbWriter<'a> {
                     .attribute_indices
                     .as_ref()
                     .map(|a| a.iter().map(|(name, _)| name.clone()).collect()),
+                self.header_writer.id_column,
             ));
         }
 
-        if let Some(feat_writer) = &mut self.feat_writer {
-            feat_writer.add_feature(feature);
-            self.write_feature()?;
-        }
+        self.write_feature(feature)?;
 
         Ok(())
     }
@@ -262,6 +260,25 @@ impl<'a> FcbWriter<'a> {
                     attr_index_buf.extend(&buf);
                 }
             }
+        }
+
+        // The id column has the highest column index, so its index comes
+        // last: the section is ordered by column index.
+        // A file without features has no id to index, and a B+tree cannot be
+        // empty.
+        if let (Some(id_column), Some(bf), false) = (
+            self.header_writer.id_column,
+            self.header_writer.header_options.id_index,
+            self.feat_offsets.is_empty(),
+        ) {
+            let (buf, info) = build_attribute_index_for_column(
+                &id_column,
+                &ColumnType::String,
+                &self.attribute_index_entries,
+                bf,
+            )?;
+            attr_index_info.push(info);
+            attr_index_buf.extend(&buf);
         }
 
         // write header with attribute indices metadata

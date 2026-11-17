@@ -385,8 +385,32 @@ class CityObject(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(24))
         return o == 0
 
+    # CityObject
+    def Address(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(26))
+        if o != 0:
+            x = self._tab.Vector(o)
+            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
+            x = self._tab.Indirect(x)
+            obj = Address()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+    # CityObject
+    def AddressLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(26))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # CityObject
+    def AddressIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(26))
+        return o == 0
+
 def CityObjectStart(builder):
-    builder.StartObject(11)
+    builder.StartObject(12)
 
 def CityObjectAddType(builder, type):
     builder.PrependUint8Slot(0, type, 0)
@@ -442,7 +466,115 @@ def CityObjectAddParents(builder, parents):
 def CityObjectStartParentsVector(builder, numElems):
     return builder.StartVector(4, numElems, 4)
 
+def CityObjectAddAddress(builder, address):
+    builder.PrependUOffsetTRelativeSlot(11, flatbuffers.number_types.UOffsetTFlags.py_type(address), 0)
+
+def CityObjectStartAddressVector(builder, numElems):
+    return builder.StartVector(4, numElems, 4)
+
 def CityObjectEnd(builder):
+    return builder.EndObject()
+
+
+
+class Address(object):
+    __slots__ = ['_tab']
+
+    @classmethod
+    def GetRootAs(cls, buf, offset=0):
+        n = flatbuffers.encode.Get(flatbuffers.packer.uoffset, buf, offset)
+        x = Address()
+        x.Init(buf, n + offset)
+        return x
+
+    @classmethod
+    def GetRootAsAddress(cls, buf, offset=0):
+        """This method is deprecated. Please switch to GetRootAs."""
+        return cls.GetRootAs(buf, offset)
+    # Address
+    def Init(self, buf, pos):
+        self._tab = flatbuffers.table.Table(buf, pos)
+
+    # Address
+    def Attributes(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
+        if o != 0:
+            a = self._tab.Vector(o)
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, a + flatbuffers.number_types.UOffsetTFlags.py_type(j * 1))
+        return 0
+
+    # Address
+    def AttributesAsNumpy(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
+        if o != 0:
+            return self._tab.GetVectorAsNumpy(flatbuffers.number_types.Uint8Flags, o)
+        return 0
+
+    # Address
+    def AttributesLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # Address
+    def AttributesIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
+        return o == 0
+
+    # Address
+    def Columns(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        if o != 0:
+            x = self._tab.Vector(o)
+            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
+            x = self._tab.Indirect(x)
+            obj = Column()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+    # Address
+    def ColumnsLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # Address
+    def ColumnsIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        return o == 0
+
+    # Address
+    def Location(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
+        if o != 0:
+            x = self._tab.Indirect(o + self._tab.Pos)
+            obj = Geometry()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+def AddressStart(builder):
+    builder.StartObject(3)
+
+def AddressAddAttributes(builder, attributes):
+    builder.PrependUOffsetTRelativeSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(attributes), 0)
+
+def AddressStartAttributesVector(builder, numElems):
+    return builder.StartVector(1, numElems, 1)
+
+def AddressAddColumns(builder, columns):
+    builder.PrependUOffsetTRelativeSlot(1, flatbuffers.number_types.UOffsetTFlags.py_type(columns), 0)
+
+def AddressStartColumnsVector(builder, numElems):
+    return builder.StartVector(4, numElems, 4)
+
+def AddressAddLocation(builder, location):
+    builder.PrependUOffsetTRelativeSlot(2, flatbuffers.number_types.UOffsetTFlags.py_type(location), 0)
+
+def AddressEnd(builder):
     return builder.EndObject()
 
 

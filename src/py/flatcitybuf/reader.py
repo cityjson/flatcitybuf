@@ -270,9 +270,21 @@ class FcbReader:
     ) -> bool:
         """reader.cpp:399-427 -- the body of select_attr's verification
         loop, one feature at a time."""
+        id_columns = {
+            c.name for c in self.header.info.columns if c.primary_key
+        }
         for condition in conditions:
             matched = False
             for obj in feature.city_objects():
+                # The id column's value is the object's id, not an
+                # attribute.
+                if condition.column in id_columns:
+                    if value_satisfies(
+                        obj.id, condition.operator, condition.value
+                    ):
+                        matched = True
+                        break
+                    continue
                 if not obj.attributes:
                     continue
                 schema = (

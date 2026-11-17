@@ -281,3 +281,26 @@ TEST_CASE("exact_index_only returns a superset of the verified result") {
     for (const auto& id : verified)
         CHECK(raw.count(id) == 1);
 }
+
+TEST_CASE("the id column is queried by City Object id, which no attribute holds") {
+    FcbReader r = FcbReader::open_file(FCB_CONFORMANCE_DIR "/id_index.fcb");
+    auto select = [&](const std::string& id) {
+        AttrQuery q = {{"id", Operator::Eq, KeyValue::from_string(KeyKind::String50, id)}};
+        FeatureIterator it = r.select_attr(q);
+        std::vector<std::string> got;
+        while (it.next())
+            got.push_back(it.current().id());
+        return got;
+    };
+    const std::string k(50, 'k');
+
+    // A child object's id finds its feature, and so does an object without
+    // attributes.
+    CHECK(select("alpha-0") == std::vector<std::string>{"alpha"});
+    CHECK(select("beta") == std::vector<std::string>{"beta"});
+    // Three ids share their first 50 bytes, and so one key: each hit is
+    // checked against the object's full id.
+    CHECK(select(k) == std::vector<std::string>{k});
+    CHECK(select(k + "-two") == std::vector<std::string>{k + "-one"});
+    CHECK(select("missing").empty());
+}

@@ -27,7 +27,8 @@ struct Extension FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_EXTRA_ATTRIBUTES = 14,
     VT_EXTRA_CITY_OBJECTS = 16,
     VT_EXTRA_ROOT_PROPERTIES = 18,
-    VT_EXTRA_SEMANTIC_SURFACES = 20
+    VT_EXTRA_SEMANTIC_SURFACES = 20,
+    VT_MEMBERS = 22
   };
   const ::flatbuffers::String *name() const {
     return GetPointer<const ::flatbuffers::String *>(VT_NAME);
@@ -56,6 +57,9 @@ struct Extension FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const ::flatbuffers::String *extra_semantic_surfaces() const {
     return GetPointer<const ::flatbuffers::String *>(VT_EXTRA_SEMANTIC_SURFACES);
   }
+  const ::flatbuffers::String *members() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_MEMBERS);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
@@ -76,6 +80,8 @@ struct Extension FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyString(extra_root_properties()) &&
            VerifyOffset(verifier, VT_EXTRA_SEMANTIC_SURFACES) &&
            verifier.VerifyString(extra_semantic_surfaces()) &&
+           VerifyOffset(verifier, VT_MEMBERS) &&
+           verifier.VerifyString(members()) &&
            verifier.EndTable();
   }
 };
@@ -111,6 +117,9 @@ struct ExtensionBuilder {
   void add_extra_semantic_surfaces(::flatbuffers::Offset<::flatbuffers::String> extra_semantic_surfaces) {
     fbb_.AddOffset(Extension::VT_EXTRA_SEMANTIC_SURFACES, extra_semantic_surfaces);
   }
+  void add_members(::flatbuffers::Offset<::flatbuffers::String> members) {
+    fbb_.AddOffset(Extension::VT_MEMBERS, members);
+  }
   explicit ExtensionBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -132,8 +141,10 @@ inline ::flatbuffers::Offset<Extension> CreateExtension(
     ::flatbuffers::Offset<::flatbuffers::String> extra_attributes = 0,
     ::flatbuffers::Offset<::flatbuffers::String> extra_city_objects = 0,
     ::flatbuffers::Offset<::flatbuffers::String> extra_root_properties = 0,
-    ::flatbuffers::Offset<::flatbuffers::String> extra_semantic_surfaces = 0) {
+    ::flatbuffers::Offset<::flatbuffers::String> extra_semantic_surfaces = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> members = 0) {
   ExtensionBuilder builder_(_fbb);
+  builder_.add_members(members);
   builder_.add_extra_semantic_surfaces(extra_semantic_surfaces);
   builder_.add_extra_root_properties(extra_root_properties);
   builder_.add_extra_city_objects(extra_city_objects);
@@ -156,7 +167,8 @@ inline ::flatbuffers::Offset<Extension> CreateExtensionDirect(
     const char *extra_attributes = nullptr,
     const char *extra_city_objects = nullptr,
     const char *extra_root_properties = nullptr,
-    const char *extra_semantic_surfaces = nullptr) {
+    const char *extra_semantic_surfaces = nullptr,
+    const char *members = nullptr) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto description__ = description ? _fbb.CreateString(description) : 0;
   auto url__ = url ? _fbb.CreateString(url) : 0;
@@ -166,6 +178,7 @@ inline ::flatbuffers::Offset<Extension> CreateExtensionDirect(
   auto extra_city_objects__ = extra_city_objects ? _fbb.CreateString(extra_city_objects) : 0;
   auto extra_root_properties__ = extra_root_properties ? _fbb.CreateString(extra_root_properties) : 0;
   auto extra_semantic_surfaces__ = extra_semantic_surfaces ? _fbb.CreateString(extra_semantic_surfaces) : 0;
+  auto members__ = members ? _fbb.CreateString(members) : 0;
   return CreateExtension(
       _fbb,
       name__,
@@ -176,7 +189,8 @@ inline ::flatbuffers::Offset<Extension> CreateExtensionDirect(
       extra_attributes__,
       extra_city_objects__,
       extra_root_properties__,
-      extra_semantic_surfaces__);
+      extra_semantic_surfaces__,
+      members__);
 }
 
 #endif  // FLATBUFFERS_GENERATED_EXTENSION_H_

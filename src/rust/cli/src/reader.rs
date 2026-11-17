@@ -60,19 +60,13 @@ fn read_cityjson_file(path: &Path) -> Result<InputData, CliError> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
-    // Parse as full CityJSON
-    let mut cj: CityJSON = serde_json::from_reader(reader)?;
-    cj.sort_cjfeatures(cjseq::SortingStrategy::Random);
-    // Extract features using cjseq library pattern
-    let mut features = Vec::new();
-    let mut i = 0;
-    while let Some(feature) = cj.get_cjfeature(i) {
-        features.push(feature);
-        i += 1;
-    }
-
-    // Get metadata (CityJSON without city_objects)
-    let metadata = cj.get_metadata();
+    // Parse as full CityJSON and slice it into a sequence: the header, then
+    // one feature per top-level City Object, in document order.
+    let cj: CityJSON = serde_json::from_reader(reader)?;
+    let features = cj
+        .features(cjseq::SortingStrategy::AsIs)
+        .collect::<Result<Vec<_>, _>>()?;
+    let metadata = cj.header()?;
 
     Ok(InputData { metadata, features })
 }

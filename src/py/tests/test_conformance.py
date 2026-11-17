@@ -31,6 +31,9 @@ CASES = [
     "inferable_types",
     "empty_appearance",
     "geom_decoder_edges",
+    "object_address",
+    "extension_members",
+    "id_index",
 ]
 
 

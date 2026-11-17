@@ -36,6 +36,7 @@ the `feature.fbs` schema (see `src/fbs/feature.fbs`) defines the structure of ci
 
 - **cityfeature**: the root object containing city objects and shared vertices
 - **cityobject**: individual 3d features with type, geometry, and attributes
+- **address**: one entry of a city object's CityJSON `address` array (see below)
 - **geometry**: complex structure for 3d geometries with boundaries and semantics
 - **semanticobject**: semantic classification of geometry parts
 
@@ -52,7 +53,7 @@ the `geometry.fbs` schema (see `src/fbs/geometry.fbs`) defines geometry structur
 
 the `extension.fbs` schema (see `src/fbs/extension.fbs`) defines support for cityjson extensions:
 
-- **extension**: contains extension metadata and schema definitions
+- **extension**: contains extension metadata and schema definitions. `members` holds every member of the CityJSON `extensions` entry other than `url` and `version` (a CityGML ADE's `xmlns`, say) as one stringified JSON object, so the entry reads back whole
 - supports custom cityobject types and semantic surfaces
 - enables extensibility while maintaining core format efficiency
 
@@ -229,6 +230,20 @@ two major optimizations improve remote access efficiency:
 
 `StringKey20` is defined but **never produced by the writer**.
 
+### the city object id column
+
+a file may index the id of every city object, a feature's children included, so that an object is found by its id without the dataset carrying an `id` attribute. the rust and c++ writers do this by default.
+
+| part | value | citation |
+|---|---|---|
+| column | one `Header.columns` entry with `primary_key = true`: name `id`, type `String`, `nullable = false`, placed after the attribute columns at the next free `Column.index` | `writer/serializer.rs` `to_header_columns` |
+| values | the column has **no value in any attribute blob**. its value for a city object is `CityObject.id`, so a decoder never emits it as an attribute | `writer/header_writer.rs` `id_column` |
+| index | an ordinary `String` index (`FixedStringKey<50>`) with one entry per city object, keyed by the object's id and pointing at the feature that holds it. it is the last blob of the attribute index section, because its column index is the highest | `writer/mod.rs` `FcbWriter::write` |
+| post-filter | a reader that verifies string hits against the untruncated value (c++, python, typescript) compares against each object's id for this column, not against a decoded attribute | `src/cpp/src/reader.cpp` `select_attr` |
+| a dataset's own `id` attribute | when the attribute schema already has a column named `id`, the writer keeps it as an ordinary column and writes no id column and no id index | `writer/header_writer.rs` `new_with_options` |
+
+a file holds at most one column with `primary_key = true`. a reader that does not know the flag reads the file correctly; a string post-filter in such a reader finds no `id` attribute and returns no match for a query on the column.
+
 ### query algorithm
 
 the b+tree index supports the following operators, each lowered to one or two tree traversals (`static_btree/query/stream.rs:161-191`):
@@ -337,6 +352,16 @@ attributes must be decoded against the schema of the `CityObject` that owns them
 - this is the normal case, not an edge case: in `examples/data/delft.fcb`, **all 1115 objects that carry attributes declare their own columns**, and the header's 44 columns are never used for decoding.
 - objects within one feature differ: the `Building` parent carries no attributes while its `BuildingPart` child carries them all. code must walk all objects rather than assuming object 0.
 - getting this wrong does **not** fail loudly. attribute records are not self-delimiting — each value's width comes from its column's type — so a wrong schema desynchronises the remainder of the blob and yields plausible-looking garbage instead of an error. it surfaced as a nonsense column index (28777, which is ASCII `"ip"` from the middle of a string value) during the native C++ port.
+
+### city object addresses
+
+`CityObject.address` holds the CityJSON `address` array, one `Address` table per entry, in order. an address's members are free-form, so each `Address` carries its own schema:
+
+- `Address.columns` is the schema its `attributes` blob is encoded with. it is always set when `attributes` is; `Header.columns` is never used for an address.
+- `Address.attributes` holds every member but `location`, encoded exactly as object attributes are (see "null values": a `null` member is not written).
+- `Address.location` is the `location` member, a `MultiPoint` `Geometry` whose boundaries index the feature's `vertices`, like any other geometry of the feature.
+
+an absent `address` field means the object has no addresses. files written before the field existed read as having none.
 
 ### attribute access
 

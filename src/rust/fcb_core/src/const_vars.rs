@@ -12,3 +12,9 @@ pub const MAGIC_BYTES_SIZE: usize = 8;
 
 // Size of header size
 pub const HEADER_SIZE_SIZE: usize = 4;
+
+/// The name of the header column that stands for a City Object's id. A file
+/// written with an id index declares it with `primary_key = true`; no
+/// attribute blob carries a value for it, because the value is
+/// `CityObject.id`.
+pub const ID_COLUMN_NAME: &str = "id";

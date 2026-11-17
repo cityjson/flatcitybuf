@@ -19,6 +19,9 @@ export interface ColumnInfo {
    *  `AttrCondition.value` against this column may have. */
   type: ColumnType
   nullable: boolean
+  /** Set on the City Object id column: its value for an object is the
+   *  object's id, and no attribute blob carries it. */
+  primaryKey: boolean
 }
 
 /** Everything a caller normally wants from the header, as owned values. */
@@ -57,6 +60,7 @@ function collectColumns(count: number, at: (i: number) => Column | null): Column
       name: c.name() ?? '',
       type: c.type(),
       nullable: c.nullable(),
+      primaryKey: c.primaryKey(),
     })
   }
   return out

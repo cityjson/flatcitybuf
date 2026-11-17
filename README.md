@@ -125,6 +125,10 @@ bytes directly. Rust is the authoritative reference:
 - **Rust toolchain** (recent stable)
 - **Node.js** ≥ 22.12 (for the TypeScript reader in `src/ts`)
 
+For Rust development with Nix, run `nix develop` from the repository root.
+The pinned shell includes the Rust tools and C linker; see the
+[Rust development guide](docs/rust.md#build-and-verify).
+
 ### 📦 Installation
 
 #### Package Manager Installation (Recommended)
@@ -174,7 +178,7 @@ from `src/ts`. See the [TypeScript guide](docs/ts.md).
 
 ### 🛠️ CLI Usage
 
-#### Convert CityJSON/CityJSONSeq to FlatCityBuf
+#### Convert CityJSON/CityJSONSeq/CityGML to FlatCityBuf
 
 Replace `cargo run -p fcb_cli --` with `fcb` in the following commands if you want to use the installed binary directly.
 
@@ -199,6 +203,10 @@ fcb ser data.city.jsonl data.fcb --attr-index attribute_name,attribute_name2
 
 # Back to CityJSONSeq
 fcb deser data.fcb output.city.jsonl
+
+# CityGML 2.0 / 3.0 in and out; the file extension picks the format
+fcb ser 53394519_bldg_6697_op.gml bldg.fcb
+fcb deser bldg.fcb bldg.gml --citygml-version 3.0
 
 # Show information about the file (static text report)
 fcb inspect data.fcb --static

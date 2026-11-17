@@ -143,6 +143,32 @@ async fn read_http_payload_data<T: AsyncHttpRangeClient>(
     Ok(payload_entry)
 }
 
+/// The payload entry at `offset`, whatever its length: its count first, then
+/// exactly the bytes that count asks for. The payload section ends at
+/// `feature_begin`, and an entry claiming more than that is not one.
+#[cfg(feature = "http")]
+async fn read_http_payload_entry<T: AsyncHttpRangeClient>(
+    client: &mut AsyncBufferedHttpRangeClient<T>,
+    offset: usize,
+    feature_begin: usize,
+) -> Result<PayloadEntry> {
+    const COUNT_SIZE: usize = size_of::<u32>();
+    let out_of_bounds =
+        || Error::InvalidFormat(format!("payload entry at {offset} runs past the index"));
+    if offset + COUNT_SIZE > feature_begin {
+        return Err(out_of_bounds());
+    }
+    let count = client.get_range(offset, COUNT_SIZE).await?;
+    let count = u32::from_le_bytes(count.try_into().map_err(|_| out_of_bounds())?) as usize;
+    let length = COUNT_SIZE + count * size_of::<u64>();
+    if offset + length > feature_begin {
+        return Err(out_of_bounds());
+    }
+    let data = client.get_range(offset, length).await?;
+    let (entry, _) = PayloadEntry::deserialize(&mut Cursor::new(data))?;
+    Ok(entry)
+}
+
 /// Cache for prefetched payload data to reduce HTTP requests
 #[derive(Debug, Default)]
 pub struct PayloadCache {
@@ -356,30 +382,31 @@ async fn batch_resolve_payloads<T: AsyncHttpRangeClient>(
     for (start, end) in offset_ranges {
         // Calculate fetch size to include the complete payload entries
         // Add a margin to account for variable-sized payload entries
-        let fetch_size = (end - start) + DEFAULT_MIN_REQ_SIZE;
+        let fetch_size =
+            ((end - start) + DEFAULT_MIN_REQ_SIZE).min(feature_begin.saturating_sub(start));
 
         let payload_data = client.get_range(start, fetch_size).await?;
 
-        // Process each requested offset within this range
+        // Process each requested offset within this range. An entry is as
+        // long as its key has features, so one may run past what was fetched.
+        let mut cut_off = Vec::new();
         for &offset in payload_offsets_to_fetch
             .iter()
             .filter(|&&o| o >= start && o <= end)
         {
-            let relative_offset = offset - start;
-
-            // Make sure we have enough data
-            if relative_offset < payload_data.len() {
-                let mut buf = Cursor::new(&payload_data[relative_offset..]);
-                match PayloadEntry::deserialize(&mut buf) {
-                    Ok((entry, _)) => {
-                        fetched_payloads.insert(offset, entry);
-                    }
-                    Err(e) => {
-                        debug!("error deserializing payload at offset {}: {:?}", offset, e);
-                        // Continue with other offsets on error
-                    }
+            let entry = payload_data
+                .get(offset - start..)
+                .and_then(|data| PayloadEntry::deserialize(&mut Cursor::new(data)).ok());
+            match entry {
+                Some((entry, _)) => {
+                    fetched_payloads.insert(offset, entry);
                 }
+                None => cut_off.push(offset),
             }
+        }
+        for offset in cut_off {
+            let entry = read_http_payload_entry(client, offset, feature_begin).await?;
+            fetched_payloads.insert(offset, entry);
         }
     }
 
@@ -1381,7 +1408,14 @@ impl<K: Key> Stree<K> {
         debug!("prefetching payload with size: {} bytes", prefetch_size);
 
         // Prefetch a chunk of payload data
-        let payload_cache = prefetch_payload(client, payload_data_start, prefetch_size).await?;
+        // Payload bytes end where feature data starts. Speculative reads past
+        // that boundary can force a second range request beyond EOF on small files.
+        let prefetch_size = prefetch_size.min(feature_begin.saturating_sub(payload_data_start));
+        let payload_cache = if prefetch_size == 0 {
+            PayloadCache::new()
+        } else {
+            prefetch_payload(client, payload_data_start, prefetch_size).await?
+        };
 
         while let Some(node_range) = queue.pop_front() {
             debug!("next: {node_range:?}. {} items left in queue", queue.len());
@@ -1753,7 +1787,14 @@ impl<K: Key> Stree<K> {
         debug!("prefetching payload with size: {} bytes", prefetch_size);
 
         // Prefetch a chunk of payload data
-        let payload_cache = prefetch_payload(client, payload_data_start, prefetch_size).await?;
+        // Payload bytes end where feature data starts. Speculative reads past
+        // that boundary can force a second range request beyond EOF on small files.
+        let prefetch_size = prefetch_size.min(feature_begin.saturating_sub(payload_data_start));
+        let payload_cache = if prefetch_size == 0 {
+            PayloadCache::new()
+        } else {
+            prefetch_payload(client, payload_data_start, prefetch_size).await?
+        };
 
         debug!("http_stream_find_range - index_begin: {index_begin}, feature_begin: {feature_begin}, num_items: {num_items}, branching_factor: {branching_factor}, level_bounds: {level_bounds:?}, lower: {lower:?}, upper: {upper:?}");
         let _ = level_bounds

@@ -4,6 +4,7 @@
 
 import * as flatbuffers from 'flatbuffers';
 
+import { Address } from './address.js';
 import { CityObjectType } from './city-object-type.js';
 import { Column } from './column.js';
 import { GeographicalExtent } from './geographical-extent.js';
@@ -134,8 +135,18 @@ parentsLength():number {
   return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
 }
 
+address(index: number, obj?:Address):Address|null {
+  const offset = this.bb!.__offset(this.bb_pos, 26);
+  return offset ? (obj || new Address()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
+
+addressLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 26);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
 static startCityObject(builder:flatbuffers.Builder) {
-  builder.startObject(11);
+  builder.startObject(12);
 }
 
 static addType(builder:flatbuffers.Builder, type:CityObjectType) {
@@ -263,6 +274,22 @@ static createParentsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[
 }
 
 static startParentsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
+static addAddress(builder:flatbuffers.Builder, addressOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(11, addressOffset, 0);
+}
+
+static createAddressVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startAddressVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 

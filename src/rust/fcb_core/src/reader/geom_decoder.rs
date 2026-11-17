@@ -25,10 +25,10 @@
 //! texture on one of them is not valid CityJSON and has no depth to decode to.
 
 use cjseq::{
-    GeometryType as CjGeometryType, MaterialReference as CjMaterialReference,
-    MaterialValues as CjMaterialValues, Ring, SemanticSurfaceType, Semantics, SemanticsSurface,
-    SemanticsValues, Shell, Surface, TextureReference as CjTextureReference,
-    TextureValues as CjTextureValues, TexturedRing, TexturedShell, TexturedSurface,
+    GeometryType as CjGeometryType, Index, MaterialIndex, MaterialReference as CjMaterialReference,
+    MultiSolidValues, PrimitiveValues, Ring, SemanticSurfaceType, Semantics, SemanticsSurface,
+    Shell, SolidValues, Surface, SurfaceIndex, TextureReference as CjTextureReference,
+    TexturedRing, TexturedShell, TexturedSurface, Themes, VertexIndex,
 };
 
 use crate::error::Error;
@@ -36,18 +36,17 @@ use crate::fb::{
     Column, GeometryType, MaterialMapping, SemanticObject, SemanticSurfaceType as FbSurfaceType,
     TextureMapping,
 };
-use std::collections::HashMap;
 
 use super::deserializer::decode_attributes;
 
 /// The wire spelling of "no value here"; see `writer::geom_encoder::NULL`.
 const NULL: u32 = u32::MAX;
 
-fn index(v: u32) -> Option<usize> {
+fn index<I: Index>(v: u32) -> Option<I> {
     if v == NULL {
         None
     } else {
-        Some(v as usize)
+        Some(I::new(v as usize))
     }
 }
 
@@ -84,7 +83,7 @@ impl<'a> BoundaryCursor<'a> {
         let end = (self.index_cursor + size).min(self.indices.len());
         let ring = self.indices[self.index_cursor..end]
             .iter()
-            .map(|&i| i as usize)
+            .map(|&i| VertexIndex(i as usize))
             .collect();
         self.index_cursor = end;
         ring
@@ -105,7 +104,7 @@ impl<'a> BoundaryCursor<'a> {
 
 /// `MultiPoint`: every index is a point of the one and only ring.
 pub(crate) fn decode_points(indices: &[u32]) -> Ring {
-    indices.iter().map(|&i| i as usize).collect()
+    indices.iter().map(|&i| VertexIndex(i as usize)).collect()
 }
 
 /// `MultiLineString`: one ring per `strings` entry.
@@ -155,9 +154,11 @@ pub(crate) fn decode_semantics_surfaces(
     let surfaces = semantics_objects.iter().map(|s| {
         let thetype = to_cj_surface_type(s.type_(), s.extension_type());
 
-        let children = s
-            .children()
-            .map(|c| c.iter().map(|i| i as usize).collect::<Vec<_>>());
+        let children = s.children().map(|c| {
+            c.iter()
+                .map(|i| SurfaceIndex(i as usize))
+                .collect::<Vec<_>>()
+        });
 
         let attributes = semantic_attr_schema
             .as_ref()
@@ -167,14 +168,14 @@ pub(crate) fn decode_semantics_surfaces(
         // encoded attribute blob is exactly that set.
         let other = attributes
             .and_then(|v| match v {
-                serde_json::Value::Object(map) => Some(map.into_iter().collect()),
+                serde_json::Value::Object(map) => Some(map),
                 _ => None,
             })
             .unwrap_or_default();
 
         SemanticsSurface {
             thetype,
-            parent: s.parent().map(|p| p as usize),
+            parent: s.parent().map(|p| SurfaceIndex(p as usize)),
             children,
             other,
         }
@@ -226,85 +227,98 @@ pub(crate) fn to_cj_surface_type(
     }
 }
 
-/// Regroups the flat run of semantic values at the depth `geometry_type`
-/// implies. `semantics.values` is nested one level less deeply than the
+/// The three shapes `semantics.values` and `material.values` come in, and how
+/// each is rebuilt from a flat run of leaves and the counts that group it.
+/// The shape — and with it the depth — is the one the geometry variant names,
+/// so the caller's type decides it, never the arrays.
+///
+/// A `NULL` entry in `shells` or `solids` is a whole `null` shell or solid; it
+/// comes back as `None`, never as an empty array. Boundary counts, which a
+/// semantics mapping is regrouped by, are never `NULL`.
+pub(crate) trait UnflattenValues<I>: Sized {
+    fn unflatten(solids: &[u32], shells: &[u32], leaves: &[u32]) -> Self;
+}
+
+/// Hands out consecutive runs of a flat leaf array.
+struct LeafCursor<'a> {
+    leaves: &'a [u32],
+    cursor: usize,
+}
+
+impl LeafCursor<'_> {
+    fn take<I: Index>(&mut self, n: u32) -> Option<PrimitiveValues<I>> {
+        if n == NULL {
+            return None;
+        }
+        let end = (self.cursor + n as usize).min(self.leaves.len());
+        let out = self.leaves[self.cursor..end]
+            .iter()
+            .map(|&v| index(v))
+            .collect();
+        self.cursor = end;
+        Some(out)
+    }
+}
+
+impl<I: Index> UnflattenValues<I> for PrimitiveValues<I> {
+    fn unflatten(_: &[u32], _: &[u32], leaves: &[u32]) -> Self {
+        leaves.iter().map(|&v| index(v)).collect()
+    }
+}
+
+impl<I: Index> UnflattenValues<I> for SolidValues<I> {
+    fn unflatten(_: &[u32], shells: &[u32], leaves: &[u32]) -> Self {
+        let mut leaves = LeafCursor { leaves, cursor: 0 };
+        shells.iter().map(|&n| leaves.take(n)).collect()
+    }
+}
+
+impl<I: Index> UnflattenValues<I> for MultiSolidValues<I> {
+    fn unflatten(solids: &[u32], shells: &[u32], leaves: &[u32]) -> Self {
+        let mut leaves = LeafCursor { leaves, cursor: 0 };
+        let mut shell_cursor = 0usize;
+        solids
+            .iter()
+            .map(|&shell_count| {
+                if shell_count == NULL {
+                    return None;
+                }
+                Some(
+                    (0..shell_count)
+                        .map(|_| {
+                            let n = shells.get(shell_cursor).copied().unwrap_or(0);
+                            shell_cursor += 1;
+                            leaves.take(n)
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// Regroups the flat run of semantic values into the shape `V` the geometry
+/// variant names. `semantics.values` is nested one level less deeply than the
 /// geometry's boundaries, so a `Solid` groups by shell and the 5-deep types
 /// group by shell and then by solid.
 ///
 /// The group sizes come from the *boundary* count arrays, because a semantics
 /// mapping carries none of its own — one semantic value per surface is the
 /// whole of its structure.
-pub(crate) fn decode_semantics(
+pub(crate) fn decode_semantics<V: UnflattenValues<SurfaceIndex>>(
     solids: &[u32],
     shells: &[u32],
-    geometry_type: GeometryType,
-    semantics_objects: Vec<SemanticObject>,
-    semantics_values: Option<Vec<u32>>,
+    semantics_objects: &[SemanticObject],
+    semantics_values: Option<&[u32]>,
     semantic_attr_schema: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Column<'_>>>>,
-) -> Semantics {
-    let surfaces = decode_semantics_surfaces(&semantics_objects, semantic_attr_schema);
-
-    // No values vector at all is `"values": null` -- a member whose value is
-    // null, which the schema requires to be present and permits to be null.
-    let Some(semantics_values) = semantics_values else {
-        return Semantics {
-            surfaces,
-            values: None,
-            other: HashMap::new(),
-        };
-    };
-
-    let mut cursor = 0usize;
-    let mut take_shell = |n: usize, values: &[u32]| -> Vec<Option<usize>> {
-        let end = (cursor + n).min(values.len());
-        let out = values[cursor..end].iter().map(|&v| index(v)).collect();
-        cursor = end;
-        out
-    };
-
-    let values = match geometry_type {
-        // One value per surface, flat.
-        GeometryType::MultiPoint
-        | GeometryType::MultiLineString
-        | GeometryType::MultiSurface
-        | GeometryType::CompositeSurface => {
-            SemanticsValues::Surfaces(semantics_values.iter().map(|&v| index(v)).collect())
-        }
-        // One array per shell.
-        GeometryType::Solid => SemanticsValues::Shells(
-            shells
-                .iter()
-                .map(|&n| Some(take_shell(n as usize, &semantics_values)))
-                .collect(),
-        ),
-        // One array per shell, per solid.
-        GeometryType::MultiSolid | GeometryType::CompositeSolid => {
-            let mut shell_cursor = 0usize;
-            SemanticsValues::Solids(
-                solids
-                    .iter()
-                    .map(|&shell_count| {
-                        Some(
-                            (0..shell_count)
-                                .map(|_| {
-                                    let n = shells.get(shell_cursor).copied().unwrap_or(0) as usize;
-                                    shell_cursor += 1;
-                                    Some(take_shell(n, &semantics_values))
-                                })
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            )
-        }
-        // A GeometryInstance carries no semantics; its template does.
-        _ => SemanticsValues::Surfaces(semantics_values.iter().map(|&v| index(v)).collect()),
-    };
-
+) -> Semantics<V> {
     Semantics {
-        surfaces,
-        values: Some(values),
-        other: HashMap::new(),
+        surfaces: decode_semantics_surfaces(semantics_objects, semantic_attr_schema),
+        // No values vector at all is `"values": null` -- a member whose value
+        // is null, which the schema requires to be present and permits to be
+        // null.
+        values: semantics_values.map(|values| V::unflatten(solids, shells, values)),
+        other: serde_json::Map::new(),
     }
 }
 
@@ -355,153 +369,104 @@ impl GeometryType {
     }
 }
 
-/// Rebuilds `material.values` at the depth `geometry_type` implies.
+/// Rebuilds each theme's `material` in the shape `V` the geometry variant
+/// names.
 ///
 /// `material.values` is nested two levels less deeply than the boundaries, so
 /// a `MultiSurface` gets one index per surface, a `Solid` one array per shell,
 /// and a `MultiSolid`/`CompositeSolid` one array per shell per solid.
-///
-/// A `NULL` entry in `shells`/`solids` is a whole `null` shell or solid, which
-/// `material.values` permits at every level; it comes back as `None`, never as
-/// an empty array.
-pub(crate) fn decode_materials(
-    geometry_type: GeometryType,
+pub(crate) fn decode_materials<V: UnflattenValues<MaterialIndex>>(
     material_mappings: &[MaterialMapping],
-) -> Option<HashMap<String, CjMaterialReference>> {
+) -> Option<Themes<CjMaterialReference<V>>> {
     if material_mappings.is_empty() {
         return None;
     }
 
-    let mut materials = HashMap::new();
-
-    for mapping in material_mappings {
-        let theme = mapping.theme().unwrap_or("theme").to_string();
-
-        // A `value` colours the whole object and has no depth at all.
-        if let Some(value) = mapping.value() {
-            materials.insert(
-                theme,
-                CjMaterialReference {
-                    value: Some(value as usize),
-                    values: None,
-                    other: HashMap::new(),
-                },
-            );
-            continue;
-        }
-
-        let solids = mapping
-            .solids()
-            .map(|s| s.iter().collect::<Vec<_>>())
-            .unwrap_or_default();
-        let shells = mapping
-            .shells()
-            .map(|s| s.iter().collect::<Vec<_>>())
-            .unwrap_or_default();
-        // No `vertices` vector at all is `"values": null` — an explicit null,
-        // which the schema distinguishes from an absent `values`.
-        let Some(vertices) = mapping.vertices().map(|v| v.iter().collect::<Vec<_>>()) else {
-            materials.insert(
-                theme,
-                CjMaterialReference {
-                    value: None,
-                    values: Some(None),
-                    other: HashMap::new(),
-                },
-            );
-            continue;
-        };
-
-        let mut vertex_cursor = 0usize;
-        let mut take_shell = |n: usize| -> Vec<Option<usize>> {
-            let end = (vertex_cursor + n).min(vertices.len());
-            let out = vertices[vertex_cursor..end]
-                .iter()
-                .map(|&v| index(v))
-                .collect();
-            vertex_cursor = end;
-            out
-        };
-
-        let values = match geometry_type {
-            // One index per surface.
-            GeometryType::MultiSurface | GeometryType::CompositeSurface => {
-                CjMaterialValues::Surfaces(vertices.iter().map(|&v| index(v)).collect())
-            }
-            // One array per shell.
-            GeometryType::Solid => CjMaterialValues::Shells(
-                shells
-                    .iter()
-                    .map(|&n| {
-                        if n == NULL {
-                            None
-                        } else {
-                            Some(take_shell(n as usize))
-                        }
-                    })
-                    .collect(),
-            ),
-            // One array per shell, per solid.
-            GeometryType::MultiSolid | GeometryType::CompositeSolid => {
-                let mut shell_cursor = 0usize;
-                CjMaterialValues::Solids(
-                    solids
-                        .iter()
-                        .map(|&shell_count| {
-                            if shell_count == NULL {
-                                return None;
-                            }
-                            Some(
-                                (0..shell_count)
-                                    .map(|_| {
-                                        let n = shells.get(shell_cursor).copied().unwrap_or(0);
-                                        shell_cursor += 1;
-                                        if n == NULL {
-                                            None
-                                        } else {
-                                            Some(take_shell(n as usize))
-                                        }
-                                    })
-                                    .collect(),
-                            )
-                        })
-                        .collect(),
-                )
-            }
-            // MultiPoint, MultiLineString and GeometryInstance cannot carry a
-            // material; if one is somehow present it has no depth of its own,
-            // so it is read as the shallowest thing it could be.
-            _ => CjMaterialValues::Surfaces(vertices.iter().map(|&v| index(v)).collect()),
-        };
-
-        materials.insert(
-            theme,
-            CjMaterialReference {
+    let materials = material_mappings
+        .iter()
+        .map(|mapping| {
+            let theme = mapping.theme().unwrap_or("theme").to_string();
+            let mut reference = CjMaterialReference {
                 value: None,
-                values: Some(Some(values)),
-                other: HashMap::new(),
-            },
-        );
-    }
+                values: None,
+                other: serde_json::Map::new(),
+            };
+
+            // A `value` colours the whole object and has no depth at all.
+            if let Some(value) = mapping.value() {
+                reference.value = Some(MaterialIndex(value as usize));
+                return (theme, reference);
+            }
+
+            // No `vertices` vector at all is `"values": null` — an explicit
+            // null, which the schema distinguishes from an absent `values`.
+            reference.values = Some(mapping.vertices().map(|vertices| {
+                let solids = mapping.solids().map(|s| s.iter().collect::<Vec<_>>());
+                let shells = mapping.shells().map(|s| s.iter().collect::<Vec<_>>());
+                V::unflatten(
+                    solids.as_deref().unwrap_or_default(),
+                    shells.as_deref().unwrap_or_default(),
+                    &vertices.iter().collect::<Vec<_>>(),
+                )
+            }));
+            (theme, reference)
+        })
+        .collect();
 
     Some(materials)
 }
 
-/// Rebuilds `texture.values` at the depth `geometry_type` implies.
+/// The three shapes `texture.values` comes in, each rebuilt level by level
+/// from a [`TextureCursor`].
+pub(crate) trait UnflattenTextures: Sized {
+    fn unflatten(cursor: &mut TextureCursor<'_>) -> Result<Self, Error>;
+}
+
+impl UnflattenTextures for Vec<TexturedSurface> {
+    /// Per surface, per ring.
+    fn unflatten(cursor: &mut TextureCursor<'_>) -> Result<Self, Error> {
+        (0..cursor.surfaces.len())
+            .map(|_| cursor.take_surface())
+            .collect()
+    }
+}
+
+impl UnflattenTextures for Vec<TexturedShell> {
+    /// ... per shell.
+    fn unflatten(cursor: &mut TextureCursor<'_>) -> Result<Self, Error> {
+        (0..cursor.shells.len())
+            .map(|_| cursor.take_shell())
+            .collect()
+    }
+}
+
+impl UnflattenTextures for Vec<Vec<TexturedShell>> {
+    /// ... per solid.
+    fn unflatten(cursor: &mut TextureCursor<'_>) -> Result<Self, Error> {
+        let solids = cursor.solids;
+        solids
+            .iter()
+            .map(|&n| (0..n).map(|_| cursor.take_shell()).collect())
+            .collect()
+    }
+}
+
+/// Rebuilds each theme's `texture` in the shape `V` the geometry variant
+/// names.
 ///
 /// `texture.values` is nested exactly as deeply as the geometry's boundaries,
-/// each ring becoming `[texture_index, uv_index, ...]`. Unlike a material, only
-/// the leaf is nullable — the schema types every intermediate level as a plain
-/// `"array"` — so nothing here decodes an intermediate `null`.
-pub(crate) fn decode_textures(
-    geometry_type: GeometryType,
+/// each ring becoming `[texture_index, uv_index, ...]` or `[null]`. Unlike a
+/// material, only the leaf is nullable — the schema types every intermediate
+/// level as a plain `"array"` — so nothing here decodes an intermediate
+/// `null`. A ring that is neither spelling is an error.
+pub(crate) fn decode_textures<V: UnflattenTextures>(
     texture_mappings: &[TextureMapping],
-) -> Option<HashMap<String, CjTextureReference>> {
+) -> Result<Option<Themes<CjTextureReference<V>>>, Error> {
     if texture_mappings.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    let mut textures = HashMap::new();
+    let mut textures = Themes::new();
 
     for mapping in texture_mappings {
         let theme = mapping.theme().unwrap_or("theme").to_string();
@@ -513,29 +478,21 @@ pub(crate) fn decode_textures(
                 theme,
                 CjTextureReference {
                     values: None,
-                    other: HashMap::new(),
+                    other: serde_json::Map::new(),
                 },
             );
             continue;
         };
-        let solids = mapping
-            .solids()
-            .map(|s| s.iter().collect::<Vec<_>>())
-            .unwrap_or_default();
-        let shells = mapping
-            .shells()
-            .map(|s| s.iter().collect::<Vec<_>>())
-            .unwrap_or_default();
-        let surfaces = mapping
-            .surfaces()
-            .map(|s| s.iter().collect::<Vec<_>>())
-            .unwrap_or_default();
-        let strings = mapping
-            .strings()
-            .map(|s| s.iter().collect::<Vec<_>>())
-            .unwrap_or_default();
+        let collect = |v: Option<flatbuffers::Vector<'_, u32>>| {
+            v.map(|s| s.iter().collect::<Vec<_>>()).unwrap_or_default()
+        };
+        let solids = collect(mapping.solids());
+        let shells = collect(mapping.shells());
+        let surfaces = collect(mapping.surfaces());
+        let strings = collect(mapping.strings());
 
         let mut cursor = TextureCursor {
+            solids: &solids,
             surfaces: &surfaces,
             shells: &shells,
             strings: &strings,
@@ -546,49 +503,23 @@ pub(crate) fn decode_textures(
             vertex_cursor: 0,
         };
 
-        let values = match geometry_type {
-            // Per surface, per ring.
-            GeometryType::MultiSurface | GeometryType::CompositeSurface => {
-                CjTextureValues::Surface(
-                    (0..surfaces.len()).map(|_| cursor.take_surface()).collect(),
-                )
-            }
-            // ... per shell.
-            GeometryType::Solid => {
-                CjTextureValues::Shell((0..shells.len()).map(|_| cursor.take_shell()).collect())
-            }
-            // ... per solid.
-            GeometryType::MultiSolid | GeometryType::CompositeSolid => CjTextureValues::Solid(
-                solids
-                    .iter()
-                    .map(|&n| (0..n).map(|_| cursor.take_shell()).collect())
-                    .collect(),
-            ),
-            // MultiPoint, MultiLineString and GeometryInstance cannot carry a
-            // texture; read whatever is there at the shallowest legal depth.
-            _ => CjTextureValues::Surface(
-                (0..surfaces.len().max(1))
-                    .map(|_| cursor.take_surface())
-                    .collect(),
-            ),
-        };
-
         textures.insert(
             theme,
             CjTextureReference {
-                values: Some(values),
-                other: HashMap::new(),
+                values: Some(V::unflatten(&mut cursor)?),
+                other: serde_json::Map::new(),
             },
         );
     }
 
-    Some(textures)
+    Ok(Some(textures))
 }
 
-/// The texture equivalent of [`BoundaryCursor`]: the same four count arrays,
-/// but the leaf holds `[texture_index, uv_index, ...]` rather than vertex
+/// The texture equivalent of [`BoundaryCursor`]: the same count arrays, but
+/// the leaf holds `[texture_index, uv_index, ...]` rather than vertex
 /// indices, and is nullable.
-struct TextureCursor<'a> {
+pub(crate) struct TextureCursor<'a> {
+    solids: &'a [u32],
     surfaces: &'a [u32],
     shells: &'a [u32],
     strings: &'a [u32],
@@ -600,25 +531,25 @@ struct TextureCursor<'a> {
 }
 
 impl TextureCursor<'_> {
-    fn take_ring(&mut self) -> TexturedRing {
+    fn take_ring(&mut self) -> Result<TexturedRing, Error> {
         let size = self.strings.get(self.string_cursor).copied().unwrap_or(0) as usize;
         self.string_cursor += 1;
         let end = (self.vertex_cursor + size).min(self.vertices.len());
-        let ring = self.vertices[self.vertex_cursor..end]
+        let ring: Vec<Option<usize>> = self.vertices[self.vertex_cursor..end]
             .iter()
-            .map(|&v| index(v))
+            .map(|&v| (v != NULL).then_some(v as usize))
             .collect();
         self.vertex_cursor = end;
-        ring
+        TexturedRing::try_from(ring).map_err(|source| Error::CjseqError { source })
     }
 
-    fn take_surface(&mut self) -> TexturedSurface {
+    fn take_surface(&mut self) -> Result<TexturedSurface, Error> {
         let rings = self.surfaces.get(self.surface_cursor).copied().unwrap_or(0);
         self.surface_cursor += 1;
         (0..rings).map(|_| self.take_ring()).collect()
     }
 
-    fn take_shell(&mut self) -> TexturedShell {
+    fn take_shell(&mut self) -> Result<TexturedShell, Error> {
         let surfaces = self.shells.get(self.shell_cursor).copied().unwrap_or(0);
         self.shell_cursor += 1;
         (0..surfaces).map(|_| self.take_surface()).collect()
@@ -637,10 +568,9 @@ mod tests {
     use serde_json::json;
 
     /// Builds one FlatBuffers `MaterialMapping` from the raw arrays and runs it
-    /// through `decode_materials` at `geometry_type`, returning the decoded
+    /// through `decode_materials` into the shape `V`, returning the decoded
     /// `values` as JSON so expectations read as CityJSON.
-    fn decode_material_values(
-        geometry_type: GeometryType,
+    fn decode_material_values<V: UnflattenValues<MaterialIndex> + serde::Serialize>(
         solids: &[u32],
         shells: &[u32],
         vertices: &[u32],
@@ -663,12 +593,11 @@ mod tests {
         fbb.finish(mapping, None);
         let buf = fbb.finished_data().to_vec();
         let mapping = flatbuffers::root::<MaterialMapping>(&buf).expect("valid mapping");
-        let decoded = decode_materials(geometry_type, &[mapping]).expect("one theme");
+        let decoded = decode_materials::<V>(&[mapping]).expect("one theme");
         serde_json::to_value(&decoded["t"].values).expect("values serialize")
     }
 
-    fn decode_texture_values(
-        geometry_type: GeometryType,
+    fn decode_texture_values<V: UnflattenTextures + serde::Serialize>(
         solids: &[u32],
         shells: &[u32],
         surfaces: &[u32],
@@ -696,14 +625,19 @@ mod tests {
         fbb.finish(mapping, None);
         let buf = fbb.finished_data().to_vec();
         let mapping = flatbuffers::root::<FbTextureMapping>(&buf).expect("valid mapping");
-        let decoded = decode_textures(geometry_type, &[mapping]).expect("one theme");
+        let decoded = decode_textures::<V>(&[mapping])
+            .expect("valid rings")
+            .expect("one theme");
         serde_json::to_value(&decoded["t"].values).expect("values serialize")
     }
 
     #[test]
     fn test_decode_boundaries() -> Result<()> {
         // MultiPoint
-        assert_eq!(decode_points(&[2, 44, 0, 7]), vec![2, 44, 0, 7]);
+        assert_eq!(
+            serde_json::to_value(decode_points(&[2, 44, 0, 7]))?,
+            json!([2, 44, 0, 7])
+        );
 
         // MultiLineString
         assert_eq!(
@@ -789,30 +723,6 @@ mod tests {
         Ok(())
     }
 
-    /// A `Solid` and a one-solid `MultiSolid` flatten to byte-identical
-    /// material arrays. Only the geometry type tells them apart, and it must:
-    /// this is finding #8 in one assertion.
-    #[test]
-    fn identical_material_arrays_decode_to_different_depths_per_type() {
-        let (solids, shells, vertices) = (&[1u32][..], &[2u32][..], &[0u32, 1][..]);
-
-        assert_eq!(
-            decode_material_values(GeometryType::Solid, solids, shells, vertices),
-            json!([[0, 1]]),
-            "a Solid's material values are one array per shell"
-        );
-        assert_eq!(
-            decode_material_values(GeometryType::MultiSolid, solids, shells, vertices),
-            json!([[[0, 1]]]),
-            "a MultiSolid's are one array per shell, per solid"
-        );
-        assert_eq!(
-            decode_material_values(GeometryType::CompositeSolid, solids, shells, vertices),
-            json!([[[0, 1]]]),
-            "a CompositeSolid decodes exactly as a MultiSolid does"
-        );
-    }
-
     #[test]
     fn test_decode_materials() -> Result<()> {
         // A `value` colours the whole object, whatever the geometry type.
@@ -829,30 +739,34 @@ mod tests {
         fbb.finish(mapping, None);
         let buf = fbb.finished_data().to_vec();
         let mapping = flatbuffers::root::<MaterialMapping>(&buf)?;
-        let materials = decode_materials(GeometryType::Solid, &[mapping]).expect("one theme");
-        assert_eq!(materials["theme1"].value, Some(5));
+        let materials =
+            decode_materials::<SolidValues<MaterialIndex>>(&[mapping]).expect("one theme");
+        assert_eq!(materials["theme1"].value, Some(MaterialIndex(5)));
         assert!(materials["theme1"].values.is_none());
 
         // MultiSurface: one index per surface.
         assert_eq!(
-            decode_material_values(GeometryType::MultiSurface, &[], &[], &[0, 1, NULL, 2]),
+            decode_material_values::<PrimitiveValues<MaterialIndex>>(&[], &[], &[0, 1, NULL, 2]),
             json!([0, 1, null, 2])
         );
         assert_eq!(
-            decode_material_values(GeometryType::CompositeSurface, &[], &[], &[0, 1, NULL, 2]),
+            decode_material_values::<PrimitiveValues<MaterialIndex>>(&[], &[], &[0, 1, NULL, 2]),
             json!([0, 1, null, 2])
         );
 
         // Solid: one array per shell.
         assert_eq!(
-            decode_material_values(GeometryType::Solid, &[2], &[3, 3], &[0, 1, NULL, 2, 3, 4]),
+            decode_material_values::<SolidValues<MaterialIndex>>(
+                &[2],
+                &[3, 3],
+                &[0, 1, NULL, 2, 3, 4]
+            ),
             json!([[0, 1, null], [2, 3, 4]])
         );
 
         // CompositeSolid: one array per shell, per solid.
         assert_eq!(
-            decode_material_values(
-                GeometryType::CompositeSolid,
+            decode_material_values::<MultiSolidValues<MaterialIndex>>(
                 &[2, 1],
                 &[3, 3, 3],
                 &[0, 1, NULL, 2, NULL, NULL, 3, 4, NULL]
@@ -869,94 +783,84 @@ mod tests {
     #[test]
     fn a_null_material_shell_or_solid_decodes_as_null() {
         assert_eq!(
-            decode_material_values(GeometryType::Solid, &[2], &[2, NULL], &[0, 1]),
+            decode_material_values::<SolidValues<MaterialIndex>>(&[2], &[2, NULL], &[0, 1]),
             json!([[0, 1], null])
         );
         assert_eq!(
-            decode_material_values(GeometryType::CompositeSolid, &[1, NULL], &[2], &[0, 1]),
+            decode_material_values::<MultiSolidValues<MaterialIndex>>(&[1, NULL], &[2], &[0, 1]),
             json!([[[0, 1]], null])
         );
     }
 
+    /// Each ring is `[texture, uv, ...]`, or `[null]` for an untextured one,
+    /// regrouped at the depth of the shape `V`.
     #[test]
-    fn test_decode_textures() -> Result<()> {
+    fn test_decode_textures() {
         // MultiSurface: per surface, per ring.
         assert_eq!(
-            decode_texture_values(
-                GeometryType::MultiSurface,
+            decode_texture_values::<Vec<TexturedSurface>>(
                 &[],
                 &[3],
                 &[1, 1, 1],
-                &[4, 4, 4],
-                &[0, 10, 20, 30, 1, 11, 21, NULL, 2, 12, NULL, 32]
+                &[4, 1, 4],
+                &[0, 10, 20, 30, NULL, 2, 12, 22, 32]
             ),
-            json!([[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]])
+            json!([[[0, 10, 20, 30]], [[null]], [[2, 12, 22, 32]]])
         );
 
         // Solid: ... per shell.
         assert_eq!(
-            decode_texture_values(
-                GeometryType::Solid,
+            decode_texture_values::<Vec<TexturedShell>>(
                 &[2],
-                &[3, 2],
-                &[1, 1, 1, 1, 1],
-                &[4, 4, 4, 4, 4],
-                &[0, 10, 20, 30, 1, 11, 21, NULL, 2, 12, NULL, 32, 3, 13, 23, 33, 4, 14, 24, NULL]
+                &[2, 1],
+                &[1, 1, 1],
+                &[4, 1, 4],
+                &[0, 10, 20, 30, NULL, 3, 13, 23, 33]
             ),
-            json!([
-                [[[0, 10, 20, 30]], [[1, 11, 21, null]], [[2, 12, null, 32]]],
-                [[[3, 13, 23, 33]], [[4, 14, 24, null]]]
-            ])
+            json!([[[[0, 10, 20, 30]], [[null]]], [[[3, 13, 23, 33]]]])
         );
 
         // CompositeSolid: ... per solid.
         assert_eq!(
-            decode_texture_values(
-                GeometryType::CompositeSolid,
+            decode_texture_values::<Vec<Vec<TexturedShell>>>(
                 &[2, 1],
-                &[2, 2, 2],
-                &[1; 6],
-                &[3; 6],
-                &[0, 10, 20, 1, 11, NULL, 2, 12, 22, 3, NULL, 23, 4, 14, 24, 5, 15, 25]
+                &[1, 1, 1],
+                &[1, 1, 1],
+                &[3, 1, 3],
+                &[0, 10, 20, NULL, 4, 14, 24]
             ),
-            json!([
-                [
-                    [[[0, 10, 20]], [[1, 11, null]]],
-                    [[[2, 12, 22]], [[3, null, 23]]]
-                ],
-                [[[[4, 14, 24]], [[5, 15, 25]]]]
-            ])
+            json!([[[[[0, 10, 20]]], [[[null]]]], [[[[4, 14, 24]]]]])
         );
-
-        Ok(())
     }
 
-    /// The texture equivalent of the material assertion above: a `Solid` and a
-    /// one-solid `MultiSolid` emit identical texture arrays.
+    /// A ring that is neither `[null]` nor `[texture, uv, ...]` -- here a
+    /// texture with a missing uv -- is reported, not passed on.
     #[test]
-    fn identical_texture_arrays_decode_to_different_depths_per_type() {
-        let args = (
-            &[1u32][..],
-            &[1u32][..],
-            &[1u32][..],
-            &[3u32][..],
-            &[0u32, 10, 20][..],
+    fn a_malformed_texture_ring_is_an_error() {
+        let mut fbb = FlatBufferBuilder::new();
+        let theme = fbb.create_string("t");
+        let shells = fbb.create_vector(&[1u32]);
+        let surfaces = fbb.create_vector(&[1u32]);
+        let strings = fbb.create_vector(&[3u32]);
+        let vertices = fbb.create_vector(&[0u32, 10, NULL]);
+        let mapping = FbTextureMapping::create(
+            &mut fbb,
+            &TextureMappingArgs {
+                theme: Some(theme),
+                shells: Some(shells),
+                surfaces: Some(surfaces),
+                strings: Some(strings),
+                vertices: Some(vertices),
+                ..Default::default()
+            },
         );
-        assert_eq!(
-            decode_texture_values(GeometryType::Solid, args.0, args.1, args.2, args.3, args.4),
-            json!([[[[0, 10, 20]]]])
-        );
-        assert_eq!(
-            decode_texture_values(
-                GeometryType::MultiSolid,
-                args.0,
-                args.1,
-                args.2,
-                args.3,
-                args.4
-            ),
-            json!([[[[[0, 10, 20]]]]])
-        );
+        fbb.finish(mapping, None);
+        let buf = fbb.finished_data().to_vec();
+        let mapping = flatbuffers::root::<FbTextureMapping>(&buf).expect("valid mapping");
+        assert!(matches!(
+            decode_textures::<Vec<TexturedSurface>>(&[mapping]),
+            Err(Error::CjseqError { .. })
+        ));
     }
 
     // ---------------------------------------------------------------------

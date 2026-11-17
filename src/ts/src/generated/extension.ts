@@ -85,8 +85,15 @@ extraSemanticSurfaces(optionalEncoding?:any):string|Uint8Array|null {
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
 
+members():string|null
+members(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+members(optionalEncoding?:any):string|Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 22);
+  return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
+}
+
 static startExtension(builder:flatbuffers.Builder) {
-  builder.startObject(9);
+  builder.startObject(10);
 }
 
 static addName(builder:flatbuffers.Builder, nameOffset:flatbuffers.Offset) {
@@ -125,12 +132,16 @@ static addExtraSemanticSurfaces(builder:flatbuffers.Builder, extraSemanticSurfac
   builder.addFieldOffset(8, extraSemanticSurfacesOffset, 0);
 }
 
+static addMembers(builder:flatbuffers.Builder, membersOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(9, membersOffset, 0);
+}
+
 static endExtension(builder:flatbuffers.Builder):flatbuffers.Offset {
   const offset = builder.endObject();
   return offset;
 }
 
-static createExtension(builder:flatbuffers.Builder, nameOffset:flatbuffers.Offset, descriptionOffset:flatbuffers.Offset, urlOffset:flatbuffers.Offset, versionOffset:flatbuffers.Offset, versionCityjsonOffset:flatbuffers.Offset, extraAttributesOffset:flatbuffers.Offset, extraCityObjectsOffset:flatbuffers.Offset, extraRootPropertiesOffset:flatbuffers.Offset, extraSemanticSurfacesOffset:flatbuffers.Offset):flatbuffers.Offset {
+static createExtension(builder:flatbuffers.Builder, nameOffset:flatbuffers.Offset, descriptionOffset:flatbuffers.Offset, urlOffset:flatbuffers.Offset, versionOffset:flatbuffers.Offset, versionCityjsonOffset:flatbuffers.Offset, extraAttributesOffset:flatbuffers.Offset, extraCityObjectsOffset:flatbuffers.Offset, extraRootPropertiesOffset:flatbuffers.Offset, extraSemanticSurfacesOffset:flatbuffers.Offset, membersOffset:flatbuffers.Offset):flatbuffers.Offset {
   Extension.startExtension(builder);
   Extension.addName(builder, nameOffset);
   Extension.addDescription(builder, descriptionOffset);
@@ -141,6 +152,7 @@ static createExtension(builder:flatbuffers.Builder, nameOffset:flatbuffers.Offse
   Extension.addExtraCityObjects(builder, extraCityObjectsOffset);
   Extension.addExtraRootProperties(builder, extraRootPropertiesOffset);
   Extension.addExtraSemanticSurfaces(builder, extraSemanticSurfacesOffset);
+  Extension.addMembers(builder, membersOffset);
   return Extension.endExtension(builder);
 }
 }

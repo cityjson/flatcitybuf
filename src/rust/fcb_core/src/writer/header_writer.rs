@@ -1,6 +1,8 @@
 use crate::error::Result;
 use crate::packed_rtree::PackedRTree;
 use crate::serializer::to_fcb_header;
+use crate::static_btree::DEFAULT_BRANCHING_FACTOR;
+use crate::ID_COLUMN_NAME;
 use cjseq::CityJSON;
 use flatbuffers::FlatBufferBuilder;
 
@@ -22,6 +24,10 @@ pub struct HeaderWriter<'a> {
     pub semantic_attr_schema: Option<AttributeSchema>,
     /// Attribute indices
     pub(super) attribute_indices_info: Option<Vec<AttributeIndexInfo>>,
+    /// The index of the City Object id column, when the file gets an id
+    /// index. It is not part of `attr_schema`, so no attribute is ever
+    /// encoded under it.
+    pub(super) id_column: Option<u16>,
 }
 
 /// Configuration options for header writing process
@@ -36,6 +42,17 @@ pub struct HeaderWriterOptions {
     pub attribute_indices: Option<Vec<(String, Option<u16>)>>, // (field name, branching factor)
     /// Geographical extent
     pub geographical_extent: Option<[f64; 6]>,
+    /// The branching factor of the index over City Object ids, or `None` to
+    /// write no such index.
+    ///
+    /// The index holds the id of every City Object, a feature's children
+    /// included, and is queried as the column
+    /// [`ID_COLUMN_NAME`](crate::ID_COLUMN_NAME). The ids are not copied into
+    /// the attributes: the header declares the column with
+    /// `primary_key = true` and a reader takes its value from `CityObject.id`.
+    /// A dataset whose attribute schema already has a column of that name
+    /// keeps it, and gets no id index.
+    pub id_index: Option<u16>,
 }
 
 impl Default for HeaderWriterOptions {
@@ -46,6 +63,7 @@ impl Default for HeaderWriterOptions {
             feature_count: 0,
             attribute_indices: None,
             geographical_extent: None,
+            id_index: Some(DEFAULT_BRANCHING_FACTOR),
         }
     }
 }
@@ -92,6 +110,19 @@ impl<'a> HeaderWriter<'a> {
         if !options.write_index {
             options.index_node_size = 0;
         }
+        // The next free column index. The dataset's own `id` attribute wins
+        // over the id column: two columns of one name could not be told
+        // apart in a query.
+        let id_column = options
+            .id_index
+            .filter(|_| !attr_schema.contains_key(ID_COLUMN_NAME))
+            .map(|_| {
+                attr_schema
+                    .values()
+                    .map(|(index, _)| index + 1)
+                    .max()
+                    .unwrap_or(0)
+            });
         HeaderWriter {
             fbb,
             cj,
@@ -99,6 +130,7 @@ impl<'a> HeaderWriter<'a> {
             attr_schema,
             semantic_attr_schema,
             attribute_indices_info: None,
+            id_column,
         }
     }
 
@@ -113,6 +145,7 @@ impl<'a> HeaderWriter<'a> {
             &self.cj,
             self.header_options,
             &self.attr_schema,
+            self.id_column,
             self.semantic_attr_schema.as_ref(),
             self.attribute_indices_info
                 .as_ref()
