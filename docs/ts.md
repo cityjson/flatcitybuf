@@ -158,6 +158,9 @@ to npm).
   be combined with `where` — that throws `UnsupportedQueryCombination`.
 - `operator` is one of `Eq | Ne | Gt | Ge | Lt | Le`; multiple `where`
   conditions are AND-intersected.
+- A file whose writer indexed the City Object ids has a string column named
+  `id` (`primaryKey` is set on its `ColumnInfo`): `{ field: 'id', operator:
+  'Eq', value: … }` finds an object by its id through that index.
 - A `String` attribute index stores keys truncated to 50 bytes, so it answers
   with **candidates**. `FcbReader.select` post-filters them against each
   feature's fully decoded attributes before counting and paging, so what you

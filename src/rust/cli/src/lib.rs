@@ -71,4 +71,7 @@ pub enum CliError {
 
     #[error("CityGML error: {0}")]
     CityGml(String),
+
+    #[error("the input changed while it was being read: {expected} features, then {found}")]
+    InputChanged { expected: usize, found: usize },
 }

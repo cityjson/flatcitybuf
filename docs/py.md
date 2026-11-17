@@ -102,6 +102,9 @@ Entry points: `FcbReader.open_file` (`src/py/flatcitybuf/reader.py:133`),
   byte offsets, sorted ascending — and `FcbReader.feature_at(hit)` is the
   public inverse that decodes one. There is no `select_bbox` that filters and
   decodes in one call.
+- A file whose writer indexed the City Object ids has a string column named
+  `id` (`ColumnInfo.primary_key` is set on it): `select_attr` with a condition
+  on `id` finds an object by its id through that index.
 - `search_rtree` is a **free function over a `RangeReader`**, not a method, so
   pass it `reader.range_reader` plus the geometry from `reader.header`.
 - Bytes come from any `RangeReader`: `FileRangeReader`, `HttpRangeReader`, or

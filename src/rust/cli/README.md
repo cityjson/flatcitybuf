@@ -106,6 +106,20 @@ fcb ser 53394519_bldg_6697_op.gml bldg.fcb
 fcb ser 'udx/bldg/*.gml' bldg.fcb
 ```
 
+**Memory.** `ser` reads a CityJSONSeq (`.jsonl`) input once per pass, one
+line at a time, and never holds its features together: one pass counts them
+without parsing them, one parses them all for the schema of the semantic
+surfaces' attributes (the attribute schema comes from the first 1,000), and
+the last writes them. `--bbox` and `--ge` add a pass each. A CityJSON (`.json`) document has to be parsed
+whole, so its features are held in memory; convert a large one to CityJSONSeq
+first. The features are written to a temporary file in `$TMPDIR` as they are
+encoded and copied from there into the output in spatial order, so `$TMPDIR`
+needs room for about the size of the output. What stays in memory grows with
+the feature count: one spatial index entry per feature and, for every
+indexed attribute, one index entry per feature. On a 3DBAG extract
+(499,703 features, 2.4 GB of CityJSONSeq) `ser -A` peaks at 1.8 GB, and plain
+`ser` at 0.45 GB.
+
 **CityGML input.** The CityGML is read by the
 [`citygml` crates](https://github.com/cityjson/cityparquet/tree/develop/lib/citygml-rs),
 the same reader `cityparquet` uses, so both tools give the same CityJSON for a
@@ -281,7 +295,6 @@ The CLI provides detailed error messages for common issues:
 - Invalid file formats
 - Missing input files
 - Malformed bounding box coordinates
-- Memory limitations for large datasets
 
 ## License
 

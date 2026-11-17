@@ -306,8 +306,10 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         term.write_line("").ok();
     }
 
-    // Read and merge input files. CityGML is read one feature at a time and
-    // spooled to disk, CityJSON into memory.
+    // Open and merge the input files. Their features are read once per pass
+    // below, never all at once: CityJSONSeq from the inputs themselves,
+    // CityGML from a spool on disk. Only a CityJSON document, which has to be
+    // parsed whole, is held in memory.
     #[cfg(feature = "citygml")]
     let citygml = input_paths
         .iter()
@@ -630,13 +632,23 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
         None
     };
 
+    let mut written = 0usize;
     features.each(&keep, |feature| {
         fcb.add_feature(feature)?;
+        written += 1;
         if let Some(ref pb) = pb {
             pb.inc(1);
         }
         Ok(true)
     })?;
+    // The inputs are read once per pass, so an input that changed while it was
+    // being read would leave the header's feature count wrong.
+    if written != kept_count {
+        return Err(CliError::InputChanged {
+            expected: kept_count,
+            found: written,
+        });
+    }
 
     if let Some(ref pb) = pb {
         pb.finish_and_clear();
@@ -669,10 +681,11 @@ fn serialize(inputs: &[String], output: &str, options: SerializeOptions) -> Resu
     Ok(())
 }
 
-/// The features `ser` converts: CityJSON read into memory, or CityGML read
-/// one feature at a time and spooled to a temporary file.
+/// The features `ser` converts: CityJSON / CityJSONSeq read from the inputs
+/// again on every pass, or CityGML read one feature at a time and spooled to a
+/// temporary file.
 enum Features {
-    Memory(Vec<CityJSONFeature>),
+    CityJson(Box<fcb_cli::merger::MergedInput>),
     #[cfg(feature = "citygml")]
     Spooled(fcb_cli::citygml::Spool),
 }
@@ -680,7 +693,7 @@ enum Features {
 impl Features {
     fn len(&self) -> usize {
         match self {
-            Features::Memory(features) => features.len(),
+            Features::CityJson(input) => input.len(),
             #[cfg(feature = "citygml")]
             Features::Spooled(spool) => spool.len(),
         }
@@ -694,9 +707,10 @@ impl Features {
         mut f: impl FnMut(&CityJSONFeature) -> Result<bool, CliError>,
     ) -> Result<(), CliError> {
         match self {
-            Features::Memory(features) => {
-                for feature in features.iter().filter(|f| keep(f)) {
-                    if !f(feature)? {
+            Features::CityJson(input) => {
+                for feature in input.features() {
+                    let feature = feature?;
+                    if keep(&feature) && !f(&feature)? {
                         break;
                     }
                 }
@@ -758,7 +772,8 @@ fn read_features(
     #[cfg(not(feature = "citygml"))]
     let _ = (citygml, term, is_stdout);
     let merged = fcb_cli::merger::merge_files(input_paths)?;
-    Ok((merged.metadata, Features::Memory(merged.features)))
+    let header = merged.metadata.clone();
+    Ok((header, Features::CityJson(Box::new(merged))))
 }
 
 /// Parse a bounding box string in format "minx,miny,maxx,maxy"
