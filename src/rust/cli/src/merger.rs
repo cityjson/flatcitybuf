@@ -3,64 +3,162 @@
 //! This module handles merging multiple input files with transform alignment.
 //! When files have different transforms (scale/translate), vertices from
 //! subsequent files are converted to match the first file's transform.
+//!
+//! A CityJSONSeq (`.jsonl`) input is not held in memory: it is read again,
+//! one line at a time, each time the merged features are iterated. A CityJSON
+//! (`.json`) document has to be parsed whole to be sliced into features, so
+//! its features are kept in memory.
 
 use cjseq::{CityJSON, CityJSONFeature, Transform};
+use std::borrow::Cow;
 use std::path::PathBuf;
 
-use crate::reader::read_input_file;
+use crate::reader::{count_cityjsonseq_features, read_cityjsonseq, read_input_file, InputFormat};
 use crate::CliError;
 
-/// Result of merging multiple input files
-pub struct MergeResult {
+/// Several CityJSON/CityJSONSeq files merged onto the first one's transform.
+///
+/// The features are not collected: [`MergedInput::features`] reads them from
+/// their files, in order, every time it is called.
+pub struct MergedInput {
     /// Merged CityJSON metadata (from first file)
     pub metadata: CityJSON,
-    /// All features from all files (with aligned transforms)
-    pub features: Vec<CityJSONFeature>,
+    sources: Vec<Source>,
+    len: usize,
 }
 
-/// Merge multiple CityJSON/CityJSONSeq files into a single result
+/// One input file.
+enum Source {
+    /// A CityJSONSeq file, read again on every pass, and its transform when it
+    /// is not the reference transform.
+    Sequence {
+        path: PathBuf,
+        transform: Option<Transform>,
+    },
+    /// A CityJSON document's features, already aligned to the reference
+    /// transform.
+    Document(Vec<CityJSONFeature>),
+}
+
+impl MergedInput {
+    /// How many features the inputs hold.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// The features of every input, in input order, with their vertices on
+    /// the first input's transform. A CityJSONSeq input is parsed again, one
+    /// line at a time, on each call.
+    pub fn features(&self) -> impl Iterator<Item = FeatureResult<'_>> + '_ {
+        self.sources
+            .iter()
+            .flat_map(|source| source.features(&self.metadata.transform))
+    }
+}
+
+/// A feature of a [`MergedInput`]: borrowed when it is held in memory, owned
+/// when it was read from its file for this pass.
+pub type FeatureResult<'a> = Result<Cow<'a, CityJSONFeature>, CliError>;
+
+impl Source {
+    fn features<'a>(
+        &'a self,
+        reference: &'a Transform,
+    ) -> Box<dyn Iterator<Item = FeatureResult<'a>> + 'a> {
+        match self {
+            Source::Document(features) => {
+                Box::new(features.iter().map(|feature| Ok(Cow::Borrowed(feature))))
+            }
+            Source::Sequence { path, transform } => match read_cityjsonseq(path) {
+                Err(error) => Box::new(std::iter::once(Err(error))),
+                Ok((_, features)) => Box::new(features.map(move |feature| {
+                    let feature = feature?;
+                    Ok(Cow::Owned(match transform {
+                        Some(source) => convert_feature_transform(feature, source, reference),
+                        None => feature,
+                    }))
+                })),
+            },
+        }
+    }
+}
+
+/// Open several CityJSON/CityJSONSeq files as one input.
 ///
 /// The first file's transform becomes the reference. Features from subsequent
 /// files have their vertices converted to use the reference transform.
-pub fn merge_files(paths: Vec<PathBuf>) -> Result<MergeResult, CliError> {
+///
+/// Each CityJSONSeq file is read here only for its metadata line and its
+/// feature count; its features are parsed when [`MergedInput::features`] is
+/// iterated.
+pub fn merge_files(paths: Vec<PathBuf>) -> Result<MergedInput, CliError> {
     if paths.is_empty() {
         return Err(CliError::NoInputFiles);
     }
 
-    let mut paths_iter = paths.into_iter();
+    let mut metadata: Option<CityJSON> = None;
+    let mut sources = Vec::with_capacity(paths.len());
+    let mut len = 0;
 
-    // Read the first file - its transform becomes the reference
-    let first_path = paths_iter.next().ok_or(CliError::NoInputFiles)?;
-    let first_data = read_input_file(&first_path)?;
-    let reference_transform = first_data.metadata.transform.clone();
-
-    let mut result = MergeResult {
-        metadata: first_data.metadata,
-        features: first_data.features,
-    };
-
-    // Process remaining files
-    for path in paths_iter {
-        let data = read_input_file(&path)?;
-
-        // Check if transforms are the same
-        if transforms_equal(&data.metadata.transform, &reference_transform) {
-            // Same transform - just append features
-            result.features.extend(data.features);
-        } else {
-            // Different transform - need to convert vertices
-            for feature in data.features {
-                let converted = convert_feature_transform(
-                    feature,
-                    &data.metadata.transform,
-                    &reference_transform,
-                );
-                result.features.push(converted);
+    for path in paths {
+        let (file_metadata, source) = match InputFormat::from_path(&path)? {
+            InputFormat::CityJSONSeq => {
+                let (file_metadata, _) = read_cityjsonseq(&path)?;
+                len += count_cityjsonseq_features(&path)?;
+                (
+                    file_metadata,
+                    Source::Sequence {
+                        path,
+                        transform: None,
+                    },
+                )
             }
-        }
+            InputFormat::CityJSON => {
+                let data = read_input_file(&path)?;
+                len += data.features.len();
+                (data.metadata, Source::Document(data.features))
+            }
+        };
+
+        let source = match &metadata {
+            // The first file's transform is the reference
+            None => source,
+            Some(reference) if transforms_equal(&file_metadata.transform, &reference.transform) => {
+                source
+            }
+            // Different transform - need to convert vertices
+            Some(reference) => match source {
+                Source::Sequence { path, .. } => Source::Sequence {
+                    path,
+                    transform: Some(file_metadata.transform.clone()),
+                },
+                Source::Document(features) => Source::Document(
+                    features
+                        .into_iter()
+                        .map(|feature| {
+                            convert_feature_transform(
+                                feature,
+                                &file_metadata.transform,
+                                &reference.transform,
+                            )
+                        })
+                        .collect(),
+                ),
+            },
+        };
+        sources.push(source);
+        metadata.get_or_insert(file_metadata);
     }
 
-    Ok(result)
+    Ok(MergedInput {
+        metadata: metadata.ok_or(CliError::NoInputFiles)?,
+        sources,
+        len,
+    })
 }
 
 /// Check if two transforms are equal

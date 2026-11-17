@@ -34,7 +34,7 @@ impl InputFormat {
     }
 }
 
-/// Result of reading an input file
+/// Result of reading an input file into memory
 pub struct InputData {
     /// CityJSON metadata (first line of CityJSONSeq)
     pub metadata: CityJSON,
@@ -42,7 +42,7 @@ pub struct InputData {
     pub features: Vec<CityJSONFeature>,
 }
 
-/// Read a CityJSON or CityJSONSeq file and return unified data
+/// Read a CityJSON or CityJSONSeq file into memory and return unified data
 ///
 /// - `.json` files are parsed as CityJSON and converted to features
 /// - `.jsonl` files are parsed as CityJSONTextSequence directly
@@ -73,27 +73,54 @@ fn read_cityjson_file(path: &Path) -> Result<InputData, CliError> {
 
 /// Read a CityJSONSeq file (first line is metadata, rest are features)
 fn read_cityjsonseq_file(path: &Path) -> Result<InputData, CliError> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut lines = reader.lines();
+    let (metadata, features) = read_cityjsonseq(path)?;
+    let features = features.collect::<Result<Vec<_>, _>>()?;
+    Ok(InputData { metadata, features })
+}
 
-    // First line is the CityJSON metadata
+/// Open a CityJSONSeq file: its metadata line, parsed, and its features,
+/// parsed one line at a time as the iterator is advanced. Blank lines are
+/// skipped.
+///
+/// Nothing is held in memory but the line being parsed, so this is the way to
+/// read a sequence too large to fit.
+pub fn read_cityjsonseq(
+    path: &Path,
+) -> Result<
+    (
+        CityJSON,
+        impl Iterator<Item = Result<CityJSONFeature, CliError>>,
+    ),
+    CliError,
+> {
+    let mut lines = open_cityjsonseq(path)?;
     let first_line = lines
         .next()
         .ok_or_else(|| CliError::EmptyFile(path.display().to_string()))??;
     let metadata: CityJSON = serde_json::from_str(&first_line)?;
+    let features = lines.filter_map(|line| match line {
+        Err(error) => Some(Err(error.into())),
+        Ok(line) if line.trim().is_empty() => None,
+        Ok(line) => Some(serde_json::from_str::<CityJSONFeature>(&line).map_err(Into::into)),
+    });
+    Ok((metadata, features))
+}
 
-    // Remaining lines are CityJSONFeatures
-    let mut features = Vec::new();
-    for line in lines {
-        let line = line?;
-        if !line.trim().is_empty() {
-            let feature: CityJSONFeature = serde_json::from_str(&line)?;
-            features.push(feature);
-        }
-    }
+/// How many features a CityJSONSeq file holds: its non-blank lines after the
+/// metadata line, counted without parsing them.
+pub fn count_cityjsonseq_features(path: &Path) -> Result<usize, CliError> {
+    let mut lines = open_cityjsonseq(path)?;
+    lines
+        .next()
+        .ok_or_else(|| CliError::EmptyFile(path.display().to_string()))??;
+    lines.try_fold(0, |count, line| {
+        Ok(count + usize::from(!line?.trim().is_empty()))
+    })
+}
 
-    Ok(InputData { metadata, features })
+fn open_cityjsonseq(path: &Path) -> Result<std::io::Lines<BufReader<File>>, CliError> {
+    let file = File::open(path)?;
+    Ok(BufReader::with_capacity(1 << 20, file).lines())
 }
 
 #[cfg(test)]
