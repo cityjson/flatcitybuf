@@ -24,7 +24,11 @@ contract remains unchanged.
 The root response advertises only self, conformance, and collections; the
 unimplemented documentation endpoints are not linked.
 
-This work deliberately excludes local concurrency refactoring and the
-planned documentation endpoints/schema, so it makes no new formal OGC
-conformance claim. See docs/upstream-findings.md for reader defects found by
+Local reads run in `spawn_blocking`. A full-scan page is located through the
+R-tree leaves (`select_all_paged`), falling back to skipping only for a file
+without an R-tree. A dataset with features must index `identificatie`, or
+startup fails. A bbox in another CRS is reprojected from its four corners.
+
+The planned documentation endpoints/schema are not implemented, so the API
+makes no formal OGC conformance claim. See docs/upstream-findings.md for reader defects found by
 the API tests and their fixes.

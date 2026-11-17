@@ -132,6 +132,12 @@ pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router>
         "unsupported storage CRS"
     );
     fcb_metadata.storage_crs = crs.uri().into();
+    // An empty dataset has no columns and no items to look up.
+    anyhow::ensure!(
+        fcb_metadata.features_count == 0 || fcb_metadata.has_item_index(),
+        "dataset has no attribute index on `{}`, which items are looked up by",
+        constants::ITEM_ID_COLUMN
+    );
 
     let state = Arc::new(AppState {
         fcb_url: fcb_url.clone(),

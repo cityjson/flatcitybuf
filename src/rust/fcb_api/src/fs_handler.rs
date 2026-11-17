@@ -8,7 +8,7 @@ use axum::{
 use chrono::Utc;
 use cjseq::CityJSONFeature;
 use fcb_core::packed_rtree::Query;
-use fcb_core::{deserializer, FcbReader, FixedStringKey, KeyType, Operator};
+use fcb_core::{FcbReader, FixedStringKey, KeyType, Operator};
 use std::error::Error as StdError;
 use std::fs::File;
 use std::io::BufReader;
@@ -78,96 +78,23 @@ pub async fn collection_items(
         }
     }
 
-    // Open local file reader
-    let file = match File::open(&state.fcb_url) {
-        Ok(f) => f,
-        Err(e) => {
-            error!(
-                "Failed to open FCB file '{}' for collection '{}': {:?}",
-                state.fcb_url, collection_id, e
-            );
-            error!(
-                "File open error context: path={}, errno={}",
-                state.fcb_url, e
-            );
-            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
-        }
-    };
-
-    let buf_reader = BufReader::new(file);
-    let reader = match FcbReader::open(buf_reader) {
-        Ok(reader) => reader,
-        Err(e) => {
-            error!(
-                "Failed to open FCB reader for collection '{}': {:?}",
-                collection_id, e
-            );
-            error!("FCB reader error details: {:#}", e);
-            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
-        }
-    };
-
-    // Need to reopen the file for querying since we can't hold the header borrow
-    // while moving the reader
-    let file2 = match File::open(&state.fcb_url) {
-        Ok(f) => f,
-        Err(e) => {
-            error!(
-                "Failed to reopen FCB file '{}' for querying: {:?}",
-                state.fcb_url, e
-            );
-            error!(
-                "File reopen error context: path={}, errno={}",
-                state.fcb_url, e
-            );
-            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
-        }
-    };
-
-    let buf_reader2 = BufReader::new(file2);
-    let query_reader = match FcbReader::open(buf_reader2) {
-        Ok(reader) => reader,
-        Err(e) => {
-            error!(
-                "Failed to reopen FCB reader for querying collection '{}': {:?}",
-                collection_id, e
-            );
-            error!("FCB query reader error details: {:#}", e);
-            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
-        }
-    };
-
-    // Store header for later use
-    let header = reader.header();
-
-    // Clone filter_conditions for logging (since it will be moved)
-    let filter_conditions_log = filter_conditions.clone();
-
-    // Apply filtering (bbox and/or attribute filters)
-    let res = fetch_features_with_filter(
-        query_reader,
-        bbox.as_ref(),
-        filter_conditions,
-        limit,
-        offset,
-    );
-
-    let (features, total_count) = match res {
-        Ok(features) => features,
-        Err(e) => {
-            error!(
-                "Failed to fetch features for collection '{}' with bbox={:?}, filter={:?}, limit={}, offset={}: {:?}",
-                collection_id, bbox, filter_conditions_log, limit, offset, e
-            );
-            error!("Query execution error details: {:#}", e);
-
-            // Note: anyhow::Error doesn't support .chain(), so we log the source if available
-            if let Some(source) = e.source() {
-                error!("Error source: {:?}", source);
-            }
-
-            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
-        }
+    // Local reads are synchronous: run them off the async workers.
+    let path = state.fcb_url.clone();
+    let has_rtree = state.fcb_metadata.has_rtree;
+    let read = tokio::task::spawn_blocking(move || {
+        fetch_features_with_filter(
+            open_reader(&path)?,
+            bbox.as_ref(),
+            filter_conditions,
+            limit,
+            offset,
+            has_rtree,
+        )
+    });
+    let (features, total_count) = match read.await {
+        Ok(Ok(features)) => features,
+        Ok(Err(e)) => return Err(ApiError::storage(format!("{e:#}"))),
+        Err(e) => return Err(ApiError::storage(e)),
     };
 
     // Handle different output formats
@@ -177,17 +104,7 @@ pub async fn collection_items(
     match format.as_str() {
         "cjseq" => {
             // Generate CityJSONSeq format
-            let metadata = match deserializer::to_cj_metadata(&header) {
-                Ok(meta) => meta,
-                Err(e) => {
-                    error!(
-                        "Failed to generate CityJSON metadata for cjseq format (collection '{}'): {:?}",
-                        collection_id, e
-                    );
-                    error!("Metadata generation error details: {:#}", e);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
-                }
-            };
+            let metadata = state.fcb_metadata.cityjson_header()?;
 
             let mut output = String::new();
             // First line: metadata
@@ -226,17 +143,7 @@ pub async fn collection_items(
         }
         "cityjson" => {
             // Generate CityJSON format by combining all features
-            let cjj = match deserializer::to_cj_metadata(&header) {
-                Ok(meta) => meta,
-                Err(e) => {
-                    error!(
-                        "Failed to generate CityJSON metadata for cityjson format (collection '{}'): {:?}",
-                        collection_id, e
-                    );
-                    error!("Metadata generation error details: {:#}", e);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
-                }
-            };
+            let cjj = state.fcb_metadata.cityjson_header()?;
 
             // Collect all features into one CityJSON object, which merges
             // duplicate vertices and moves the transform to the data.
@@ -270,17 +177,7 @@ pub async fn collection_items(
         }
         "obj" => {
             // Generate OBJ format
-            let cjj = match deserializer::to_cj_metadata(&header) {
-                Ok(meta) => meta,
-                Err(e) => {
-                    error!(
-                        "Failed to generate CityJSON metadata for obj format (collection '{}'): {:?}",
-                        collection_id, e
-                    );
-                    error!("Metadata generation error details: {:#}", e);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
-                }
-            };
+            let cjj = state.fcb_metadata.cityjson_header()?;
 
             // Collect all features into one CityJSON object, which merges
             // duplicate vertices and moves the transform to the data.
@@ -366,38 +263,17 @@ pub async fn collection_item_by_id(
     }
 
     validate_output_crs(query.crs.as_deref(), &state)?;
-    // Open local file reader
-    let file = match File::open(&state.fcb_url) {
-        Ok(f) => f,
-        Err(e) => {
-            error!(
-                "Failed to open FCB file '{}' for item '{}' in collection '{}': {:?}",
-                state.fcb_url, item_id, collection_id, e
-            );
-            error!(
-                "File open error context: path={}, errno={}",
-                state.fcb_url, e
-            );
-            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
-        }
-    };
-
-    let buf_reader = BufReader::new(file);
-    let reader = match FcbReader::open(buf_reader) {
-        Ok(reader) => reader,
-        Err(e) => {
-            error!(
-                "Failed to open FCB reader for item '{}' in collection '{}': {:?}",
-                item_id, collection_id, e
-            );
-            error!("FCB reader error details: {:#}", e);
-            return Err(StatusCode::SERVICE_UNAVAILABLE.into());
-        }
-    };
-
-    let feature = fetch_feature_by_id(reader, &item_id)
-        .map_err(ApiError::storage)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+    if !state.fcb_metadata.has_item_index() {
+        return Err(StatusCode::NOT_FOUND.into());
+    }
+    let path = state.fcb_url.clone();
+    let id = item_id.clone();
+    let feature =
+        tokio::task::spawn_blocking(move || fetch_feature_by_id(open_reader(&path)?, &id))
+            .await
+            .map_err(ApiError::storage)?
+            .map_err(|e| ApiError::storage(format!("{e:#}")))?
+            .ok_or(StatusCode::NOT_FOUND)?;
     let links = build_feature_links(
         &state.base_url,
         &collection_id,
@@ -413,6 +289,10 @@ pub async fn collection_item_by_id(
         id: Some(id),
         links: Some(links),
     }))
+}
+
+fn open_reader(path: &str) -> Result<FcbReader<BufReader<File>>, anyhow::Error> {
+    Ok(FcbReader::open(BufReader::new(File::open(path)?))?)
 }
 
 fn fetch_features_by_bbox(
@@ -460,33 +340,30 @@ fn fetch_features_limited(
     reader: FcbReader<BufReader<File>>,
     limit: usize,
     offset: usize,
+    has_rtree: bool,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
-    // For full scan with pagination
-    let mut iter = reader.select_all()?;
-
-    // Skip offset
-    let mut skipped: usize = 0;
-    while skipped < offset {
-        match iter.next()? {
-            Some(_) => skipped += 1,
-            None => break,
+    // The R-tree leaves locate the page. Without them the only way to a
+    // page is through every feature before it.
+    let mut iter = if has_rtree {
+        reader.select_all_paged(Some(limit), Some(offset))?
+    } else {
+        let mut iter = reader.select_all()?;
+        let mut skipped: usize = 0;
+        while skipped < offset && iter.next()?.is_some() {
+            skipped += 1;
         }
-    }
+        iter
+    };
 
     let mut features = Vec::new();
-    let mut count = 0;
-
-    while count < limit {
+    while features.len() < limit {
         match iter.next()? {
-            Some(feature_iter) => {
-                features.push(feature_iter.cur_cj_feature()?);
-                count += 1;
-            }
+            Some(feature_iter) => features.push(feature_iter.cur_cj_feature()?),
             None => break,
         }
     }
 
-    let features_count = iter.features_count().unwrap_or(count);
+    let features_count = iter.features_count().unwrap_or(features.len());
 
     Ok((features, features_count))
 }
@@ -499,7 +376,7 @@ fn fetch_feature_by_id(
         return Ok(None);
     }
     let query: Vec<(String, Operator, KeyType)> = vec![(
-        "identificatie".to_string(),
+        ITEM_ID_COLUMN.to_string(),
         Operator::Eq,
         KeyType::StringKey50(FixedStringKey::from_str(feature_id)),
     )];
@@ -519,6 +396,7 @@ fn fetch_features_with_filter(
     filter_conditions: Option<Vec<(String, Operator, KeyType)>>,
     limit: usize,
     offset: usize,
+    has_rtree: bool,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     match (bbox, filter_conditions) {
         (Some(_), Some(_)) => unreachable!("combined queries rejected by validation"),
@@ -570,6 +448,6 @@ fn fetch_features_with_filter(
         // Only bbox
         (Some(bbox), None) => fetch_features_by_bbox(reader, bbox, limit, offset),
         // Neither bbox nor filter
-        (None, None) => fetch_features_limited(reader, limit, offset),
+        (None, None) => fetch_features_limited(reader, limit, offset, has_rtree),
     }
 }

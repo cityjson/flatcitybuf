@@ -37,11 +37,13 @@ output CRS requests return 400. Bbox inputs additionally accept EPSG:4326 and
 CRS84. **EPSG:4326 uses latitude/longitude axis order**; use CRS84 for
 longitude/latitude. Six-coordinate bboxes filter horizontally only.
 
-Startup fails if dataset metadata cannot be loaded. `GET /readyz` opens the
+Startup fails if dataset metadata cannot be loaded, or if a dataset with
+features has no attribute index on `identificatie`, which items are looked up
+by. `GET /readyz` opens the
 dataset again and returns 200 when accessible, otherwise 503. Remote startup
 and readiness reads use `DATASET_PROBE_TIMEOUT_SECONDS` (positive, default 10).
 Other remote reads have a 5-second connection timeout and 30-second request
-timeout. Local reads remain synchronous. Treat datasets as immutable while
+timeout. Local reads run on Tokio's blocking thread pool. Treat datasets as immutable while
 serving; restart after replacing them. Missing features return 404, while
 storage failures return 503.
 

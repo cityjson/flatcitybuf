@@ -156,6 +156,12 @@ while let Some(feature) = hits.next()? {
 }
 ```
 
+`select_all_paged(limit, offset)` reads one page of the whole file. It takes
+the page's byte offsets from the R-tree leaves, so a page far into the file
+costs no more than the first one; `select_query` takes the same two arguments
+for a page of a bounding box. `features_count()` on either iterator is the
+number of matches, not the size of the page.
+
 Each `select_*` has a `_seq` twin (`select_all_seq`, `select_query_seq`,
 `select_attr_query_seq`) for a `Read`-only stream that cannot seek.
 

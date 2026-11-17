@@ -102,6 +102,7 @@ pub async fn collection_items(
         filter_conditions,
         limit,
         offset,
+        state.fcb_metadata.has_rtree,
     )
     .await;
 
@@ -297,6 +298,9 @@ pub async fn collection_item_by_id(
     }
 
     validate_output_crs(query.crs.as_deref(), &state)?;
+    if !state.fcb_metadata.has_item_index() {
+        return Err(StatusCode::NOT_FOUND.into());
+    }
     let http_reader = match state.http_reader().await {
         Ok(reader) => reader,
         Err(e) => {
@@ -364,33 +368,30 @@ async fn fetch_features_limited<T: AsyncHttpRangeClient + Send + Sync>(
     reader: HttpFcbReader<T>,
     limit: usize,
     offset: usize,
+    has_rtree: bool,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
-    // For full scan, emulate pagination by skipping `offset` features client-side.
-    let mut iter = reader.select_all().await?;
-
-    // Skip offset
-    let mut skipped: usize = 0;
-    while skipped < offset {
-        match iter.next().await? {
-            Some(_) => skipped += 1,
-            None => break,
+    // The R-tree leaves locate the page. Without them the only way to a
+    // page is through every feature before it.
+    let mut iter = if has_rtree {
+        reader.select_all_paged(Some(limit), Some(offset)).await?
+    } else {
+        let mut iter = reader.select_all().await?;
+        let mut skipped: usize = 0;
+        while skipped < offset && iter.next().await?.is_some() {
+            skipped += 1;
         }
-    }
+        iter
+    };
 
     let mut features = Vec::new();
-    let mut count = 0;
-
-    while count < limit {
+    while features.len() < limit {
         match iter.next().await? {
-            Some(feature_result) => {
-                features.push(feature_result.cj_feature()?);
-                count += 1;
-            }
+            Some(feature_result) => features.push(feature_result.cj_feature()?),
             None => break,
         }
     }
 
-    let features_count = iter.features_count().unwrap_or(count);
+    let features_count = iter.features_count().unwrap_or(features.len());
 
     Ok((features, features_count))
 }
@@ -403,7 +404,7 @@ async fn fetch_feature_by_id<T: AsyncHttpRangeClient + Send + Sync>(
         return Ok(None);
     }
     let query: Vec<(String, Operator, KeyType)> = vec![(
-        "identificatie".to_string(),
+        ITEM_ID_COLUMN.to_string(),
         Operator::Eq,
         KeyType::StringKey50(FixedStringKey::from_str(feature_id)),
     )];
@@ -425,6 +426,7 @@ async fn fetch_features_with_filter<T: AsyncHttpRangeClient + Send + Sync>(
     filter_conditions: Option<Vec<(String, Operator, KeyType)>>,
     limit: usize,
     offset: usize,
+    has_rtree: bool,
 ) -> Result<(Vec<CityJSONFeature>, usize), anyhow::Error> {
     match (bbox, filter_conditions) {
         (Some(_), Some(_)) => unreachable!("combined queries rejected by validation"),
@@ -461,6 +463,6 @@ async fn fetch_features_with_filter<T: AsyncHttpRangeClient + Send + Sync>(
         // Only bbox
         (Some(bbox), None) => fetch_features_by_bbox(reader, bbox, limit, offset).await,
         // Neither bbox nor filter
-        (None, None) => fetch_features_limited(reader, limit, offset).await,
+        (None, None) => fetch_features_limited(reader, limit, offset, has_rtree).await,
     }
 }

@@ -11,6 +11,9 @@ pub const DEFAULT_BBOX: [f64; 4] = [10000.0, 306250.0, 287760.0, 623690.0];
 
 // Pagination defaults
 pub const DEFAULT_OFFSET: u64 = 0;
+
+/// The attribute an item is looked up by. Its index must be in the dataset.
+pub const ITEM_ID_COLUMN: &str = "identificatie";
 pub const DEFAULT_LIMIT: i32 = 10;
 pub const DEFAULT_MAX_LIMIT: i32 = 10000;
 
