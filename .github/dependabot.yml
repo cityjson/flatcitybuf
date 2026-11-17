@@ -1,0 +1,16 @@
+# Action updates arrive as reviewed pull requests that change the workflow and
+# its entry in .github/workflows/actions.lock together. A release has to be a
+# week old before it is proposed.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
