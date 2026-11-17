@@ -203,6 +203,47 @@ impl<R: Read + Seek> FcbReader<R> {
         ))
     }
 
+    /// A page of [`FcbReader::select_all`]: `limit` features from the
+    /// `offset`-th one on, in file order, found through the leaves of the
+    /// R-tree without reading the features before the page.
+    /// `features_count()` on the returned iterator is the number of features
+    /// in the file. A file without an R-tree is [`Error::NoIndex`].
+    pub fn select_all_paged(
+        mut self,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<FeatureIter<R, Seekable>, Error> {
+        let header = self.buffer.header();
+        if header.index_node_size() == 0 || header.features_count() == 0 {
+            return Err(Error::NoIndex);
+        }
+        let total_feat_count = header.features_count();
+        let start = offset.unwrap_or(0);
+        let list = PackedRTree::stream_leaf_items(
+            &mut self.reader,
+            total_feat_count as usize,
+            header.index_node_size(),
+            start..start.saturating_add(limit.unwrap_or(usize::MAX)),
+        )?;
+        self.reader
+            .seek(SeekFrom::Current(self.attr_index_size() as i64))?;
+        let feature_offset = FeatureOffset {
+            magic_bytes: 8,
+            header: 4 + self.buffer.header_buf.len() as u64,
+            rtree_index: self.rtree_index_size(),
+            attributes: self.attr_index_size(),
+        };
+        Ok(FeatureIter::new(
+            self.reader,
+            self.verify,
+            self.buffer,
+            Some(list),
+            None,
+            feature_offset,
+            total_feat_count,
+        ))
+    }
+
     pub fn select_query(
         mut self,
         query: Query,

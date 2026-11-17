@@ -8,6 +8,9 @@ pub struct FcbMetadata {
     pub storage_crs: String,
     pub cityjson: serde_json::Value,
     pub extent: Option<[f64; 6]>,
+    pub features_count: u64,
+    /// Whether the file has an R-tree, which bbox queries and paging need.
+    pub has_rtree: bool,
     pub columns: HashMap<String, ColumnMetadata>,
 }
 
@@ -32,6 +35,8 @@ impl FcbMetadata {
         Self {
             columns: HashMap::new(),
             extent: None,
+            features_count: 0,
+            has_rtree: false,
             cityjson: serde_json::Value::Null,
             storage_crs: String::new(),
         }
@@ -49,6 +54,8 @@ impl FcbMetadata {
                 e.max().z(),
             ]
         });
+        metadata.features_count = header.features_count();
+        metadata.has_rtree = header.index_node_size() > 0 && header.features_count() > 0;
         metadata.cityjson = serde_json::to_value(fcb_core::deserializer::to_cj_metadata(&header)?)?;
         if let Some(columns) = header.columns() {
             for column in columns.iter() {
@@ -70,6 +77,21 @@ impl FcbMetadata {
     /// Get the column type for a given column name
     pub fn get_column_type(&self, column_name: &str) -> Option<ColumnType> {
         self.columns.get(column_name).map(|c| c.column_type)
+    }
+
+    /// The dataset's CityJSON header document, for the outputs that are one.
+    pub fn cityjson_header(&self) -> Result<cjseq::CityJSON, axum::http::StatusCode> {
+        serde_json::from_value(self.cityjson.clone()).map_err(|e| {
+            tracing::error!("the dataset metadata is not a CityJSON document: {e}");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })
+    }
+
+    /// Whether items can be looked up by id: the index on [`ITEM_ID_COLUMN`].
+    ///
+    /// [`ITEM_ID_COLUMN`]: crate::constants::ITEM_ID_COLUMN
+    pub fn has_item_index(&self) -> bool {
+        self.is_column_indexed(crate::constants::ITEM_ID_COLUMN)
     }
 
     /// Check if a column is indexed

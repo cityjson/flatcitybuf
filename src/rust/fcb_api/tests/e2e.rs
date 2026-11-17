@@ -32,6 +32,9 @@ impl Dataset {
         Self::with_hierarchy(count, false)
     }
     fn with_hierarchy(count: usize, hierarchy: bool) -> Self {
+        Self::with_indices(count, hierarchy, &["identificatie", "height"])
+    }
+    fn with_indices(count: usize, hierarchy: bool, indices: &[&str]) -> Self {
         let header = json!({"type":"CityJSON","version":"2.0","transform":{"scale":[0.01,0.02,0.03],"translate":[85000.25,446000.5,3.0]},"CityObjects":{},"vertices":[],"metadata":{"referenceSystem":"https://www.opengis.net/def/crs/EPSG/0/7415","title":"API fixture"}});
         let mut input = format!("{header}\n");
         for i in 0..count {
@@ -65,11 +68,14 @@ impl Dataset {
                 write_index: true,
                 feature_count: count as u64,
                 index_node_size: 16,
-                attribute_indices: Some(vec![
-                    ("identificatie".into(), None),
-                    ("height".into(), None),
-                ]),
+                attribute_indices: Some(
+                    indices
+                        .iter()
+                        .map(|name| (name.to_string(), None))
+                        .collect(),
+                ),
                 geographical_extent: Some([85000.25, 446000.5, 3.0, 85000.45, 446000.9, 3.0]),
+                ..Default::default()
             }),
             Some(schema),
             None,
@@ -509,18 +515,24 @@ async fn startup_configuration_and_remote_probe_timeout() {
 }
 
 #[tokio::test]
-async fn missing_id_index_is_storage_failure_and_invalid_crs_fails_startup() {
+async fn a_dataset_without_the_item_index_or_a_supported_crs_fails_startup() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance");
     let d = Dataset::new();
     let config = d.config(root.join("noise_extension.fcb").to_str().unwrap().into());
     assert!(create_app_with_config(config).await.is_err());
+
+    let unindexed = Dataset::with_indices(3, false, &["height"]);
+    let config = unindexed.config(unindexed.file.path().to_str().unwrap().into());
+    assert!(create_app_with_config(config).await.is_err());
+
+    // An empty dataset has no columns to index, and no item to find.
     let empty = Dataset::with_count(0);
     let app = create_app_with_config(empty.config(empty.file.path().to_str().unwrap().into()))
         .await
         .unwrap();
     assert_eq!(
         request(&app, "/collections/pand/items/nonexistent").await.0,
-        StatusCode::SERVICE_UNAVAILABLE
+        StatusCode::NOT_FOUND
     );
 }
 

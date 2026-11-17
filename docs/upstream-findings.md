@@ -1969,3 +1969,23 @@ links to `/api` and `/api.html`, although those routes return 404. The root
 response now links only to itself, `/conformance`, and `/collections` until
 the documentation endpoints are implemented. Its stored response fixture is
 updated to match.
+
+## 42. Rust HTTP reader: an attribute key shared by more than 4,095 features could not be read — FIXED
+
+**Where:** `fcb_core/src/static_btree/stree.rs` `batch_resolve_payloads`. A
+payload entry is a `u32` count followed by that many `u64` feature offsets, so
+its length is the number of features sharing the key. The function fetched
+each group of entries with a fixed margin of `DEFAULT_MIN_REQ_SIZE` (32 KiB)
+past the last entry's start, and decoded from that buffer: an entry of more
+than 4,095 offsets was cut off. The decode error was swallowed, so the key
+matched nothing; since the API hardening above it is an error. The local
+reader, and the C++, Python and TypeScript HTTP readers, read the count first
+and then the body, and were not affected.
+
+**Reproduction:** `http_reader::paging_tests::a_key_shared_by_many_features_is_read_whole`
+writes 6,000 features of which 5,000 share one `height`, and compares
+`Eq`/`Le`/`Gt`/`Ge` over the mock HTTP client with the local reader.
+
+**Fix:** an entry that does not decode from the speculative fetch is read
+again by `read_http_payload_entry`: its count, then exactly its bytes, bounded
+by the start of the feature section.
