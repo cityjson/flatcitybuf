@@ -70,6 +70,7 @@ impl Dataset {
                     ("height".into(), None),
                 ]),
                 geographical_extent: Some([85000.25, 446000.5, 3.0, 85000.45, 446000.9, 3.0]),
+                ..Default::default()
             }),
             Some(schema),
             None,
