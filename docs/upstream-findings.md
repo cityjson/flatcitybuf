@@ -1980,7 +1980,9 @@ past the last entry's start, and decoded from that buffer: an entry of more
 than 4,095 offsets was cut off. The decode error was swallowed, so the key
 matched nothing; since the API hardening above it is an error. The local
 reader, and the C++, Python and TypeScript HTTP readers, read the count first
-and then the body, and were not affected.
+and then the body, and were not affected. A file of 6,000 features with 5,000
+sharing one value gives the same `Eq`/`Le`/`Gt`/`Ge` counts in all three, from
+a local file and over HTTP range requests.
 
 **Reproduction:** `http_reader::paging_tests::a_key_shared_by_many_features_is_read_whole`
 writes 6,000 features of which 5,000 share one `height`, and compares
