@@ -104,6 +104,8 @@ Response (CityJSONFeature/CityJSON/OBJ)
 | `/collections/{collection_id}/items` | GET | Query and retrieve features |
 | `/collections/{collection_id}/items/{item_id}` | GET | Retrieve a specific feature by ID |
 
+Every path answers the same with a trailing slash (`/collections/`) as without one.
+
 **Note**: Currently, only the `pand` collection is supported.
 
 ---

@@ -216,6 +216,32 @@ async fn request(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap,
     )
 }
 #[tokio::test]
+async fn a_trailing_slash_answers_as_the_path_without_it() {
+    let d = Dataset::new();
+    let app = create_app_with_config(d.config(d.file.path().to_str().unwrap().into()))
+        .await
+        .unwrap();
+    let id = urlencoding::encode(d.features[0]["id"].as_str().unwrap()).into_owned();
+    for (path, query) in [
+        ("/readyz", ""),
+        ("/conformance", ""),
+        ("/collections", ""),
+        ("/collections/pand", ""),
+        ("/collections/pand/items", "?limit=2"),
+        (&*format!("/collections/pand/items/{id}"), ""),
+    ] {
+        let mut bare = request(&app, &format!("{path}{query}")).await;
+        let mut slashed = request(&app, &format!("{path}/{query}")).await;
+        // The one member that differs between any two answers.
+        for body in [&mut bare.2, &mut slashed.2] {
+            body.as_object_mut().unwrap().remove("timeStamp");
+        }
+        assert_eq!(bare.0, StatusCode::OK, "{path}");
+        assert_eq!((slashed.0, &slashed.2), (bare.0, &bare.2), "{path}/");
+    }
+}
+
+#[tokio::test]
 async fn local_and_http_listing() {
     let d = Dataset::new();
     let server = serve(std::fs::read(d.file.path()).unwrap()).await;
