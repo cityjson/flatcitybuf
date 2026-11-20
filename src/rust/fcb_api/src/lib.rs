@@ -26,7 +26,9 @@ use axum::{routing::get, Router};
 use metadata::FcbMetadata;
 use std::env;
 use std::sync::Arc;
+use tower::Layer;
 use tower_http::cors::CorsLayer;
+use tower_http::normalize_path::NormalizePathLayer;
 use tower_http::trace::TraceLayer;
 
 #[derive(Clone)]
@@ -163,7 +165,7 @@ pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router>
     );
 
     // Route to appropriate handlers based on URL type
-    Ok(if is_local {
+    let routes = if is_local {
         Router::new()
             .route("/", get(handlers::landing_page))
             .route("/readyz", get(readiness))
@@ -219,7 +221,12 @@ pub async fn create_app_with_config(config: AppConfig) -> anyhow::Result<Router>
             ]))
             .layer(TraceLayer::new_for_http())
             .with_state(state)
-    })
+    };
+    // A path with a trailing slash is served as the path without it. The
+    // slash is trimmed before routing, which a layer on `routes` would run
+    // too late for, and the request is answered directly rather than
+    // redirected, so a client that does not follow redirects gets its answer.
+    Ok(Router::new().fallback_service(NormalizePathLayer::trim_trailing_slash().layer(routes)))
 }
 
 async fn load_fcb_metadata(config: &AppConfig) -> anyhow::Result<FcbMetadata> {

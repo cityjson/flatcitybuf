@@ -63,5 +63,5 @@ crossterm = "0.28"
 #---API dependencies---
 axum = "0.7"
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "normalize-path", "trace"] }
 futures = "0.3"
