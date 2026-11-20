@@ -66,18 +66,22 @@ else
     exit 1
 fi
 
-# Post-processing: Setup proper module structure
-if [ -d "$OUTPUT_DIR" ]; then
+# Post-processing: the generator writes a whole crate; fcb_api keeps only
+# the models, as its own `openapi::models` module.
+if [ -d "$OUTPUT_DIR/src/models" ]; then
     echo "Setting up module structure..."
-    # Create a simple mod.rs to re-export models
-    cat > "$OUTPUT_DIR/mod.rs" << 'MODEOF'
-// Re-export generated OpenAPI models
-pub use self::models::*;
-
-// Include the generated modules
-pub mod models;
-MODEOF
-    echo "Models generated successfully in $OUTPUT_DIR"
+    rm -rf "$OUTPUT_DIR/models"
+    mv "$OUTPUT_DIR/src/models" "$OUTPUT_DIR/models"
+    rm -rf "$OUTPUT_DIR/src" "$OUTPUT_DIR/docs" "$OUTPUT_DIR/Cargo.toml" \
+        "$OUTPUT_DIR/README.md" "$OUTPUT_DIR/git_push.sh" \
+        "$OUTPUT_DIR/.gitignore" "$OUTPUT_DIR/.travis.yml" \
+        "$OUTPUT_DIR/.openapi-generator" "$OUTPUT_DIR/.openapi-generator-ignore"
+    for f in "$OUTPUT_DIR"/models/*.rs; do
+        sed 's/^use crate::models;$/use crate::openapi::models;/' "$f" > "$f.tmp"
+        mv "$f.tmp" "$f"
+    done
+    cargo fmt -p fcb_api
+    echo "Models generated successfully in $OUTPUT_DIR/models"
 else
     echo "Error: Output directory was not created"
     exit 1

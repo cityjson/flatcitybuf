@@ -17,7 +17,7 @@ a byte means, `fcb_core` is the answer — see
 |---|---|---|
 | `fcb_core` | `src/rust/fcb_core` | The library: reader, writer, packed Hilbert R-tree, static B+tree, HTTP range-request reader. Published on crates.io. |
 | `fcb_cli` | `src/rust/cli` | The `fcb` command-line tool — `ser`, `deser`, `inspect`, `cbor`, `bson`. Published on crates.io. |
-| `fcb_api` | `src/rust/fcb_api` | An OGC API - Features server (Axum) that serves a remote `.fcb` over HTTP range requests. Not published; deployed. |
+| `fcb_api` | `src/rust/fcb_api` | An OGC API - Features server (Axum) that serves a remote `.fcb` over HTTP range requests. Published on crates.io, and deployed from the `Dockerfile`. |
 
 > The former `fcb_wasm` binding has been retired. Browsers are served by the
 > from-scratch TypeScript reader in `src/ts` instead — see

@@ -1,5 +1,5 @@
-pub use openapi::models::feature_collection::Type;
-pub use openapi::models::*;
+pub use crate::openapi::models::feature_collection::Type;
+pub use crate::openapi::models::*;
 
 #[derive(serde::Serialize)]
 pub struct FeatureCollection {
