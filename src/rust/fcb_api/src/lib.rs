@@ -6,8 +6,9 @@
 //! request needs. Bounding-box and attribute filters are pushed down into the
 //! R-tree and B+tree indices rather than scanning.
 //!
-//! This crate is not published to crates.io; it is built and run from the
-//! repository (see the `Dockerfile` in `src/rust`).
+//! The crate ships the `fcb_api` binary (`cargo install fcb_api`) and this
+//! library, for embedding the router in another server. The `Dockerfile` in
+//! `src/rust` of the repository builds the deployed image.
 
 pub mod constants;
 mod crs;
@@ -19,6 +20,7 @@ mod http_handler;
 mod link;
 mod metadata;
 mod models;
+mod openapi;
 
 use axum::{routing::get, Router};
 use metadata::FcbMetadata;
